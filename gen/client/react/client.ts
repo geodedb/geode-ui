@@ -93,6 +93,12 @@ export interface EdgeTypeList {
 }
 export interface Empty {
 }
+export interface GrantReq {
+  grantee: string;
+  grantee_kind?: string;
+  permission: string;
+  resource?: string;
+}
 export interface GraphList {
   graphs: Array<string>;
 }
@@ -130,6 +136,22 @@ export interface PermissionList {
 export interface PingMsg {
   seq: number;
 }
+export interface Policy {
+  expression?: string;
+  name: string;
+  resource?: string;
+}
+export interface PolicyCreateReq {
+  expression: string;
+  name: string;
+  resource?: string;
+}
+export interface PolicyList {
+  policies: Array<unknown>;
+}
+export interface PolicyParam {
+  name: string;
+}
 export interface QueryReq {
   graph?: string;
   page_size?: number;
@@ -155,6 +177,22 @@ export interface QueryStreamMsg {
   row?: Array<unknown>;
   row_count?: number;
   statement?: string;
+}
+export interface Role {
+  description?: string;
+  name: string;
+  permissions?: Array<string>;
+}
+export interface RoleCreateReq {
+  description?: string;
+  name: string;
+  permissions?: Array<string>;
+}
+export interface RoleList {
+  roles: Array<unknown>;
+}
+export interface RoleParam {
+  role: string;
 }
 export interface TxBeginReq {
   graph?: string;
@@ -864,6 +902,24 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
+  async grants(req: GrantReq): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/grants",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async revoke(req: GrantReq): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/grants/revoke",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
   async graphs(req: Empty): Promise<GraphList> {
     return this.request<GraphList>(
       "GET",
@@ -909,6 +965,42 @@ export class GenAPIClient {
       ["graph"], copyRecord(req),
     );
   }
+  async getPolicies(req: Empty): Promise<PolicyList> {
+    return this.request<PolicyList>(
+      "GET",
+      "/api/v1/policies",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
+  async postPolicies(req: PolicyCreateReq): Promise<Policy> {
+    return this.request<Policy>(
+      "POST",
+      "/api/v1/policies",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async deleteName(req: PolicyParam): Promise<Empty> {
+    return this.request<Empty>(
+      "DELETE",
+      "/api/v1/policies/{name}",
+      "jwt",
+      "query",
+      ["name"], copyRecord(req),
+    );
+  }
+  async getName(req: PolicyParam): Promise<Policy> {
+    return this.request<Policy>(
+      "GET",
+      "/api/v1/policies/{name}",
+      "jwt",
+      "query",
+      ["name"], copyRecord(req),
+    );
+  }
   async query(req: QueryReq): Promise<QueryResp> {
     return this.request<QueryResp>(
       "POST",
@@ -916,6 +1008,42 @@ export class GenAPIClient {
       "jwt",
       "json",
       [], copyRecord(req),
+    );
+  }
+  async getRoles(req: Empty): Promise<RoleList> {
+    return this.request<RoleList>(
+      "GET",
+      "/api/v1/roles",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
+  async postApiRoles(req: RoleCreateReq): Promise<Role> {
+    return this.request<Role>(
+      "POST",
+      "/api/v1/roles",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async deleteRole(req: RoleParam): Promise<Empty> {
+    return this.request<Empty>(
+      "DELETE",
+      "/api/v1/roles/{role}",
+      "jwt",
+      "query",
+      ["role"], copyRecord(req),
+    );
+  }
+  async getRole(req: RoleParam): Promise<Role> {
+    return this.request<Role>(
+      "GET",
+      "/api/v1/roles/{role}",
+      "jwt",
+      "query",
+      ["role"], copyRecord(req),
     );
   }
   async tx(req: TxBeginReq): Promise<TxBeginResp> {
@@ -1035,7 +1163,7 @@ export class GenAPIClient {
       ["username"], copyRecord(req),
     );
   }
-  async roles(req: AssignRoleReq): Promise<Empty> {
+  async postUsernameRoles(req: AssignRoleReq): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/users/{username}/roles",
@@ -1088,6 +1216,12 @@ export function useGenAPIClient(config: ClientConfig): GenAPIClient {
 export function useLoginMutation(client: GenAPIClient): MutationState<LoginReq, LoginResp> {
   return useMutationState((req) => client.login(req));
 }
+export function useGrantsMutation(client: GenAPIClient): MutationState<GrantReq, Empty> {
+  return useMutationState((req) => client.grants(req));
+}
+export function useRevokeMutation(client: GenAPIClient): MutationState<GrantReq, Empty> {
+  return useMutationState((req) => client.revoke(req));
+}
 export function useGraphs(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<GraphList> {
   return usePromise(() => client.graphs(req), deps);
 }
@@ -1103,8 +1237,32 @@ export function useIndexes(client: GenAPIClient, req: GraphParam, deps: Readonly
 export function useLabels(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<LabelList> {
   return usePromise(() => client.labels(req), deps);
 }
+export function useGetPolicies(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<PolicyList> {
+  return usePromise(() => client.getPolicies(req), deps);
+}
+export function usePostPoliciesMutation(client: GenAPIClient): MutationState<PolicyCreateReq, Policy> {
+  return useMutationState((req) => client.postPolicies(req));
+}
+export function useDeleteName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
+  return usePromise(() => client.deleteName(req), deps);
+}
+export function useGetName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = []): RequestState<Policy> {
+  return usePromise(() => client.getName(req), deps);
+}
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));
+}
+export function useGetRoles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<RoleList> {
+  return usePromise(() => client.getRoles(req), deps);
+}
+export function usePostApiRolesMutation(client: GenAPIClient): MutationState<RoleCreateReq, Role> {
+  return useMutationState((req) => client.postApiRoles(req));
+}
+export function useDeleteRole(client: GenAPIClient, req: RoleParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
+  return usePromise(() => client.deleteRole(req), deps);
+}
+export function useGetRole(client: GenAPIClient, req: RoleParam, deps: ReadonlyArray<unknown> = []): RequestState<Role> {
+  return usePromise(() => client.getRole(req), deps);
 }
 export function useTxMutation(client: GenAPIClient): MutationState<TxBeginReq, TxBeginResp> {
   return useMutationState((req) => client.tx(req));
@@ -1145,8 +1303,8 @@ export function usePasswordMutation(client: GenAPIClient): MutationState<Passwor
 export function usePermissions(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<PermissionList> {
   return usePromise(() => client.permissions(req), deps);
 }
-export function useRolesMutation(client: GenAPIClient): MutationState<AssignRoleReq, Empty> {
-  return useMutationState((req) => client.roles(req));
+export function usePostUsernameRolesMutation(client: GenAPIClient): MutationState<AssignRoleReq, Empty> {
+  return useMutationState((req) => client.postUsernameRoles(req));
 }
 export function useHealthz(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<HealthResp> {
   return usePromise(() => client.healthz(req), deps);

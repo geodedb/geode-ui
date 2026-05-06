@@ -192,6 +192,42 @@ components:
             required:
                 - error
             type: object
+        GrantReq:
+            description: Generated schema for GrantReq
+            example:
+                grantee: x
+                permission: x
+            properties:
+                grantee:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                granteeKind:
+                    enum:
+                        - ""
+                        - user
+                        - role
+                    example: ""
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                permission:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                resource:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+            required:
+                - permission
+                - grantee
+            type: object
         GraphList:
             description: Generated schema for GraphList
             example:
@@ -378,6 +414,70 @@ components:
             required:
                 - seq
             type: object
+        Policy:
+            description: Generated schema for Policy
+            example:
+                name: x
+            properties:
+                expression:
+                    example: x
+                    maxLength: 4096
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                resource:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+            required:
+                - name
+            type: object
+        PolicyCreateReq:
+            description: Generated schema for PolicyCreateReq
+            example:
+                expression: x
+                name: x
+            properties:
+                expression:
+                    example: x
+                    maxLength: 4096
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                resource:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+            required:
+                - name
+                - expression
+            type: object
+        PolicyList:
+            description: Generated schema for PolicyList
+            example:
+                policies: []
+            properties:
+                policies:
+                    example: []
+                    items: {}
+                    maxItems: 100
+                    type: array
+            required:
+                - policies
+            type: object
         QueryReq:
             description: Generated schema for QueryReq
             example:
@@ -519,6 +619,73 @@ components:
                     type: string
             required:
                 - kind
+            type: object
+        Role:
+            description: Generated schema for Role
+            example:
+                name: x
+            properties:
+                description:
+                    example: x
+                    maxLength: 1024
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                permissions:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - name
+            type: object
+        RoleCreateReq:
+            description: Generated schema for RoleCreateReq
+            example:
+                name: x
+            properties:
+                description:
+                    example: x
+                    maxLength: 1024
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                permissions:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - name
+            type: object
+        RoleList:
+            description: Generated schema for RoleList
+            example:
+                roles: []
+            properties:
+                roles:
+                    example: []
+                    items: {}
+                    maxItems: 100
+                    type: array
+            required:
+                - roles
             type: object
         TxBeginReq:
             description: Generated schema for TxBeginReq
@@ -780,6 +947,102 @@ paths:
             summary: POST /api/v1/auth/login
             tags:
                 - Login
+    /api/v1/grants:
+        post:
+            description: POST /api/v1/grants operation
+            operationId: postApiV1Grants
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GrantReq'
+                description: POST /api/v1/grants request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/grants success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/grants
+            tags:
+                - Grants
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/grants/revoke:
+        post:
+            description: POST /api/v1/grants/revoke operation
+            operationId: postApiV1GrantsRevoke
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GrantReq'
+                description: POST /api/v1/grants/revoke request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/grants/revoke success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/grants/revoke
+            tags:
+                - Revoke
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /api/v1/graphs:
         get:
             description: GET /api/v1/graphs operation
@@ -1001,6 +1264,193 @@ paths:
             summary: GET /api/v1/graphs/{graph}/labels
             tags:
                 - Labels
+    /api/v1/policies:
+        get:
+            description: GET /api/v1/policies operation
+            operationId: getApiV1Policies
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PolicyList'
+                    description: GET /api/v1/policies success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/policies
+            tags:
+                - Policies
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        post:
+            description: POST /api/v1/policies operation
+            operationId: postApiV1Policies
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PolicyCreateReq'
+                description: POST /api/v1/policies request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Policy'
+                    description: POST /api/v1/policies success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/policies
+            tags:
+                - Policies
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/policies/{name}:
+        delete:
+            description: DELETE /api/v1/policies/{name} operation
+            operationId: deleteApiV1PoliciesName
+            parameters:
+                - description: DELETE /api/v1/policies/{name} path parameter name
+                  in: path
+                  name: name
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: DELETE /api/v1/policies/{name} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: DELETE /api/v1/policies/{name}
+            tags:
+                - Name
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        get:
+            description: GET /api/v1/policies/{name} operation
+            operationId: getApiV1PoliciesName
+            parameters:
+                - description: GET /api/v1/policies/{name} path parameter name
+                  in: path
+                  name: name
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Policy'
+                    description: GET /api/v1/policies/{name} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/policies/{name}
+            tags:
+                - Name
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /api/v1/query:
         post:
             description: POST /api/v1/query operation
@@ -1045,6 +1495,193 @@ paths:
             summary: POST /api/v1/query
             tags:
                 - Query
+    /api/v1/roles:
+        get:
+            description: GET /api/v1/roles operation
+            operationId: getApiV1Roles
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RoleList'
+                    description: GET /api/v1/roles success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/roles
+            tags:
+                - Roles
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        post:
+            description: POST /api/v1/roles operation
+            operationId: postApiV1Roles
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RoleCreateReq'
+                description: POST /api/v1/roles request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Role'
+                    description: POST /api/v1/roles success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/roles
+            tags:
+                - Roles
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/roles/{role}:
+        delete:
+            description: DELETE /api/v1/roles/{role} operation
+            operationId: deleteApiV1RolesRole
+            parameters:
+                - description: DELETE /api/v1/roles/{role} path parameter role
+                  in: path
+                  name: role
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: DELETE /api/v1/roles/{role} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: DELETE /api/v1/roles/{role}
+            tags:
+                - Role
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        get:
+            description: GET /api/v1/roles/{role} operation
+            operationId: getApiV1RolesRole
+            parameters:
+                - description: GET /api/v1/roles/{role} path parameter role
+                  in: path
+                  name: role
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Role'
+                    description: GET /api/v1/roles/{role} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/roles/{role}
+            tags:
+                - Role
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /api/v1/tx:
         post:
             description: POST /api/v1/tx operation
@@ -1894,6 +2531,8 @@ tags:
       name: EdgeTypes
     - description: Operations for Enable
       name: Enable
+    - description: Operations for Grants
+      name: Grants
     - description: Operations for Graphs
       name: Graphs
     - description: Operations for Healthz
@@ -1904,14 +2543,22 @@ tags:
       name: Labels
     - description: Operations for Login
       name: Login
+    - description: Operations for Name
+      name: Name
     - description: Operations for Password
       name: Password
     - description: Operations for Permissions
       name: Permissions
     - description: Operations for Ping
       name: Ping
+    - description: Operations for Policies
+      name: Policies
     - description: Operations for Query
       name: Query
+    - description: Operations for Revoke
+      name: Revoke
+    - description: Operations for Role
+      name: Role
     - description: Operations for Roles
       name: Roles
     - description: Operations for Rollback

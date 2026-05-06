@@ -208,6 +208,96 @@
       "auth": "jwt",
       "rateLimit": 100,
       "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles",
+      "requestSchema": "Empty",
+      "responseSchema": "RoleList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/roles",
+      "requestSchema": "RoleCreateReq",
+      "responseSchema": "Role",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles/{role}",
+      "requestSchema": "RoleParam",
+      "responseSchema": "Role",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/roles/{role}",
+      "requestSchema": "RoleParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/policies",
+      "requestSchema": "Empty",
+      "responseSchema": "PolicyList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/policies",
+      "requestSchema": "PolicyCreateReq",
+      "responseSchema": "Policy",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/policies/{name}",
+      "requestSchema": "PolicyParam",
+      "responseSchema": "Policy",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/policies/{name}",
+      "requestSchema": "PolicyParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/grants",
+      "requestSchema": "GrantReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 30,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/grants/revoke",
+      "requestSchema": "GrantReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 30,
+      "required_roles": ["admin"]
     }
   ],
   "websocket": [
@@ -486,6 +576,80 @@
             }
           }
         }
+      }
+    },
+    "Role": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "permissions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "RoleList": {
+      "type": "object",
+      "required": ["roles"],
+      "properties": {
+        "roles": { "type": "array", "items": { } }
+      }
+    },
+    "RoleCreateReq": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "permissions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "RoleParam": {
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "Policy": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":       { "type": "string", "minLength": 1, "maxLength": 256 },
+        "expression": { "type": "string", "maxLength": 4096 },
+        "resource":   { "type": "string", "maxLength": 256 }
+      }
+    },
+    "PolicyList": {
+      "type": "object",
+      "required": ["policies"],
+      "properties": {
+        "policies": { "type": "array", "items": { } }
+      }
+    },
+    "PolicyCreateReq": {
+      "type": "object",
+      "required": ["name", "expression"],
+      "properties": {
+        "name":       { "type": "string", "minLength": 1, "maxLength": 256 },
+        "expression": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "resource":   { "type": "string", "maxLength": 256 }
+      }
+    },
+    "PolicyParam": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "GrantReq": {
+      "type": "object",
+      "required": ["permission", "grantee"],
+      "properties": {
+        "permission":   { "type": "string", "minLength": 1, "maxLength": 256 },
+        "resource":     { "type": "string", "maxLength": 256 },
+        "grantee":      { "type": "string", "minLength": 1, "maxLength": 256 },
+        "grantee_kind": { "type": "string", "enum": ["", "user", "role"] }
       }
     }
   }

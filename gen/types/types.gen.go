@@ -46,6 +46,31 @@ func (v Empty) Valid() error {
 	return nil
 }
 
+// GrantReq generated from config schema
+type GrantReq struct {
+	Grantee string `json:"grantee" genapi:"grantee"`
+	GranteeKind string `json:"grantee_kind" genapi:"grantee_kind"`
+	Permission string `json:"permission" genapi:"permission"`
+	Resource string `json:"resource" genapi:"resource"`
+}
+
+// Valid validates GrantReq fields against schema constraints.
+func (v GrantReq) Valid() error {
+	if len(v.Grantee) < 1 { return errors.New("grantee: too short") }
+	if len(v.Grantee) > 256 { return errors.New("grantee: too long") }
+	{
+		okEnum := false
+		if v.GranteeKind == "" { okEnum = true }
+		if v.GranteeKind == "user" { okEnum = true }
+		if v.GranteeKind == "role" { okEnum = true }
+		if !okEnum { return errors.New("grantee_kind: invalid enum value") }
+	}
+	if len(v.Permission) < 1 { return errors.New("permission: too short") }
+	if len(v.Permission) > 256 { return errors.New("permission: too long") }
+	if len(v.Resource) > 256 { return errors.New("resource: too long") }
+	return nil
+}
+
 // GraphList generated from config schema
 type GraphList struct {
 	Graphs []string `json:"graphs" genapi:"graphs"`
@@ -179,6 +204,61 @@ func (v PingMsg) Valid() error {
 	return nil
 }
 
+// Policy generated from config schema
+type Policy struct {
+	Expression string `json:"expression" genapi:"expression"`
+	Name string `json:"name" genapi:"name"`
+	Resource string `json:"resource" genapi:"resource"`
+}
+
+// Valid validates Policy fields against schema constraints.
+func (v Policy) Valid() error {
+	if len(v.Expression) > 4096 { return errors.New("expression: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Resource) > 256 { return errors.New("resource: too long") }
+	return nil
+}
+
+// PolicyCreateReq generated from config schema
+type PolicyCreateReq struct {
+	Expression string `json:"expression" genapi:"expression"`
+	Name string `json:"name" genapi:"name"`
+	Resource string `json:"resource" genapi:"resource"`
+}
+
+// Valid validates PolicyCreateReq fields against schema constraints.
+func (v PolicyCreateReq) Valid() error {
+	if len(v.Expression) < 1 { return errors.New("expression: too short") }
+	if len(v.Expression) > 4096 { return errors.New("expression: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Resource) > 256 { return errors.New("resource: too long") }
+	return nil
+}
+
+// PolicyList generated from config schema
+type PolicyList struct {
+	Policies []jsontext.Value `json:"policies" genapi:"policies"`
+}
+
+// Valid validates PolicyList fields against schema constraints.
+func (v PolicyList) Valid() error {
+	return nil
+}
+
+// PolicyParam generated from config schema
+type PolicyParam struct {
+	Name string `json:"name" genapi:"name"`
+}
+
+// Valid validates PolicyParam fields against schema constraints.
+func (v PolicyParam) Valid() error {
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	return nil
+}
+
 // QueryReq generated from config schema
 type QueryReq struct {
 	Graph string `json:"graph" genapi:"graph"`
@@ -249,6 +329,58 @@ func (v QueryStreamMsg) Valid() error {
 	if len(v.Message) > 4096 { return errors.New("message: too long") }
 	if v.RowCount < 0 { return errors.New("row_count: too small") }
 	if len(v.Statement) > 524288 { return errors.New("statement: too long") }
+	return nil
+}
+
+// Role generated from config schema
+type Role struct {
+	Description string `json:"description" genapi:"description"`
+	Name string `json:"name" genapi:"name"`
+	Permissions []string `json:"permissions" genapi:"permissions"`
+}
+
+// Valid validates Role fields against schema constraints.
+func (v Role) Valid() error {
+	if len(v.Description) > 1024 { return errors.New("description: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	return nil
+}
+
+// RoleCreateReq generated from config schema
+type RoleCreateReq struct {
+	Description string `json:"description" genapi:"description"`
+	Name string `json:"name" genapi:"name"`
+	Permissions []string `json:"permissions" genapi:"permissions"`
+}
+
+// Valid validates RoleCreateReq fields against schema constraints.
+func (v RoleCreateReq) Valid() error {
+	if len(v.Description) > 1024 { return errors.New("description: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	return nil
+}
+
+// RoleList generated from config schema
+type RoleList struct {
+	Roles []jsontext.Value `json:"roles" genapi:"roles"`
+}
+
+// Valid validates RoleList fields against schema constraints.
+func (v RoleList) Valid() error {
+	return nil
+}
+
+// RoleParam generated from config schema
+type RoleParam struct {
+	Role string `json:"role" genapi:"role"`
+}
+
+// Valid validates RoleParam fields against schema constraints.
+func (v RoleParam) Valid() error {
+	if len(v.Role) < 1 { return errors.New("role: too short") }
+	if len(v.Role) > 256 { return errors.New("role: too long") }
 	return nil
 }
 
