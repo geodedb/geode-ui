@@ -14,6 +14,7 @@ import (
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
+	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/server"
 	"geodedb.com/geode-ui/internal/ui"
@@ -60,6 +61,20 @@ func main() {
 		AuthJWT:     func(*http.Request) error { return errors.New("unimplemented") },
 		GlobalRate:  2000,
 		GlobalBurst: 400,
+	})
+
+	// /ws/* surface lives on a separate server type because the
+	// generated WS interface emits "Query" for /ws/query, which would
+	// collide with the API "Query" method on *GraphServer. Both
+	// servers share the same Config (and therefore the same Pool)
+	// and AuthJWT stub — B9 will replace both with srv.AuthJWT once
+	// JWT verification lands.
+	wsSrv := server.NewWSServer(server.Config{
+		Version: "v0.1.0",
+		Pool:    pool,
+	})
+	genws.RegisterGeneratedWS(mux, wsSrv, genws.WSOptions{
+		AuthJWT: func(*http.Request) error { return errors.New("unimplemented") },
 	})
 
 	uiHandler, err := ui.Handler()

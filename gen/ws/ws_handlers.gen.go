@@ -21,12 +21,18 @@ var ErrNotImplemented = errors.New("not implemented")
 // Embed UnimplementedWSServer and override only the endpoints you need.
 type WSServerInterface interface {
 	Ping(conn *wsx.Conn) error
+	Query(conn *wsx.Conn) error
 }
 
 // UnimplementedWSServer returns ErrNotImplemented for every WebSocket endpoint.
 type UnimplementedWSServer struct{}
 
 func (UnimplementedWSServer) Ping(conn *wsx.Conn) error {
+	_ = conn.WriteMessage(0x8, []byte("not implemented"))
+	return ErrNotImplemented
+}
+
+func (UnimplementedWSServer) Query(conn *wsx.Conn) error {
 	_ = conn.WriteMessage(0x8, []byte("not implemented"))
 	return ErrNotImplemented
 }
@@ -43,6 +49,14 @@ var wsOptions = map[string]wsx.Options{
 		PingInterval: 30000 * time.Millisecond,
 		MaxFrame:     65536,
 		MaxMessage:   1048576,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		CheckOrigin: true,
+	},
+	"/ws/query": {
+		PingInterval: 15000 * time.Millisecond,
+		MaxFrame:     1048576,
+		MaxMessage:   16777216,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		CheckOrigin: true,
@@ -87,12 +101,65 @@ func RegisterGeneratedWS(mux *http.ServeMux, srv WSServerInterface, opts WSOptio
 			}
 			return
 		}
+		// Attach the spanned context so handlers see the otel span / request-id
+		// derived from r.Context() rather than the bare request context.
+		conn.WithContext(_ctx)
 		defer func() { _ = conn.Close() }()
 		defer obsx.LogAudit("ws_close", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		defer func() {
 			obsx.EmitWSDisconnect(_ctx, "/ws/ping", float64(time.Since(_wsStart).Milliseconds()))
 		}()
 		if err := srv.Ping(conn); err != nil && !errors.Is(err, ErrNotImplemented) {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "ws handler error")
+			obsx.LogAudit("ws_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		}
+	})
+	mux.HandleFunc("/ws/query", func(w http.ResponseWriter, r *http.Request) {
+		authReq := securex.RequestWithAuthPolicy(r, securex.RequestAuthPolicy{AllowAuthorizationHeader: true, AllowSubprotocolBearer: true, AllowSubprotocolSignature: true, AllowQueryBearer: false, AllowQuerySignature: false})
+		if opts.AuthJWT == nil {
+			http.Error(w, "unauthorized", 401)
+			obsx.LogAudit("ws_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			return
+		}
+		if err := opts.AuthJWT(authReq); err != nil {
+			http.Error(w, "unauthorized", 401)
+			obsx.LogAudit("ws_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			return
+		}
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		_ctx, _span := obsx.Tracer("genapi.ws").Start(r.Context(), "WS Query",
+			trace.WithAttributes(attribute.String("ws.path", "/ws/query")))
+		defer _span.End()
+		_wsStart := time.Now()
+		obsx.EmitWSConnect(_ctx, "/ws/query")
+		o := wsOptions["/ws/query"]
+		obsx.LogAudit("ws_connect", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// APPSEC-2: SEC-0008 fail-closed primitive. The deprecated wsx.Upgrade
+		// allowed connections through whenever the route's allowlist was
+		// empty -- a regression-prone "happens to be safe" pattern. UpgradeStrict
+		// rejects unless OriginAllowlist matches the Origin header (or the
+		// caller opts in via wsx.Options.AllowAnyOrigin / AllowEmptyOrigin) and
+		// writes the 403 response itself, so the handler must guard the origin
+		// rejection path to avoid double-writing.
+		conn, err := wsx.UpgradeStrict(w, r, o)
+		if err != nil {
+			if !errors.Is(err, wsx.ErrOriginNotAllowed) {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			return
+		}
+		// Attach the spanned context so handlers see the otel span / request-id
+		// derived from r.Context() rather than the bare request context.
+		conn.WithContext(_ctx)
+		defer func() { _ = conn.Close() }()
+		defer obsx.LogAudit("ws_close", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		defer func() {
+			obsx.EmitWSDisconnect(_ctx, "/ws/query", float64(time.Since(_wsStart).Milliseconds()))
+		}()
+		if err := srv.Query(conn); err != nil && !errors.Is(err, ErrNotImplemented) {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "ws handler error")
 			obsx.LogAudit("ws_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})

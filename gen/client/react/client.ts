@@ -114,6 +114,18 @@ export interface QueryResp {
   row_count: number;
   rows: Array<Array<unknown>>;
 }
+export interface QueryStreamMsg {
+  code?: string;
+  columns?: Array<unknown>;
+  elapsed_ms?: number;
+  graph?: string;
+  kind: string;
+  message?: string;
+  params?: Record<string, unknown>;
+  row?: Array<unknown>;
+  row_count?: number;
+  statement?: string;
+}
 type PreparedBody = {
   body?: BodyInit;
   contentType?: string;
@@ -808,6 +820,14 @@ export class GenAPIClient {
     );
     return createJSONSocket<PingMsg>(socket);
   }
+  async connectQuery(): Promise<JSONSocket<QueryStreamMsg>> {
+    const path = "/ws/query";
+    const socket = await this.openSocket(
+      await this.websocketURL(path),
+      await this.websocketProtocols(path, "jwt", this.config.wsProtocols?.[path] ?? []),
+    );
+    return createJSONSocket<QueryStreamMsg>(socket);
+  }
 }
 
 export function createClient(config: ClientConfig): GenAPIClient {
@@ -835,4 +855,7 @@ export function useHealthz(client: GenAPIClient, req: Empty, deps: ReadonlyArray
 }
 export function usePingSocket(client: GenAPIClient, deps: ReadonlyArray<unknown> = []): StreamState<PingMsg> {
   return useStream(() => client.connectPing(), deps);
+}
+export function useQuerySocket(client: GenAPIClient, deps: ReadonlyArray<unknown> = []): StreamState<QueryStreamMsg> {
+  return useStream(() => client.connectQuery(), deps);
 }

@@ -85,3 +85,23 @@ func (c *Client) ConnectPing(ctx context.Context) (	*JSONSocket[types.PingMsg], 
 	}
 	return &JSONSocket[types.PingMsg]{conn: conn}, nil
 }
+// ConnectQuery opens /ws/query.
+func (c *Client) ConnectQuery(ctx context.Context) (	*JSONSocket[types.QueryStreamMsg], error) {
+	wsURL, err := c.websocketURL("/ws/query")
+	if err != nil {
+		return nil, err
+	}
+	headers, err := c.websocketHeaders(wsURL, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	conn, err := wsx.Dial(ctx, wsURL, wsx.DialOptions{
+		Headers:   headers,
+		Origin:    c.wsOrigin,
+		Protocols: []string(nil),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &JSONSocket[types.QueryStreamMsg]{conn: conn}, nil
+}

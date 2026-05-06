@@ -67,9 +67,28 @@ type Conn struct {
 	writeTO            time.Duration
 	allowUnmaskedReads bool
 	maskWrites         bool
+	// ctx is the context associated with this connection. For server-side
+	// upgrades it inherits from the originating *http.Request so handlers
+	// can honor cancellation / deadlines that were attached upstream
+	// (tracing, request-id, auth claims). Falls back to context.Background
+	// when not set (e.g. NewConn for in-memory pipes without an explicit
+	// WithContext).
+	ctx context.Context
 }
 
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+// RFC 6455 §11.8 frame opcodes. Exposed so callers of ReadMessage /
+// WriteMessage can compare/emit text/binary/control frames without
+// hard-coding magic numbers.
+const (
+	OpContinuation byte = 0x0
+	OpText         byte = 0x1
+	OpBinary       byte = 0x2
+	OpClose        byte = 0x8
+	OpPing         byte = 0x9
+	OpPong         byte = 0xA
+)
 
 func newConn(c net.Conn, br *bufio.Reader, bw *bufio.Writer, opts Options, allowUnmaskedReads, maskWrites bool) *Conn {
 	if br == nil {
@@ -219,6 +238,7 @@ func finishUpgrade(w http.ResponseWriter, r *http.Request, opts Options) (*Conn,
 		return nil, err
 	}
 	c := newConn(conn, rw.Reader, rw.Writer, opts, false, false)
+	c.ctx = r.Context()
 	if opts.PingInterval > 0 {
 		c.pingStop = make(chan struct{})
 		gen.SafeLoop("ws-ping", c.pingStop, func(stop <-chan struct{}) {
@@ -284,6 +304,30 @@ func (c *Conn) MaxMessage() int { return max(1024, c.maxMessage) }
 
 // NetConn exposes the underlying network connection for advanced integrations.
 func (c *Conn) NetConn() net.Conn { return c.c }
+
+// Context returns the context attached to this connection. For server-side
+// upgrades this is the originating *http.Request context, so handlers can
+// observe cancellation/deadlines and read context values (tracing,
+// request-id, auth claims) without needing the original *http.Request.
+// Returns context.Background() when no context has been attached (e.g.
+// NewConn-wrapped pipes without an explicit WithContext call).
+func (c *Conn) Context() context.Context {
+	if c == nil || c.ctx == nil {
+		return context.Background()
+	}
+	return c.ctx
+}
+
+// WithContext attaches ctx to the connection so future Context() calls
+// return it. Intended for callers that build a Conn via NewConn (for
+// pipes, tests) or that want to override the upgrade context with a
+// derived/spanned one before invoking the business handler.
+func (c *Conn) WithContext(ctx context.Context) *Conn {
+	if c != nil {
+		c.ctx = ctx
+	}
+	return c
+}
 
 // Dial establishes a client-side RFC 6455 connection.
 func Dial(ctx context.Context, rawURL string, opts DialOptions) (*Conn, error) {

@@ -56,6 +56,15 @@
       "ping_interval_ms": 30000,
       "max_frame_bytes": 65536,
       "max_message_bytes": 1048576
+    },
+    {
+      "path": "/ws/query",
+      "proto": "json",
+      "messageSchema": "QueryStreamMsg",
+      "auth": "jwt",
+      "ping_interval_ms": 15000,
+      "max_frame_bytes": 1048576,
+      "max_message_bytes": 16777216
     }
   ],
   "mcp": {
@@ -127,6 +136,22 @@
       "type": "object",
       "required": ["seq"],
       "properties": { "seq": { "type": "integer", "minimum": 0 } }
+    },
+    "QueryStreamMsg": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind":      { "type": "string", "enum": ["start", "schema", "row", "summary", "error", "end", "cancel"] },
+        "statement": { "type": "string", "maxLength": 524288 },
+        "graph":     { "type": "string", "maxLength": 256 },
+        "params":    { "type": "object", "properties": {} },
+        "columns":   { "type": "array", "items": { } },
+        "row":       { "type": "array", "items": { } },
+        "elapsed_ms":{ "type": "integer", "minimum": 0 },
+        "row_count": { "type": "integer", "minimum": 0 },
+        "code":      { "type": "string", "maxLength": 64 },
+        "message":   { "type": "string", "maxLength": 4096 }
+      }
     }
   }
 }

@@ -119,3 +119,39 @@ func (v QueryResp) Valid() error {
 	if v.RowCount < 0 { return errors.New("row_count: too small") }
 	return nil
 }
+
+// QueryStreamMsg generated from config schema
+type QueryStreamMsg struct {
+	Code string `json:"code" genapi:"code"`
+	Columns []jsontext.Value `json:"columns" genapi:"columns"`
+	ElapsedMs int64 `json:"elapsed_ms" genapi:"elapsed_ms"`
+	Graph string `json:"graph" genapi:"graph"`
+	Kind string `json:"kind" genapi:"kind"`
+	Message string `json:"message" genapi:"message"`
+	Params jsontext.Value `json:"params" genapi:"params"`
+	Row []jsontext.Value `json:"row" genapi:"row"`
+	RowCount int64 `json:"row_count" genapi:"row_count"`
+	Statement string `json:"statement" genapi:"statement"`
+}
+
+// Valid validates QueryStreamMsg fields against schema constraints.
+func (v QueryStreamMsg) Valid() error {
+	if len(v.Code) > 64 { return errors.New("code: too long") }
+	if v.ElapsedMs < 0 { return errors.New("elapsed_ms: too small") }
+	if len(v.Graph) > 256 { return errors.New("graph: too long") }
+	{
+		okEnum := false
+		if v.Kind == "start" { okEnum = true }
+		if v.Kind == "schema" { okEnum = true }
+		if v.Kind == "row" { okEnum = true }
+		if v.Kind == "summary" { okEnum = true }
+		if v.Kind == "error" { okEnum = true }
+		if v.Kind == "end" { okEnum = true }
+		if v.Kind == "cancel" { okEnum = true }
+		if !okEnum { return errors.New("kind: invalid enum value") }
+	}
+	if len(v.Message) > 4096 { return errors.New("message: too long") }
+	if v.RowCount < 0 { return errors.New("row_count: too small") }
+	if len(v.Statement) > 524288 { return errors.New("statement: too long") }
+	return nil
+}
