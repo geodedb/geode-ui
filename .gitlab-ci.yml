@@ -1,0 +1,167 @@
+---
+# GitLab CI/CD Pipeline for ui
+# SPDX-License-Identifier: Apache-2.0
+
+include:
+  # Security scanning
+  - component: gitlab.com/devnw/ci-catalog/security-sast@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/security-dependency-scanning@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.7.1
+
+  # SBOM
+  - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/sbom-scan@v1.7.1
+
+  # Release
+  - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.7.1
+
+variables:
+  NODE_VERSION: '22.14.0'
+  npm_config_cache: '$CI_PROJECT_DIR/.npm'
+  FF_USE_FASTZIP: 'true'
+  ARTIFACT_COMPRESSION_LEVEL: 'fast'
+  CACHE_COMPRESSION_LEVEL: 'fast'
+
+default:
+  image: node:${NODE_VERSION}
+  before_script:
+    # Configure GitLab npm registry for @devnw scope
+    - |
+      echo "@devnw:registry=https://gitlab.com/api/v4/packages/npm/" >> ~/.npmrc
+      echo "//gitlab.com/api/v4/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> ~/.npmrc
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+    policy: pull
+  tags:
+    - company
+
+stages:
+  - install
+  - lint
+  - test
+  - build
+  - pages
+  - security
+  - sbom
+  - release
+
+# ============================================================================
+# INSTALL STAGE
+# ============================================================================
+
+install:
+  stage: install
+  script:
+    - npm ci
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+      - node_modules/
+    policy: pull-push
+  artifacts:
+    paths:
+      - node_modules/
+    expire_in: 1 hour
+
+# ============================================================================
+# LINT STAGE
+# ============================================================================
+
+typecheck:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run test:ts
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+eslint:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+prettier:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run prettier:check
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+
+unit-tests:
+  stage: test
+  needs: ['install']
+  script:
+    - npm test -- --coverage --ci
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+  artifacts:
+    when: always
+    paths:
+      - coverage/
+    reports:
+      junit: junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura-coverage.xml
+    expire_in: 7 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+
+build:
+  stage: build
+  needs:
+    - job: install
+    - job: eslint
+  script:
+    - npm run build
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 7 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# ============================================================================
+# PAGES STAGE - Deploy to GitLab Pages
+# ============================================================================
+
+pages:
+  stage: pages
+  needs: ['build']
+  before_script: []
+  script:
+    - mv dist public
+  artifacts:
+    paths:
+      - public
+  environment:
+    name: production
+    url: $CI_PAGES_URL
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

@@ -1,0 +1,108 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "jest": true
+  },
+  "extends": [
+    "airbnb",
+    "plugin:import/recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "ignorePatterns": [
+    "build/*",
+    "dist/*",
+    "node_modules/*",
+    "coverage/*"
+  ],
+  "overrides": [
+    {
+      "files": ["*.js"],
+      "rules": {
+        "import/extensions": 0,
+        "react/destructuring-assignment": 1,
+        "react/no-array-index-key": 1,
+        "react/prop-types": 0
+      }
+    },
+    {
+      "files": ["*.ts", "*.tsx"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": 0,
+        "@typescript-eslint/no-var-requires": 0,
+        "function-paren-newline": 0,
+        "implicit-arrow-linebreak": 0,
+        "import/extensions": 0,
+        "react/destructuring-assignment": 2,
+        "react/prop-types": 0,
+        "react/require-default-props": 0,
+        "import/no-extraneous-dependencies": [
+          "error",
+          {
+            "devDependencies": true
+          }
+        ]
+      }
+    },
+    {
+      "files": ["*.test.tsx", "*.test.ts"],
+      "rules": {
+        "@typescript-eslint/no-empty-function": 0,
+        "import/first": 0,
+        "import/order": 0
+      }
+    }
+  ],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaFeatures": {
+      "jsx": true
+    },
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "plugins": ["react", "@typescript-eslint"],
+  "root": true,
+  "rules": {
+    "comma-dangle": 0,
+    "eol-last": ["error", "always"],
+    "import-extensions": 0,
+    "max-len": 0,
+    "object-curly-newline": 0,
+    "react/button-has-type": 0,
+    "react/function-component-definition": [
+      2,
+      {
+        "namedComponents": "arrow-function"
+      }
+    ],
+    "react/jsx-filename-extension": 0,
+    "react/jsx-props-no-spreading": 0,
+    "semi": 0,
+    "import/prefer-default-export": 0,
+    "consistent-return": 0,
+    "operator-linebreak": 0,
+    "no-bitwise": 0,
+    "prefer-destructuring": 0,
+    "prefer-template": 0,
+    "no-use-before-define": [
+      "error",
+      { "functions": false, "classes": false, "variables": false }
+    ],
+    "max-classes-per-file": 0,
+    "arrow-body-style": 0,
+    "react/jsx-one-expression-per-line": 0,
+    "no-param-reassign": 0,
+    "array-callback-return": 0,
+    "react/jsx-no-useless-fragment": 0,
+    "no-shadow": 0
+  },
+  "reportUnusedDisableDirectives": true,
+  "settings": {
+    "import/resolver": {
+      "node": {
+        "extensions": [".ts", ".tsx", ".js", ".jsx"]
+      }
+    }
+  }
+}

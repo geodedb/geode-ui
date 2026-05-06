@@ -1,0 +1,17 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks
+
+title = "ui Gitleaks Config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist"
+paths = [
+    '''node_modules''',
+    '''dist''',
+    '''build''',
+    '''\.git''',
+    '''coverage''',
+]
