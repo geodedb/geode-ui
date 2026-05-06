@@ -1,106 +1,80 @@
-# ui - React Application Makefile
-# SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2024-2025 CodePros
+SHELL := /usr/bin/env bash
+GOEXPERIMENT ?= jsonv2
+GOTOOLCHAIN ?= go1.26.2
+GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
+BIN := bin/geode-ui
 
-.PHONY: all build test dev ci clean lint fmt help
-.PHONY: pre-commit-install pre-commit pre-commit-run
+.PHONY: all help \
+        generate go-build go-test go-lint go-fmt go-tidy \
+        web-install web-build web-dev web-test web-lint web-fmt web-typecheck \
+        build test lint fmt ci clean dev pre-commit
 
-# Default target: lint and test
-all: lint test
-	@echo "All checks passed!"
+all: lint test build
 
-# Start development server
-dev:
-	@echo "Starting development server..."
-	@npm start
-
-# Production build
-build:
-	@echo "Building ui..."
-	@npm run build
-
-# Run all tests
-test:
-	@echo "Running tests..."
-	@npm test -- --ci
-
-# Run tests in watch mode
-test-watch:
-	@echo "Starting test watcher..."
-	@npm run test:watch
-
-# TypeScript type checking
-typecheck:
-	@echo "Checking types..."
-	@npm run test:ts
-
-# Run linter
-lint:
-	@echo "Linting..."
-	@npm run lint
-
-# Fix lint issues
-lint-fix:
-	@echo "Fixing lint issues..."
-	@npm run lint:fix
-
-# Format code
-fmt:
-	@echo "Formatting code..."
-	@npm run prettier:fix
-
-# Check formatting
-fmt-check:
-	@echo "Checking formatting..."
-	@npm run prettier:check
-
-# Full CI pipeline (clean slate)
-ci: clean lint typecheck test build
-	@echo "CI pipeline passed!"
-
-# Clean build artifacts
-clean:
-	@echo "Cleaning..."
-	@npm run clean
-
-# Pre-commit hook management
-pre-commit-install:
-	@echo "Installing pre-commit hooks..."
-	@pre-commit install
-	@pre-commit install --hook-type commit-msg
-	@pre-commit install --hook-type pre-push
-
-pre-commit:
-	@echo "Running pre-commit checks..."
-	@pre-commit run --all-files
-
-pre-commit-run: pre-commit
-
-# Display help
 help:
-	@echo "ui - React Application"
-	@echo ""
-	@echo "Usage: make [target]"
-	@echo ""
-	@echo "Development:"
-	@echo "  all                  Lint and test (default)"
-	@echo "  dev                  Start development server (port 3000)"
-	@echo "  build                Production build"
-	@echo "  ci                   Full CI: clean + lint + typecheck + test + build"
-	@echo ""
-	@echo "Testing:"
-	@echo "  test                 Run test suite"
-	@echo "  test-watch           Run tests in watch mode"
-	@echo "  typecheck            TypeScript type checking"
-	@echo ""
-	@echo "Code Quality:"
-	@echo "  lint                 Run ESLint"
-	@echo "  lint-fix             Fix ESLint issues"
-	@echo "  fmt                  Format with Prettier"
-	@echo "  fmt-check            Check formatting"
-	@echo "  pre-commit           Run pre-commit hooks"
-	@echo "  pre-commit-install   Install pre-commit hooks"
-	@echo ""
-	@echo "Maintenance:"
-	@echo "  clean                Remove build artifacts"
-	@echo "  help                 Show this help message"
+	@echo "Targets:"
+	@echo "  make generate     Run genapi → gen/"
+	@echo "  make build        Build SPA into dist/ then Go binary into $(BIN)"
+	@echo "  make test         Run Go + JS tests"
+	@echo "  make lint         Run Go + JS linters"
+	@echo "  make dev          Run go server (terminal 1) and webpack dev (terminal 2)"
+	@echo "  make ci           Full CI sequence"
+	@echo "  make clean        Remove gen/, dist/, bin/, coverage"
+
+# ----- Code generation -----
+generate:
+	$(GOENV) genapi generate --config geode.json --out gen/ --with-tests
+	$(GOENV) go mod tidy
+
+# ----- Go build/test -----
+go-build: web-build
+	$(GOENV) go build -o $(BIN) ./cmd/server
+
+go-test:
+	$(GOENV) go test -race -cover -failfast ./...
+
+go-lint:
+	$(GOENV) golangci-lint run
+
+go-fmt:
+	$(GOENV) gofmt -s -w .
+	$(GOENV) goimports -w .
+
+go-tidy:
+	$(GOENV) go mod tidy
+
+# ----- Web build/test (delegates to npm scripts) -----
+web-install:
+	npm ci
+
+web-build:
+	npm run build
+
+web-dev:
+	npm start
+
+web-test:
+	npm test -- --ci
+
+web-lint:
+	npm run lint
+
+web-fmt:
+	npm run prettier:fix
+
+web-typecheck:
+	npm run test:ts
+
+# ----- Aggregates -----
+build: generate go-build
+test: web-test go-test
+lint: web-lint go-lint
+fmt: go-fmt web-fmt
+ci: web-install lint web-typecheck test build
+clean:
+	rm -rf gen dist bin coverage.txt *.out
+
+dev:
+	@echo "Run 'make web-dev' in one terminal and './$(BIN) -listen :8080' in another"
+
+pre-commit: fmt go-tidy lint test

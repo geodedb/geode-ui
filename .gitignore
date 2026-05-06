@@ -38,3 +38,13 @@ yarn-error.log*
 
 # Debug
 firebase-debug.log
+
+# Generated code
+/gen/
+
+# Go build artifacts
+/bin/
+
+# Coverage
+*.out
+coverage.txt
