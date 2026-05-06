@@ -43,7 +43,7 @@ export type APIKeySigningResult = {
 
 export type ClientConfig = {
   baseUrl: string;
-  bearerToken?: string;
+  bearerToken?: string | (() => string | null | undefined | Promise<string | null | undefined>);
   apiKeySigner?: (input: APIKeySigningInput) => Promise<APIKeySigningResult> | APIKeySigningResult;
   headers?: Record<string, string>;
   fetchImpl?: typeof fetch;
@@ -51,6 +51,14 @@ export type ClientConfig = {
   wsProtocols?: Record<string, string[]>;
   wsOrigin?: string;
 };
+
+async function resolveBearerToken(value: ClientConfig["bearerToken"]): Promise<string> {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  const resolved = typeof value === "function" ? await value() : value;
+  return resolved ?? "";
+}
 
 export interface MessageStream<T> {
   close(): void;
@@ -622,11 +630,12 @@ async function applyHTTPAuth(
     return;
   }
   if (mode === "jwt") {
-    if (!config.bearerToken) {
+    const token = await resolveBearerToken(config.bearerToken);
+    if (!token) {
       throw new Error("missing bearer token");
     }
     if (!headers.has("Authorization")) {
-      headers.set("Authorization", `Bearer ${config.bearerToken}`);
+      headers.set("Authorization", `Bearer ${token}`);
     }
     return;
   }
@@ -918,10 +927,11 @@ export class GenAPIClient {
         : [];
     const mode = authMode.trim().toLowerCase();
     if (mode === "jwt") {
-      if (!this.config.bearerToken) {
+      const token = await resolveBearerToken(this.config.bearerToken);
+      if (!token) {
         throw new Error("missing bearer token");
       }
-      nextProtocols.push(encodeWSAuthProtocol("bearer", this.config.bearerToken));
+      nextProtocols.push(encodeWSAuthProtocol("bearer", token));
     } else if (mode === "api_key") {
       const signed = await signAPIKey(this.config, "GET", path, new ArrayBuffer(0), "ws");
       nextProtocols.push(encodeWSAuthProtocol("sig", bearerTokenFromAuthorization(signed.authorization)));

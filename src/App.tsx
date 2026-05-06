@@ -1,5 +1,11 @@
 import React from 'react'
-import styled, { ThemeProvider, createGlobalStyle } from 'styled-components'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { ThemeProvider, createGlobalStyle } from 'styled-components'
+import { AuthProvider } from './auth/AuthProvider'
+import { ProtectedRoute } from './auth/ProtectedRoute'
+import { Shell } from './components/layout/Shell'
+import { LoginPage } from './pages/LoginPage'
+import { QueryPage } from './pages/QueryPage'
 
 const theme = {
   colors: {
@@ -37,38 +43,28 @@ const GlobalStyle = createGlobalStyle`
   }
 `
 
-const Container = styled.div`
-  max-width: 960px;
-  margin: 0 auto;
-  padding: ${({ theme }) => theme.spacing.xl};
-`
+const ProtectedShell: React.FC = () => (
+  <ProtectedRoute>
+    <Shell />
+  </ProtectedRoute>
+)
 
-const Header = styled.header`
-  text-align: center;
-  padding: ${({ theme }) => theme.spacing.xl} 0;
-`
-
-const Title = styled.h1`
-  font-size: 2rem;
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.text};
-  margin-bottom: ${({ theme }) => theme.spacing.sm};
-`
-
-const Subtitle = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 1.1rem;
-`
-
-const App = () => (
+const App: React.FC = () => (
   <ThemeProvider theme={theme}>
     <GlobalStyle />
-    <Container>
-      <Header>
-        <Title>Geode UI</Title>
-        <Subtitle>Graph database admin & query workbench</Subtitle>
-      </Header>
-    </Container>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<ProtectedShell />}>
+            <Route index element={<QueryPage />} />
+            <Route path="schema" element={<div>schema (TODO D1)</div>} />
+            <Route path="admin" element={<div>admin (TODO D2-D3)</div>} />
+            <Route path="ops" element={<div>ops (TODO D4-D5)</div>} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   </ThemeProvider>
 )
 

@@ -22,7 +22,7 @@ module.exports = {
       },
     ],
   },
-  setupFilesAfterSetup: ['<rootDir>/__test_utils__/afterEnv.js'],
+  setupFilesAfterEnv: ['<rootDir>/__test_utils__/afterEnv.js'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   setupFiles: ['<rootDir>/__test_utils__/polyfills.js'],
   moduleNameMapper: {
