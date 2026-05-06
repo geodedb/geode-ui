@@ -217,7 +217,7 @@
               "name":    { "type": "string" },
               "type":    { "type": "string" },
               "table":   { "type": "string" },
-              "columns": { "type": "string" }
+              "columns": {}
             }
           }
         }
@@ -235,7 +235,7 @@
               "name":    { "type": "string" },
               "type":    { "type": "string" },
               "table":   { "type": "string" },
-              "columns": { "type": "string" }
+              "columns": {}
             }
           }
         }
