@@ -315,3 +315,57 @@ func TestTxHandlers_RollbackPath(t *testing.T) {
 		t.Fatalf("events=%v want [begin rollback ...]", d.events)
 	}
 }
+
+// TestTxHandlers_BeginSanitizesGraphName confirms the Tx handler routes
+// req.Graph through sanitizeGraphName before inlining it into the
+// "USE GRAPH ..." statement issued on the new transaction. A regression
+// that drops the sanitizer would let the raw graph name reach the
+// driver and open a query-injection vector — this test pins the wiring
+// by feeding a name with spaces, semicolons, and SQL-comment syntax and
+// asserting the exact stripped form lands on the driver.
+func TestTxHandlers_BeginSanitizesGraphName(t *testing.T) {
+	d := &txCapableDriver{}
+	registerTxDriver("tx_sanitize_graph", d)
+	db, err := sql.Open("tx_sanitize_graph", "")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	srv := New(Config{Version: "test", Pool: &stubPool{db: db}, TxStore: NewTxStore()})
+
+	rec := httptest.NewRecorder()
+	beginReq := httptest.NewRequest(http.MethodPost, "/api/v1/tx", nil)
+	beginResp, err := srv.Tx(rec, beginReq, &gentypes.TxBeginReq{Graph: "bad name; DROP TABLE users--"})
+	if err != nil {
+		t.Fatalf("Tx: %v", err)
+	}
+	if beginResp == nil {
+		t.Fatalf("Tx returned nil resp; status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(beginResp.Txid) != 32 {
+		t.Fatalf("txid len=%d want 32", len(beginResp.Txid))
+	}
+	if rec.Code != http.StatusOK && rec.Code != 0 {
+		// httptest.ResponseRecorder defaults Code to 200 until WriteHeader
+		// is called; either 200 or the unwritten zero value is fine.
+		t.Fatalf("status=%d want 200", rec.Code)
+	}
+
+	d.mu.Lock()
+	events := append([]string(nil), d.events...)
+	d.mu.Unlock()
+
+	// sanitizeGraphName keeps [a-zA-Z0-9_-], so the input
+	// "bad name; DROP TABLE users--" collapses to "badnameDROPTABLEusers--".
+	wantQuery := "exec:USE GRAPH badnameDROPTABLEusers--"
+	wantSeen := []string{"begin", wantQuery}
+	if len(events) != len(wantSeen) {
+		t.Fatalf("driver events=%v want %v", events, wantSeen)
+	}
+	for i, want := range wantSeen {
+		if events[i] != want {
+			t.Fatalf("event[%d]=%q want %q (full=%v)", i, events[i], want, events)
+		}
+	}
+}
