@@ -9,6 +9,14 @@ import { QueryPage } from './pages/QueryPage'
 import { SchemaPage } from './pages/SchemaPage'
 import { AdminPage } from './pages/AdminPage'
 import { UsersPage } from './components/admin/UsersPage'
+import { RolesPage } from './components/admin/RolesPage'
+import { PoliciesPage } from './components/admin/PoliciesPage'
+import { GrantsPanel } from './components/admin/GrantsPanel'
+import { OpsPage } from './pages/OpsPage'
+import { BackupPage } from './components/ops/BackupPage'
+import { RestorePage } from './components/ops/RestorePage'
+import { MigrationsPage } from './components/ops/MigrationsPage'
+import { AuditLogPage } from './components/ops/AuditLogPage'
 
 const theme = {
   colors: {
@@ -65,11 +73,17 @@ const App: React.FC = () => (
             <Route path="admin" element={<AdminPage />}>
               <Route index element={<Navigate to="users" replace />} />
               <Route path="users" element={<UsersPage />} />
-              <Route path="roles" element={<div>roles (TODO D3)</div>} />
-              <Route path="policies" element={<div>policies (TODO D3)</div>} />
-              <Route path="grants" element={<div>grants (TODO D3)</div>} />
+              <Route path="roles" element={<RolesPage />} />
+              <Route path="policies" element={<PoliciesPage />} />
+              <Route path="grants" element={<GrantsPanel />} />
             </Route>
-            <Route path="ops" element={<div>ops (TODO D4-D5)</div>} />
+            <Route path="ops" element={<OpsPage />}>
+              <Route index element={<Navigate to="backups" replace />} />
+              <Route path="backups" element={<BackupPage />} />
+              <Route path="restore" element={<RestorePage />} />
+              <Route path="migrations" element={<MigrationsPage />} />
+              <Route path="audit" element={<AuditLogPage />} />
+            </Route>
           </Route>
         </Routes>
       </BrowserRouter>
