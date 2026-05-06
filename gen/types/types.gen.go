@@ -6,6 +6,17 @@ import (
 	"encoding/json/jsontext"
 )
 
+// AssignRoleReq generated from config schema
+type AssignRoleReq struct {
+	Role string `json:"role" genapi:"role"`
+	Username string `json:"username" genapi:"username"`
+}
+
+// Valid validates AssignRoleReq fields against schema constraints.
+func (v AssignRoleReq) Valid() error {
+	return nil
+}
+
 // ConstraintList generated from config schema
 type ConstraintList struct {
 	Constraints []jsontext.Value `json:"constraints" genapi:"constraints"`
@@ -131,6 +142,29 @@ func (v LoginResp) Valid() error {
 		if v.TokenType == "Bearer" { okEnum = true }
 		if !okEnum { return errors.New("token_type: invalid enum value") }
 	}
+	return nil
+}
+
+// PasswordChangeReq generated from config schema
+type PasswordChangeReq struct {
+	NewPassword string `json:"new_password" genapi:"new_password"`
+	OldPassword string `json:"old_password" genapi:"old_password"`
+	Username string `json:"username" genapi:"username"`
+}
+
+// Valid validates PasswordChangeReq fields against schema constraints.
+func (v PasswordChangeReq) Valid() error {
+	if len(v.NewPassword) < 8 { return errors.New("new_password: too short") }
+	return nil
+}
+
+// PermissionList generated from config schema
+type PermissionList struct {
+	Permissions []jsontext.Value `json:"permissions" genapi:"permissions"`
+}
+
+// Valid validates PermissionList fields against schema constraints.
+func (v PermissionList) Valid() error {
 	return nil
 }
 
@@ -264,5 +298,72 @@ type TxRunReq struct {
 // Valid validates TxRunReq fields against schema constraints.
 func (v TxRunReq) Valid() error {
 	if len(v.Statement) < 1 { return errors.New("statement: too short") }
+	return nil
+}
+
+// User generated from config schema
+type User struct {
+	Disabled bool `json:"disabled" genapi:"disabled"`
+	Email string `json:"email" genapi:"email"`
+	MfaEnrolled bool `json:"mfa_enrolled" genapi:"mfa_enrolled"`
+	Roles []string `json:"roles" genapi:"roles"`
+	Username string `json:"username" genapi:"username"`
+}
+
+// Valid validates User fields against schema constraints.
+func (v User) Valid() error {
+	return nil
+}
+
+// UserCreateReq generated from config schema
+type UserCreateReq struct {
+	Email string `json:"email" genapi:"email"`
+	Password string `json:"password" genapi:"password"`
+	Roles []string `json:"roles" genapi:"roles"`
+	Username string `json:"username" genapi:"username"`
+}
+
+// Valid validates UserCreateReq fields against schema constraints.
+func (v UserCreateReq) Valid() error {
+	if len(v.Email) < 3 { return errors.New("email: too short") }
+	if len(v.Email) > 256 { return errors.New("email: too long") }
+	if len(v.Password) > 4096 { return errors.New("password: too long") }
+	if len(v.Username) < 1 { return errors.New("username: too short") }
+	if len(v.Username) > 256 { return errors.New("username: too long") }
+	return nil
+}
+
+// UserList generated from config schema
+type UserList struct {
+	Users []jsontext.Value `json:"users" genapi:"users"`
+}
+
+// Valid validates UserList fields against schema constraints.
+func (v UserList) Valid() error {
+	return nil
+}
+
+// UserUpdateReq generated from config schema
+type UserUpdateReq struct {
+	Email string `json:"email" genapi:"email"`
+	Password string `json:"password" genapi:"password"`
+	Roles []string `json:"roles" genapi:"roles"`
+	Username string `json:"username" genapi:"username"`
+}
+
+// Valid validates UserUpdateReq fields against schema constraints.
+func (v UserUpdateReq) Valid() error {
+	return nil
+}
+
+// UsernameParam generated from config schema
+type UsernameParam struct {
+	Username string `json:"username" genapi:"username"`
+}
+
+// Valid validates UsernameParam fields against schema constraints.
+func (v UsernameParam) Valid() error {
+	if len(v.Username) < 1 { return errors.New("username: too short") }
+	if len(v.Username) > 256 { return errors.New("username: too long") }
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
 	"geodedb.com/geode-ui/gen/pkg/obsx"
@@ -32,6 +33,16 @@ type ServerInterface interface {
 	Commit(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error)
 	Rollback(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error)
 	Run(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error)
+	GetUsers(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.UserList, error)
+	PostUsers(w http.ResponseWriter, r *http.Request, req *types.UserCreateReq) (*types.User, error)
+	DeleteUsername(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error)
+	GetUsername(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.User, error)
+	PatchUsername(w http.ResponseWriter, r *http.Request, req *types.UserUpdateReq) (*types.User, error)
+	Disable(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error)
+	Enable(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error)
+	Password(w http.ResponseWriter, r *http.Request, req *types.PasswordChangeReq) (*types.Empty, error)
+	Permissions(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.PermissionList, error)
+	Roles(w http.ResponseWriter, r *http.Request, req *types.AssignRoleReq) (*types.Empty, error)
 	Healthz(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.HealthResp, error)
 }
 
@@ -80,6 +91,46 @@ func (UnimplementedServer) Rollback(_ http.ResponseWriter, _ *http.Request, _ *t
 }
 
 func (UnimplementedServer) Run(_ http.ResponseWriter, _ *http.Request, _ *types.TxRunReq) (*types.QueryResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetUsers(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.UserList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) PostUsers(_ http.ResponseWriter, _ *http.Request, _ *types.UserCreateReq) (*types.User, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) DeleteUsername(_ http.ResponseWriter, _ *http.Request, _ *types.UsernameParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetUsername(_ http.ResponseWriter, _ *http.Request, _ *types.UsernameParam) (*types.User, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) PatchUsername(_ http.ResponseWriter, _ *http.Request, _ *types.UserUpdateReq) (*types.User, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Disable(_ http.ResponseWriter, _ *http.Request, _ *types.UsernameParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Enable(_ http.ResponseWriter, _ *http.Request, _ *types.UsernameParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Password(_ http.ResponseWriter, _ *http.Request, _ *types.PasswordChangeReq) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Permissions(_ http.ResponseWriter, _ *http.Request, _ *types.UsernameParam) (*types.PermissionList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Roles(_ http.ResponseWriter, _ *http.Request, _ *types.AssignRoleReq) (*types.Empty, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -406,6 +457,246 @@ func (s catchAllServer) Run(w http.ResponseWriter, r *http.Request, req *types.T
 		HasTypedResponse:   true,
 		PathParams:         []string{"txid"},
 		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetUsers(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.UserList, error) {
+	return callCatchAll[*types.UserList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/users",
+		MuxPattern:         "GET /api/v1/users",
+		MethodName:         "GetUsers",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.UserList",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "UserList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) PostUsers(w http.ResponseWriter, r *http.Request, req *types.UserCreateReq) (*types.User, error) {
+	return callCatchAll[*types.User](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/users",
+		MuxPattern:         "POST /api/v1/users",
+		MethodName:         "PostUsers",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UserCreateReq",
+		ResponseType:       "*types.User",
+		RequestSchema:      "UserCreateReq",
+		ResponseSchema:     "User",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "DELETE",
+		Path:               "/api/v1/users/{username}",
+		MuxPattern:         "DELETE /api/v1/users/{username}",
+		MethodName:         "DeleteUsername",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UsernameParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "UsernameParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetUsername(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.User, error) {
+	return callCatchAll[*types.User](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/users/{username}",
+		MuxPattern:         "GET /api/v1/users/{username}",
+		MethodName:         "GetUsername",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UsernameParam",
+		ResponseType:       "*types.User",
+		RequestSchema:      "UsernameParam",
+		ResponseSchema:     "User",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) PatchUsername(w http.ResponseWriter, r *http.Request, req *types.UserUpdateReq) (*types.User, error) {
+	return callCatchAll[*types.User](s.handler, w, r, RouteInfo{
+		Method:             "PATCH",
+		Path:               "/api/v1/users/{username}",
+		MuxPattern:         "PATCH /api/v1/users/{username}",
+		MethodName:         "PatchUsername",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UserUpdateReq",
+		ResponseType:       "*types.User",
+		RequestSchema:      "UserUpdateReq",
+		ResponseSchema:     "User",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Disable(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/users/{username}/disable",
+		MuxPattern:         "POST /api/v1/users/{username}/disable",
+		MethodName:         "Disable",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UsernameParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "UsernameParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Enable(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/users/{username}/enable",
+		MuxPattern:         "POST /api/v1/users/{username}/enable",
+		MethodName:         "Enable",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UsernameParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "UsernameParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Password(w http.ResponseWriter, r *http.Request, req *types.PasswordChangeReq) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/users/{username}/password",
+		MuxPattern:         "POST /api/v1/users/{username}/password",
+		MethodName:         "Password",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.PasswordChangeReq",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "PasswordChangeReq",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Permissions(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.PermissionList, error) {
+	return callCatchAll[*types.PermissionList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/users/{username}/permissions",
+		MuxPattern:         "GET /api/v1/users/{username}/permissions",
+		MethodName:         "Permissions",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UsernameParam",
+		ResponseType:       "*types.PermissionList",
+		RequestSchema:      "UsernameParam",
+		ResponseSchema:     "PermissionList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Roles(w http.ResponseWriter, r *http.Request, req *types.AssignRoleReq) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/users/{username}/roles",
+		MuxPattern:         "POST /api/v1/users/{username}/roles",
+		MethodName:         "Roles",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.AssignRoleReq",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "AssignRoleReq",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"username"},
+		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
@@ -887,6 +1178,828 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		req.Txid = r.PathValue("txid")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Run(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetUsers *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetUsers = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetUsers",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_get_GetUsers != nil { lim, rem, reset := bkt_get_GetUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetUsers(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_PostUsers *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_PostUsers = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostUsers",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_PostUsers != nil { lim, rem, reset := bkt_post_PostUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UserCreateReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PostUsers(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_delete_DeleteUsername *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteUsername = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("DELETE /api/v1/users/{username}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteUsername",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}"),
+				attribute.String("http.method", "DELETE"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_delete_DeleteUsername != nil { lim, rem, reset := bkt_delete_DeleteUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UsernameParam
+		req.Username = r.URL.Query().Get("username")
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.DeleteUsername(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetUsername *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetUsername = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/users/{username}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetUsername",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_get_GetUsername != nil { lim, rem, reset := bkt_get_GetUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UsernameParam
+		req.Username = r.URL.Query().Get("username")
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetUsername(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_patch_PatchUsername *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_patch_PatchUsername = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("PATCH /api/v1/users/{username}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PatchUsername",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}"),
+				attribute.String("http.method", "PATCH"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_patch_PatchUsername != nil { lim, rem, reset := bkt_patch_PatchUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UserUpdateReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PatchUsername(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Disable *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Disable = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/users/{username}/disable", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Disable",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}/disable"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_Disable != nil { lim, rem, reset := bkt_post_Disable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Disable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UsernameParam
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Disable(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Enable *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Enable = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/users/{username}/enable", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Enable",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}/enable"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_Enable != nil { lim, rem, reset := bkt_post_Enable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Enable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UsernameParam
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Enable(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Password *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Password = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/users/{username}/password", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Password",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}/password"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_post_Password != nil { lim, rem, reset := bkt_post_Password.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Password.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.PasswordChangeReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Password(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Permissions *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Permissions = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/users/{username}/permissions", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Permissions",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}/permissions"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_get_Permissions != nil { lim, rem, reset := bkt_get_Permissions.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Permissions.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UsernameParam
+		req.Username = r.URL.Query().Get("username")
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Permissions(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Roles *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Roles = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/users/{username}/roles", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Roles",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/users/{username}/roles"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_Roles != nil { lim, rem, reset := bkt_post_Roles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Roles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.AssignRoleReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Username = r.PathValue("username")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Roles(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

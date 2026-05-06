@@ -119,6 +119,95 @@
       "responseSchema": "Empty",
       "auth": "jwt",
       "rateLimit": 50
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "requestSchema": "Empty",
+      "responseSchema": "UserList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "requestSchema": "UserCreateReq",
+      "responseSchema": "User",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/{username}",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "User",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/{username}",
+      "requestSchema": "UserUpdateReq",
+      "responseSchema": "User",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/{username}",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/disable",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/enable",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/password",
+      "requestSchema": "PasswordChangeReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/roles",
+      "requestSchema": "AssignRoleReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/{username}/permissions",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "PermissionList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
     }
   ],
   "websocket": [
@@ -319,6 +408,84 @@
         "row_count": { "type": "integer", "minimum": 0 },
         "code":      { "type": "string", "maxLength": 64 },
         "message":   { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "User": {
+      "type": "object",
+      "required": ["username", "email"],
+      "properties": {
+        "username":     { "type": "string" },
+        "email":        { "type": "string" },
+        "roles":        { "type": "array", "items": { "type": "string" } },
+        "disabled":     { "type": "boolean" },
+        "mfa_enrolled": { "type": "boolean" }
+      }
+    },
+    "UserList": {
+      "type": "object",
+      "required": ["users"],
+      "properties": {
+        "users": { "type": "array", "items": { } }
+      }
+    },
+    "UserCreateReq": {
+      "type": "object",
+      "required": ["username", "email"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "email":    { "type": "string", "minLength": 3, "maxLength": 256 },
+        "password": { "type": "string", "maxLength": 4096 },
+        "roles":    { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "UserUpdateReq": {
+      "type": "object",
+      "required": ["username"],
+      "properties": {
+        "username": { "type": "string" },
+        "email":    { "type": "string" },
+        "password": { "type": "string" },
+        "roles":    { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "UsernameParam": {
+      "type": "object",
+      "required": ["username"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "PasswordChangeReq": {
+      "type": "object",
+      "required": ["username", "new_password"],
+      "properties": {
+        "username":     { "type": "string" },
+        "old_password": { "type": "string" },
+        "new_password": { "type": "string", "minLength": 8 }
+      }
+    },
+    "AssignRoleReq": {
+      "type": "object",
+      "required": ["username", "role"],
+      "properties": {
+        "username": { "type": "string" },
+        "role":     { "type": "string" }
+      }
+    },
+    "PermissionList": {
+      "type": "object",
+      "required": ["permissions"],
+      "properties": {
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "permission": { "type": "string" },
+              "resource":   { "type": "string" }
+            }
+          }
+        }
       }
     }
   }

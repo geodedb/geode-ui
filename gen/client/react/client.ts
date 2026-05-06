@@ -81,6 +81,10 @@ export class HTTPError extends Error {
     super(body ? `http status ${status}: ${body}` : `http status ${status}`);
   }
 }
+export interface AssignRoleReq {
+  role: string;
+  username: string;
+}
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;
 }
@@ -114,6 +118,14 @@ export interface LoginResp {
   access_token: string;
   expires_in: number;
   token_type: string;
+}
+export interface PasswordChangeReq {
+  new_password: string;
+  old_password?: string;
+  username: string;
+}
+export interface PermissionList {
+  permissions: Array<Record<string, unknown>>;
 }
 export interface PingMsg {
   seq: number;
@@ -158,6 +170,31 @@ export interface TxRunReq {
   params?: Record<string, unknown>;
   statement: string;
   txid: string;
+}
+export interface User {
+  disabled?: boolean;
+  email: string;
+  mfa_enrolled?: boolean;
+  roles?: Array<string>;
+  username: string;
+}
+export interface UserCreateReq {
+  email: string;
+  password?: string;
+  roles?: Array<string>;
+  username: string;
+}
+export interface UserList {
+  users: Array<unknown>;
+}
+export interface UserUpdateReq {
+  email?: string;
+  password?: string;
+  roles?: Array<string>;
+  username: string;
+}
+export interface UsernameParam {
+  username: string;
 }
 type PreparedBody = {
   body?: BodyInit;
@@ -917,6 +954,96 @@ export class GenAPIClient {
       ["txid"], copyRecord(req),
     );
   }
+  async getUsers(req: Empty): Promise<UserList> {
+    return this.request<UserList>(
+      "GET",
+      "/api/v1/users",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
+  async postUsers(req: UserCreateReq): Promise<User> {
+    return this.request<User>(
+      "POST",
+      "/api/v1/users",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async deleteUsername(req: UsernameParam): Promise<Empty> {
+    return this.request<Empty>(
+      "DELETE",
+      "/api/v1/users/{username}",
+      "jwt",
+      "query",
+      ["username"], copyRecord(req),
+    );
+  }
+  async getUsername(req: UsernameParam): Promise<User> {
+    return this.request<User>(
+      "GET",
+      "/api/v1/users/{username}",
+      "jwt",
+      "query",
+      ["username"], copyRecord(req),
+    );
+  }
+  async patchUsername(req: UserUpdateReq): Promise<User> {
+    return this.request<User>(
+      "PATCH",
+      "/api/v1/users/{username}",
+      "jwt",
+      "json",
+      ["username"], copyRecord(req),
+    );
+  }
+  async disable(req: UsernameParam): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/users/{username}/disable",
+      "jwt",
+      "json",
+      ["username"], copyRecord(req),
+    );
+  }
+  async enable(req: UsernameParam): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/users/{username}/enable",
+      "jwt",
+      "json",
+      ["username"], copyRecord(req),
+    );
+  }
+  async password(req: PasswordChangeReq): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/users/{username}/password",
+      "jwt",
+      "json",
+      ["username"], copyRecord(req),
+    );
+  }
+  async permissions(req: UsernameParam): Promise<PermissionList> {
+    return this.request<PermissionList>(
+      "GET",
+      "/api/v1/users/{username}/permissions",
+      "jwt",
+      "query",
+      ["username"], copyRecord(req),
+    );
+  }
+  async roles(req: AssignRoleReq): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/users/{username}/roles",
+      "jwt",
+      "json",
+      ["username"], copyRecord(req),
+    );
+  }
   async healthz(req: Empty): Promise<HealthResp> {
     return this.request<HealthResp>(
       "GET",
@@ -990,6 +1117,36 @@ export function useRollbackMutation(client: GenAPIClient): MutationState<TxIDPar
 }
 export function useRunMutation(client: GenAPIClient): MutationState<TxRunReq, QueryResp> {
   return useMutationState((req) => client.run(req));
+}
+export function useGetUsers(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<UserList> {
+  return usePromise(() => client.getUsers(req), deps);
+}
+export function usePostUsersMutation(client: GenAPIClient): MutationState<UserCreateReq, User> {
+  return useMutationState((req) => client.postUsers(req));
+}
+export function useDeleteUsername(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
+  return usePromise(() => client.deleteUsername(req), deps);
+}
+export function useGetUsername(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<User> {
+  return usePromise(() => client.getUsername(req), deps);
+}
+export function usePatchUsernameMutation(client: GenAPIClient): MutationState<UserUpdateReq, User> {
+  return useMutationState((req) => client.patchUsername(req));
+}
+export function useDisableMutation(client: GenAPIClient): MutationState<UsernameParam, Empty> {
+  return useMutationState((req) => client.disable(req));
+}
+export function useEnableMutation(client: GenAPIClient): MutationState<UsernameParam, Empty> {
+  return useMutationState((req) => client.enable(req));
+}
+export function usePasswordMutation(client: GenAPIClient): MutationState<PasswordChangeReq, Empty> {
+  return useMutationState((req) => client.password(req));
+}
+export function usePermissions(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<PermissionList> {
+  return usePromise(() => client.permissions(req), deps);
+}
+export function useRolesMutation(client: GenAPIClient): MutationState<AssignRoleReq, Empty> {
+  return useMutationState((req) => client.roles(req));
 }
 export function useHealthz(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<HealthResp> {
   return usePromise(() => client.healthz(req), deps);

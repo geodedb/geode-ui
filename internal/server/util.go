@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -101,6 +103,145 @@ func runQuery(ctx context.Context, db *sql.DB, stmt string, args ...any) ([][]an
 		return nil, nil, err
 	}
 	return out, cols, nil
+}
+
+// runStatement executes stmt against db with optional named arguments and
+// returns the driver's sql.Result. It is the DDL/DML counterpart to
+// runQuery — administrative commands like CREATE USER, DROP USER, ALTER
+// USER, GRANT, and REVOKE typically have no result set, so the user-
+// management handlers funnel them through here. Errors are returned
+// untouched so the caller can wrap them with handler-specific endpoint
+// codes.
+func runStatement(ctx context.Context, db *sql.DB, stmt string, args ...any) (sql.Result, error) {
+	return db.ExecContext(ctx, stmt, args...)
+}
+
+// errInvalidIdent / errInvalidString surface for quoteIdent / quoteString
+// when the input contains characters that cannot be safely escaped without
+// risking a parser-level injection. Handlers translate these into 400
+// endpointError responses.
+var (
+	errInvalidIdent  = errors.New("identifier contains forbidden characters")
+	errInvalidString = errors.New("string literal contains forbidden characters")
+)
+
+// quoteIdent returns name wrapped in backticks, suitable for inlining into
+// a GQL admin statement that takes a quoted identifier (e.g. CREATE USER
+// `name`). It rejects any input containing a backtick or ASCII control
+// character — both would let the caller break out of the quoted span and
+// inject arbitrary syntax.
+//
+// All B-series user/role/policy handlers that string-concatenate a
+// caller-controlled identifier into a GQL statement MUST route the value
+// through this helper.
+func quoteIdent(name string) (string, error) {
+	if name == "" {
+		return "", errInvalidIdent
+	}
+	for _, r := range name {
+		if r == '`' || r < 0x20 || r == 0x7f {
+			return "", errInvalidIdent
+		}
+	}
+	return "`" + name + "`", nil
+}
+
+// quoteString returns s wrapped in single quotes with internal single
+// quotes doubled (the standard SQL/GQL escape). It rejects any ASCII
+// control character so a value like "foo\nDROP TABLE" cannot smuggle a
+// newline into the quoted literal.
+func quoteString(s string) (string, error) {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			return "", errInvalidString
+		}
+	}
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'", nil
+}
+
+// asStr coerces a driver-returned column value to a string. STRING columns
+// from the geode driver scan as string, but other column types may surface
+// as []byte or primitives; fmt.Sprint handles all of them with no surprises.
+func asStr(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+// asBool coerces a driver-returned column value to a bool. The geode
+// driver returns BOOLEAN columns as bool but historic versions emitted
+// them as string ("true"/"false") or 0/1; this helper normalises all of
+// those.
+func asBool(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return t
+	case []byte:
+		return strings.EqualFold(string(t), "true") || string(t) == "1"
+	case string:
+		return strings.EqualFold(t, "true") || t == "1"
+	case int64:
+		return t != 0
+	case int:
+		return t != 0
+	default:
+		return false
+	}
+}
+
+// asStrs coerces a driver-returned column value to a []string. The geode
+// driver scans LIST<STRING> as []any; we tolerate []string and a
+// comma-or-pipe-separated string fallback so the handler keeps working
+// across driver versions.
+func asStrs(v any) []string {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case []string:
+		return append([]string(nil), t...)
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			out = append(out, asStr(e))
+		}
+		return out
+	case string:
+		if t == "" {
+			return nil
+		}
+		// Tolerate comma-separated fallback that some Geode versions emit.
+		return splitListString(t)
+	case []byte:
+		return asStrs(string(t))
+	default:
+		return nil
+	}
+}
+
+// splitListString splits a comma- or pipe-separated string into entries
+// with whitespace trimmed. Empty entries are dropped.
+func splitListString(s string) []string {
+	sep := ","
+	if !strings.Contains(s, ",") && strings.Contains(s, "|") {
+		sep = "|"
+	}
+	raw := strings.Split(s, sep)
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		if v := strings.TrimSpace(r); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // namedArgs converts a JSON-encoded params object into a slice of

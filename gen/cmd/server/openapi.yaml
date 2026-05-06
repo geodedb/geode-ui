@@ -122,6 +122,26 @@ components:
                 X-RateLimit-Reset:
                     $ref: '#/components/headers/X-RateLimit-Reset'
     schemas:
+        AssignRoleReq:
+            description: Generated schema for AssignRoleReq
+            example:
+                role: x
+                username: x
+            properties:
+                role:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                username:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+            required:
+                - username
+                - role
+            type: object
         ConstraintList:
             description: Generated schema for ConstraintList
             example:
@@ -302,6 +322,47 @@ components:
                 - accessToken
                 - tokenType
                 - expiresIn
+            type: object
+        PasswordChangeReq:
+            description: Generated schema for PasswordChangeReq
+            example:
+                newPassword: xxxxxxxx
+                username: x
+            properties:
+                newPassword:
+                    example: xxxxxxxx
+                    maxLength: 2048
+                    minLength: 8
+                    pattern: ^.*$
+                    type: string
+                oldPassword:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                username:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+            required:
+                - username
+                - newPassword
+            type: object
+        PermissionList:
+            description: Generated schema for PermissionList
+            example:
+                permissions:
+                    - {}
+            properties:
+                permissions:
+                    example: []
+                    items:
+                        type: object
+                    maxItems: 100
+                    type: array
+            required:
+                - permissions
             type: object
         PingMsg:
             description: Generated schema for PingMsg
@@ -523,6 +584,133 @@ components:
             required:
                 - txid
                 - statement
+            type: object
+        User:
+            description: Generated schema for User
+            example:
+                email: x
+                username: x
+            properties:
+                disabled:
+                    example: true
+                    type: boolean
+                email:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                mfaEnrolled:
+                    example: true
+                    type: boolean
+                roles:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+                username:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+            required:
+                - username
+                - email
+            type: object
+        UserCreateReq:
+            description: Generated schema for UserCreateReq
+            example:
+                email: xxx
+                username: x
+            properties:
+                email:
+                    example: xxx
+                    maxLength: 256
+                    minLength: 3
+                    pattern: ^.*$
+                    type: string
+                password:
+                    example: x
+                    maxLength: 4096
+                    pattern: ^.*$
+                    type: string
+                roles:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+                username:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+            required:
+                - username
+                - email
+            type: object
+        UserList:
+            description: Generated schema for UserList
+            example:
+                users: []
+            properties:
+                users:
+                    example: []
+                    items: {}
+                    maxItems: 100
+                    type: array
+            required:
+                - users
+            type: object
+        UserUpdateReq:
+            description: Generated schema for UserUpdateReq
+            example:
+                username: x
+            properties:
+                email:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                password:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                roles:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+                username:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+            required:
+                - username
+            type: object
+        UsernameParam:
+            description: Generated schema for UsernameParam
+            example:
+                username: x
+            properties:
+                username:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+            required:
+                - username
             type: object
     securitySchemes:
         bearerAuth:
@@ -1060,6 +1248,523 @@ paths:
             summary: POST /api/v1/tx/{txid}/run
             tags:
                 - Run
+    /api/v1/users:
+        get:
+            description: GET /api/v1/users operation
+            operationId: getApiV1Users
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UserList'
+                    description: GET /api/v1/users success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/users
+            tags:
+                - Users
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        post:
+            description: POST /api/v1/users operation
+            operationId: postApiV1Users
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UserCreateReq'
+                description: POST /api/v1/users request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/User'
+                    description: POST /api/v1/users success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/users
+            tags:
+                - Users
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/users/{username}:
+        delete:
+            description: DELETE /api/v1/users/{username} operation
+            operationId: deleteApiV1UsersUsername
+            parameters:
+                - description: DELETE /api/v1/users/{username} path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: DELETE /api/v1/users/{username} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: DELETE /api/v1/users/{username}
+            tags:
+                - Username
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        get:
+            description: GET /api/v1/users/{username} operation
+            operationId: getApiV1UsersUsername
+            parameters:
+                - description: GET /api/v1/users/{username} path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/User'
+                    description: GET /api/v1/users/{username} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/users/{username}
+            tags:
+                - Username
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        patch:
+            description: PATCH /api/v1/users/{username} operation
+            operationId: patchApiV1UsersUsername
+            parameters:
+                - description: PATCH /api/v1/users/{username} path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UserUpdateReq'
+                description: PATCH /api/v1/users/{username} request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/User'
+                    description: PATCH /api/v1/users/{username} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: PATCH /api/v1/users/{username}
+            tags:
+                - Username
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/users/{username}/disable:
+        post:
+            description: POST /api/v1/users/{username}/disable operation
+            operationId: postApiV1UsersUsernameDisable
+            parameters:
+                - description: POST /api/v1/users/{username}/disable path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UsernameParam'
+                description: POST /api/v1/users/{username}/disable request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/users/{username}/disable success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/users/{username}/disable
+            tags:
+                - Disable
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/users/{username}/enable:
+        post:
+            description: POST /api/v1/users/{username}/enable operation
+            operationId: postApiV1UsersUsernameEnable
+            parameters:
+                - description: POST /api/v1/users/{username}/enable path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UsernameParam'
+                description: POST /api/v1/users/{username}/enable request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/users/{username}/enable success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/users/{username}/enable
+            tags:
+                - Enable
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/users/{username}/password:
+        post:
+            description: POST /api/v1/users/{username}/password operation
+            operationId: postApiV1UsersUsernamePassword
+            parameters:
+                - description: POST /api/v1/users/{username}/password path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PasswordChangeReq'
+                description: POST /api/v1/users/{username}/password request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/users/{username}/password success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/users/{username}/password
+            tags:
+                - Password
+    /api/v1/users/{username}/permissions:
+        get:
+            description: GET /api/v1/users/{username}/permissions operation
+            operationId: getApiV1UsersUsernamePermissions
+            parameters:
+                - description: GET /api/v1/users/{username}/permissions path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PermissionList'
+                    description: GET /api/v1/users/{username}/permissions success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/users/{username}/permissions
+            tags:
+                - Permissions
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/users/{username}/roles:
+        post:
+            description: POST /api/v1/users/{username}/roles operation
+            operationId: postApiV1UsersUsernameRoles
+            parameters:
+                - description: POST /api/v1/users/{username}/roles path parameter username
+                  in: path
+                  name: username
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AssignRoleReq'
+                description: POST /api/v1/users/{username}/roles request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/users/{username}/roles success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/users/{username}/roles
+            tags:
+                - Roles
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /healthz:
         get:
             description: GET /healthz operation
@@ -1183,8 +1888,12 @@ tags:
       name: Commit
     - description: Operations for Constraints
       name: Constraints
+    - description: Operations for Disable
+      name: Disable
     - description: Operations for EdgeTypes
       name: EdgeTypes
+    - description: Operations for Enable
+      name: Enable
     - description: Operations for Graphs
       name: Graphs
     - description: Operations for Healthz
@@ -1195,15 +1904,25 @@ tags:
       name: Labels
     - description: Operations for Login
       name: Login
+    - description: Operations for Password
+      name: Password
+    - description: Operations for Permissions
+      name: Permissions
     - description: Operations for Ping
       name: Ping
     - description: Operations for Query
       name: Query
+    - description: Operations for Roles
+      name: Roles
     - description: Operations for Rollback
       name: Rollback
     - description: Operations for Run
       name: Run
     - description: Operations for Tx
       name: Tx
+    - description: Operations for Username
+      name: Username
+    - description: Operations for Users
+      name: Users
     - description: Default generated operations
       name: default
