@@ -453,8 +453,8 @@ func TestReadWSFrameRejectsOversizedLength(t *testing.T) {
 
 	select {
 	case err := <-done:
-		if !errors.Is(err, errWSFrameTooLarge) {
-			t.Fatalf("expected errWSFrameTooLarge, got %v", err)
+		if !errors.Is(err, ErrWSFrameTooLarge) {
+			t.Fatalf("expected ErrWSFrameTooLarge, got %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for oversized frame rejection")

@@ -1,0 +1,80 @@
+package securex
+
+import (
+	"crypto/x509"
+	"errors"
+	"net/http"
+)
+
+// Sentinel errors raised by VerifyMTLS. Callers should match with errors.Is
+// rather than substring-matching the messages.
+var (
+	ErrMTLSCertMissing     = errors.New("securex: client certificate missing")
+	ErrMTLSCertNotVerified = errors.New("securex: client certificate not verified")
+	ErrMTLSCertEKUMissing  = errors.New("securex: client cert lacks clientAuth EKU")
+)
+
+// MTLSPolicy is the per-route mTLS verification policy emitted by the
+// genapi code generator and consumed by VerifyMTLS at request time. The
+// shape mirrors the MTLSContract block in the genapi config.
+type MTLSPolicy struct {
+	// Required, when true, demands a peer certificate be presented and
+	// verified. When false, requests that omit a client cert are allowed
+	// through; this matches the tls.VerifyClientCertIfGiven listener mode.
+	Required bool
+	// EKUValidation, when true, demands the leaf certificate carry the
+	// x509.ExtKeyUsageClientAuth extended key usage (or ExtKeyUsageAny).
+	EKUValidation bool
+	// SupportedIssuers is plumbed through for caller-side issuer-label
+	// policy (PIV/CAC/custom). VerifyMTLS does NOT enforce this slice;
+	// the mapping from label to certificate Subject/Issuer is deployment-
+	// specific and must be supplied via the opts.AuthMTLS hook.
+	SupportedIssuers []string
+}
+
+// VerifyMTLS enforces a per-route mTLS policy against an HTTP request whose
+// connection terminated on a TLS listener. Call after the listener has
+// completed the TLS handshake but before any handler logic runs.
+//
+// Checks, in order:
+//
+//  1. r and r.TLS are non-nil. Defends against an accidentally plaintext
+//     reverse-proxy hop in front of the server stripping mTLS state.
+//  2. If policy.Required, at least one peer certificate is present.
+//  3. The peer cert chain has been verified by the listener
+//     (r.TLS.VerifiedChains is non-empty).
+//  4. If policy.EKUValidation, the leaf certificate carries the
+//     clientAuth (or ExtKeyUsageAny) Extended Key Usage.
+//
+// SupportedIssuers is intentionally NOT enforced. Callers that need
+// issuer-label validation should layer their own verifier on top after
+// VerifyMTLS returns nil; the genapi-emitted handler invokes opts.AuthMTLS
+// for exactly that purpose.
+func VerifyMTLS(r *http.Request, policy MTLSPolicy) error {
+	if r == nil || r.TLS == nil {
+		return ErrMTLSCertMissing
+	}
+	if len(r.TLS.PeerCertificates) == 0 {
+		if policy.Required {
+			return ErrMTLSCertMissing
+		}
+		return nil
+	}
+	if len(r.TLS.VerifiedChains) == 0 {
+		return ErrMTLSCertNotVerified
+	}
+	if policy.EKUValidation {
+		leaf := r.TLS.PeerCertificates[0]
+		ok := false
+		for _, eku := range leaf.ExtKeyUsage {
+			if eku == x509.ExtKeyUsageClientAuth || eku == x509.ExtKeyUsageAny {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return ErrMTLSCertEKUMissing
+		}
+	}
+	return nil
+}

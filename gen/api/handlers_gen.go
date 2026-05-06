@@ -178,6 +178,12 @@ func (s catchAllServer) Healthz(w http.ResponseWriter, r *http.Request, req *typ
 type APIOptions struct {
 	Auth        func(*http.Request) error
 	AuthJWT     func(*http.Request) error
+	// AuthMTLS is invoked for routes whose config declared auth: "mtls"
+	// AFTER the basic securex.VerifyMTLS gate has accepted the request.
+	// Use this hook to enforce deployment-specific issuer-label policy
+	// (PIV/CAC/custom) using policy.SupportedIssuers. Returning a non-nil
+	// error rejects the request with 401.
+	AuthMTLS    func(*http.Request, securex.MTLSPolicy) error
 	GlobalRate  float64
 	GlobalBurst float64
 }

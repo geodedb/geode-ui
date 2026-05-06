@@ -17,7 +17,11 @@ import (
 
 const maxWSFrameBytes int64 = 1 << 20 // 1 MiB per frame
 
-var errWSFrameTooLarge = errors.New("websocket frame too large")
+// ErrWSFrameTooLarge is returned by the in-package WebSocket frame
+// reader when an inbound frame exceeds [maxWSFrameBytes]. The reader
+// is independent of pkg/wsx's framing, so the sentinel lives here to
+// keep gqlx self-contained.
+var ErrWSFrameTooLarge = errors.New("gqlx: websocket frame exceeds configured size")
 
 // wsMessage represents a graphql-transport-ws protocol message.
 type wsMessage struct {
@@ -390,7 +394,7 @@ func readWSFrame(c net.Conn) ([]byte, error) {
 		length = int64(binary.BigEndian.Uint64(ext)) //nolint:gosec // G115: bounded by maxWSFrameBytes check below
 	}
 	if length < 0 || length > maxWSFrameBytes {
-		return nil, errWSFrameTooLarge
+		return nil, ErrWSFrameTooLarge
 	}
 
 	var maskKey []byte

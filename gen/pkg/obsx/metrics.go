@@ -39,29 +39,49 @@ func Metrics() MetricsProvider {
 }
 
 // ExpvarMetrics implements MetricsProvider using expvar.
+//
+// Per-name *expvar.Int counters are cached in a sync.Map so steady-state
+// IncCounter / ObserveHistogram calls hit the hot path without taking any
+// locks. The mutex is only used for the first-time publish race.
 type ExpvarMetrics struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	counters sync.Map // name -> *expvar.Int
+	hsums    sync.Map // name -> *expvar.Int (the "<name>_sum" counter)
 }
 
 func (e *ExpvarMetrics) IncCounter(name string, _ map[string]string) {
-	e.mu.Lock()
-	v, ok := expvar.Get(name).(*expvar.Int)
-	if !ok {
-		v = new(expvar.Int)
-		expvar.Publish(name, v)
+	if v, ok := e.counters.Load(name); ok {
+		v.(*expvar.Int).Add(1)
+		return
 	}
-	e.mu.Unlock()
-	v.Add(1)
+	e.expvarIntFor(&e.counters, name, name).Add(1)
 }
 
 func (e *ExpvarMetrics) ObserveHistogram(name string, value float64, _ map[string]string) {
-	key := name + "_sum"
+	if v, ok := e.hsums.Load(name); ok {
+		v.(*expvar.Int).Add(int64(value))
+		return
+	}
+	// The expvar publish key uses a "_sum" suffix; the cache is keyed by
+	// the un-suffixed name passed by the caller so the steady-state
+	// Load() above hits without re-allocating "<name>_sum" each call.
+	e.expvarIntFor(&e.hsums, name, name+"_sum").Add(int64(value))
+}
+
+// expvarIntFor finds-or-publishes the *expvar.Int for the given expvar key
+// and inserts it into the cache under cacheKey. The first writer wins the
+// publish race; later writers reuse the published value.
+func (e *ExpvarMetrics) expvarIntFor(cache *sync.Map, cacheKey, expvarKey string) *expvar.Int {
 	e.mu.Lock()
-	v, ok := expvar.Get(key).(*expvar.Int)
+	defer e.mu.Unlock()
+	if v, ok := cache.Load(cacheKey); ok {
+		return v.(*expvar.Int)
+	}
+	v, ok := expvar.Get(expvarKey).(*expvar.Int)
 	if !ok {
 		v = new(expvar.Int)
-		expvar.Publish(key, v)
+		expvar.Publish(expvarKey, v)
 	}
-	e.mu.Unlock()
-	v.Add(int64(value))
+	cache.Store(cacheKey, v)
+	return v
 }

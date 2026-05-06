@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -19,10 +20,34 @@ import (
 	"geodedb.com/geode-ui/gen/pkg/gen"
 )
 
+// defaultHMACBodyLimit bounds the number of bytes APIKeyAuth will read from
+// a request body when computing the canonical HMAC signature. Before
+// PERF-0012 the body was io.ReadAll'd with no cap, which let an attacker
+// tie up memory by sending a large body just before the signature check.
+// Callers who need a different limit can use APIKeyAuthWithLimit directly.
+const defaultHMACBodyLimit int64 = 10 * 1024 * 1024 // 10 MiB
+
 // APIKeyAuth verifies Authorization: Bearer <hmac-hex> using a canonical request
 // signature bound to method/path/body/nonce/timestamp and secret.
 // It enforces a time window and replay protection via the seen map.
+//
+// The request body is streamed through the hash via io.LimitReader with
+// defaultHMACBodyLimit so that a single oversized request cannot exhaust
+// server memory. See APIKeyAuthWithLimit for the explicit-limit variant.
 func APIKeyAuth(r *http.Request, secret []byte, window time.Duration, seen *sync.Map) error {
+	return APIKeyAuthWithLimit(r, secret, window, seen, defaultHMACBodyLimit)
+}
+
+// APIKeyAuthWithLimit is the explicit-limit variant of APIKeyAuth. The
+// maxBodyBytes parameter caps the number of bytes that will be read from
+// r.Body when computing the canonical signature. A value of 0 resolves to
+// defaultHMACBodyLimit. A body strictly larger than maxBodyBytes is
+// rejected with an error that wraps ErrBodyTooLarge; callers can inspect
+// via errors.Is.
+func APIKeyAuthWithLimit(r *http.Request, secret []byte, window time.Duration, seen *sync.Map, maxBodyBytes int64) error {
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = defaultHMACBodyLimit
+	}
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
 		return ErrAuthFailed
@@ -45,8 +70,11 @@ func APIKeyAuth(r *http.Request, secret []byte, window time.Duration, seen *sync
 	if d := time.Since(when); d > window || d < -window {
 		return ErrAuthFailed
 	}
-	msg, replayKey, err := canonicalRequestMACInput(r, nonce, ts)
+	msg, replayKey, err := canonicalRequestMACInputWithLimit(r, nonce, ts, maxBodyBytes)
 	if err != nil {
+		if errors.Is(err, ErrBodyTooLarge) {
+			return err
+		}
 		return ErrAuthFailed
 	}
 	exp := computeHMAC(msg, secret)
@@ -251,8 +279,29 @@ func websocketProtocolAuth(values []string) websocketProtocolAuthData {
 	return auth
 }
 
+// bodyBufPool recycles *bytes.Buffer instances used to re-stage the request
+// body after streaming it through the HMAC hash. Reusing the buffer across
+// calls keeps allocation O(1) per request independent of body size
+// (modulo the pool capacity growth path).
+//
+//nolint:gochecknoglobals // sync.Pool is the idiomatic lifetime boundary here
+var bodyBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+// canonicalRequestMACInput is the back-compat entry point for callers that
+// do not need a custom body limit. It delegates to the limit-aware path
+// with defaultHMACBodyLimit so that the legacy helper is no longer
+// unbounded. (PERF-0012.)
 func canonicalRequestMACInput(r *http.Request, nonce, ts string) (msg string, replayKey string, err error) {
-	bodyHash, err := requestBodySHA256Hex(r)
+	return canonicalRequestMACInputWithLimit(r, nonce, ts, defaultHMACBodyLimit)
+}
+
+// canonicalRequestMACInputWithLimit assembles the canonical HMAC input and
+// replay key for r, bounding the body read at maxBodyBytes bytes. A body
+// that exceeds the limit produces an error that wraps ErrBodyTooLarge.
+func canonicalRequestMACInputWithLimit(r *http.Request, nonce, ts string, maxBodyBytes int64) (msg string, replayKey string, err error) {
+	bodyHash, err := requestBodySHA256HexWithLimit(r, maxBodyBytes)
 	if err != nil {
 		return "", "", err
 	}
@@ -266,18 +315,70 @@ func canonicalRequestMACInput(r *http.Request, nonce, ts string) (msg string, re
 	return msg, replayKey, nil
 }
 
-func requestBodySHA256Hex(r *http.Request) (string, error) {
+// requestBodySHA256HexWithLimit streams r.Body through sha256 via an
+// io.LimitReader bounded at maxBodyBytes. The hashed bytes are also
+// copied into a pooled *bytes.Buffer so that r.Body can be re-read by
+// downstream handlers. If the body actually contains more than
+// maxBodyBytes bytes, returns an error wrapping ErrBodyTooLarge without
+// buffering the rest.
+//
+// IMPORTANT: the previous io.ReadAll(r.Body) implementation was the
+// PERF-0012 hot path. Leaving any unbounded reader here would defeat
+// the fix.
+func requestBodySHA256HexWithLimit(r *http.Request, maxBodyBytes int64) (string, error) {
 	if r == nil || r.Body == nil {
 		sum := sha256.Sum256(nil)
 		return hex.EncodeToString(sum[:]), nil
 	}
-	b, err := io.ReadAll(r.Body)
+	if maxBodyBytes <= 0 {
+		maxBodyBytes = defaultHMACBodyLimit
+	}
+	h := sha256.New()
+	buf := bodyBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+
+	// Read at most maxBodyBytes+1 so we can distinguish "exactly at limit"
+	// (acceptable) from "over the limit" (reject).
+	limited := io.LimitReader(r.Body, maxBodyBytes+1)
+	// Tee into both the hash and the rewrap buffer in a single streaming
+	// pass; zero-copy beyond the hash/buffer capacity growth.
+	n, err := io.Copy(io.MultiWriter(h, buf), limited)
 	if err != nil {
+		bodyBufPool.Put(buf)
 		return "", err
 	}
-	r.Body = io.NopCloser(bytes.NewReader(b))
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
+	_ = r.Body.Close()
+	if n > maxBodyBytes {
+		bodyBufPool.Put(buf)
+		return "", fmt.Errorf("%w: body exceeds %d bytes", ErrBodyTooLarge, maxBodyBytes)
+	}
+
+	// Rewrap the body so downstream handlers see the same bytes. The
+	// closer returns the buffer to the pool once the body is fully
+	// consumed and closed.
+	r.Body = &pooledBuffer{Reader: bytes.NewReader(buf.Bytes()), buf: buf}
+
+	sum := h.Sum(nil)
+	return hex.EncodeToString(sum), nil
+}
+
+// pooledBuffer wraps a bytes.Reader over a pooled *bytes.Buffer. Closing
+// the wrapper releases the underlying buffer back to the pool. We use a
+// struct with embedded *bytes.Reader so Read/Close both satisfy io.ReadCloser.
+type pooledBuffer struct {
+	*bytes.Reader
+	buf *bytes.Buffer
+}
+
+// Close returns the underlying buffer to the pool. Safe to call at most
+// once; subsequent calls are no-ops.
+func (p *pooledBuffer) Close() error {
+	if p.buf != nil {
+		p.buf.Reset()
+		bodyBufPool.Put(p.buf)
+		p.buf = nil
+	}
+	return nil
 }
 
 func computeHMAC(msg string, key []byte) string {
@@ -378,7 +479,7 @@ func SetRateHeaders(w http.ResponseWriter, limit, remaining int, reset time.Time
 }
 
 // ErrJWTUnsupported indicates VerifyJWT cannot handle the given algorithm/token.
-var ErrJWTUnsupported = errors.New("ErrJWTUnsupported")
+var ErrJWTUnsupported = errors.New("securex: jwt algorithm or token unsupported")
 
 // JWTVerifyOptions are optional constraints for issuer/audience claim checks.
 type JWTVerifyOptions struct {

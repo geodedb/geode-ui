@@ -2,13 +2,16 @@ package obsx
 
 import (
 	"bufio"
+	"context"
 	"encoding/json/v2"
 	"expvar"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -26,6 +29,15 @@ var (
 // Defaults to logJSON; log_hooks.go overrides with slog-based logging.
 var logFn = logJSON
 
+// requestStartLogFn and requestEndLogFn are the per-request fast-path log
+// emitters used by Middleware. They avoid the per-event map[string]any literal
+// allocation by accepting positional, primitive arguments. log_hooks.go swaps
+// these to slog-backed implementations at init.
+var (
+	requestStartLogFn = defaultRequestStartLog
+	requestEndLogFn   = defaultRequestEndLog
+)
+
 // Hook variables for optional enrichment (OTEL, MetricsProvider, etc.).
 // Defaults are nil; log_hooks.go registers implementations.
 var (
@@ -33,6 +45,17 @@ var (
 	onMiddlewarePost func(r *http.Request, status int, bytes int, dur time.Duration)
 	onWSFrame        func(direction string, n int)
 )
+
+// requests_total counter is published at init() and cached so the hot path
+// avoids a per-request expvar.Get + interface assertion.
+var requestsTotal *expvar.Int
+
+// loggingWriterPool reuses loggingWriter instances across requests. The
+// loggingWriter is reset on each acquisition so it never leaks state between
+// handlers.
+var loggingWriterPool = sync.Pool{
+	New: func() any { return new(loggingWriter) },
+}
 
 // SetAppInfo configures the application identity for logging.
 func SetAppInfo(name, version string) {
@@ -46,38 +69,35 @@ func Middleware(next http.Handler) http.Handler {
 		id := RequestIDFrom(r)
 		w.Header().Set("X-Request-ID", id)
 		start := time.Now()
-		logFn(map[string]any{
-			"ts":     start.UnixNano(),
-			"event":  "request_start",
-			"id":     id,
-			"method": r.Method,
-			"path":   r.URL.Path,
-		})
+		requestStartLogFn(start, id, r.Method, r.URL.Path)
 		if fn := onMiddlewarePre; fn != nil {
 			fn(r)
 		}
-		lw := &loggingWriter{ResponseWriter: w}
+		lw := loggingWriterPool.Get().(*loggingWriter)
+		lw.ResponseWriter = w
+		lw.code = 0
+		lw.n = 0
 		next.ServeHTTP(lw, r)
 		dur := time.Since(start)
 		status := lw.code
 		if status == 0 {
 			status = 200
 		}
-		logFn(map[string]any{
-			"ts":     time.Now().UnixNano(),
-			"event":  "request_end",
-			"id":     id,
-			"status": status,
-			"bytes":  lw.n,
-			"ms":     dur.Milliseconds(),
-		})
+		bytesWritten := lw.n
+		// Reset before returning to pool so we never hold a reference to
+		// the underlying ResponseWriter across requests.
+		lw.ResponseWriter = nil
+		lw.code = 0
+		lw.n = 0
+		loggingWriterPool.Put(lw)
+		requestEndLogFn(id, status, bytesWritten, dur)
 		atomic.AddUint64(&reqCounter, 1)
-		if v, ok := expvar.Get("requests_total").(*expvar.Int); ok {
-			v.Add(1)
+		if requestsTotal != nil {
+			requestsTotal.Add(1)
 		}
 		observeLatency("http", dur)
 		if fn := onMiddlewarePost; fn != nil {
-			fn(r, status, lw.n, dur)
+			fn(r, status, bytesWritten, dur)
 		}
 	})
 }
@@ -126,8 +146,11 @@ func (l *loggingWriter) Push(target string, opts *http.PushOptions) error {
 
 func init() {
 	// initialize expvar counters
-	if expvar.Get("requests_total") == nil {
-		expvar.Publish("requests_total", new(expvar.Int))
+	if v, ok := expvar.Get("requests_total").(*expvar.Int); ok && v != nil {
+		requestsTotal = v
+	} else {
+		requestsTotal = new(expvar.Int)
+		expvar.Publish("requests_total", requestsTotal)
 	}
 	initLatencyVars()
 	initWSMetrics()
@@ -144,6 +167,32 @@ func logJSON(v map[string]any) {
 	_, _ = os.Stdout.Write([]byte("\n"))
 }
 
+// defaultRequestStartLog is the pre-slog fallback used when log_hooks.go has
+// not yet swapped in slogRequestStartLog. It mirrors the legacy logJSON path
+// so the JSON shape is identical.
+func defaultRequestStartLog(start time.Time, id, method, path string) {
+	logJSON(map[string]any{
+		"ts":     start.UnixNano(),
+		"event":  "request_start",
+		"id":     id,
+		"method": method,
+		"path":   path,
+	})
+}
+
+// defaultRequestEndLog is the pre-slog fallback used when log_hooks.go has
+// not yet swapped in slogRequestEndLog.
+func defaultRequestEndLog(id string, status, bytesWritten int, dur time.Duration) {
+	logJSON(map[string]any{
+		"ts":     time.Now().UnixNano(),
+		"event":  "request_end",
+		"id":     id,
+		"status": status,
+		"bytes":  bytesWritten,
+		"ms":     dur.Milliseconds(),
+	})
+}
+
 // RequestIDFrom returns the existing request id from headers if present, otherwise generates a new one.
 func RequestIDFrom(r *http.Request) string {
 	if id := r.Header.Get("X-Request-ID"); id != "" {
@@ -152,11 +201,22 @@ func RequestIDFrom(r *http.Request) string {
 	return NewRequestID()
 }
 
-// NewRequestID creates a new request id string.
+// NewRequestID creates a new request id string. The encoding is
+// "<base36-counter>-<base36-unix-nanos>". Implemented with stack-allocated
+// scratch buffers so the only heap allocation is the returned string itself
+// (a single allocation per call, vs. the prior format/concat path which
+// allocated three).
 func NewRequestID() string {
 	c := atomic.AddUint64(&reqCounter, 1)
-	// base36 counter with nanosecond suffix for local uniqueness
-	return strconv.FormatUint(c, 36) + "-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	var counterBuf [16]byte
+	var nanosBuf [16]byte
+	cb := strconv.AppendUint(counterBuf[:0], c, 36)
+	nb := strconv.AppendInt(nanosBuf[:0], time.Now().UnixNano(), 36)
+	out := make([]byte, 0, len(cb)+1+len(nb))
+	out = append(out, cb...)
+	out = append(out, '-')
+	out = append(out, nb...)
+	return string(out)
 }
 
 // VarsHandler returns /debug/vars gated by an auth function. If auth returns false, 401.
@@ -172,21 +232,40 @@ func VarsHandler(auth func(*http.Request) bool) http.Handler {
 
 // Histogram state and observation
 var (
-	latencyBuckets = []int64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000} // ms
-	latencyMap     *expvar.Map
-	latencySum     *expvar.Int
-	latencyCount   *expvar.Int
+	latencyBuckets    = []int64{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000} // ms
+	latencyBucketKeys = makeBucketKeys(latencyBuckets)                             // pre-computed "le_<n>" labels
+	latencyBucketVars = make([]*expvar.Int, len(latencyBuckets))                   // hoisted per-bucket counters
+	latencyMap        *expvar.Map
+	latencySum        *expvar.Int
+	latencyCount      *expvar.Int
 )
+
+func makeBucketKeys(buckets []int64) []string {
+	out := make([]string, len(buckets))
+	for i, b := range buckets {
+		out[i] = "le_" + strconv.FormatInt(b, 10)
+	}
+	return out
+}
 
 func initLatencyVars() {
 	if expvar.Get("http_latency_ms_buckets") == nil {
 		latencyMap = new(expvar.Map)
 		expvar.Publish("http_latency_ms_buckets", latencyMap)
-		for _, b := range latencyBuckets {
-			latencyMap.Set(bucketKey(b), new(expvar.Int))
+		for i, key := range latencyBucketKeys {
+			v := new(expvar.Int)
+			latencyMap.Set(key, v)
+			latencyBucketVars[i] = v
 		}
 	} else {
 		latencyMap, _ = expvar.Get("http_latency_ms_buckets").(*expvar.Map)
+		// Repopulate the cached *expvar.Int slice from the live map so we
+		// avoid the per-observation Get + type assertion on the hot path.
+		for i, key := range latencyBucketKeys {
+			if v, ok := latencyMap.Get(key).(*expvar.Int); ok {
+				latencyBucketVars[i] = v
+			}
+		}
 	}
 	if expvar.Get("http_latency_ms_sum") == nil {
 		latencySum = new(expvar.Int)
@@ -202,14 +281,12 @@ func initLatencyVars() {
 	}
 }
 
-func bucketKey(b int64) string { return "le_" + strconv.FormatInt(b, 10) }
-
 // observeLatency records duration into fixed buckets and updates sum/count.
 func observeLatency(_ string, d time.Duration) {
 	ms := d.Milliseconds()
-	for _, b := range latencyBuckets {
+	for i, b := range latencyBuckets {
 		if ms <= b {
-			if v, ok := latencyMap.Get(bucketKey(b)).(*expvar.Int); ok {
+			if v := latencyBucketVars[i]; v != nil {
 				v.Add(1)
 			}
 			break
@@ -221,10 +298,13 @@ func observeLatency(_ string, d time.Duration) {
 
 // WS metrics
 var (
-	wsFramesTotal *expvar.Int
-	wsBytesTotal  *expvar.Int
-	wsSizeBuckets *expvar.Map
-	wsBuckets     = []int64{0, 64, 128, 256, 512, 1024, 2048, 4096, 8192}
+	wsFramesTotal  *expvar.Int
+	wsBytesTotal   *expvar.Int
+	wsSizeBuckets  *expvar.Map
+	wsBuckets      = []int64{0, 64, 128, 256, 512, 1024, 2048, 4096, 8192}
+	wsBucketKeys   = makeBucketKeys(wsBuckets)
+	wsBucketVars   = make([]*expvar.Int, len(wsBuckets))
+	_largeFrameCtx = context.Background() // reused for level-gate checks
 )
 
 func initWSMetrics() {
@@ -239,8 +319,17 @@ func initWSMetrics() {
 	if expvar.Get("ws_msg_bytes_buckets") == nil {
 		wsSizeBuckets = new(expvar.Map)
 		expvar.Publish("ws_msg_bytes_buckets", wsSizeBuckets)
-		for _, b := range wsBuckets {
-			wsSizeBuckets.Set(bucketKey(b), new(expvar.Int))
+		for i, key := range wsBucketKeys {
+			v := new(expvar.Int)
+			wsSizeBuckets.Set(key, v)
+			wsBucketVars[i] = v
+		}
+	} else {
+		wsSizeBuckets, _ = expvar.Get("ws_msg_bytes_buckets").(*expvar.Map)
+		for i, key := range wsBucketKeys {
+			if v, ok := wsSizeBuckets.Get(key).(*expvar.Int); ok {
+				wsBucketVars[i] = v
+			}
 		}
 	}
 }
@@ -250,9 +339,9 @@ func ObserveWSFrame(direction string, opcode byte, n int) {
 	wsFramesTotal.Add(1)
 	wsBytesTotal.Add(int64(n))
 	// bucket by size
-	for _, b := range wsBuckets {
+	for i, b := range wsBuckets {
 		if int64(n) <= b {
-			if v, ok := wsSizeBuckets.Get(bucketKey(b)).(*expvar.Int); ok {
+			if v := wsBucketVars[i]; v != nil {
 				v.Add(1)
 			}
 			break
@@ -260,11 +349,27 @@ func ObserveWSFrame(direction string, opcode byte, n int) {
 	}
 	// Optional: emit a small JSON log for large frames
 	if n > 4096 {
-		logFn(map[string]any{"event": "ws_large_frame", "dir": direction, "opcode": opcode, "bytes": n})
+		// Only build the map when slog (or the default JSON logger) will
+		// actually emit Info-level output; otherwise the work is wasted.
+		if loggerEnabledInfo() {
+			logFn(map[string]any{"event": "ws_large_frame", "dir": direction, "opcode": opcode, "bytes": n})
+		}
 	}
 	if fn := onWSFrame; fn != nil {
 		fn(direction, n)
 	}
+}
+
+// loggerEnabledInfo reports whether the active logger will emit Info events.
+// Returns true when the default (logJSON) logger is in use because that path
+// always writes; the slog hook in log_hooks.go overrides the implementation
+// to consult slog.Logger.Enabled.
+var loggerEnabledInfo = func() bool { return true }
+
+// loggerEnabledInfoSlog is the slog-backed implementation installed by
+// log_hooks.go.
+func loggerEnabledInfoSlog() bool {
+	return getLogger().Enabled(_largeFrameCtx, slog.LevelInfo)
 }
 
 // LogWS emits a JSON log entry for WebSocket events.

@@ -2,10 +2,13 @@ package httpx
 
 import "errors"
 
-// Sentinel errors for HTTP runtime. Kept at package level per repo conventions.
+// Sentinel errors for HTTP runtime. Kept at package level per repo
+// conventions. Messages use a lowercase, package-prefixed, diagnostic
+// form so log output reads naturally; errors.Is callers should rely on
+// pointer equality rather than substring matching of Error().
 var (
-	ErrInvalidConfig = errors.New("ErrInvalidConfig")
-	ErrAuthFailed    = errors.New("ErrAuthFailed")
-	ErrRateLimited   = errors.New("ErrRateLimited")
-	ErrBodyTooLarge  = errors.New("ErrBodyTooLarge")
+	ErrInvalidConfig = errors.New("httpx: invalid configuration")
+	ErrAuthFailed    = errors.New("httpx: authentication failed")
+	ErrRateLimited   = errors.New("httpx: rate limit exceeded")
+	ErrBodyTooLarge  = errors.New("httpx: request body exceeds configured limit")
 )

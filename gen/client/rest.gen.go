@@ -13,6 +13,12 @@ import (
 	"geodedb.com/geode-ui/gen/types"
 )
 
+// maxRESTResponseBytes caps the number of bytes the generated client
+// reads from any server response (both success and error paths). An
+// attacker-controlled server cannot force the client to buffer an
+// arbitrarily large body. (PERF-0015.)
+const maxRESTResponseBytes = 10 * 1024 * 1024 // 10 MiB
+
 // HTTPError captures a non-2xx response from a generated REST endpoint.
 type HTTPError struct {
 	StatusCode int
@@ -105,8 +111,14 @@ func buildRESTBody(mode string, payload map[string]any) (httpBody, error) {
 }
 
 func decodeHTTPError(resp *http.Response) error {
-	body, _ := io.ReadAll(resp.Body)
-	return &HTTPError{StatusCode: resp.StatusCode, Body: body}
+	// Stream the error body through a LimitReader into a bounded
+	// bytes.Buffer. The buffer only grows to min(body_size, cap), so a
+	// rogue server returning an enormous error body cannot exhaust
+	// client memory. (PERF-0015.)
+	var buf bytes.Buffer
+	limited := io.LimitReader(resp.Body, maxRESTResponseBytes)
+	_, _ = io.Copy(&buf, limited)
+	return &HTTPError{StatusCode: resp.StatusCode, Body: buf.Bytes()}
 }
 // Login performs POST /api/v1/auth/login.
 func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginResp, error) {
@@ -141,7 +153,9 @@ func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginRe
 		return nil, nil
 	}
 	var out types.LoginResp
-	if err := json.UnmarshalRead(resp.Body, &out); err != nil {
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -179,7 +193,9 @@ func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryRe
 		return nil, nil
 	}
 	var out types.QueryResp
-	if err := json.UnmarshalRead(resp.Body, &out); err != nil {
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -215,7 +231,9 @@ func (c *Client) Healthz(ctx context.Context, req *types.Empty) (*types.HealthRe
 		return nil, nil
 	}
 	var out types.HealthResp
-	if err := json.UnmarshalRead(resp.Body, &out); err != nil {
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

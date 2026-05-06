@@ -1,16 +1,23 @@
 package server
 
 import (
+	"database/sql"
 	"net/http"
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
+// Pool is the subset of *conn.Pool the server uses; an interface for testing.
+type Pool interface {
+	DB(name string) (*sql.DB, error)
+}
+
 // Config carries dependencies for GraphServer.
 // Fields are added incrementally as tasks need them.
 type Config struct {
 	Version string
+	Pool    Pool
 }
 
 // GraphServer implements gen/api.ServerInterface.

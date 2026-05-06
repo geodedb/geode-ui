@@ -101,6 +101,7 @@ func TestServeWS_E2E(t *testing.T) {
 	installHeaderAuthVerifier(t)
 	toolBuckets = nil
 	SetToolTimeout(5 * time.Second)
+	configureMCPWSAllowlist(t, []string{"https://app.example"})
 
 	tools := map[string]Tool{
 		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
@@ -119,6 +120,11 @@ func TestServeWS_E2E(t *testing.T) {
 		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 		req.Header.Set("Sec-WebSocket-Version", "13")
 		req.Header.Set("Authorization", "Bearer test-token")
+		// SEC-0008: ServeWS uses UpgradeStrict; supply a matching
+		// allowlist + Origin so the handshake reaches the JSON-RPC
+		// loop. The fail-closed default is exercised separately in
+		// TestServeWS_FailsClosed_NilAllowlistNoAllowAny.
+		req.Header.Set("Origin", "https://app.example")
 		hw := &hijackWriter{Conn: serverConn, hdr: make(http.Header)}
 		ServeWS(hw, req, tools)
 	}()
@@ -168,6 +174,7 @@ func TestServeWS_E2E_ToolCall(t *testing.T) {
 	installHeaderAuthVerifier(t)
 	toolBuckets = nil
 	SetToolTimeout(5 * time.Second)
+	configureMCPWSAllowlist(t, []string{"https://app.example"})
 
 	tools := map[string]Tool{
 		"greet": func(p jsontext.Value) (jsontext.Value, error) {
@@ -187,6 +194,11 @@ func TestServeWS_E2E_ToolCall(t *testing.T) {
 		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
 		req.Header.Set("Sec-WebSocket-Version", "13")
 		req.Header.Set("Authorization", "Bearer test-token")
+		// SEC-0008: ServeWS uses UpgradeStrict; supply a matching
+		// allowlist + Origin so the handshake reaches the JSON-RPC
+		// loop. The fail-closed default is exercised separately in
+		// TestServeWS_FailsClosed_NilAllowlistNoAllowAny.
+		req.Header.Set("Origin", "https://app.example")
 		hw := &hijackWriter{Conn: serverConn, hdr: make(http.Header)}
 		ServeWS(hw, req, tools)
 	}()
@@ -229,6 +241,104 @@ func TestServeWS_E2E_ToolCall(t *testing.T) {
 	}
 	if out["result"] == nil {
 		t.Fatalf("expected result, got nil")
+	}
+}
+
+// configureMCPWSAllowlist sets the MCP WS origin allowlist for the
+// duration of the test and restores the prior state via t.Cleanup.
+// SEC-0008: ServeWS now calls wsx.UpgradeStrict, which requires either
+// a non-empty allowlist or wsAllowAnyOrigin=true.
+func configureMCPWSAllowlist(t *testing.T, origins []string) {
+	t.Helper()
+	prevList := wsOriginAllowlist
+	prevAny := wsAllowAnyOrigin
+	SetWSOriginAllowlist(origins)
+	SetWSAllowAnyOrigin(false)
+	t.Cleanup(func() {
+		wsOriginAllowlist = prevList
+		wsAllowAnyOrigin = prevAny
+	})
+}
+
+// TestServeWS_FailsClosed_NilAllowlistNoAllowAny is the SEC-0008
+// regression assertion. With wsOriginAllowlist nil and
+// wsAllowAnyOrigin false (the historical default), ServeWS must
+// reject the upgrade with HTTP 403 — no JSON-RPC loop, no upgrade
+// headers, no leak of session state.
+func TestServeWS_FailsClosed_NilAllowlistNoAllowAny(t *testing.T) {
+	installHeaderAuthVerifier(t)
+	prevList := wsOriginAllowlist
+	prevAny := wsAllowAnyOrigin
+	SetWSOriginAllowlist(nil)
+	SetWSAllowAnyOrigin(false)
+	t.Cleanup(func() {
+		wsOriginAllowlist = prevList
+		wsAllowAnyOrigin = prevAny
+	})
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Origin", "https://app.example")
+	rec := httptest.NewRecorder()
+	ServeWS(rec, req, map[string]Tool{})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403; got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestServeWS_FailsClosed_OriginNotInAllowlist confirms that even with
+// a populated allowlist, an Origin that is not on the list is rejected
+// (the existing reject-bad-origin behaviour, but now via UpgradeStrict's
+// 403 response).
+func TestServeWS_FailsClosed_OriginNotInAllowlist(t *testing.T) {
+	installHeaderAuthVerifier(t)
+	configureMCPWSAllowlist(t, []string{"https://app.example"})
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+	ServeWS(rec, req, map[string]Tool{})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403; got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestServeWS_AllowAnyOriginPasses is the explicit opt-in regression
+// test: when wsAllowAnyOrigin is true the upgrade proceeds (until the
+// hijack fails on httptest.NewRecorder, which lacks Hijacker support).
+// We assert that 403 is NOT the response — the strict origin gate did
+// not fire.
+func TestServeWS_AllowAnyOriginPasses(t *testing.T) {
+	installHeaderAuthVerifier(t)
+	prevList := wsOriginAllowlist
+	prevAny := wsAllowAnyOrigin
+	SetWSOriginAllowlist(nil)
+	SetWSAllowAnyOrigin(true)
+	t.Cleanup(func() {
+		wsOriginAllowlist = prevList
+		wsAllowAnyOrigin = prevAny
+	})
+
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Origin", "https://anything.example")
+	rec := httptest.NewRecorder()
+	ServeWS(rec, req, map[string]Tool{})
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("AllowAnyOrigin must permit the upgrade; got 403 body=%s", rec.Body.String())
 	}
 }
 

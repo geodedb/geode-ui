@@ -52,7 +52,10 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	srv := server.New(server.Config{Version: "v0.1.0"})
+	srv := server.New(server.Config{
+		Version: "v0.1.0",
+		Pool:    pool,
+	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     func(*http.Request) error { return errors.New("unimplemented") },
 		GlobalRate:  2000,

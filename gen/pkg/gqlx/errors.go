@@ -2,23 +2,26 @@ package gqlx
 
 import "errors"
 
-// Sentinel errors for GraphQL runtime. Kept at package level per repo conventions.
+// Sentinel errors for GraphQL runtime. Kept at package level per repo
+// conventions. Messages use a lowercase, package-prefixed, diagnostic
+// form so log output reads naturally; errors.Is callers should rely on
+// pointer equality rather than substring matching of Error().
 var (
-	ErrDepthExceeded      = errors.New("ErrDepthExceeded")
-	ErrComplexityExceeded = errors.New("ErrComplexityExceeded")
-	ErrAliasLimitExceeded = errors.New("ErrAliasLimitExceeded")
-	ErrIntrospection      = errors.New("ErrIntrospection")
-	ErrBatchLimitExceeded = errors.New("ErrBatchLimitExceeded")
-	ErrResolverTimeout    = errors.New("ErrResolverTimeout")
-	ErrFragmentCycle      = errors.New("ErrFragmentCycle")
-	ErrQueryTooLarge      = errors.New("ErrQueryTooLarge")
-	ErrAuthRequired       = errors.New("ErrAuthRequired")
-	ErrRateLimited        = errors.New("ErrRateLimited")
-	ErrInvalidConfig      = errors.New("ErrInvalidConfig")
-	ErrFieldNotFound      = errors.New("ErrFieldNotFound")
-	ErrInvalidArgument    = errors.New("ErrInvalidArgument")
-	ErrVariableNotDefined = errors.New("ErrVariableNotDefined")
-	ErrVariableUnused     = errors.New("ErrVariableUnused")
+	ErrDepthExceeded      = errors.New("gqlx: query depth exceeds configured limit")
+	ErrComplexityExceeded = errors.New("gqlx: query complexity exceeds configured limit")
+	ErrAliasLimitExceeded = errors.New("gqlx: alias count exceeds configured limit")
+	ErrIntrospection      = errors.New("gqlx: introspection disabled")
+	ErrBatchLimitExceeded = errors.New("gqlx: batch size exceeds configured limit")
+	ErrResolverTimeout    = errors.New("gqlx: resolver execution timed out")
+	ErrFragmentCycle      = errors.New("gqlx: fragment cycle detected")
+	ErrQueryTooLarge      = errors.New("gqlx: query body exceeds configured size")
+	ErrAuthRequired       = errors.New("gqlx: authentication required")
+	ErrRateLimited        = errors.New("gqlx: rate limit exceeded")
+	ErrInvalidConfig      = errors.New("gqlx: invalid configuration")
+	ErrFieldNotFound      = errors.New("gqlx: field not found in schema")
+	ErrInvalidArgument    = errors.New("gqlx: invalid argument")
+	ErrVariableNotDefined = errors.New("gqlx: variable referenced but not defined")
+	ErrVariableUnused     = errors.New("gqlx: variable defined but not used")
 )
 
 // GQLError represents a single error in a GraphQL response per the spec.

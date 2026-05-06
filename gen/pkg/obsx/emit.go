@@ -95,23 +95,59 @@ func EmitMCPRequest(ctx context.Context, method string) {
 	}
 }
 
-// EmitGQLQuery records a GraphQL query execution.
+// EmitGQLQuery records a GraphQL query execution. The operation name
+// is supplied by the (possibly untrusted) GraphQL client and is
+// sanitized by safeOperationLabel before being used as a metric label
+// to bound cardinality. APPSEC-12.
 func EmitGQLQuery(ctx context.Context, operationName string, durationMs float64, ok bool) {
 	status := "ok"
 	if !ok {
 		status = "error"
 	}
-	labels := map[string]string{"operation_name": operationName, "status": status}
+	opLabel := safeOperationLabel(operationName)
+	labels := map[string]string{"operation_name": opLabel, "status": status}
 	Metrics().IncCounter("gql.queries.total", labels)
 	Metrics().ObserveHistogram("gql.query.duration", durationMs, labels)
 	if TelemetryEnabled() {
 		attrs := metric.WithAttributes(
-			attribute.String("operation_name", operationName),
+			attribute.String("operation_name", opLabel),
 			attribute.String("status", status),
 		)
 		otelGQLQueriesTotal.Add(ctx, 1, attrs)
 		otelGQLQueryDuration.Record(ctx, durationMs, attrs)
 	}
+}
+
+// maxOperationLabelLen caps the operation_name metric label so an
+// attacker cannot blow out cardinality by sending arbitrarily long
+// names. 64 is generous for any well-formed GraphQL identifier.
+const maxOperationLabelLen = 64
+
+// safeOperationLabel maps an attacker-controlled operationName onto a
+// bounded, ASCII-only label suitable for use as a metric dimension.
+// Empty input collapses to "anonymous" (the canonical GraphQL term
+// for an unnamed operation); any name failing the validation falls
+// back to "invalid" so cardinality stays bounded by the configured
+// schema rather than by request volume. APPSEC-12.
+func safeOperationLabel(name string) string {
+	if name == "" {
+		return "anonymous"
+	}
+	if len(name) > maxOperationLabelLen {
+		return "invalid"
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+		case c >= 'a' && c <= 'z':
+		case c >= '0' && c <= '9':
+		case c == '_':
+		default:
+			return "invalid"
+		}
+	}
+	return name
 }
 
 // EmitGQLSubActive adjusts the active GraphQL subscription gauge.

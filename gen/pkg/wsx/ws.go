@@ -7,7 +7,6 @@ import (
 	"crypto/sha1" //nolint:gosec // SHA-1 required by RFC 6455 WebSocket handshake
 	"crypto/tls"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,12 +25,22 @@ import (
 type Options struct {
 	OriginAllowlist []string
 	CheckOrigin     bool
-	Protocols       []string // allowed subprotocols; first match is selected
-	MaxFrame        int      // max single frame payload
-	MaxMessage      int      // max reassembled message
-	PingInterval    time.Duration
-	ReadTimeout     time.Duration // per-read deadline; 0 = none
-	WriteTimeout    time.Duration // per-write deadline; 0 = none
+	// AllowAnyOrigin opts in to permitting any value of the Origin
+	// request header (including absent). Required by UpgradeStrict to
+	// disable the fail-closed default. Use only for non-browser
+	// surfaces (CLIs, server-to-server callers) where the origin gate
+	// is not the right protection. SEC-0008.
+	AllowAnyOrigin bool
+	// AllowEmptyOrigin opts in to permitting requests with no Origin
+	// header set. Useful for non-browser callers under UpgradeStrict
+	// that nevertheless want a strict allowlist for browsers. SEC-0008.
+	AllowEmptyOrigin bool
+	Protocols        []string // allowed subprotocols; first match is selected
+	MaxFrame         int      // max single frame payload
+	MaxMessage       int      // max reassembled message
+	PingInterval     time.Duration
+	ReadTimeout      time.Duration // per-read deadline; 0 = none
+	WriteTimeout     time.Duration // per-write deadline; 0 = none
 }
 
 // DialOptions controls client-side WebSocket dialing.
@@ -83,12 +92,17 @@ func newConn(c net.Conn, br *bufio.Reader, bw *bufio.Writer, opts Options, allow
 }
 
 // Upgrade performs an RFC6455 upgrade and returns a Conn.
+//
+// Deprecated: Upgrade defaults to fail-open when OriginAllowlist is
+// nil and CheckOrigin is false, which historically caused SEC-0008
+// (cross-origin WS hijack on privileged surfaces). New code MUST use
+// UpgradeStrict, which fails closed unless either OriginAllowlist is
+// non-empty or Options.AllowAnyOrigin is true. The default for the
+// next major version will flip to UpgradeStrict's semantics; until
+// then Upgrade is retained for backward compatibility.
 func Upgrade(w http.ResponseWriter, r *http.Request, opts Options) (*Conn, error) {
-	if strings.ToLower(r.Header.Get("Connection")) != "upgrade" || strings.ToLower(r.Header.Get("Upgrade")) != "websocket" {
-		return nil, errors.New("bad upgrade headers")
-	}
-	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Version")) != "13" {
-		return nil, errors.New("unsupported websocket version")
+	if err := upgradeHandshakeHeaders(r); err != nil {
+		return nil, err
 	}
 	if opts.CheckOrigin || len(opts.OriginAllowlist) > 0 {
 		orig := strings.TrimSpace(r.Header.Get("Origin"))
@@ -103,14 +117,82 @@ func Upgrade(w http.ResponseWriter, r *http.Request, opts Options) (*Conn, error
 			}
 		}
 		if !ok {
-			return nil, errors.New("forbidden origin")
+			return nil, ErrForbiddenOrigin
 		}
 	}
 originOK:
+	return finishUpgrade(w, r, opts)
+}
+
+// UpgradeStrict is the SEC-0008 fail-closed entry point for RFC 6455
+// upgrades. Unlike Upgrade, the default behavior when OriginAllowlist
+// is empty/nil is to REJECT the request with HTTP 403 and
+// ErrOriginNotAllowed.
+//
+// Origin policy:
+//
+//   - opts.AllowAnyOrigin == true       : every Origin (including absent) is OK.
+//   - len(opts.OriginAllowlist) > 0     : Origin must match the list (case-insensitive)
+//     or be "*". Empty Origin is permitted only
+//     when opts.AllowEmptyOrigin is true.
+//   - both unset                        : ErrOriginNotAllowed (HTTP 403).
+//
+// Privileged surfaces (MCP WS, REST WS, GraphQL WS) MUST use
+// UpgradeStrict. The legacy Upgrade is retained for backward
+// compatibility; a future major version will switch the default.
+func UpgradeStrict(w http.ResponseWriter, r *http.Request, opts Options) (*Conn, error) {
+	if err := upgradeHandshakeHeaders(r); err != nil {
+		return nil, err
+	}
+	if !opts.AllowAnyOrigin {
+		if len(opts.OriginAllowlist) == 0 {
+			http.Error(w, ErrOriginNotAllowed.Error(), http.StatusForbidden)
+			return nil, ErrOriginNotAllowed
+		}
+		orig := strings.TrimSpace(r.Header.Get("Origin"))
+		if orig == "" {
+			if !opts.AllowEmptyOrigin {
+				http.Error(w, ErrOriginNotAllowed.Error(), http.StatusForbidden)
+				return nil, ErrOriginNotAllowed
+			}
+		} else {
+			ok := false
+			for _, o := range opts.OriginAllowlist {
+				if o == "*" || strings.EqualFold(o, orig) {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				http.Error(w, ErrOriginNotAllowed.Error(), http.StatusForbidden)
+				return nil, ErrOriginNotAllowed
+			}
+		}
+	}
+	return finishUpgrade(w, r, opts)
+}
+
+// upgradeHandshakeHeaders validates the static RFC 6455 request
+// headers shared by Upgrade and UpgradeStrict.
+func upgradeHandshakeHeaders(r *http.Request) error {
+	if strings.ToLower(r.Header.Get("Connection")) != "upgrade" || strings.ToLower(r.Header.Get("Upgrade")) != "websocket" {
+		return ErrBadUpgradeHeaders
+	}
+	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Version")) != "13" {
+		return ErrUnsupportedVersion
+	}
+	return nil
+}
+
+// finishUpgrade performs the post-origin steps of the RFC 6455
+// handshake: subprotocol selection, hijack, accept-key computation,
+// 101 response, ping loop bring-up. Shared by Upgrade and
+// UpgradeStrict so the strict and legacy entry points cannot drift.
+func finishUpgrade(w http.ResponseWriter, r *http.Request, opts Options) (*Conn, error) {
 	chosenProto := chooseSubprotocol(r.Header.Get("Sec-WebSocket-Protocol"), opts.Protocols)
 	hj, ok := w.(http.Hijacker)
 	if !ok {
-		return nil, errors.New("no hijack")
+		return nil, ErrNoHijack
 	}
 	conn, rw, err := hj.Hijack()
 	if err != nil {
@@ -122,7 +204,7 @@ originOK:
 		_, _ = rw.WriteString("HTTP/1.1 400 Bad Request\r\n\r\n")
 		_ = rw.Flush()
 		_ = conn.Close()
-		return nil, errors.New("invalid websocket key")
+		return nil, ErrInvalidWebSocketKey
 	}
 	accept := computeAccept(key)
 	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\n")
@@ -189,7 +271,7 @@ func (c *Conn) ReadMessage() (byte, []byte, error) {
 // WriteMessage writes a single frame for small messages; text requires utf8 validity.
 func (c *Conn) WriteMessage(op byte, payload []byte) error {
 	if op == 0x1 && !utf8.Valid(payload) {
-		return errors.New("utf8 invalid")
+		return ErrInvalidUTF8
 	}
 	if c.writeTO > 0 {
 		_ = c.c.SetWriteDeadline(time.Now().Add(c.writeTO))
@@ -333,11 +415,11 @@ func Dial(ctx context.Context, rawURL string, opts DialOptions) (*Conn, error) {
 	}
 	if !strings.EqualFold(strings.TrimSpace(resp.Header.Get("Upgrade")), "websocket") {
 		_ = conn.Close()
-		return nil, errors.New("websocket handshake failed: missing upgrade header")
+		return nil, ErrHandshakeMissingUpgrade
 	}
 	if got := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Accept")); got != computeAccept(key) {
 		_ = conn.Close()
-		return nil, errors.New("websocket handshake failed: invalid accept key")
+		return nil, ErrHandshakeInvalidAccept
 	}
 
 	return newConn(conn, br, bw, Options{
@@ -466,7 +548,7 @@ func readMessage(br *bufio.Reader, scratch []byte, maxMsg int, allowUnmasked boo
 		}
 		if fin {
 			if opcode == 0x1 && !utf8.Valid(assembled) {
-				return 0, nil, errors.New("utf8 invalid")
+				return 0, nil, ErrInvalidUTF8
 			}
 			return opcode, assembled, nil
 		}
@@ -489,7 +571,7 @@ func readFrame(br *bufio.Reader, scratch []byte, max int, first bool, allowUnmas
 	fin := (b1 & 0x80) != 0
 	rsv := b1 & 0x70
 	if rsv != 0 {
-		return false, 0, nil, errors.New("reserved bits set")
+		return false, 0, nil, ErrReservedBitsSet
 	}
 	op := b1 & 0x0F
 	if op > 0xA {
@@ -497,7 +579,7 @@ func readFrame(br *bufio.Reader, scratch []byte, max int, first bool, allowUnmas
 	}
 	masked := (b2 & 0x80) != 0
 	if !masked && !allowUnmasked {
-		return false, 0, nil, errors.New("client frames must be masked")
+		return false, 0, nil, ErrUnmaskedClientFrame
 	}
 	ln := int(b2 & 0x7F)
 	switch ln {

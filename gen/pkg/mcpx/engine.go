@@ -20,10 +20,10 @@ import (
 )
 
 // ErrInvalidRequest indicates a malformed JSON-RPC 2.0 request.
-var ErrInvalidRequest = errors.New("invalid request")
+var ErrInvalidRequest = errors.New("mcpx: invalid request")
 
 // ErrToolTimeout indicates a tool exceeded its allotted time.
-var ErrToolTimeout = errors.New("tool timeout")
+var ErrToolTimeout = errors.New("mcpx: tool timeout")
 
 // Tool is a function that takes params as raw JSON and returns result JSON.
 type Tool func(params jsontext.Value) (jsontext.Value, error)
@@ -77,6 +77,26 @@ var toolBuckets map[string]*bucket
 var toolTimeout = 5 * time.Second
 var authVerifier func(*http.Request) error
 var wsOriginAllowlist []string
+var wsAllowAnyOrigin bool
+
+// DefaultMaxHTTPBodyBytes is the default per-request body cap that
+// HandleHTTP enforces via io.LimitReader. Mirrors the route-level
+// MaxBytesReader cap in genapi's emitted /mcp wrapper. APPSEC-1.
+const DefaultMaxHTTPBodyBytes int64 = 1 << 20
+
+var maxHTTPBodyBytes int64 = DefaultMaxHTTPBodyBytes
+
+// MaxHTTPBodyBytes reports the current body cap for HandleHTTP.
+// APPSEC-1.
+func MaxHTTPBodyBytes() int64 { return maxHTTPBodyBytes }
+
+// SetMaxHTTPBodyBytes configures the per-request body cap that
+// HandleHTTP applies to incoming JSON-RPC requests. Set to 0 to
+// disable the cap (operators that have already wrapped the route at
+// a higher layer may opt out, but doing so is discouraged because it
+// re-opens the unbounded io.ReadAll DoS path that motivated this
+// finding). APPSEC-1.
+func SetMaxHTTPBodyBytes(n int64) { maxHTTPBodyBytes = n }
 
 // SetToolBuckets configures per-tool rate limiting buckets.
 func SetToolBuckets(tools map[string]Tool, rate, burst float64) {
@@ -91,7 +111,11 @@ func SetToolTimeout(d time.Duration) { toolTimeout = d }
 func SetAuthVerifier(v func(*http.Request) error) { authVerifier = v }
 
 // SetWSOriginAllowlist configures allowed Origin values for MCP WebSocket
-// upgrades. Empty list disables origin checks.
+// upgrades. SEC-0008: an empty list now means fail-closed under
+// UpgradeStrict — every upgrade is rejected with HTTP 403 unless
+// SetWSAllowAnyOrigin(true) has been called. The legacy "empty list
+// disables origin checks" behaviour was a fail-open default that
+// allowed cross-origin WS hijack on the privileged MCP surface.
 func SetWSOriginAllowlist(origins []string) {
 	if len(origins) == 0 {
 		wsOriginAllowlist = nil
@@ -100,6 +124,36 @@ func SetWSOriginAllowlist(origins []string) {
 	cpy := make([]string, len(origins))
 	copy(cpy, origins)
 	wsOriginAllowlist = cpy
+}
+
+// auditConfigChange dispatches package-config audit events. The
+// indirection lets tests intercept emissions without depending on
+// obsx's stdout JSON path. APPSEC-14.
+var auditConfigChange = obsx.LogAudit
+
+// SetWSAllowAnyOrigin toggles the explicit "any origin" override for
+// MCP WebSocket upgrades. SEC-0008: callers MUST opt in by passing
+// true to bypass the fail-closed allowlist gate. Intended for STDIO-
+// adjacent or non-browser deployments where origin policing is not
+// the right protection. Defaults to false.
+//
+// APPSEC-14: every false → true and true → false transition is
+// recorded as a structured audit event so a misconfiguration leaves
+// a forensic trail. Idempotent calls (no transition) are silent so
+// config-reload callers do not flood the audit log.
+func SetWSAllowAnyOrigin(allow bool) {
+	prev := wsAllowAnyOrigin
+	wsAllowAnyOrigin = allow
+	switch {
+	case !prev && allow:
+		auditConfigChange("mcp_ws_allow_any_origin_enabled", map[string]any{
+			"warning": "SEC-0008 fail-closed gate disabled; all WS upgrades will accept any Origin header value",
+		})
+	case prev && !allow:
+		auditConfigChange("mcp_ws_allow_any_origin_disabled", map[string]any{
+			"info": "SEC-0008 fail-closed gate re-enabled; WS upgrades fall back to OriginAllowlist enforcement",
+		})
+	}
 }
 
 // BuildToolBuckets constructs default buckets for tools.
@@ -129,28 +183,92 @@ func HandleHTTP(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 	AuditMCP.AuthOK("http", "")
 	obsx.LogAudit("mcp_auth_ok", map[string]any{"transport": "http", "id": id})
 	w.Header().Set("Content-Type", "application/json")
-	var v any
-	if err := json.UnmarshalRead(r.Body, &v); err != nil {
+
+	body, err := readBoundedBody(r.Body, maxHTTPBodyBytes)
+	if err != nil {
+		switch err {
+		case errBodyTooLarge:
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_ = json.MarshalWrite(w, objErr(nil, -32600, "request body too large"))
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.MarshalWrite(w, objErr(nil, -32600, "invalid request"))
+		}
+		return
+	}
+	dispatchHTTP(w, body, tools)
+}
+
+// errBodyTooLarge is returned by readBoundedBody when a request body
+// strictly exceeds the configured cap. Distinct sentinel so HandleHTTP
+// can map it to HTTP 413 rather than the generic 400.
+var errBodyTooLarge = errors.New("mcpx: request body exceeds limit")
+
+// readBoundedBody streams r through io.LimitReader with cap+1 bytes so
+// any read returning more than cap bytes signals a violation. A cap
+// value of 0 or negative disables bounding (legacy behaviour;
+// discouraged because of CWE-770). APPSEC-1.
+func readBoundedBody(r io.Reader, cap int64) ([]byte, error) {
+	if cap <= 0 {
+		return io.ReadAll(r)
+	}
+	body, err := io.ReadAll(io.LimitReader(r, cap+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > cap {
+		return nil, errBodyTooLarge
+	}
+	return body, nil
+}
+
+// dispatchHTTP variant of dispatch that sets http.StatusBadRequest for
+// malformed top-level JSON. Splitting from dispatch lets the STDIO/WS
+// paths stay header-agnostic.
+func dispatchHTTP(w http.ResponseWriter, body []byte, tools map[string]Tool) {
+	trimmed := bytesTrimSpace(body)
+	if len(trimmed) == 0 {
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.MarshalWrite(w, objErr(nil, -32600, "invalid request"))
 		return
 	}
-	switch vv := v.(type) {
-	case map[string]any:
-		// If tools/call, emit basic rate headers before processing
-		if name := extractToolName(vv); name != "" {
-			if bk, ok := toolBuckets[name]; ok {
-				lim, rem, reset := bk.snapshot()
-				setRateHeaders(w, lim, rem, reset)
+	switch trimmed[0] {
+	case '{':
+		env, err := decodeEnvelope(trimmed)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.MarshalWrite(w, objErr(nil, -32600, "invalid request"))
+			return
+		}
+		if env.Method == "tools/call" {
+			if name := extractToolNameRaw(env.Params); name != "" {
+				if bk, ok := toolBuckets[name]; ok {
+					lim, rem, reset := bk.snapshot()
+					setRateHeaders(w, lim, rem, reset)
+				}
 			}
 		}
-		res := handleOne(vv, tools, toolBuckets)
+		res := handleRaw(env, tools, toolBuckets)
+		if res == nil {
+			// notification: legacy behavior writes "null"
+			_, _ = w.Write([]byte("null"))
+			return
+		}
 		_ = json.MarshalWrite(w, res)
-	case []any:
-		out := make([]any, 0, len(vv))
-		for _, it := range vv {
-			m, _ := it.(map[string]any)
-			res := handleOne(m, tools, toolBuckets)
+	case '[':
+		var batch []jsontext.Value
+		if err := json.Unmarshal(trimmed, &batch); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.MarshalWrite(w, objErr(nil, -32600, "invalid request"))
+			return
+		}
+		out := make([]any, 0, len(batch))
+		for _, raw := range batch {
+			env, err := decodeEnvelope(raw)
+			if err != nil {
+				continue
+			}
+			res := handleRaw(env, tools, toolBuckets)
 			if res != nil {
 				out = append(out, res)
 			}
@@ -179,13 +297,23 @@ func ServeWS(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 	}
 	AuditMCP.AuthOK("ws", "")
 	obsx.LogAudit("mcp_auth_ok", map[string]any{"transport": "ws", "id": id})
-	conn, err := wsx.Upgrade(w, r, wsx.Options{
+	// SEC-0008: UpgradeStrict fails closed when wsOriginAllowlist is
+	// empty/nil unless wsAllowAnyOrigin was explicitly enabled. The
+	// MCP WS surface is privileged; browser-side cross-origin hijack
+	// is unacceptable, so we never want the legacy fail-open default.
+	conn, err := wsx.UpgradeStrict(w, r, wsx.Options{
 		OriginAllowlist: wsOriginAllowlist,
+		AllowAnyOrigin:  wsAllowAnyOrigin,
 		MaxFrame:        1 << 20,
 		MaxMessage:      1 << 20,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		// UpgradeStrict has already written the 403 response on
+		// origin failures; only the protocol-error path needs an
+		// explicit 400 here.
+		if !errors.Is(err, wsx.ErrOriginNotAllowed) {
+			w.WriteHeader(http.StatusBadRequest)
+		}
 		return
 	}
 	defer func() { _ = conn.Close() }()
@@ -197,12 +325,18 @@ func ServeWS(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 		if op != 0x1 {
 			continue
 		}
-		var m map[string]any
-		if e := json.Unmarshal(msg, &m); e != nil {
+		trimmed := bytesTrimSpace(msg)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			// WS only handles single requests (no batch in this transport).
 			_ = conn.WriteMessage(0x1, []byte(`{"jsonrpc":"2.0","error":{"code":-32600,"message":"invalid request"}}`))
 			continue
 		}
-		res := handleOne(m, tools, toolBuckets)
+		env, e := decodeEnvelope(trimmed)
+		if e != nil {
+			_ = conn.WriteMessage(0x1, []byte(`{"jsonrpc":"2.0","error":{"code":-32600,"message":"invalid request"}}`))
+			continue
+		}
+		res := handleRaw(env, tools, toolBuckets)
 		if res == nil {
 			continue
 		}
@@ -227,26 +361,41 @@ func serveSTDIOWith(in io.Reader, out io.Writer, tools map[string]Tool) error {
 			}
 			return err
 		}
-		var v any
-		if e := json.Unmarshal(bytesTrimSpace(line), &v); e != nil {
+		trimmed := bytesTrimSpace(line)
+		if len(trimmed) == 0 {
 			_ = json.MarshalWrite(out, objErr(nil, -32600, "invalid request"))
 			_, _ = out.Write([]byte("\n"))
 			continue
 		}
-		switch m := v.(type) {
-		case map[string]any:
-			res := handleOne(m, tools, toolBuckets)
+		switch trimmed[0] {
+		case '{':
+			env, e := decodeEnvelope(trimmed)
+			if e != nil {
+				_ = json.MarshalWrite(out, objErr(nil, -32600, "invalid request"))
+				_, _ = out.Write([]byte("\n"))
+				continue
+			}
+			res := handleRaw(env, tools, toolBuckets)
 			if res == nil { // notification
 				_, _ = out.Write([]byte("null\n"))
 				continue
 			}
 			_ = json.MarshalWrite(out, res)
 			_, _ = out.Write([]byte("\n"))
-		case []any:
-			outArr := make([]any, 0, len(m))
-			for _, it := range m {
-				mm, _ := it.(map[string]any)
-				res := handleOne(mm, tools, toolBuckets)
+		case '[':
+			var batch []jsontext.Value
+			if e := json.Unmarshal(trimmed, &batch); e != nil {
+				_ = json.MarshalWrite(out, objErr(nil, -32600, "invalid request"))
+				_, _ = out.Write([]byte("\n"))
+				continue
+			}
+			outArr := make([]any, 0, len(batch))
+			for _, raw := range batch {
+				env, e := decodeEnvelope(raw)
+				if e != nil {
+					continue
+				}
+				res := handleRaw(env, tools, toolBuckets)
 				if res != nil {
 					outArr = append(outArr, res)
 				}
@@ -272,53 +421,126 @@ func bytesTrimSpace(b []byte) []byte {
 	return b[i : j+1]
 }
 
-func handleOne(m map[string]any, tools map[string]Tool, buckets map[string]*bucket) any {
-	ver, _ := m["jsonrpc"].(string)
-	if ver != "2.0" {
-		return objErr(m["id"], -32600, "invalid request")
+// rawEnvelope is the minimally-decoded JSON-RPC 2.0 request envelope.
+// id and params are kept as raw jsontext.Value so the dispatcher can
+// splice them back into the response (id) and forward them to a tool
+// (params) without an intermediate any/map round-trip. See PERF-0041.
+type rawEnvelope struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      jsontext.Value `json:"id,omitzero"`
+	Method  string         `json:"method"`
+	Params  jsontext.Value `json:"params,omitzero"`
+}
+
+// rawToolCall is the minimally-decoded params payload for tools/call.
+// The inner Params is forwarded to the tool unchanged.
+type rawToolCall struct {
+	Name   string         `json:"name"`
+	Params jsontext.Value `json:"params,omitzero"`
+}
+
+// decodeEnvelope parses a single JSON-RPC 2.0 request into rawEnvelope.
+// It does not validate the protocol version; that is the caller's job.
+func decodeEnvelope(raw jsontext.Value) (*rawEnvelope, error) {
+	env := &rawEnvelope{}
+	if err := json.Unmarshal(raw, env); err != nil {
+		return nil, err
 	}
-	method, _ := m["method"].(string)
-	id := m["id"]
-	// notifications: no response
-	if id == nil {
+	return env, nil
+}
+
+// extractToolNameRaw reads only the "name" field from a raw tools/call
+// params payload without decoding the inner params bytes. Returns ""
+// for malformed/missing inputs.
+func extractToolNameRaw(params jsontext.Value) string {
+	if len(params) == 0 {
+		return ""
+	}
+	var p struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+	return p.Name
+}
+
+// rpcResultEnvelope is the success-response envelope written for
+// non-tools/call paths. result is set as a Go value (map/slice/etc).
+type rpcResultEnvelope struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      jsontext.Value `json:"id"`
+	Result  any            `json:"result"`
+}
+
+// rpcRawResultEnvelope writes a tools/call success response by splicing
+// the tool's raw jsontext.Value result back in unchanged. This avoids
+// the post-call json.Unmarshal(out, &v) round-trip that PERF-0041
+// targeted.
+type rpcRawResultEnvelope struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      jsontext.Value `json:"id"`
+	Result  jsontext.Value `json:"result"`
+}
+
+// rpcErrEnvelope is the error-response envelope.
+type rpcErrEnvelope struct {
+	JSONRPC string         `json:"jsonrpc"`
+	ID      jsontext.Value `json:"id"`
+	Error   rpcErrPayload  `json:"error"`
+}
+
+type rpcErrPayload struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// handleRaw is the single-request dispatcher operating on a
+// minimally-decoded envelope. Returns nil for notifications.
+func handleRaw(env *rawEnvelope, tools map[string]Tool, buckets map[string]*bucket) any {
+	if env.JSONRPC != "2.0" {
+		return objErrRaw(env.ID, -32600, "invalid request")
+	}
+	// Notifications have no id field. jsontext.Value zero-length means
+	// the id key was absent or set to null/undefined.
+	if isNullID(env.ID) {
 		return nil
 	}
-	switch method {
+	switch env.Method {
 	case "initialize":
-		return objRes(id, map[string]any{"capabilities": map[string]any{}})
+		return objResRaw(env.ID, map[string]any{"capabilities": map[string]any{}})
 	case "ping":
-		return objRes(id, map[string]any{"ok": true})
+		return objResRaw(env.ID, map[string]any{"ok": true})
 	case "shutdown":
-		return objRes(id, map[string]any{"ok": true})
+		return objResRaw(env.ID, map[string]any{"ok": true})
 	case "tools/list":
 		list := make([]string, 0, len(tools))
 		for k := range tools {
 			list = append(list, k)
 		}
 		sort.Strings(list)
-		return objRes(id, map[string]any{"tools": list})
+		return objResRaw(env.ID, map[string]any{"tools": list})
 	case "tools/call":
-		var pr struct {
-			Name   string         `json:"name"`
-			Params jsontext.Value `json:"params"`
-		}
-		b, _ := json.Marshal(m["params"])
-		_ = json.Unmarshal(b, &pr)
-		if pr.Name == "" {
-			return objErr(id, -32602, "invalid params")
-		}
-		fn, ok := tools[pr.Name]
-		if !ok {
-			return objErr(id, -32601, "method not found")
-		}
-		if buckets != nil {
-			if bk, ok := buckets[pr.Name]; ok && !bk.allow() {
-				return objErr(id, -32000, "rate limited")
+		var call rawToolCall
+		if len(env.Params) > 0 {
+			if err := json.Unmarshal(env.Params, &call); err != nil {
+				return objErrRaw(env.ID, -32602, "invalid params")
 			}
 		}
-		AuditMCP.ToolCall(pr.Name)
-		obsx.LogAudit("mcp_tool_call", map[string]any{"tool": pr.Name})
-		// enforce per-tool timeout
+		if call.Name == "" {
+			return objErrRaw(env.ID, -32602, "invalid params")
+		}
+		fn, ok := tools[call.Name]
+		if !ok {
+			return objErrRaw(env.ID, -32601, "method not found")
+		}
+		if buckets != nil {
+			if bk, ok := buckets[call.Name]; ok && !bk.allow() {
+				return objErrRaw(env.ID, -32000, "rate limited")
+			}
+		}
+		AuditMCP.ToolCall(call.Name)
+		obsx.LogAudit("mcp_tool_call", map[string]any{"tool": call.Name})
 		ctx, cancel := context.WithTimeout(context.Background(), toolTimeout)
 		defer cancel()
 		ch := make(chan struct {
@@ -326,7 +548,7 @@ func handleOne(m map[string]any, tools map[string]Tool, buckets map[string]*buck
 			err error
 		}, 1)
 		gen.SafeGo("mcp-tool-exec", func() {
-			o, e := fn(pr.Params)
+			o, e := fn(call.Params)
 			ch <- struct {
 				out jsontext.Value
 				err error
@@ -339,23 +561,62 @@ func handleOne(m map[string]any, tools map[string]Tool, buckets map[string]*buck
 			out = res.out
 			err = res.err
 		case <-ctx.Done():
-			return objErr(id, -32000, ErrToolTimeout.Error())
+			return objErrRaw(env.ID, -32000, ErrToolTimeout.Error())
 		}
 		if err != nil {
-			return objErr(id, -32000, err.Error())
+			return objErrRaw(env.ID, -32000, err.Error())
 		}
-		var v any
-		_ = json.Unmarshal(out, &v)
-		obsx.LogAudit("mcp_tool_result", map[string]any{"tool": pr.Name})
-		return objRes(id, v)
+		obsx.LogAudit("mcp_tool_result", map[string]any{"tool": call.Name})
+		// Splice raw result bytes directly into the envelope so the
+		// outer MarshalWrite emits them verbatim. If the tool returned
+		// no bytes, encode an explicit JSON null to keep wire format.
+		if len(out) == 0 {
+			out = jsontext.Value("null")
+		}
+		return &rpcRawResultEnvelope{JSONRPC: "2.0", ID: cloneID(env.ID), Result: out}
 	default:
-		return objErr(id, -32601, "method not found")
+		return objErrRaw(env.ID, -32601, "method not found")
 	}
 }
 
-func objRes(id any, result any) map[string]any {
-	return map[string]any{"jsonrpc": "2.0", "id": id, "result": result}
+// isNullID reports whether the JSON-RPC id field was absent or null,
+// indicating a notification. We treat a present-but-null id as a
+// notification per legacy behavior (handleOne returned nil when m["id"]
+// was nil).
+func isNullID(v jsontext.Value) bool {
+	if len(v) == 0 {
+		return true
+	}
+	t := bytesTrimSpace(v)
+	return len(t) == 4 && string(t) == "null"
 }
+
+// cloneID copies the id bytes so subsequent reuse of the request buffer
+// can't mutate the response.
+func cloneID(v jsontext.Value) jsontext.Value {
+	if len(v) == 0 {
+		return jsontext.Value("null")
+	}
+	out := make(jsontext.Value, len(v))
+	copy(out, v)
+	return out
+}
+
+func objResRaw(id jsontext.Value, result any) *rpcResultEnvelope {
+	return &rpcResultEnvelope{JSONRPC: "2.0", ID: cloneID(id), Result: result}
+}
+
+func objErrRaw(id jsontext.Value, code int, msg string) *rpcErrEnvelope {
+	return &rpcErrEnvelope{
+		JSONRPC: "2.0",
+		ID:      cloneID(id),
+		Error:   rpcErrPayload{Code: code, Message: msg},
+	}
+}
+
+// objErr is the parse-failure error envelope used when the request
+// body cannot be decoded enough to recover an id field. It always uses
+// id=null per JSON-RPC 2.0.
 func objErr(id any, code int, msg string) map[string]any {
 	return map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": msg}}
 }
@@ -369,21 +630,3 @@ func setRateHeaders(w http.ResponseWriter, limit, remaining int, reset time.Time
 
 func itoa(v int) string          { return strconv.Itoa(v) }
 func fmtUnix(t time.Time) string { return strconv.FormatInt(t.Unix(), 10) }
-
-// extract tool name if request is tools/call
-func extractToolName(m map[string]any) string {
-	if m == nil {
-		return ""
-	}
-	method, _ := m["method"].(string)
-	if method != "tools/call" {
-		return ""
-	}
-	p := m["params"]
-	pm, _ := p.(map[string]any)
-	if pm == nil {
-		return ""
-	}
-	name, _ := pm["name"].(string)
-	return name
-}

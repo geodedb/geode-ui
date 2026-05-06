@@ -2,10 +2,53 @@ package wsx
 
 import "errors"
 
-// Sentinel errors for WebSocket runtime. Kept at package level per repo conventions.
+// Sentinel errors for WebSocket runtime. Kept at package level per repo
+// conventions. Messages use a lowercase, package-prefixed, diagnostic
+// form so log output reads naturally; errors.Is callers should rely on
+// pointer equality rather than substring matching of Error().
 var (
-	ErrFrameTooLarge = errors.New("ErrFrameTooLarge")
-	ErrInvalidOpcode = errors.New("ErrInvalidOpcode")
-	ErrInvalidConfig = errors.New("ErrInvalidConfig")
-	ErrAuthFailed    = errors.New("ErrAuthFailed")
+	ErrFrameTooLarge = errors.New("wsx: frame exceeds configured size")
+	ErrInvalidOpcode = errors.New("wsx: invalid websocket opcode")
+	ErrInvalidConfig = errors.New("wsx: invalid configuration")
+	ErrAuthFailed    = errors.New("wsx: authentication failed")
+	// ErrOriginNotAllowed is returned by UpgradeStrict when the request
+	// Origin (or the absence of one) is rejected by the configured
+	// allowlist. SEC-0008: the strict upgrade path is fail-closed, so
+	// callers that omit OriginAllowlist and AllowAnyOrigin always see
+	// this error.
+	ErrOriginNotAllowed = errors.New("wsx: origin not allowed")
+
+	// ErrBadUpgradeHeaders is returned when the Connection or Upgrade
+	// request headers do not match the values required by RFC 6455.
+	ErrBadUpgradeHeaders = errors.New("wsx: bad upgrade headers")
+	// ErrUnsupportedVersion is returned when Sec-WebSocket-Version is
+	// not "13" (the only version supported by this implementation).
+	ErrUnsupportedVersion = errors.New("wsx: unsupported websocket version")
+	// ErrNoHijack is returned when the supplied http.ResponseWriter
+	// does not implement http.Hijacker, so the upgrade cannot proceed.
+	ErrNoHijack = errors.New("wsx: response writer does not support hijack")
+	// ErrInvalidWebSocketKey is returned when the Sec-WebSocket-Key
+	// header is missing, malformed, or not 16 bytes after base64 decode.
+	ErrInvalidWebSocketKey = errors.New("wsx: invalid sec-websocket-key")
+	// ErrForbiddenOrigin is returned by Upgrade (the legacy fail-open
+	// entry point) when the Origin header is non-empty and does not
+	// match the configured allowlist.
+	ErrForbiddenOrigin = errors.New("wsx: forbidden origin")
+	// ErrInvalidUTF8 is returned when a text frame payload (op 0x1) or
+	// a reassembled text message contains invalid UTF-8.
+	ErrInvalidUTF8 = errors.New("wsx: invalid utf-8 in text frame")
+	// ErrReservedBitsSet is returned when a frame has any of the
+	// reserved bits (RSV1/RSV2/RSV3) set; this implementation does not
+	// negotiate any extensions, so they MUST be zero.
+	ErrReservedBitsSet = errors.New("wsx: reserved bits set on frame")
+	// ErrUnmaskedClientFrame is returned when a server-side reader
+	// receives an unmasked frame and unmasked reads are not permitted
+	// (per RFC 6455, client→server frames must be masked).
+	ErrUnmaskedClientFrame = errors.New("wsx: client frames must be masked")
+	// ErrHandshakeMissingUpgrade is returned by Dial when the server
+	// response is missing the required Upgrade: websocket header.
+	ErrHandshakeMissingUpgrade = errors.New("wsx: websocket handshake failed: missing upgrade header")
+	// ErrHandshakeInvalidAccept is returned by Dial when the server's
+	// Sec-WebSocket-Accept header does not match the expected value.
+	ErrHandshakeInvalidAccept = errors.New("wsx: websocket handshake failed: invalid accept key")
 )

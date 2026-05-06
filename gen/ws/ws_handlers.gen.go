@@ -73,8 +73,20 @@ func RegisterGeneratedWS(mux *http.ServeMux, srv WSServerInterface, opts WSOptio
 		obsx.EmitWSConnect(_ctx, "/ws/ping")
 		o := wsOptions["/ws/ping"]
 		obsx.LogAudit("ws_connect", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		conn, err := wsx.Upgrade(w, r, o)
-		if err != nil { return }
+		// APPSEC-2: SEC-0008 fail-closed primitive. The deprecated wsx.Upgrade
+		// allowed connections through whenever the route's allowlist was
+		// empty -- a regression-prone "happens to be safe" pattern. UpgradeStrict
+		// rejects unless OriginAllowlist matches the Origin header (or the
+		// caller opts in via wsx.Options.AllowAnyOrigin / AllowEmptyOrigin) and
+		// writes the 403 response itself, so the handler must guard the origin
+		// rejection path to avoid double-writing.
+		conn, err := wsx.UpgradeStrict(w, r, o)
+		if err != nil {
+			if !errors.Is(err, wsx.ErrOriginNotAllowed) {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			return
+		}
 		defer func() { _ = conn.Close() }()
 		defer obsx.LogAudit("ws_close", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		defer func() {

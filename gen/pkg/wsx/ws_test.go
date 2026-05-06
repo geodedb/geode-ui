@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"unicode/utf8"
@@ -113,8 +115,8 @@ func TestUpgrade_CheckOriginRejectsUnexpectedBrowserOrigin(t *testing.T) {
 	req.Header.Set("Sec-WebSocket-Version", "13")
 	req.Header.Set("Origin", "https://disallowed.example")
 
-	if _, err := Upgrade(httptest.NewRecorder(), req, Options{CheckOrigin: true}); err == nil || err.Error() != "forbidden origin" {
-		t.Fatalf("expected forbidden origin error, got %v", err)
+	if _, err := Upgrade(httptest.NewRecorder(), req, Options{CheckOrigin: true}); err == nil || !errors.Is(err, ErrForbiddenOrigin) {
+		t.Fatalf("expected ErrForbiddenOrigin, got %v", err)
 	}
 }
 
@@ -130,4 +132,149 @@ func TestChooseSubprotocol_FallsBackToGeneratedAuthProtocol(t *testing.T) {
 	if got != "genapi.auth.sig.YWJj" {
 		t.Fatalf("got %q", got)
 	}
+}
+
+// SEC-0008: UpgradeStrict is the fail-closed alternative to Upgrade.
+// When OriginAllowlist is nil/empty AND AllowAnyOrigin is unset, the
+// handshake MUST be rejected with ErrOriginNotAllowed (HTTP 403). The
+// existing Upgrade kept the legacy fail-open semantics for backward
+// compatibility; UpgradeStrict is the new required entry point for
+// privileged surfaces (MCP WS, REST WS, GraphQL WS).
+
+func newStrictUpgradeReq(origin string) *http.Request {
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "http://example.com/ws", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Key", testWebSocketKey())
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	return req
+}
+
+func TestUpgradeStrict_NilAllowlistFailsClosed(t *testing.T) {
+	req := newStrictUpgradeReq("https://app.example.com")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{})
+	if !errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("expected ErrOriginNotAllowed; got %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403; got %d", rec.Code)
+	}
+}
+
+func TestUpgradeStrict_EmptyAllowlistFailsClosed(t *testing.T) {
+	req := newStrictUpgradeReq("https://app.example.com")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{OriginAllowlist: []string{}})
+	if !errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("expected ErrOriginNotAllowed; got %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403; got %d", rec.Code)
+	}
+}
+
+func TestUpgradeStrict_AllowlistMatch(t *testing.T) {
+	req := newStrictUpgradeReq("https://app.example.com")
+	rec := httptest.NewRecorder()
+	// httptest.NewRecorder does not implement http.Hijacker, so the
+	// handshake errors AFTER the origin check passes. The presence of
+	// ErrNoHijack rather than ErrOriginNotAllowed proves the origin
+	// gate accepted the request.
+	_, err := UpgradeStrict(rec, req, Options{OriginAllowlist: []string{"https://app.example.com"}})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("origin should have been allowed; got %v", err)
+	}
+	if err == nil {
+		t.Fatal("expected hijack error from httptest.NewRecorder; got nil")
+	}
+}
+
+func TestUpgradeStrict_AllowlistMiss(t *testing.T) {
+	req := newStrictUpgradeReq("https://evil.example")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{OriginAllowlist: []string{"https://app.example.com"}})
+	if !errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("expected ErrOriginNotAllowed for unlisted origin; got %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403; got %d", rec.Code)
+	}
+}
+
+func TestUpgradeStrict_AllowAnyOriginPasses(t *testing.T) {
+	req := newStrictUpgradeReq("https://random.example")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{AllowAnyOrigin: true})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("AllowAnyOrigin must permit any origin; got %v", err)
+	}
+}
+
+func TestUpgradeStrict_EmptyOriginRejected(t *testing.T) {
+	// No Origin header set; AllowEmptyOrigin defaults to false.
+	req := newStrictUpgradeReq("")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{OriginAllowlist: []string{"https://app.example.com"}})
+	if !errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("empty Origin must be rejected by default; got %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403; got %d", rec.Code)
+	}
+}
+
+func TestUpgradeStrict_EmptyOriginPermitted(t *testing.T) {
+	req := newStrictUpgradeReq("")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{
+		OriginAllowlist:  []string{"https://app.example.com"},
+		AllowEmptyOrigin: true,
+	})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("AllowEmptyOrigin must permit missing Origin; got %v", err)
+	}
+}
+
+func TestUpgradeStrict_AllowAnyOriginEmptyOriginAlsoPasses(t *testing.T) {
+	// AllowAnyOrigin should imply that empty Origin is fine too — server-
+	// to-server callers and CLIs frequently omit the header.
+	req := newStrictUpgradeReq("")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{AllowAnyOrigin: true})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("AllowAnyOrigin must permit empty Origin; got %v", err)
+	}
+}
+
+func TestUpgradeStrict_BadHandshakeHeadersStillRejected(t *testing.T) {
+	// Origin gate passes, but missing Upgrade header must still error
+	// out (regression: do not skip the rest of the handshake checks).
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "http://example.com/ws", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{OriginAllowlist: []string{"https://app.example.com"}})
+	if err == nil {
+		t.Fatal("expected handshake error for missing Upgrade headers")
+	}
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("missing-headers error should not be ErrOriginNotAllowed; got %v", err)
+	}
+}
+
+// TestUpgrade_DeprecatedFailOpenStillWorks proves the legacy Upgrade
+// keeps its fail-open semantics for back-compat. SEC-0008 only adds
+// UpgradeStrict; flipping the default is scheduled for a major bump.
+func TestUpgrade_DeprecatedFailOpenStillWorks(t *testing.T) {
+	req := newStrictUpgradeReq("https://anywhere.example")
+	rec := httptest.NewRecorder()
+	_, err := Upgrade(rec, req, Options{}) // nil allowlist + CheckOrigin=false
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("legacy Upgrade should not return ErrOriginNotAllowed when allowlist is nil; got %v", err)
+	}
+	// Deprecated path passes the origin gate and only fails on the
+	// hijack step (httptest.NewRecorder lacks Hijacker).
 }

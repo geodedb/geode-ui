@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -41,6 +42,15 @@ type ServerOptions struct {
 	Middleware []func(http.Handler) http.Handler
 	Metrics    obsx.MetricsProvider
 	Telemetry  *obsx.TelemetryProvider
+	// AuthMTLS is the deployment-specific issuer-label verifier invoked
+	// by the generated mTLS auth gate AFTER the basic securex.VerifyMTLS
+	// check passes. Use this hook to map MTLSPolicy.SupportedIssuers
+	// (PIV/CAC/custom) to actual certificate Subject/Issuer DNs. When the
+	// spec declares any auth: "mtls" route with a non-empty
+	// supported_issuers list, Serve() refuses to start unless this hook
+	// is wired -- otherwise the issuer-label policy would silently no-op.
+	// APPSEC-5.
+	AuthMTLS func(*http.Request, securex.MTLSPolicy) error
 }
 
 // ServerOption is a functional option for server configuration.
@@ -69,16 +79,37 @@ func WithTelemetry(tp *obsx.TelemetryProvider) ServerOption {
 	return func(o *ServerOptions) { o.Telemetry = tp }
 }
 
+// WithAuthMTLS wires a deployment-specific mTLS issuer-label verifier. The
+// hook runs AFTER the basic securex.VerifyMTLS gate accepts a request and
+// is responsible for enforcing MTLSPolicy.SupportedIssuers (PIV/CAC/custom).
+// When the spec declares any mtls route with supported_issuers set, Serve()
+// refuses to start unless this hook is wired. APPSEC-5.
+func WithAuthMTLS(fn func(*http.Request, securex.MTLSPolicy) error) ServerOption {
+	return func(o *ServerOptions) { o.AuthMTLS = fn }
+}
+
 func main() {
-	legacyShared := flag.String("apikey", "", "DEPRECATED: shared secret for API key and JWT")
+	legacyShared := flag.String("apikey", "", "DEPRECATED: shared secret for API key and JWT. Disabled by default; requires --unsafe-legacy-apikey.")
 	apiKeySecret := flag.String("api-key-secret", "", "API key HMAC secret (prefer GENAPI_API_KEY_SECRET/GENAPI_API_KEY_SECRET_FILE)")
 	jwtSecret := flag.String("jwt-secret", "", "JWT HS256 secret (prefer GENAPI_JWT_SECRET/GENAPI_JWT_SECRET_FILE)")
+	unsafeLegacy := flag.Bool("unsafe-legacy-apikey", false, "UNSAFE: enable the deprecated -apikey flag. Prefer setting GENAPI_API_KEY_SECRET and GENAPI_JWT_SECRET independently.")
 	flag.Parse()
 
-	// Apply flag-based fallbacks to env (resolveSecret checks env first)
-	if v := strings.TrimSpace(*legacyShared); v != "" {
-		if os.Getenv("GENAPI_API_KEY_SECRET") == "" { _ = os.Setenv("GENAPI_API_KEY_SECRET", v) }
-		if os.Getenv("GENAPI_JWT_SECRET") == "" { _ = os.Setenv("GENAPI_JWT_SECRET", v) }
+	// SEC-0001: reject -apikey alone; require explicit --unsafe-legacy-apikey.
+	// The legacy flag seeds BOTH HMAC API-key and HS256 JWT secrets with the
+	// same bytes, collapsing two trust boundaries into one.
+	if strings.TrimSpace(*legacyShared) != "" && !*unsafeLegacy {
+		log.Fatal("legacy -apikey flag is disabled by default: set GENAPI_API_KEY_SECRET and GENAPI_JWT_SECRET (or --api-key-secret/--jwt-secret) to distinct values, or pass --unsafe-legacy-apikey to opt back in")
+	}
+
+	// Apply flag-based fallbacks to env (resolveSecret checks env first).
+	// Legacy seeding only runs when --unsafe-legacy-apikey is true.
+	if *unsafeLegacy {
+		if v := strings.TrimSpace(*legacyShared); v != "" {
+			log.Printf("WARN --unsafe-legacy-apikey is enabled: -apikey seeds missing secrets. This mode is deprecated; set GENAPI_API_KEY_SECRET and GENAPI_JWT_SECRET to distinct values.")
+			if os.Getenv("GENAPI_API_KEY_SECRET") == "" { _ = os.Setenv("GENAPI_API_KEY_SECRET", v) }
+			if os.Getenv("GENAPI_JWT_SECRET") == "" { _ = os.Setenv("GENAPI_JWT_SECRET", v) }
+		}
 	}
 	if v := strings.TrimSpace(*apiKeySecret); v != "" {
 		if os.Getenv("GENAPI_API_KEY_SECRET") == "" { _ = os.Setenv("GENAPI_API_KEY_SECRET", v) }
@@ -132,6 +163,12 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 	if rc.Security.Auth.JWT && len(jwtSecretBytes) == 0 {
 		return fmt.Errorf("missing JWT secret: set GENAPI_JWT_SECRET or GENAPI_JWT_SECRET_FILE")
 	}
+	// SEC-0001: boot-time key-lineage-divergence guard. Refuse to serve if
+	// the HMAC API-key and HS256 JWT secrets are byte-identical, regardless
+	// of how they were sourced (env, file, or --api-key-secret/--jwt-secret).
+	if len(apiSecretBytes) > 0 && len(jwtSecretBytes) > 0 && bytes.Equal(apiSecretBytes, jwtSecretBytes) {
+		return fmt.Errorf("API key secret and JWT secret must be distinct: configure GENAPI_API_KEY_SECRET and GENAPI_JWT_SECRET (or --api-key-secret and --jwt-secret) to distinct values")
+	}
 
 	stopGC := securex.StartNonceGC(seen, time.Minute)
 	defer close(stopGC)
@@ -172,6 +209,7 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 	genapi.RegisterGeneratedAPI(mux, genapi.UnimplementedServer{}, genapi.APIOptions{
 		Auth:        authAPIKey,
 		AuthJWT:     authJWT,
+		AuthMTLS:    sopts.AuthMTLS,
 		GlobalRate:  float64(rc.Security.RateLimit.GlobalRPS),
 		GlobalBurst: float64(rc.Security.RateLimit.Burst),
 	})
@@ -202,6 +240,16 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 				http.Error(w, securex.ErrAuthFailed.Error(), http.StatusUnauthorized)
 				return
 			}
+			// APPSEC-1: cap the JSON-RPC body so an authenticated principal
+			// cannot pin server memory by streaming an unbounded request
+			// into the dispatcher. Mirrors the per-route http.MaxBytesReader
+			// wrap that every other generated route already gets.
+			if r.ContentLength > 0 && r.ContentLength > 1048576 {
+				obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+				http.Error(w, httpx.ErrBodyTooLarge.Error(), http.StatusRequestEntityTooLarge)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 			genmcp.HandleMCPHTTP(w, r)
 		})
 	}

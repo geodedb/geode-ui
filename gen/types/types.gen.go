@@ -110,7 +110,7 @@ type QueryResp struct {
 	ElapsedMs int64 `json:"elapsed_ms" genapi:"elapsed_ms"`
 	GraphSummary jsontext.Value `json:"graph_summary" genapi:"graph_summary"`
 	RowCount int64 `json:"row_count" genapi:"row_count"`
-	// Rows omitted (unsupported array item type: array)
+	Rows []jsontext.Value `json:"rows" genapi:"rows"`
 }
 
 // Valid validates QueryResp fields against schema constraints.

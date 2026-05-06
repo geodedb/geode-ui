@@ -529,7 +529,9 @@ function createBinarySocket(socket: WebSocket): BinarySocket {
   return {
     socket,
     send(value: Uint8Array) {
-      socket.send(value);
+      // TS 5.7+ narrowed WebSocket.send(); widen Uint8Array<ArrayBufferLike>
+      // to the accepted BufferSource shape.
+      socket.send(value as unknown as BufferSource);
     },
     close() {
       socket.removeEventListener("message", listener as EventListener);
