@@ -6,6 +6,7 @@ replace geodedb.com/geode => /data/home/benji/src/devnw/codepros/geode/geode-cli
 
 require (
 	geodedb.com/geode v0.0.0-00010101000000-000000000000
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/lestrrat-go/jwx v1.2.31
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.43.0

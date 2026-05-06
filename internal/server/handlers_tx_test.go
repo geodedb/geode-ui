@@ -102,12 +102,17 @@ func TestNewTxID_Uniqueness(t *testing.T) {
 	}
 }
 
-// TestUserFromContext_StubReturnsEmpty pins the current B3 contract so
-// the B9 JWT change clearly flips the test rather than a silent
-// behaviour drift through the tx ownership path.
-func TestUserFromContext_StubReturnsEmpty(t *testing.T) {
+// TestUserFromContext covers both the no-claim case (an empty subject
+// is returned, preserving the TxStore owner check semantics for tests
+// that don't go through AuthJWT) and the populated case (AuthJWT
+// attaches the subject under userCtxKey and userFromContext echoes it).
+func TestUserFromContext(t *testing.T) {
 	if got := userFromContext(context.Background()); got != "" {
-		t.Fatalf("userFromContext(ctx)=%q want \"\" (B9 will flip this)", got)
+		t.Fatalf("userFromContext(empty ctx)=%q want \"\"", got)
+	}
+	ctx := context.WithValue(context.Background(), userCtxKey, "alice")
+	if got := userFromContext(ctx); got != "alice" {
+		t.Fatalf("userFromContext(ctx with sub=alice)=%q want alice", got)
 	}
 }
 

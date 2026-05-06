@@ -23,19 +23,34 @@ type ctxKey int
 
 const (
 	// profileCtxKey is the connection-profile name selected for the request
-	// (e.g. picked from the "X-Geode-Profile" header by middleware in B9).
+	// (sourced from the JWT "profile" claim by AuthJWT in auth.go).
 	profileCtxKey ctxKey = iota + 1
+	// userCtxKey is the authenticated subject (upstream Geode username),
+	// sourced from the JWT "sub" claim.
+	userCtxKey
+	// rolesCtxKey is the roles claim ([]string) carried in the JWT and
+	// used by genapi's required_roles enforcement.
+	rolesCtxKey
 )
 
 // profileFromContext returns the connection-profile name attached to ctx,
 // or "" if no middleware set one.
-//
-//nolint:unused // wired up in B-series JWT/middleware tasks.
 func profileFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(profileCtxKey).(string); ok {
 		return v
 	}
 	return ""
+}
+
+// rolesFromContext returns the JWT roles claim attached to ctx by the
+// AuthJWT middleware, or nil if none was set.
+//
+//nolint:unused // wired up by AuthJWT; reserved for required_roles tests.
+func rolesFromContext(ctx context.Context) []string {
+	if v, ok := ctx.Value(rolesCtxKey).([]string); ok {
+		return v
+	}
+	return nil
 }
 
 // profileFromContextOrDefault returns the profile from ctx or "default" when

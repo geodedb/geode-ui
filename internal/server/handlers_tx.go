@@ -86,11 +86,15 @@ func newTxID() string {
 }
 
 // userFromContext extracts the authenticated subject (username) from ctx.
-// Returns "" until the JWT middleware in B9 starts attaching a value;
-// every TxStore entry is therefore owned by "" today and the owner
-// check is effectively a no-op. Do not short-circuit it — when B9 lands
-// it picks up the isolation for free.
-func userFromContext(_ context.Context) string {
+// AuthJWT (internal/server/auth.go) populates this from the JWT "sub"
+// claim before any handler runs. Tests that call handlers without a
+// JWT context will see "" and rely on the TxStore owner check still
+// being invoked so multi-user isolation is preserved as soon as a real
+// token shows up.
+func userFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(userCtxKey).(string); ok {
+		return v
+	}
 	return ""
 }
 

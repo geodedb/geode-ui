@@ -6,11 +6,20 @@ import (
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	gentypes "geodedb.com/geode-ui/gen/types"
+	"geodedb.com/geode-ui/internal/conn"
+	"geodedb.com/geode-ui/internal/jwt"
 )
 
 // Pool is the subset of *conn.Pool the server uses; an interface for testing.
 type Pool interface {
 	DB(name string) (*sql.DB, error)
+}
+
+// ProfileLookup resolves a profile name to a conn.Profile. *conn.Pool
+// satisfies this interface — Login uses it to locate the upstream DSN
+// for an authenticate-then-issue-token round trip.
+type ProfileLookup interface {
+	Lookup(name string) (conn.Profile, error)
 }
 
 // Config carries dependencies for GraphServer.
@@ -23,6 +32,14 @@ type Config struct {
 	// Inject NewTxStore() from main; tests can pass nil and the handlers
 	// will return a 500 if invoked, matching the Pool=nil contract.
 	TxStore *TxStore
+	// JWT issues and verifies bearer tokens. AuthJWT panics-free returns
+	// a 401 if this is nil, so unit tests that don't exercise the auth
+	// path can leave it unset.
+	JWT *jwt.Issuer
+	// Profiles resolves a profile name to a conn.Profile.DSN — used by
+	// Login to authenticate against the upstream Geode by opening a
+	// short-lived *sql.DB with the user's submitted credentials.
+	Profiles ProfileLookup
 }
 
 // GraphServer implements gen/api.ServerInterface.

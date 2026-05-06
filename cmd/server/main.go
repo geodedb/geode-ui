@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -16,6 +17,7 @@ import (
 	"geodedb.com/geode-ui/gen/pkg/httpx"
 	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/internal/conn"
+	"geodedb.com/geode-ui/internal/jwt"
 	"geodedb.com/geode-ui/internal/server"
 	"geodedb.com/geode-ui/internal/ui"
 )
@@ -24,13 +26,32 @@ func main() {
 	var (
 		listen       string
 		profilesFile string
+		secretHex    string
+		jwtTTL       time.Duration
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
+	flag.StringVar(&secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
+	flag.DurationVar(&jwtTTL, "jwt-ttl", 8*time.Hour, "JWT TTL (1m..24h)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	if secretHex == "" {
+		slog.Error("missing -jwt-secret-hex (generate with `openssl rand -hex 32`)")
+		os.Exit(1)
+	}
+	secret, err := hex.DecodeString(secretHex)
+	if err != nil {
+		slog.Error("decode -jwt-secret-hex", "err", err)
+		os.Exit(1)
+	}
+	issuer, err := jwt.NewIssuer(secret, jwtTTL)
+	if err != nil {
+		slog.Error("jwt issuer", "err", err)
+		os.Exit(1)
+	}
 
 	profiles := []conn.Profile{{Name: "default", DSN: "quic://127.0.0.1:3141"}}
 	if profilesFile != "" {
@@ -54,12 +75,14 @@ func main() {
 	mux := http.NewServeMux()
 
 	srv := server.New(server.Config{
-		Version: "v0.1.0",
-		Pool:    pool,
-		TxStore: server.NewTxStore(),
+		Version:  "v0.1.0",
+		Pool:     pool,
+		Profiles: pool,
+		JWT:      issuer,
+		TxStore:  server.NewTxStore(),
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
-		AuthJWT:     func(*http.Request) error { return errors.New("unimplemented") },
+		AuthJWT:     srv.AuthJWT,
 		GlobalRate:  2000,
 		GlobalBurst: 400,
 	})
@@ -67,15 +90,16 @@ func main() {
 	// /ws/* surface lives on a separate server type because the
 	// generated WS interface emits "Query" for /ws/query, which would
 	// collide with the API "Query" method on *GraphServer. Both
-	// servers share the same Config (and therefore the same Pool)
-	// and AuthJWT stub — B9 will replace both with srv.AuthJWT once
-	// JWT verification lands.
+	// servers share the same Config and AuthJWT — the WS upgrade
+	// can't carry an Authorization header from a browser, so AuthJWT
+	// also accepts ?access_token= as a fallback (see auth.go).
 	wsSrv := server.NewWSServer(server.Config{
 		Version: "v0.1.0",
 		Pool:    pool,
+		JWT:     issuer,
 	})
 	genws.RegisterGeneratedWS(mux, wsSrv, genws.WSOptions{
-		AuthJWT: func(*http.Request) error { return errors.New("unimplemented") },
+		AuthJWT: srv.AuthJWT,
 	})
 
 	uiHandler, err := ui.Handler()
