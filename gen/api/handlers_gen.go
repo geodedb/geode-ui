@@ -28,6 +28,10 @@ type ServerInterface interface {
 	Indexes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.IndexList, error)
 	Labels(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.LabelList, error)
 	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error)
+	Tx(w http.ResponseWriter, r *http.Request, req *types.TxBeginReq) (*types.TxBeginResp, error)
+	Commit(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error)
+	Rollback(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error)
+	Run(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error)
 	Healthz(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.HealthResp, error)
 }
 
@@ -60,6 +64,22 @@ func (UnimplementedServer) Labels(_ http.ResponseWriter, _ *http.Request, _ *typ
 }
 
 func (UnimplementedServer) Query(_ http.ResponseWriter, _ *http.Request, _ *types.QueryReq) (*types.QueryResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Tx(_ http.ResponseWriter, _ *http.Request, _ *types.TxBeginReq) (*types.TxBeginResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Commit(_ http.ResponseWriter, _ *http.Request, _ *types.TxIDParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Rollback(_ http.ResponseWriter, _ *http.Request, _ *types.TxIDParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Run(_ http.ResponseWriter, _ *http.Request, _ *types.TxRunReq) (*types.QueryResp, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -289,6 +309,102 @@ func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types
 		HasTypedRequest:    true,
 		HasTypedResponse:   true,
 		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Tx(w http.ResponseWriter, r *http.Request, req *types.TxBeginReq) (*types.TxBeginResp, error) {
+	return callCatchAll[*types.TxBeginResp](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/tx",
+		MuxPattern:         "POST /api/v1/tx",
+		MethodName:         "Tx",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.TxBeginReq",
+		ResponseType:       "*types.TxBeginResp",
+		RequestSchema:      "TxBeginReq",
+		ResponseSchema:     "TxBeginResp",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Commit(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/tx/{txid}/commit",
+		MuxPattern:         "POST /api/v1/tx/{txid}/commit",
+		MethodName:         "Commit",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.TxIDParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "TxIDParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"txid"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Rollback(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/tx/{txid}/rollback",
+		MuxPattern:         "POST /api/v1/tx/{txid}/rollback",
+		MethodName:         "Rollback",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.TxIDParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "TxIDParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"txid"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Run(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error) {
+	return callCatchAll[*types.QueryResp](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/tx/{txid}/run",
+		MuxPattern:         "POST /api/v1/tx/{txid}/run",
+		MethodName:         "Run",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.TxRunReq",
+		ResponseType:       "*types.QueryResp",
+		RequestSchema:      "TxRunReq",
+		ResponseSchema:     "QueryResp",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"txid"},
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
@@ -604,6 +720,173 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Query(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Tx *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_Tx = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/tx", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Tx",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/tx"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_post_Tx != nil { lim, rem, reset := bkt_post_Tx.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Tx.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.TxBeginReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Tx(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Commit *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_Commit = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/tx/{txid}/commit", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Commit",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/tx/{txid}/commit"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_post_Commit != nil { lim, rem, reset := bkt_post_Commit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Commit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.TxIDParam
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Txid = r.PathValue("txid")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Commit(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Rollback *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_Rollback = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/tx/{txid}/rollback", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Rollback",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/tx/{txid}/rollback"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_post_Rollback != nil { lim, rem, reset := bkt_post_Rollback.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Rollback.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.TxIDParam
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Txid = r.PathValue("txid")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Rollback(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Run *securex.Bucket
+	if (200) > 0 && opts.GlobalBurst > 0 { bkt_post_Run = securex.NewBucket(200, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/tx/{txid}/run", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Run",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/tx/{txid}/run"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 524288 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 524288)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_post_Run != nil { lim, rem, reset := bkt_post_Run.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Run.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.TxRunReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Txid = r.PathValue("txid")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Run(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

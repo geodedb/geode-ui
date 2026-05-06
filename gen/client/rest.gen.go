@@ -390,6 +390,166 @@ func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryRe
 	}
 	return &out, nil
 }
+// Tx performs POST /api/v1/tx.
+func (c *Client) Tx(ctx context.Context, req *types.TxBeginReq) (*types.TxBeginResp, error) {
+	target, err := c.buildURL("/api/v1/tx")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("json", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.TxBeginResp
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Commit performs POST /api/v1/tx/{txid}/commit.
+func (c *Client) Commit(ctx context.Context, req *types.TxIDParam) (*types.Empty, error) {
+	target, err := c.buildURL("/api/v1/tx/{txid}/commit")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("json", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Empty
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Rollback performs POST /api/v1/tx/{txid}/rollback.
+func (c *Client) Rollback(ctx context.Context, req *types.TxIDParam) (*types.Empty, error) {
+	target, err := c.buildURL("/api/v1/tx/{txid}/rollback")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("json", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Empty
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Run performs POST /api/v1/tx/{txid}/run.
+func (c *Client) Run(ctx context.Context, req *types.TxRunReq) (*types.QueryResp, error) {
+	target, err := c.buildURL("/api/v1/tx/{txid}/run")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("json", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.QueryResp
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Healthz performs GET /healthz.
 func (c *Client) Healthz(ctx context.Context, req *types.Empty) (*types.HealthResp, error) {
 	target, err := c.buildURL("/healthz")

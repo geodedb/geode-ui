@@ -144,6 +144,21 @@ export interface QueryStreamMsg {
   row_count?: number;
   statement?: string;
 }
+export interface TxBeginReq {
+  graph?: string;
+  read_only?: boolean;
+}
+export interface TxBeginResp {
+  txid: string;
+}
+export interface TxIDParam {
+  txid: string;
+}
+export interface TxRunReq {
+  params?: Record<string, unknown>;
+  statement: string;
+  txid: string;
+}
 type PreparedBody = {
   body?: BodyInit;
   contentType?: string;
@@ -866,6 +881,42 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
+  async tx(req: TxBeginReq): Promise<TxBeginResp> {
+    return this.request<TxBeginResp>(
+      "POST",
+      "/api/v1/tx",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async commit(req: TxIDParam): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/tx/{txid}/commit",
+      "jwt",
+      "json",
+      ["txid"], copyRecord(req),
+    );
+  }
+  async rollback(req: TxIDParam): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/tx/{txid}/rollback",
+      "jwt",
+      "json",
+      ["txid"], copyRecord(req),
+    );
+  }
+  async run(req: TxRunReq): Promise<QueryResp> {
+    return this.request<QueryResp>(
+      "POST",
+      "/api/v1/tx/{txid}/run",
+      "jwt",
+      "json",
+      ["txid"], copyRecord(req),
+    );
+  }
   async healthz(req: Empty): Promise<HealthResp> {
     return this.request<HealthResp>(
       "GET",
@@ -927,6 +978,18 @@ export function useLabels(client: GenAPIClient, req: GraphParam, deps: ReadonlyA
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));
+}
+export function useTxMutation(client: GenAPIClient): MutationState<TxBeginReq, TxBeginResp> {
+  return useMutationState((req) => client.tx(req));
+}
+export function useCommitMutation(client: GenAPIClient): MutationState<TxIDParam, Empty> {
+  return useMutationState((req) => client.commit(req));
+}
+export function useRollbackMutation(client: GenAPIClient): MutationState<TxIDParam, Empty> {
+  return useMutationState((req) => client.rollback(req));
+}
+export function useRunMutation(client: GenAPIClient): MutationState<TxRunReq, QueryResp> {
+  return useMutationState((req) => client.run(req));
 }
 export function useHealthz(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<HealthResp> {
   return usePromise(() => client.healthz(req), deps);

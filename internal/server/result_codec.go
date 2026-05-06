@@ -1,9 +1,91 @@
 package server
 
 import (
-	"encoding/json"
+	"database/sql"
+	stdjson "encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
 	"math"
+	"time"
+
+	gentypes "geodedb.com/geode-ui/gen/types"
 )
+
+// queryRowScanner is the read-only subset of *sql.Rows that scanQueryResult
+// needs. *sql.Tx.QueryContext and *sql.DB.QueryContext both return
+// *sql.Rows, so the same helper services both transactional and one-shot
+// query paths.
+type queryRowScanner interface {
+	Columns() ([]string, error)
+	ColumnTypes() ([]*sql.ColumnType, error)
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+// scanQueryResult drains rows into a *gentypes.QueryResp using the same
+// shape Query exposes: per-column descriptors, per-row JSON arrays, a
+// graph summary, and elapsed_ms measured from start. Both the synchronous
+// query handler and the transactional Run handler call this so the shape
+// stays consistent across endpoints.
+func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("columns: %w", err)
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, fmt.Errorf("column types: %w", err)
+	}
+	colDescs := make([]jsontext.Value, len(cols))
+	for i, name := range cols {
+		raw, mErr := json.Marshal(struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}{Name: name, Type: colTypes[i].DatabaseTypeName()})
+		if mErr != nil {
+			return nil, fmt.Errorf("marshal column desc: %w", mErr)
+		}
+		colDescs[i] = jsontext.Value(raw)
+	}
+
+	var allRows [][]any
+	var rowJSON []jsontext.Value
+	for rows.Next() {
+		row := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range row {
+			ptrs[i] = &row[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		allRows = append(allRows, row)
+		raw, mErr := json.Marshal(row)
+		if mErr != nil {
+			return nil, fmt.Errorf("marshal row: %w", mErr)
+		}
+		rowJSON = append(rowJSON, jsontext.Value(raw))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	summary := extractGraphSummary(allRows)
+	summaryJSON, err := json.Marshal(summary)
+	if err != nil {
+		return nil, fmt.Errorf("marshal graph summary: %w", err)
+	}
+
+	return &gentypes.QueryResp{
+		Columns:      colDescs,
+		Rows:         rowJSON,
+		RowCount:     int64(len(allRows)),
+		ElapsedMs:    time.Since(start).Milliseconds(),
+		GraphSummary: jsontext.Value(summaryJSON),
+	}, nil
+}
 
 // extractGraphSummary walks the rows of a query result and pulls out any
 // nodes/edges/paths so the UI can render a graph view alongside the table.
@@ -110,7 +192,7 @@ func toInt64(v any) (int64, bool) {
 			return 0, false
 		}
 		return int64(x), true
-	case json.Number:
+	case stdjson.Number:
 		n, err := x.Int64()
 		if err != nil {
 			return 0, false

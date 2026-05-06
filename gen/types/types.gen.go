@@ -217,3 +217,52 @@ func (v QueryStreamMsg) Valid() error {
 	if len(v.Statement) > 524288 { return errors.New("statement: too long") }
 	return nil
 }
+
+// TxBeginReq generated from config schema
+type TxBeginReq struct {
+	Graph string `json:"graph" genapi:"graph"`
+	ReadOnly bool `json:"read_only" genapi:"read_only"`
+}
+
+// Valid validates TxBeginReq fields against schema constraints.
+func (v TxBeginReq) Valid() error {
+	if len(v.Graph) > 256 { return errors.New("graph: too long") }
+	return nil
+}
+
+// TxBeginResp generated from config schema
+type TxBeginResp struct {
+	Txid string `json:"txid" genapi:"txid"`
+}
+
+// Valid validates TxBeginResp fields against schema constraints.
+func (v TxBeginResp) Valid() error {
+	if len(v.Txid) < 16 { return errors.New("txid: too short") }
+	if len(v.Txid) > 64 { return errors.New("txid: too long") }
+	return nil
+}
+
+// TxIDParam generated from config schema
+type TxIDParam struct {
+	Txid string `json:"txid" genapi:"txid"`
+}
+
+// Valid validates TxIDParam fields against schema constraints.
+func (v TxIDParam) Valid() error {
+	if len(v.Txid) < 16 { return errors.New("txid: too short") }
+	if len(v.Txid) > 64 { return errors.New("txid: too long") }
+	return nil
+}
+
+// TxRunReq generated from config schema
+type TxRunReq struct {
+	Params jsontext.Value `json:"params" genapi:"params"`
+	Statement string `json:"statement" genapi:"statement"`
+	Txid string `json:"txid" genapi:"txid"`
+}
+
+// Valid validates TxRunReq fields against schema constraints.
+func (v TxRunReq) Valid() error {
+	if len(v.Statement) < 1 { return errors.New("statement: too short") }
+	return nil
+}

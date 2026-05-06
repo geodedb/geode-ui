@@ -154,6 +154,10 @@ components:
             required:
                 - types
             type: object
+        Empty:
+            description: Generated schema for Empty
+            example: {}
+            type: object
         ErrorResponse:
             description: Standard error response
             example:
@@ -454,6 +458,71 @@ components:
                     type: string
             required:
                 - kind
+            type: object
+        TxBeginReq:
+            description: Generated schema for TxBeginReq
+            example: {}
+            properties:
+                graph:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+                readOnly:
+                    example: true
+                    type: boolean
+            type: object
+        TxBeginResp:
+            description: Generated schema for TxBeginResp
+            example:
+                txid: xxxxxxxxxxxxxxxx
+            properties:
+                txid:
+                    example: xxxxxxxxxxxxxxxx
+                    maxLength: 64
+                    minLength: 16
+                    pattern: ^.*$
+                    type: string
+            required:
+                - txid
+            type: object
+        TxIDParam:
+            description: Generated schema for TxIDParam
+            example:
+                txid: xxxxxxxxxxxxxxxx
+            properties:
+                txid:
+                    example: xxxxxxxxxxxxxxxx
+                    maxLength: 64
+                    minLength: 16
+                    pattern: ^.*$
+                    type: string
+            required:
+                - txid
+            type: object
+        TxRunReq:
+            description: Generated schema for TxRunReq
+            example:
+                statement: x
+                txid: x
+            properties:
+                params:
+                    example: {}
+                    type: object
+                statement:
+                    example: x
+                    maxLength: 2048
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                txid:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+            required:
+                - txid
+                - statement
             type: object
     securitySchemes:
         bearerAuth:
@@ -788,6 +857,209 @@ paths:
             summary: POST /api/v1/query
             tags:
                 - Query
+    /api/v1/tx:
+        post:
+            description: POST /api/v1/tx operation
+            operationId: postApiV1Tx
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TxBeginReq'
+                description: POST /api/v1/tx request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TxBeginResp'
+                    description: POST /api/v1/tx success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/tx
+            tags:
+                - Tx
+    /api/v1/tx/{txid}/commit:
+        post:
+            description: POST /api/v1/tx/{txid}/commit operation
+            operationId: postApiV1TxTxidCommit
+            parameters:
+                - description: POST /api/v1/tx/{txid}/commit path parameter txid
+                  in: path
+                  name: txid
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TxIDParam'
+                description: POST /api/v1/tx/{txid}/commit request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/tx/{txid}/commit success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/tx/{txid}/commit
+            tags:
+                - Commit
+    /api/v1/tx/{txid}/rollback:
+        post:
+            description: POST /api/v1/tx/{txid}/rollback operation
+            operationId: postApiV1TxTxidRollback
+            parameters:
+                - description: POST /api/v1/tx/{txid}/rollback path parameter txid
+                  in: path
+                  name: txid
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TxIDParam'
+                description: POST /api/v1/tx/{txid}/rollback request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/tx/{txid}/rollback success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/tx/{txid}/rollback
+            tags:
+                - Rollback
+    /api/v1/tx/{txid}/run:
+        post:
+            description: POST /api/v1/tx/{txid}/run operation
+            operationId: postApiV1TxTxidRun
+            parameters:
+                - description: POST /api/v1/tx/{txid}/run path parameter txid
+                  in: path
+                  name: txid
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TxRunReq'
+                description: POST /api/v1/tx/{txid}/run request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QueryResp'
+                    description: POST /api/v1/tx/{txid}/run success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/tx/{txid}/run
+            tags:
+                - Run
     /healthz:
         get:
             description: GET /healthz operation
@@ -907,6 +1179,8 @@ servers:
     - description: API server
       url: https://api.devnw.com/v1
 tags:
+    - description: Operations for Commit
+      name: Commit
     - description: Operations for Constraints
       name: Constraints
     - description: Operations for EdgeTypes
@@ -925,5 +1199,11 @@ tags:
       name: Ping
     - description: Operations for Query
       name: Query
+    - description: Operations for Rollback
+      name: Rollback
+    - description: Operations for Run
+      name: Run
+    - description: Operations for Tx
+      name: Tx
     - description: Default generated operations
       name: default

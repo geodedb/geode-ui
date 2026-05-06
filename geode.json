@@ -85,6 +85,40 @@
       "responseSchema": "ConstraintList",
       "auth": "jwt",
       "rateLimit": 100
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx",
+      "requestSchema": "TxBeginReq",
+      "responseSchema": "TxBeginResp",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/run",
+      "requestSchema": "TxRunReq",
+      "responseSchema": "QueryResp",
+      "auth": "jwt",
+      "rateLimit": 200,
+      "maxBodyBytes": 524288
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/commit",
+      "requestSchema": "TxIDParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 50
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/rollback",
+      "requestSchema": "TxIDParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 50
     }
   ],
   "websocket": [
@@ -239,6 +273,36 @@
             }
           }
         }
+      }
+    },
+    "TxBeginReq": {
+      "type": "object",
+      "properties": {
+        "read_only": { "type": "boolean" },
+        "graph":     { "type": "string", "maxLength": 256 }
+      }
+    },
+    "TxBeginResp": {
+      "type": "object",
+      "required": ["txid"],
+      "properties": {
+        "txid": { "type": "string", "minLength": 16, "maxLength": 64 }
+      }
+    },
+    "TxRunReq": {
+      "type": "object",
+      "required": ["txid", "statement"],
+      "properties": {
+        "txid":      { "type": "string" },
+        "statement": { "type": "string", "minLength": 1 },
+        "params":    { "type": "object", "properties": {} }
+      }
+    },
+    "TxIDParam": {
+      "type": "object",
+      "required": ["txid"],
+      "properties": {
+        "txid": { "type": "string", "minLength": 16, "maxLength": 64 }
       }
     },
     "QueryStreamMsg": {

@@ -1,0 +1,237 @@
+package server
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
+	"errors"
+	"net/http"
+	"sync"
+	"time"
+
+	gentypes "geodedb.com/geode-ui/gen/types"
+)
+
+// txEntry is the per-transaction record held in TxStore.
+type txEntry struct {
+	tx        *sql.Tx
+	createdAt time.Time
+	owner     string // username from the JWT subject claim
+}
+
+// TxStore is an in-memory map of open *sql.Tx handles keyed by opaque
+// 128-bit hex txids returned to the client.
+//
+// Owner identity is sourced from userFromContext, which currently returns
+// "" until the JWT middleware lands in B9. Until then EVERY transaction
+// is owned by the empty string, so any caller can commit/rollback another
+// caller's transaction by guessing the txid. The owner check is still
+// invoked so that B9 picks up real isolation for free; until then the
+// 128-bit random txid is the only barrier.
+type TxStore struct {
+	mu sync.Mutex
+	m  map[string]*txEntry
+}
+
+// NewTxStore returns an empty store. Inject one into Config.TxStore so
+// the handlers can find it.
+func NewTxStore() *TxStore { return &TxStore{m: map[string]*txEntry{}} }
+
+// put registers tx under a new random id and returns the id.
+func (t *TxStore) put(tx *sql.Tx, owner string) string {
+	id := newTxID()
+	t.mu.Lock()
+	t.m[id] = &txEntry{tx: tx, createdAt: time.Now(), owner: owner}
+	t.mu.Unlock()
+	return id
+}
+
+// take removes the entry for id and returns the underlying *sql.Tx if
+// the caller owns it. Used by commit/rollback (one-shot terminators).
+func (t *TxStore) take(id, owner string) (*sql.Tx, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.m[id]
+	if !ok {
+		return nil, errors.New("tx not found")
+	}
+	if e.owner != owner {
+		return nil, errors.New("tx owner mismatch")
+	}
+	delete(t.m, id)
+	return e.tx, nil
+}
+
+// get reads the entry for id (does not remove) and verifies owner.
+// Used by run, which keeps the tx alive after the call.
+func (t *TxStore) get(id, owner string) (*sql.Tx, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	e, ok := t.m[id]
+	if !ok {
+		return nil, errors.New("tx not found")
+	}
+	if e.owner != owner {
+		return nil, errors.New("tx owner mismatch")
+	}
+	return e.tx, nil
+}
+
+// newTxID returns a 32-character (128-bit) hex string.
+func newTxID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+// userFromContext extracts the authenticated subject (username) from ctx.
+// Returns "" until the JWT middleware in B9 starts attaching a value;
+// every TxStore entry is therefore owned by "" today and the owner
+// check is effectively a no-op. Do not short-circuit it — when B9 lands
+// it picks up the isolation for free.
+func userFromContext(_ context.Context) string {
+	return ""
+}
+
+// Tx implements POST /api/v1/tx — opens a new transaction on the
+// caller's connection profile and returns an opaque txid.
+func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.TxBeginReq) (*gentypes.TxBeginResp, error) {
+	if s.cfg.Pool == nil || s.cfg.TxStore == nil {
+		return nil, errors.New("server: tx subsystem not configured")
+	}
+	db, err := s.cfg.Pool.DB(profileFromContextOrDefault(r.Context()))
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusBadGateway,
+			code:        "profile_unreachable",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	tx, err := db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: req.ReadOnly})
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusUnprocessableEntity,
+			code:        "tx_begin_failed",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	if req.Graph != "" {
+		if _, err := tx.ExecContext(r.Context(), "USE GRAPH "+sanitizeGraphName(req.Graph)); err != nil {
+			_ = tx.Rollback()
+			writeEndpointError(w, &endpointError{
+				status:      http.StatusUnprocessableEntity,
+				code:        "tx_use_graph_failed",
+				description: err.Error(),
+			})
+			return nil, nil
+		}
+	}
+	id := s.cfg.TxStore.put(tx, userFromContext(r.Context()))
+	return &gentypes.TxBeginResp{Txid: id}, nil
+}
+
+// Run implements POST /api/v1/tx/{txid}/run — executes one statement on
+// the open transaction and returns the row set in the same shape as the
+// synchronous Query handler.
+func (s *GraphServer) Run(w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq) (*gentypes.QueryResp, error) {
+	if s.cfg.TxStore == nil {
+		return nil, errors.New("server: tx store not configured")
+	}
+	tx, err := s.cfg.TxStore.get(req.Txid, userFromContext(r.Context()))
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusNotFound,
+			code:        "tx_not_found",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	args, err := namedArgs(req.Params)
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusBadRequest,
+			code:        "invalid_params",
+			description: "params field is not a valid JSON object: " + err.Error(),
+		})
+		return nil, nil
+	}
+	start := time.Now()
+	rows, err := tx.QueryContext(r.Context(), req.Statement, args...)
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusUnprocessableEntity,
+			code:        "query_error",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	defer func() { _ = rows.Close() }()
+	resp, err := scanQueryResult(rows, start)
+	if err != nil {
+		if rerr := rows.Err(); rerr != nil && errors.Is(err, rerr) {
+			writeEndpointError(w, &endpointError{
+				status:      http.StatusUnprocessableEntity,
+				code:        "query_error",
+				description: err.Error(),
+			})
+			return nil, nil
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+// Commit implements POST /api/v1/tx/{txid}/commit — finalises the
+// transaction and removes it from the store.
+func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
+	if s.cfg.TxStore == nil {
+		return nil, errors.New("server: tx store not configured")
+	}
+	tx, err := s.cfg.TxStore.take(req.Txid, userFromContext(r.Context()))
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusNotFound,
+			code:        "tx_not_found",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusUnprocessableEntity,
+			code:        "tx_commit_failed",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	return &gentypes.Empty{}, nil
+}
+
+// Rollback implements POST /api/v1/tx/{txid}/rollback — discards the
+// transaction and removes it from the store.
+func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
+	if s.cfg.TxStore == nil {
+		return nil, errors.New("server: tx store not configured")
+	}
+	tx, err := s.cfg.TxStore.take(req.Txid, userFromContext(r.Context()))
+	if err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusNotFound,
+			code:        "tx_not_found",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	if err := tx.Rollback(); err != nil {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusUnprocessableEntity,
+			code:        "tx_rollback_failed",
+			description: err.Error(),
+		})
+		return nil, nil
+	}
+	return &gentypes.Empty{}, nil
+}

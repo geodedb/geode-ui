@@ -56,6 +56,7 @@ func main() {
 	srv := server.New(server.Config{
 		Version: "v0.1.0",
 		Pool:    pool,
+		TxStore: server.NewTxStore(),
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     func(*http.Request) error { return errors.New("unimplemented") },

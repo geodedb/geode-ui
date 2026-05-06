@@ -18,6 +18,11 @@ type Pool interface {
 type Config struct {
 	Version string
 	Pool    Pool
+	// TxStore holds *sql.Tx handles keyed by opaque txid for the explicit
+	// transaction endpoints (POST /api/v1/tx[/{txid}/{run,commit,rollback}]).
+	// Inject NewTxStore() from main; tests can pass nil and the handlers
+	// will return a 500 if invoked, matching the Pool=nil contract.
+	TxStore *TxStore
 }
 
 // GraphServer implements gen/api.ServerInterface.
