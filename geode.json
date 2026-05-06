@@ -1,0 +1,132 @@
+{
+  "server": {
+    "bind": "0.0.0.0:8080",
+    "tls": { "cert_path": "", "key_path": "" },
+    "timeouts": {
+      "read_header_ms": 5000,
+      "read_ms": 30000,
+      "write_ms": 60000,
+      "idle_ms": 120000
+    },
+    "limits": {
+      "max_header_bytes": 16384,
+      "max_body_bytes": 1048576
+    }
+  },
+  "security": {
+    "auth": { "api_key": false, "jwt": true },
+    "cors": { "enabled": true, "origins": ["http://localhost:3000"] },
+    "rate_limit": { "global_rps": 2000, "burst": 400 }
+  },
+  "api": [
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "requestSchema": "Empty",
+      "responseSchema": "HealthResp",
+      "auth": "",
+      "rateLimit": 50
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "requestSchema": "LoginReq",
+      "responseSchema": "LoginResp",
+      "auth": "",
+      "rateLimit": 20,
+      "form_encoded": true,
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/query",
+      "requestSchema": "QueryReq",
+      "responseSchema": "QueryResp",
+      "auth": "jwt",
+      "rateLimit": 200,
+      "maxBodyBytes": 524288
+    }
+  ],
+  "websocket": [
+    {
+      "path": "/ws/ping",
+      "proto": "json",
+      "messageSchema": "PingMsg",
+      "auth": "jwt",
+      "ping_interval_ms": 30000,
+      "max_frame_bytes": 65536,
+      "max_message_bytes": 1048576
+    }
+  ],
+  "mcp": {
+    "transport": ["http"],
+    "tools": [
+      { "name": "query", "paramsSchema": "QueryReq", "resultSchema": "QueryResp" }
+    ]
+  },
+  "schemas": {
+    "Empty": { "type": "object", "properties": {} },
+    "HealthResp": {
+      "type": "object",
+      "required": ["status", "version"],
+      "properties": {
+        "status":  { "type": "string", "enum": ["ok"] },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "LoginReq": {
+      "type": "object",
+      "required": ["username", "password"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "password": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "profile":  { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "LoginResp": {
+      "type": "object",
+      "required": ["access_token", "token_type", "expires_in"],
+      "properties": {
+        "access_token": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "token_type":   { "type": "string", "enum": ["Bearer"] },
+        "expires_in":   { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    },
+    "QueryReq": {
+      "type": "object",
+      "required": ["statement"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 524288 },
+        "params":    { "type": "object", "properties": {} },
+        "graph":     { "type": "string", "maxLength": 256 },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "timeout_ms":{ "type": "integer", "minimum": 1, "maximum": 600000 }
+      }
+    },
+    "QueryResp": {
+      "type": "object",
+      "required": ["columns", "rows", "row_count", "elapsed_ms"],
+      "properties": {
+        "columns":    { "type": "array",  "items": { "type": "object", "properties": {
+          "name":  { "type": "string" },
+          "type":  { "type": "string" }
+        } } },
+        "rows":       { "type": "array",  "items": { "type": "array", "items": { } } },
+        "row_count":  { "type": "integer", "minimum": 0 },
+        "elapsed_ms": { "type": "integer", "minimum": 0 },
+        "graph_summary": {
+          "type": "object",
+          "properties": {
+            "nodes": { "type": "array", "items": { } },
+            "edges": { "type": "array", "items": { } }
+          }
+        }
+      }
+    },
+    "PingMsg": {
+      "type": "object",
+      "required": ["seq"],
+      "properties": { "seq": { "type": "integer", "minimum": 0 } }
+    }
+  }
+}
