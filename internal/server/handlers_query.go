@@ -62,8 +62,17 @@ func (s *GraphServer) handleQuery(ctx context.Context, req *gentypes.QueryReq) (
 		}
 	}
 
+	args, err := namedArgs(req.Params)
+	if err != nil {
+		return nil, &endpointError{
+			status:      http.StatusBadRequest,
+			code:        "invalid_params",
+			description: "params field is not a valid JSON object: " + err.Error(),
+		}
+	}
+
 	start := time.Now()
-	rows, err := db.QueryContext(ctx, stmt, namedArgs(req.Params)...)
+	rows, err := db.QueryContext(ctx, stmt, args...)
 	if err != nil {
 		return nil, &endpointError{
 			status:      http.StatusUnprocessableEntity,

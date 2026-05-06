@@ -65,26 +65,29 @@ func sanitizeGraphName(name string) string {
 }
 
 // namedArgs converts a JSON-encoded params object into a slice of
-// sql.NamedArg suitable for db.QueryContext. Non-object inputs (or empty)
-// produce a nil slice. Each property becomes one sql.Named entry.
+// sql.NamedArg suitable for db.QueryContext. Empty/null/missing input
+// returns (nil, nil); a syntactically invalid JSON value returns the
+// underlying decode error so the handler can surface a 400 rather than
+// silently dropping the parameters. Each property becomes one sql.Named
+// entry.
 //
 // Values are passed through as decoded Go primitives (string/float64/bool/
 // nil/[]any/map[string]any) — driver-side parameter coercion is the geode
 // driver's responsibility.
-func namedArgs(raw jsontext.Value) []any {
+func namedArgs(raw jsontext.Value) ([]any, error) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil
+		return nil, err
 	}
 	if len(m) == 0 {
-		return nil
+		return nil, nil
 	}
 	args := make([]any, 0, len(m))
 	for k, v := range m {
 		args = append(args, sql.Named(k, v))
 	}
-	return args
+	return args, nil
 }
