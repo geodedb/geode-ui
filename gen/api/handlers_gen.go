@@ -23,6 +23,11 @@ var ErrNotImplemented = errors.New("not implemented")
 // Embed UnimplementedServer and override only the methods you need.
 type ServerInterface interface {
 	Login(w http.ResponseWriter, r *http.Request, req *types.LoginReq) (*types.LoginResp, error)
+	GetBackups(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.BackupList, error)
+	PostBackups(w http.ResponseWriter, r *http.Request, req *types.BackupCreateReq) (*types.BackupRef, error)
+	Cleanup(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.BackupCleanupResp, error)
+	DeleteFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.Empty, error)
+	GetFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.BackupInfo, error)
 	Grants(w http.ResponseWriter, r *http.Request, req *types.GrantReq) (*types.Empty, error)
 	Revoke(w http.ResponseWriter, r *http.Request, req *types.GrantReq) (*types.Empty, error)
 	Graphs(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.GraphList, error)
@@ -30,11 +35,16 @@ type ServerInterface interface {
 	EdgeTypes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.EdgeTypeList, error)
 	Indexes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.IndexList, error)
 	Labels(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.LabelList, error)
+	GetMigrations(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.MigrationStatus, error)
+	PostMigrations(w http.ResponseWriter, r *http.Request, req *types.MigrationCreateReq) (*types.MigrationRef, error)
+	PostMigrationsRun(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.MigrationRunResp, error)
+	Sign(w http.ResponseWriter, r *http.Request, req *types.MigrationParam) (*types.Empty, error)
 	GetPolicies(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PolicyList, error)
 	PostPolicies(w http.ResponseWriter, r *http.Request, req *types.PolicyCreateReq) (*types.Policy, error)
 	DeleteName(w http.ResponseWriter, r *http.Request, req *types.PolicyParam) (*types.Empty, error)
 	GetName(w http.ResponseWriter, r *http.Request, req *types.PolicyParam) (*types.Policy, error)
 	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error)
+	Restore(w http.ResponseWriter, r *http.Request, req *types.RestoreReq) (*types.Empty, error)
 	GetRoles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.RoleList, error)
 	PostApiRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error)
 	DeleteRole(w http.ResponseWriter, r *http.Request, req *types.RoleParam) (*types.Empty, error)
@@ -42,7 +52,7 @@ type ServerInterface interface {
 	Tx(w http.ResponseWriter, r *http.Request, req *types.TxBeginReq) (*types.TxBeginResp, error)
 	Commit(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error)
 	Rollback(w http.ResponseWriter, r *http.Request, req *types.TxIDParam) (*types.Empty, error)
-	Run(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error)
+	PostTxidRun(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error)
 	GetUsers(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.UserList, error)
 	PostUsers(w http.ResponseWriter, r *http.Request, req *types.UserCreateReq) (*types.User, error)
 	DeleteUsername(w http.ResponseWriter, r *http.Request, req *types.UsernameParam) (*types.Empty, error)
@@ -61,6 +71,26 @@ type ServerInterface interface {
 type UnimplementedServer struct{}
 
 func (UnimplementedServer) Login(_ http.ResponseWriter, _ *http.Request, _ *types.LoginReq) (*types.LoginResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetBackups(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.BackupList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) PostBackups(_ http.ResponseWriter, _ *http.Request, _ *types.BackupCreateReq) (*types.BackupRef, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Cleanup(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.BackupCleanupResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) DeleteFile(_ http.ResponseWriter, _ *http.Request, _ *types.BackupFileParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetFile(_ http.ResponseWriter, _ *http.Request, _ *types.BackupFileParam) (*types.BackupInfo, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -92,6 +122,22 @@ func (UnimplementedServer) Labels(_ http.ResponseWriter, _ *http.Request, _ *typ
 	return nil, ErrNotImplemented
 }
 
+func (UnimplementedServer) GetMigrations(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.MigrationStatus, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) PostMigrations(_ http.ResponseWriter, _ *http.Request, _ *types.MigrationCreateReq) (*types.MigrationRef, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) PostMigrationsRun(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.MigrationRunResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Sign(_ http.ResponseWriter, _ *http.Request, _ *types.MigrationParam) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
 func (UnimplementedServer) GetPolicies(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.PolicyList, error) {
 	return nil, ErrNotImplemented
 }
@@ -109,6 +155,10 @@ func (UnimplementedServer) GetName(_ http.ResponseWriter, _ *http.Request, _ *ty
 }
 
 func (UnimplementedServer) Query(_ http.ResponseWriter, _ *http.Request, _ *types.QueryReq) (*types.QueryResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Restore(_ http.ResponseWriter, _ *http.Request, _ *types.RestoreReq) (*types.Empty, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -140,7 +190,7 @@ func (UnimplementedServer) Rollback(_ http.ResponseWriter, _ *http.Request, _ *t
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) Run(_ http.ResponseWriter, _ *http.Request, _ *types.TxRunReq) (*types.QueryResp, error) {
+func (UnimplementedServer) PostTxidRun(_ http.ResponseWriter, _ *http.Request, _ *types.TxRunReq) (*types.QueryResp, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -267,6 +317,126 @@ func (s catchAllServer) Login(w http.ResponseWriter, r *http.Request, req *types
 		HasTypedResponse:   true,
 		PathParams:         []string(nil),
 		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetBackups(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.BackupList, error) {
+	return callCatchAll[*types.BackupList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/backups",
+		MuxPattern:         "GET /api/v1/backups",
+		MethodName:         "GetBackups",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.BackupList",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "BackupList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) PostBackups(w http.ResponseWriter, r *http.Request, req *types.BackupCreateReq) (*types.BackupRef, error) {
+	return callCatchAll[*types.BackupRef](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/backups",
+		MuxPattern:         "POST /api/v1/backups",
+		MethodName:         "PostBackups",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.BackupCreateReq",
+		ResponseType:       "*types.BackupRef",
+		RequestSchema:      "BackupCreateReq",
+		ResponseSchema:     "BackupRef",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Cleanup(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.BackupCleanupResp, error) {
+	return callCatchAll[*types.BackupCleanupResp](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/backups/cleanup",
+		MuxPattern:         "POST /api/v1/backups/cleanup",
+		MethodName:         "Cleanup",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.BackupCleanupResp",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "BackupCleanupResp",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "DELETE",
+		Path:               "/api/v1/backups/{file}",
+		MuxPattern:         "DELETE /api/v1/backups/{file}",
+		MethodName:         "DeleteFile",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.BackupFileParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "BackupFileParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"file"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.BackupInfo, error) {
+	return callCatchAll[*types.BackupInfo](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/backups/{file}",
+		MuxPattern:         "GET /api/v1/backups/{file}",
+		MethodName:         "GetFile",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.BackupFileParam",
+		ResponseType:       "*types.BackupInfo",
+		RequestSchema:      "BackupFileParam",
+		ResponseSchema:     "BackupInfo",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"file"},
+		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
@@ -440,6 +610,102 @@ func (s catchAllServer) Labels(w http.ResponseWriter, r *http.Request, req *type
 	}, req)
 }
 
+func (s catchAllServer) GetMigrations(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.MigrationStatus, error) {
+	return callCatchAll[*types.MigrationStatus](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/migrations",
+		MuxPattern:         "GET /api/v1/migrations",
+		MethodName:         "GetMigrations",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.MigrationStatus",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "MigrationStatus",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) PostMigrations(w http.ResponseWriter, r *http.Request, req *types.MigrationCreateReq) (*types.MigrationRef, error) {
+	return callCatchAll[*types.MigrationRef](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/migrations",
+		MuxPattern:         "POST /api/v1/migrations",
+		MethodName:         "PostMigrations",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.MigrationCreateReq",
+		ResponseType:       "*types.MigrationRef",
+		RequestSchema:      "MigrationCreateReq",
+		ResponseSchema:     "MigrationRef",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.MigrationRunResp, error) {
+	return callCatchAll[*types.MigrationRunResp](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/migrations/run",
+		MuxPattern:         "POST /api/v1/migrations/run",
+		MethodName:         "PostMigrationsRun",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.MigrationRunResp",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "MigrationRunResp",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Sign(w http.ResponseWriter, r *http.Request, req *types.MigrationParam) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/migrations/{name}/sign",
+		MuxPattern:         "POST /api/v1/migrations/{name}/sign",
+		MethodName:         "Sign",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.MigrationParam",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "MigrationParam",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"name"},
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
 func (s catchAllServer) GetPolicies(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PolicyList, error) {
 	return callCatchAll[*types.PolicyList](s.handler, w, r, RouteInfo{
 		Method:             "GET",
@@ -555,6 +821,30 @@ func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types
 		HasTypedResponse:   true,
 		PathParams:         []string(nil),
 		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Restore(w http.ResponseWriter, r *http.Request, req *types.RestoreReq) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/restore",
+		MuxPattern:         "POST /api/v1/restore",
+		MethodName:         "Restore",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.RestoreReq",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "RestoreReq",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
@@ -728,12 +1018,12 @@ func (s catchAllServer) Rollback(w http.ResponseWriter, r *http.Request, req *ty
 	}, req)
 }
 
-func (s catchAllServer) Run(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error) {
+func (s catchAllServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *types.TxRunReq) (*types.QueryResp, error) {
 	return callCatchAll[*types.QueryResp](s.handler, w, r, RouteInfo{
 		Method:             "POST",
 		Path:               "/api/v1/tx/{txid}/run",
 		MuxPattern:         "POST /api/v1/tx/{txid}/run",
-		MethodName:         "Run",
+		MethodName:         "PostTxidRun",
 		BodyMode:           "json",
 		Auth:               "jwt",
 		Surface:            "public",
@@ -1052,6 +1342,437 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		req.Username = r.FormValue("username")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Login(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetBackups *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetBackups = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetBackups",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/backups"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_get_GetBackups != nil { lim, rem, reset := bkt_get_GetBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetBackups(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_PostBackups *securex.Bucket
+	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_PostBackups = securex.NewBucket(10, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostBackups",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/backups"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_PostBackups != nil { lim, rem, reset := bkt_post_PostBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.BackupCreateReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PostBackups(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Cleanup *securex.Bucket
+	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_Cleanup = securex.NewBucket(10, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/backups/cleanup", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Cleanup",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/backups/cleanup"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_Cleanup != nil { lim, rem, reset := bkt_post_Cleanup.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Cleanup.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Cleanup(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_delete_DeleteFile *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteFile = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("DELETE /api/v1/backups/{file}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteFile",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/backups/{file}"),
+				attribute.String("http.method", "DELETE"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_delete_DeleteFile != nil { lim, rem, reset := bkt_delete_DeleteFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.BackupFileParam
+		req.File = r.URL.Query().Get("file")
+		req.File = r.PathValue("file")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.DeleteFile(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetFile *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetFile = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/backups/{file}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetFile",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/backups/{file}"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_get_GetFile != nil { lim, rem, reset := bkt_get_GetFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.BackupFileParam
+		req.File = r.URL.Query().Get("file")
+		req.File = r.PathValue("file")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetFile(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -1446,6 +2167,350 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			_ = json.MarshalWrite(w, resp)
 		}
 	})
+	var bkt_get_GetMigrations *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetMigrations = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/migrations", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetMigrations",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/migrations"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_get_GetMigrations != nil { lim, rem, reset := bkt_get_GetMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetMigrations(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_PostMigrations *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_PostMigrations = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/migrations", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostMigrations",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/migrations"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_PostMigrations != nil { lim, rem, reset := bkt_post_PostMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.MigrationCreateReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PostMigrations(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_PostMigrationsRun *securex.Bucket
+	if (5) > 0 && opts.GlobalBurst > 0 { bkt_post_PostMigrationsRun = securex.NewBucket(5, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/migrations/run", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostMigrationsRun",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/migrations/run"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_PostMigrationsRun != nil { lim, rem, reset := bkt_post_PostMigrationsRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrationsRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PostMigrationsRun(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Sign *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Sign = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/migrations/{name}/sign", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Sign",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/migrations/{name}/sign"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_Sign != nil { lim, rem, reset := bkt_post_Sign.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Sign.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.MigrationParam
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.Name = r.PathValue("name")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Sign(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
 	var bkt_get_GetPolicies *securex.Bucket
 	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetPolicies = securex.NewBucket(100, opts.GlobalBurst) }
 	mux.HandleFunc("GET /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
@@ -1818,6 +2883,92 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Query(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_Restore *securex.Bucket
+	if (5) > 0 && opts.GlobalBurst > 0 { bkt_post_Restore = securex.NewBucket(5, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/restore", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Restore",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/restore"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		if bkt_post_Restore != nil { lim, rem, reset := bkt_post_Restore.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Restore.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.RestoreReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Restore(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -2302,10 +3453,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			_ = json.MarshalWrite(w, resp)
 		}
 	})
-	var bkt_post_Run *securex.Bucket
-	if (200) > 0 && opts.GlobalBurst > 0 { bkt_post_Run = securex.NewBucket(200, opts.GlobalBurst) }
+	var bkt_post_PostTxidRun *securex.Bucket
+	if (200) > 0 && opts.GlobalBurst > 0 { bkt_post_PostTxidRun = securex.NewBucket(200, opts.GlobalBurst) }
 	mux.HandleFunc("POST /api/v1/tx/{txid}/run", func(w http.ResponseWriter, r *http.Request) {
-		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Run",
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostTxidRun",
 			trace.WithAttributes(
 				attribute.String("http.route", "/api/v1/tx/{txid}/run"),
 				attribute.String("http.method", "POST"),
@@ -2324,12 +3475,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if bkt_post_Run != nil { lim, rem, reset := bkt_post_Run.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Run.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostTxidRun != nil { lim, rem, reset := bkt_post_PostTxidRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostTxidRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxRunReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Txid = r.PathValue("txid")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.Run(w, r, &req)
+		resp, err := srv.PostTxidRun(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

@@ -17,6 +17,88 @@ func (v AssignRoleReq) Valid() error {
 	return nil
 }
 
+// BackupCleanupResp generated from config schema
+type BackupCleanupResp struct {
+	FreedBytes int64 `json:"freed_bytes" genapi:"freed_bytes"`
+	Removed int64 `json:"removed" genapi:"removed"`
+}
+
+// Valid validates BackupCleanupResp fields against schema constraints.
+func (v BackupCleanupResp) Valid() error {
+	if v.FreedBytes < 0 { return errors.New("freed_bytes: too small") }
+	if v.Removed < 0 { return errors.New("removed: too small") }
+	return nil
+}
+
+// BackupCreateReq generated from config schema
+type BackupCreateReq struct {
+	Graph string `json:"graph" genapi:"graph"`
+	Output string `json:"output" genapi:"output"`
+}
+
+// Valid validates BackupCreateReq fields against schema constraints.
+func (v BackupCreateReq) Valid() error {
+	if len(v.Graph) > 256 { return errors.New("graph: too long") }
+	if len(v.Output) > 1024 { return errors.New("output: too long") }
+	return nil
+}
+
+// BackupFileParam generated from config schema
+type BackupFileParam struct {
+	File string `json:"file" genapi:"file"`
+}
+
+// Valid validates BackupFileParam fields against schema constraints.
+func (v BackupFileParam) Valid() error {
+	if len(v.File) < 1 { return errors.New("file: too short") }
+	if len(v.File) > 256 { return errors.New("file: too long") }
+	return nil
+}
+
+// BackupInfo generated from config schema
+type BackupInfo struct {
+	CreatedAt string `json:"created_at" genapi:"created_at"`
+	EdgeCount int64 `json:"edge_count" genapi:"edge_count"`
+	File string `json:"file" genapi:"file"`
+	GraphCount int64 `json:"graph_count" genapi:"graph_count"`
+	NodeCount int64 `json:"node_count" genapi:"node_count"`
+	Path string `json:"path" genapi:"path"`
+	SizeBytes int64 `json:"size_bytes" genapi:"size_bytes"`
+}
+
+// Valid validates BackupInfo fields against schema constraints.
+func (v BackupInfo) Valid() error {
+	return nil
+}
+
+// BackupList generated from config schema
+type BackupList struct {
+	Backups []jsontext.Value `json:"backups" genapi:"backups"`
+}
+
+// Valid validates BackupList fields against schema constraints.
+func (v BackupList) Valid() error {
+	return nil
+}
+
+// BackupRef generated from config schema
+type BackupRef struct {
+	CreatedAt string `json:"created_at" genapi:"created_at"`
+	File string `json:"file" genapi:"file"`
+	Path string `json:"path" genapi:"path"`
+	SizeBytes int64 `json:"size_bytes" genapi:"size_bytes"`
+}
+
+// Valid validates BackupRef fields against schema constraints.
+func (v BackupRef) Valid() error {
+	if len(v.CreatedAt) > 64 { return errors.New("created_at: too long") }
+	if len(v.File) < 1 { return errors.New("file: too short") }
+	if len(v.File) > 256 { return errors.New("file: too long") }
+	if len(v.Path) > 1024 { return errors.New("path: too long") }
+	if v.SizeBytes < 0 { return errors.New("size_bytes: too small") }
+	return nil
+}
+
 // ConstraintList generated from config schema
 type ConstraintList struct {
 	Constraints []jsontext.Value `json:"constraints" genapi:"constraints"`
@@ -167,6 +249,65 @@ func (v LoginResp) Valid() error {
 		if v.TokenType == "Bearer" { okEnum = true }
 		if !okEnum { return errors.New("token_type: invalid enum value") }
 	}
+	return nil
+}
+
+// MigrationCreateReq generated from config schema
+type MigrationCreateReq struct {
+	Description string `json:"description" genapi:"description"`
+	Name string `json:"name" genapi:"name"`
+}
+
+// Valid validates MigrationCreateReq fields against schema constraints.
+func (v MigrationCreateReq) Valid() error {
+	if len(v.Description) > 1024 { return errors.New("description: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	return nil
+}
+
+// MigrationParam generated from config schema
+type MigrationParam struct {
+	Name string `json:"name" genapi:"name"`
+}
+
+// Valid validates MigrationParam fields against schema constraints.
+func (v MigrationParam) Valid() error {
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 256 { return errors.New("name: too long") }
+	return nil
+}
+
+// MigrationRef generated from config schema
+type MigrationRef struct {
+	CreatedAt string `json:"created_at" genapi:"created_at"`
+	Name string `json:"name" genapi:"name"`
+	Path string `json:"path" genapi:"path"`
+}
+
+// Valid validates MigrationRef fields against schema constraints.
+func (v MigrationRef) Valid() error {
+	return nil
+}
+
+// MigrationRunResp generated from config schema
+type MigrationRunResp struct {
+	Applied []string `json:"applied" genapi:"applied"`
+}
+
+// Valid validates MigrationRunResp fields against schema constraints.
+func (v MigrationRunResp) Valid() error {
+	return nil
+}
+
+// MigrationStatus generated from config schema
+type MigrationStatus struct {
+	Applied []jsontext.Value `json:"applied" genapi:"applied"`
+	Pending []string `json:"pending" genapi:"pending"`
+}
+
+// Valid validates MigrationStatus fields against schema constraints.
+func (v MigrationStatus) Valid() error {
 	return nil
 }
 
@@ -329,6 +470,20 @@ func (v QueryStreamMsg) Valid() error {
 	if len(v.Message) > 4096 { return errors.New("message: too long") }
 	if v.RowCount < 0 { return errors.New("row_count: too small") }
 	if len(v.Statement) > 524288 { return errors.New("statement: too long") }
+	return nil
+}
+
+// RestoreReq generated from config schema
+type RestoreReq struct {
+	File string `json:"file" genapi:"file"`
+	TargetTime string `json:"target_time" genapi:"target_time"`
+}
+
+// Valid validates RestoreReq fields against schema constraints.
+func (v RestoreReq) Valid() error {
+	if len(v.File) < 1 { return errors.New("file: too short") }
+	if len(v.File) > 256 { return errors.New("file: too long") }
+	if len(v.TargetTime) > 64 { return errors.New("target_time: too long") }
 	return nil
 }
 

@@ -233,7 +233,7 @@ func TestTxHandlers_HappyPath(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/tx/"+beginResp.Txid+"/run", nil)
-	runResp, err := srv.Run(rec, runReq, &gentypes.TxRunReq{
+	runResp, err := srv.PostTxidRun(rec, runReq, &gentypes.TxRunReq{
 		Txid:      beginResp.Txid,
 		Statement: "MATCH (n) RETURN n",
 	})

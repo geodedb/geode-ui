@@ -85,6 +85,35 @@ export interface AssignRoleReq {
   role: string;
   username: string;
 }
+export interface BackupCleanupResp {
+  freed_bytes?: number;
+  removed: number;
+}
+export interface BackupCreateReq {
+  graph?: string;
+  output?: string;
+}
+export interface BackupFileParam {
+  file: string;
+}
+export interface BackupInfo {
+  created_at?: string;
+  edge_count?: number;
+  file: string;
+  graph_count?: number;
+  node_count?: number;
+  path?: string;
+  size_bytes?: number;
+}
+export interface BackupList {
+  backups: Array<unknown>;
+}
+export interface BackupRef {
+  created_at?: string;
+  file: string;
+  path?: string;
+  size_bytes?: number;
+}
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;
 }
@@ -124,6 +153,25 @@ export interface LoginResp {
   access_token: string;
   expires_in: number;
   token_type: string;
+}
+export interface MigrationCreateReq {
+  description?: string;
+  name: string;
+}
+export interface MigrationParam {
+  name: string;
+}
+export interface MigrationRef {
+  created_at?: string;
+  name: string;
+  path?: string;
+}
+export interface MigrationRunResp {
+  applied: Array<string>;
+}
+export interface MigrationStatus {
+  applied: Array<unknown>;
+  pending: Array<string>;
 }
 export interface PasswordChangeReq {
   new_password: string;
@@ -177,6 +225,10 @@ export interface QueryStreamMsg {
   row?: Array<unknown>;
   row_count?: number;
   statement?: string;
+}
+export interface RestoreReq {
+  file: string;
+  target_time?: string;
 }
 export interface Role {
   description?: string;
@@ -902,6 +954,51 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
+  async getBackups(req: Empty): Promise<BackupList> {
+    return this.request<BackupList>(
+      "GET",
+      "/api/v1/backups",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
+  async postBackups(req: BackupCreateReq): Promise<BackupRef> {
+    return this.request<BackupRef>(
+      "POST",
+      "/api/v1/backups",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async cleanup(req: Empty): Promise<BackupCleanupResp> {
+    return this.request<BackupCleanupResp>(
+      "POST",
+      "/api/v1/backups/cleanup",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async deleteFile(req: BackupFileParam): Promise<Empty> {
+    return this.request<Empty>(
+      "DELETE",
+      "/api/v1/backups/{file}",
+      "jwt",
+      "query",
+      ["file"], copyRecord(req),
+    );
+  }
+  async getFile(req: BackupFileParam): Promise<BackupInfo> {
+    return this.request<BackupInfo>(
+      "GET",
+      "/api/v1/backups/{file}",
+      "jwt",
+      "query",
+      ["file"], copyRecord(req),
+    );
+  }
   async grants(req: GrantReq): Promise<Empty> {
     return this.request<Empty>(
       "POST",
@@ -965,6 +1062,42 @@ export class GenAPIClient {
       ["graph"], copyRecord(req),
     );
   }
+  async getMigrations(req: Empty): Promise<MigrationStatus> {
+    return this.request<MigrationStatus>(
+      "GET",
+      "/api/v1/migrations",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
+  async postMigrations(req: MigrationCreateReq): Promise<MigrationRef> {
+    return this.request<MigrationRef>(
+      "POST",
+      "/api/v1/migrations",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async postMigrationsRun(req: Empty): Promise<MigrationRunResp> {
+    return this.request<MigrationRunResp>(
+      "POST",
+      "/api/v1/migrations/run",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async sign(req: MigrationParam): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/migrations/{name}/sign",
+      "jwt",
+      "json",
+      ["name"], copyRecord(req),
+    );
+  }
   async getPolicies(req: Empty): Promise<PolicyList> {
     return this.request<PolicyList>(
       "GET",
@@ -1005,6 +1138,15 @@ export class GenAPIClient {
     return this.request<QueryResp>(
       "POST",
       "/api/v1/query",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async restore(req: RestoreReq): Promise<Empty> {
+    return this.request<Empty>(
+      "POST",
+      "/api/v1/restore",
       "jwt",
       "json",
       [], copyRecord(req),
@@ -1073,7 +1215,7 @@ export class GenAPIClient {
       ["txid"], copyRecord(req),
     );
   }
-  async run(req: TxRunReq): Promise<QueryResp> {
+  async postTxidRun(req: TxRunReq): Promise<QueryResp> {
     return this.request<QueryResp>(
       "POST",
       "/api/v1/tx/{txid}/run",
@@ -1216,6 +1358,21 @@ export function useGenAPIClient(config: ClientConfig): GenAPIClient {
 export function useLoginMutation(client: GenAPIClient): MutationState<LoginReq, LoginResp> {
   return useMutationState((req) => client.login(req));
 }
+export function useGetBackups(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<BackupList> {
+  return usePromise(() => client.getBackups(req), deps);
+}
+export function usePostBackupsMutation(client: GenAPIClient): MutationState<BackupCreateReq, BackupRef> {
+  return useMutationState((req) => client.postBackups(req));
+}
+export function useCleanupMutation(client: GenAPIClient): MutationState<Empty, BackupCleanupResp> {
+  return useMutationState((req) => client.cleanup(req));
+}
+export function useDeleteFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
+  return usePromise(() => client.deleteFile(req), deps);
+}
+export function useGetFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = []): RequestState<BackupInfo> {
+  return usePromise(() => client.getFile(req), deps);
+}
 export function useGrantsMutation(client: GenAPIClient): MutationState<GrantReq, Empty> {
   return useMutationState((req) => client.grants(req));
 }
@@ -1237,6 +1394,18 @@ export function useIndexes(client: GenAPIClient, req: GraphParam, deps: Readonly
 export function useLabels(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<LabelList> {
   return usePromise(() => client.labels(req), deps);
 }
+export function useGetMigrations(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<MigrationStatus> {
+  return usePromise(() => client.getMigrations(req), deps);
+}
+export function usePostMigrationsMutation(client: GenAPIClient): MutationState<MigrationCreateReq, MigrationRef> {
+  return useMutationState((req) => client.postMigrations(req));
+}
+export function usePostMigrationsRunMutation(client: GenAPIClient): MutationState<Empty, MigrationRunResp> {
+  return useMutationState((req) => client.postMigrationsRun(req));
+}
+export function useSignMutation(client: GenAPIClient): MutationState<MigrationParam, Empty> {
+  return useMutationState((req) => client.sign(req));
+}
 export function useGetPolicies(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<PolicyList> {
   return usePromise(() => client.getPolicies(req), deps);
 }
@@ -1251,6 +1420,9 @@ export function useGetName(client: GenAPIClient, req: PolicyParam, deps: Readonl
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));
+}
+export function useRestoreMutation(client: GenAPIClient): MutationState<RestoreReq, Empty> {
+  return useMutationState((req) => client.restore(req));
 }
 export function useGetRoles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<RoleList> {
   return usePromise(() => client.getRoles(req), deps);
@@ -1273,8 +1445,8 @@ export function useCommitMutation(client: GenAPIClient): MutationState<TxIDParam
 export function useRollbackMutation(client: GenAPIClient): MutationState<TxIDParam, Empty> {
   return useMutationState((req) => client.rollback(req));
 }
-export function useRunMutation(client: GenAPIClient): MutationState<TxRunReq, QueryResp> {
-  return useMutationState((req) => client.run(req));
+export function usePostTxidRunMutation(client: GenAPIClient): MutationState<TxRunReq, QueryResp> {
+  return useMutationState((req) => client.postTxidRun(req));
 }
 export function useGetUsers(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<UserList> {
   return usePromise(() => client.getUsers(req), deps);

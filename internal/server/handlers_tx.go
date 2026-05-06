@@ -133,10 +133,15 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 	return &gentypes.TxBeginResp{Txid: id}, nil
 }
 
-// Run implements POST /api/v1/tx/{txid}/run — executes one statement on
-// the open transaction and returns the row set in the same shape as the
-// synchronous Query handler.
-func (s *GraphServer) Run(w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq) (*gentypes.QueryResp, error) {
+// PostTxidRun implements POST /api/v1/tx/{txid}/run — executes one
+// statement on the open transaction and returns the row set in the
+// same shape as the synchronous Query handler.
+//
+// Naming: genapi disambiguated this from the migrations `MIGRATE RUN`
+// endpoint (POST /api/v1/migrations/run, method PostMigrationsRun) by
+// folding the path-parameter token into the method name. The B7+B8
+// regen rotated this from the simpler `Run` we had before that.
+func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq) (*gentypes.QueryResp, error) {
 	if s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx store not configured")
 	}

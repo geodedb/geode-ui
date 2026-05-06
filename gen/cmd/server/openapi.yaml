@@ -142,6 +142,131 @@ components:
                 - username
                 - role
             type: object
+        BackupCleanupResp:
+            description: Generated schema for BackupCleanupResp
+            example:
+                removed: 0
+            properties:
+                freedBytes:
+                    example: 0
+                    format: int32
+                    maximum: 2147483647
+                    minimum: 0
+                    type: integer
+                removed:
+                    example: 0
+                    format: int32
+                    maximum: 2147483647
+                    minimum: 0
+                    type: integer
+            required:
+                - removed
+            type: object
+        BackupCreateReq:
+            description: Generated schema for BackupCreateReq
+            example: {}
+            properties:
+                graph:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+                output:
+                    example: x
+                    maxLength: 1024
+                    pattern: ^.*$
+                    type: string
+            type: object
+        BackupInfo:
+            description: Generated schema for BackupInfo
+            example:
+                file: x
+            properties:
+                createdAt:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                edgeCount:
+                    example: 1
+                    format: int32
+                    maximum: 2147483647
+                    minimum: -2147483648
+                    type: integer
+                file:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                graphCount:
+                    example: 1
+                    format: int32
+                    maximum: 2147483647
+                    minimum: -2147483648
+                    type: integer
+                nodeCount:
+                    example: 1
+                    format: int32
+                    maximum: 2147483647
+                    minimum: -2147483648
+                    type: integer
+                path:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                sizeBytes:
+                    example: 1
+                    format: int32
+                    maximum: 2147483647
+                    minimum: -2147483648
+                    type: integer
+            required:
+                - file
+            type: object
+        BackupList:
+            description: Generated schema for BackupList
+            example:
+                backups: []
+            properties:
+                backups:
+                    example: []
+                    items: {}
+                    maxItems: 100
+                    type: array
+            required:
+                - backups
+            type: object
+        BackupRef:
+            description: Generated schema for BackupRef
+            example:
+                file: x
+            properties:
+                createdAt:
+                    example: x
+                    maxLength: 64
+                    pattern: ^.*$
+                    type: string
+                file:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                path:
+                    example: x
+                    maxLength: 1024
+                    pattern: ^.*$
+                    type: string
+                sizeBytes:
+                    example: 0
+                    format: int32
+                    maximum: 2147483647
+                    minimum: 0
+                    type: integer
+            required:
+                - file
+            type: object
         ConstraintList:
             description: Generated schema for ConstraintList
             example:
@@ -358,6 +483,103 @@ components:
                 - accessToken
                 - tokenType
                 - expiresIn
+            type: object
+        MigrationCreateReq:
+            description: Generated schema for MigrationCreateReq
+            example:
+                name: x
+            properties:
+                description:
+                    example: x
+                    maxLength: 1024
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+            required:
+                - name
+            type: object
+        MigrationParam:
+            description: Generated schema for MigrationParam
+            example:
+                name: x
+            properties:
+                name:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+            required:
+                - name
+            type: object
+        MigrationRef:
+            description: Generated schema for MigrationRef
+            example:
+                name: x
+            properties:
+                createdAt:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                path:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+            required:
+                - name
+            type: object
+        MigrationRunResp:
+            description: Generated schema for MigrationRunResp
+            example:
+                applied:
+                    - example
+            properties:
+                applied:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - applied
+            type: object
+        MigrationStatus:
+            description: Generated schema for MigrationStatus
+            example:
+                applied: []
+                pending:
+                    - example
+            properties:
+                applied:
+                    example: []
+                    items: {}
+                    maxItems: 100
+                    type: array
+                pending:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - pending
+                - applied
             type: object
         PasswordChangeReq:
             description: Generated schema for PasswordChangeReq
@@ -619,6 +841,25 @@ components:
                     type: string
             required:
                 - kind
+            type: object
+        RestoreReq:
+            description: Generated schema for RestoreReq
+            example:
+                file: x
+            properties:
+                file:
+                    example: x
+                    maxLength: 256
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                targetTime:
+                    example: x
+                    maxLength: 64
+                    pattern: ^.*$
+                    type: string
+            required:
+                - file
             type: object
         Role:
             description: Generated schema for Role
@@ -947,6 +1188,241 @@ paths:
             summary: POST /api/v1/auth/login
             tags:
                 - Login
+    /api/v1/backups:
+        get:
+            description: GET /api/v1/backups operation
+            operationId: getApiV1Backups
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BackupList'
+                    description: GET /api/v1/backups success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/backups
+            tags:
+                - Backups
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        post:
+            description: POST /api/v1/backups operation
+            operationId: postApiV1Backups
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BackupCreateReq'
+                description: POST /api/v1/backups request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BackupRef'
+                    description: POST /api/v1/backups success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/backups
+            tags:
+                - Backups
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/backups/{file}:
+        delete:
+            description: DELETE /api/v1/backups/{file} operation
+            operationId: deleteApiV1BackupsFile
+            parameters:
+                - description: DELETE /api/v1/backups/{file} path parameter file
+                  in: path
+                  name: file
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: DELETE /api/v1/backups/{file} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: DELETE /api/v1/backups/{file}
+            tags:
+                - File
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        get:
+            description: GET /api/v1/backups/{file} operation
+            operationId: getApiV1BackupsFile
+            parameters:
+                - description: GET /api/v1/backups/{file} path parameter file
+                  in: path
+                  name: file
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BackupInfo'
+                    description: GET /api/v1/backups/{file} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/backups/{file}
+            tags:
+                - File
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/backups/cleanup:
+        post:
+            description: POST /api/v1/backups/cleanup operation
+            operationId: postApiV1BackupsCleanup
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Empty'
+                description: POST /api/v1/backups/cleanup request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BackupCleanupResp'
+                    description: POST /api/v1/backups/cleanup success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/backups/cleanup
+            tags:
+                - Cleanup
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /api/v1/grants:
         post:
             description: POST /api/v1/grants operation
@@ -1264,6 +1740,199 @@ paths:
             summary: GET /api/v1/graphs/{graph}/labels
             tags:
                 - Labels
+    /api/v1/migrations:
+        get:
+            description: GET /api/v1/migrations operation
+            operationId: getApiV1Migrations
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/MigrationStatus'
+                    description: GET /api/v1/migrations success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/migrations
+            tags:
+                - Migrations
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+        post:
+            description: POST /api/v1/migrations operation
+            operationId: postApiV1Migrations
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/MigrationCreateReq'
+                description: POST /api/v1/migrations request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/MigrationRef'
+                    description: POST /api/v1/migrations success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/migrations
+            tags:
+                - Migrations
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/migrations/{name}/sign:
+        post:
+            description: POST /api/v1/migrations/{name}/sign operation
+            operationId: postApiV1MigrationsNameSign
+            parameters:
+                - description: POST /api/v1/migrations/{name}/sign path parameter name
+                  in: path
+                  name: name
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/MigrationParam'
+                description: POST /api/v1/migrations/{name}/sign request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/migrations/{name}/sign success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/migrations/{name}/sign
+            tags:
+                - Sign
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
+    /api/v1/migrations/run:
+        post:
+            description: POST /api/v1/migrations/run operation
+            operationId: postApiV1MigrationsRun
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/Empty'
+                description: POST /api/v1/migrations/run request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/MigrationRunResp'
+                    description: POST /api/v1/migrations/run success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/migrations/run
+            tags:
+                - Run
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /api/v1/policies:
         get:
             description: GET /api/v1/policies operation
@@ -1495,6 +2164,54 @@ paths:
             summary: POST /api/v1/query
             tags:
                 - Query
+    /api/v1/restore:
+        post:
+            description: POST /api/v1/restore operation
+            operationId: postApiV1Restore
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RestoreReq'
+                description: POST /api/v1/restore request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: POST /api/v1/restore success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/restore
+            tags:
+                - Restore
+            x-rbac:
+                required_roles:
+                    - admin
+                required_scopes: []
     /api/v1/roles:
         get:
             description: GET /api/v1/roles operation
@@ -2521,6 +3238,10 @@ servers:
     - description: API server
       url: https://api.devnw.com/v1
 tags:
+    - description: Operations for Backups
+      name: Backups
+    - description: Operations for Cleanup
+      name: Cleanup
     - description: Operations for Commit
       name: Commit
     - description: Operations for Constraints
@@ -2531,6 +3252,8 @@ tags:
       name: EdgeTypes
     - description: Operations for Enable
       name: Enable
+    - description: Operations for File
+      name: File
     - description: Operations for Grants
       name: Grants
     - description: Operations for Graphs
@@ -2543,6 +3266,8 @@ tags:
       name: Labels
     - description: Operations for Login
       name: Login
+    - description: Operations for Migrations
+      name: Migrations
     - description: Operations for Name
       name: Name
     - description: Operations for Password
@@ -2555,6 +3280,8 @@ tags:
       name: Policies
     - description: Operations for Query
       name: Query
+    - description: Operations for Restore
+      name: Restore
     - description: Operations for Revoke
       name: Revoke
     - description: Operations for Role
@@ -2565,6 +3292,8 @@ tags:
       name: Rollback
     - description: Operations for Run
       name: Run
+    - description: Operations for Sign
+      name: Sign
     - description: Operations for Tx
       name: Tx
     - description: Operations for Username
