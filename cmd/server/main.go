@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
@@ -13,17 +14,41 @@ import (
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
+	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/server"
 	"geodedb.com/geode-ui/internal/ui"
 )
 
 func main() {
-	var listen string
+	var (
+		listen       string
+		profilesFile string
+	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
+	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
+
+	profiles := []conn.Profile{{Name: "default", DSN: "quic://127.0.0.1:3141"}}
+	if profilesFile != "" {
+		raw, err := os.ReadFile(profilesFile)
+		if err != nil {
+			slog.Error("read profiles", "err", err)
+			os.Exit(1)
+		}
+		if err := json.Unmarshal(raw, &profiles); err != nil {
+			slog.Error("parse profiles", "err", err)
+			os.Exit(1)
+		}
+	}
+	pool, err := conn.NewPool(profiles)
+	if err != nil {
+		slog.Error("conn pool", "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = pool.Close() }()
 
 	mux := http.NewServeMux()
 
