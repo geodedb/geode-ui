@@ -13,6 +13,7 @@ import (
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
+	"geodedb.com/geode-ui/internal/server"
 	"geodedb.com/geode-ui/internal/ui"
 )
 
@@ -26,8 +27,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Stub server — handlers will be implemented in Task A4+.
-	srv := &stubServer{}
+	srv := server.New(server.Config{Version: "v0.1.0"})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     func(*http.Request) error { return errors.New("unimplemented") },
 		GlobalRate:  2000,
@@ -51,7 +51,7 @@ func main() {
 	}
 	handler := httpx.WrapHandler(hcfg, mux)
 
-	server := &http.Server{
+	httpSrv := &http.Server{
 		Addr:              listen,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -62,7 +62,7 @@ func main() {
 
 	go func() {
 		slog.Info("listening", "addr", listen)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("listen", "err", err)
 			os.Exit(1)
 		}
@@ -70,9 +70,5 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = server.Shutdown(shutdownCtx)
+	_ = httpSrv.Shutdown(shutdownCtx)
 }
-
-// stubServer satisfies gen/api.ServerInterface with not-implemented stubs.
-// Replaced by internal/server.GraphServer in Task A4.
-type stubServer struct{ genapi.UnimplementedServer }
