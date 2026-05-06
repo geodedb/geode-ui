@@ -72,6 +72,7 @@ module.exports = {
         'styled-components'
       ),
       '@': path.resolve(__dirname, 'src'),
+      '@api': path.resolve(__dirname, 'gen/client/react'),
     },
   },
   optimization: {

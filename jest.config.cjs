@@ -31,6 +31,8 @@ module.exports = {
     '^.+\\.(jpg|jpeg|png|gif|webp|avif|svg|eot|otf|ttf|woff|woff2)$':
       '<rootDir>/__test_utils__/mocks/fileMock.js',
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^@api$': '<rootDir>/gen/client/react/index.ts',
+    '^@api/(.*)$': '<rootDir>/gen/client/react/$1',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(@devnw)/)',

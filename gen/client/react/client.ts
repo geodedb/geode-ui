@@ -391,7 +391,10 @@ function joinURLPath(basePath: string, path: string): string {
 }
 
 function utf8Bytes(value: string): ArrayBuffer {
-  return new TextEncoder().encode(value).buffer;
+  const encoded = new TextEncoder().encode(value);
+  const buffer = new ArrayBuffer(encoded.byteLength);
+  new Uint8Array(buffer).set(encoded);
+  return buffer;
 }
 
 function normalizeBaseURL(baseUrl: string): string {
@@ -457,10 +460,12 @@ function sanitizeAuthValue(name: string, value: string): string {
 function bearerTokenFromAuthorization(authorization: string): string {
   const trimmed = sanitizeAuthValue("authorization", authorization);
   const parts = trimmed.split(/\s+/);
-  if (parts.length != 2 || parts[0].toLowerCase() !== "bearer") {
+  const scheme = parts[0];
+  const token = parts[1];
+  if (parts.length !== 2 || scheme === undefined || token === undefined || scheme.toLowerCase() !== "bearer") {
     throw new Error("authorization must use Bearer token format");
   }
-  return sanitizeAuthValue("authorization token", parts[1]);
+  return sanitizeAuthValue("authorization token", token);
 }
 
 function encodeWSAuthProtocol(kind: string, value: string): string {
@@ -884,7 +889,8 @@ export class GenAPIClient {
     }
     const envelope = (await response.json()) as GraphQLEnvelope;
     if (envelope.errors && envelope.errors.length > 0) {
-      throw new Error(envelope.errors[0].message);
+      const firstError = envelope.errors[0];
+      throw new Error(firstError ? firstError.message : "graphql error");
     }
     return (envelope.data?.[field] ?? null) as T;
   }

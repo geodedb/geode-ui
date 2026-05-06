@@ -18,7 +18,9 @@
     "baseUrl": ".",
     "outDir": "./dist/",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@api": ["gen/client/react/index.ts"],
+      "@api/*": ["gen/client/react/*"]
     }
   },
   "exclude": [
@@ -28,5 +30,9 @@
     "coverage",
     "__test_utils__"
   ],
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "gen/client/react/**/*"
+  ]
 }
