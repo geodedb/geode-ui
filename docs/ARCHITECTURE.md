@@ -13,6 +13,6 @@ Outbound:
 - one or more Geode servers via `geodedb.com/geode` (QUIC default, gRPC fallback, mTLS)
 
 Source of truth: `geode.json` (genapi spec). Run `make generate` after editing it.
-Generated code lives in `gen/`; do not edit by hand.
+Generated code lives in `gen/`; do not edit by hand (checked in so PRs can review handler-name diffs).
 
 Reference impl pattern: `~/src/devnw/go/oidc` (storage-abstraction, JWT auth, audit emit, embedded test http server).

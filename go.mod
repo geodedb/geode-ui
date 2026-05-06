@@ -2,8 +2,19 @@ module geodedb.com/geode-ui
 
 go 1.26.2
 
-toolchain go1.26.2
-
 replace geodedb.com/geode => /data/home/benji/src/devnw/codepros/geode/geode-client-go
 
-require github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+require (
+	github.com/stretchr/testify v1.11.1
+	go.opentelemetry.io/otel v1.43.0
+	go.opentelemetry.io/otel/metric v1.43.0
+	go.opentelemetry.io/otel/trace v1.43.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
+)
+
+require (
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)

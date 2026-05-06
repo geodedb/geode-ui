@@ -45,7 +45,7 @@ repos:
   hooks:
   - id: pretty-format-yaml
     args: [--autofix, --indent, '2']
-    exclude: ^\.gitlab-ci\.yml$
+    exclude: ^(\.gitlab-ci\.yml|gen/.*)$
 
   # Conventional commits
 - repo: https://github.com/commitizen-tools/commitizen
@@ -62,7 +62,7 @@ repos:
     entry: npx --no-install eslint --max-warnings=0
     language: system
     files: \.(ts|tsx)$
-    exclude: node_modules/
+    exclude: ^(node_modules/|gen/)
 
   - id: typecheck
     name: typescript check

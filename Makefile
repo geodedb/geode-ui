@@ -72,7 +72,7 @@ lint: web-lint go-lint
 fmt: go-fmt web-fmt
 ci: web-install lint web-typecheck test build
 clean:
-	rm -rf gen dist bin coverage.txt *.out
+	rm -rf gen internal/ui/dist bin coverage.txt *.out
 
 dev:
 	@echo "Run 'make web-dev' in one terminal and './$(BIN) -listen :8080' in another"
