@@ -1,11 +1,14 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider, createGlobalStyle } from 'styled-components'
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { Shell } from './components/layout/Shell'
 import { LoginPage } from './pages/LoginPage'
 import { QueryPage } from './pages/QueryPage'
+import { SchemaPage } from './pages/SchemaPage'
+import { AdminPage } from './pages/AdminPage'
+import { UsersPage } from './components/admin/UsersPage'
 
 const theme = {
   colors: {
@@ -58,8 +61,14 @@ const App: React.FC = () => (
           <Route path="/login" element={<LoginPage />} />
           <Route element={<ProtectedShell />}>
             <Route index element={<QueryPage />} />
-            <Route path="schema" element={<div>schema (TODO D1)</div>} />
-            <Route path="admin" element={<div>admin (TODO D2-D3)</div>} />
+            <Route path="schema" element={<SchemaPage />} />
+            <Route path="admin" element={<AdminPage />}>
+              <Route index element={<Navigate to="users" replace />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="roles" element={<div>roles (TODO D3)</div>} />
+              <Route path="policies" element={<div>policies (TODO D3)</div>} />
+              <Route path="grants" element={<div>grants (TODO D3)</div>} />
+            </Route>
             <Route path="ops" element={<div>ops (TODO D4-D5)</div>} />
           </Route>
         </Routes>

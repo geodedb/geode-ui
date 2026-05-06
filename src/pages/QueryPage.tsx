@@ -1,4 +1,4 @@
-import React, { useReducer, useRef, useState } from 'react'
+import React, { useEffect, useReducer, useRef, useState } from 'react'
 import styled from 'styled-components'
 import type { QueryResp } from '@api'
 import { GqlEditor } from '../components/editor/GqlEditor'
@@ -7,6 +7,7 @@ import { JsonView } from '../components/results/JsonView'
 import { GraphView } from '../components/results/GraphView'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle, StreamMsg } from '../lib/queryStream'
+import { useQueryStore } from '../lib/queryStore'
 
 type Tab = 'table' | 'json' | 'graph'
 
@@ -121,6 +122,19 @@ export const QueryPage: React.FC = () => {
   const [streamMode, setStreamMode] = useState(false)
   const [stream, dispatch] = useReducer(streamReducer, initialStream)
   const handleRef = useRef<StreamHandle | null>(null)
+
+  // The schema explorer (D1) stages a statement in queryStore and
+  // navigates here. Pull it once on mount, copy it into local editor
+  // state, and clear the slot so a later route change doesn't replay
+  // the same query.
+  const staged = useQueryStore((s) => s.stagedStatement)
+  const clearStaged = useQueryStore((s) => s.setStaged)
+  useEffect(() => {
+    if (staged != null) {
+      setStmt(staged)
+      clearStaged(null)
+    }
+  }, [staged, clearStaged])
 
   const runSync = async (): Promise<void> => {
     setBusy(true)
