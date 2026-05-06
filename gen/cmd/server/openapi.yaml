@@ -713,6 +713,21 @@ components:
             required:
                 - policies
             type: object
+        ProfileList:
+            description: Generated schema for ProfileList
+            example:
+                profiles:
+                    - {}
+            properties:
+                profiles:
+                    example: []
+                    items:
+                        type: object
+                    maxItems: 100
+                    type: array
+            required:
+                - profiles
+            type: object
         QueryReq:
             description: Generated schema for QueryReq
             example:
@@ -2199,6 +2214,43 @@ paths:
                 required_roles:
                     - admin
                 required_scopes: []
+    /api/v1/profiles:
+        get:
+            description: GET /api/v1/profiles operation
+            operationId: getApiV1Profiles
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProfileList'
+                    description: GET /api/v1/profiles success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/profiles
+            tags:
+                - Profiles
     /api/v1/query:
         post:
             description: POST /api/v1/query operation
@@ -3359,6 +3411,8 @@ tags:
       name: Ping
     - description: Operations for Policies
       name: Policies
+    - description: Operations for Profiles
+      name: Profiles
     - description: Operations for Query
       name: Query
     - description: Operations for Restore

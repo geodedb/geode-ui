@@ -425,6 +425,16 @@ func (v PolicyParam) Valid() error {
 	return nil
 }
 
+// ProfileList generated from config schema
+type ProfileList struct {
+	Profiles []jsontext.Value `json:"profiles" genapi:"profiles"`
+}
+
+// Valid validates ProfileList fields against schema constraints.
+func (v ProfileList) Valid() error {
+	return nil
+}
+
 // QueryReq generated from config schema
 type QueryReq struct {
 	Graph string `json:"graph" genapi:"graph"`

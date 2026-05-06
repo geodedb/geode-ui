@@ -400,6 +400,14 @@
       "auth": "jwt",
       "rateLimit": 50,
       "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/profiles",
+      "requestSchema": "Empty",
+      "responseSchema": "ProfileList",
+      "auth": "jwt",
+      "rateLimit": 50
     }
   ],
   "websocket": [
@@ -866,6 +874,22 @@
       "required": ["entries"],
       "properties": {
         "entries": { "type": "array", "items": { } }
+      }
+    },
+    "ProfileList": {
+      "type": "object",
+      "required": ["profiles"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":        { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
       }
     }
   }

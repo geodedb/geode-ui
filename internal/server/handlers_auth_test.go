@@ -15,12 +15,17 @@ import (
 // fakeProfileLookup is a tiny ProfileLookup implementation for tests
 // that don't want to spin up a real *conn.Pool.
 type fakeProfileLookup struct {
-	prof conn.Profile
-	err  error
+	prof  conn.Profile
+	err   error
+	names []string
 }
 
 func (f fakeProfileLookup) Lookup(_ string) (conn.Profile, error) {
 	return f.prof, f.err
+}
+
+func (f fakeProfileLookup) Names() []string {
+	return f.names
 }
 
 // TestLogin_RejectsWhenJWTNil exercises the server-misconfigured guard

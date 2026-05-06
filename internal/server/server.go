@@ -15,11 +15,14 @@ type Pool interface {
 	DB(name string) (*sql.DB, error)
 }
 
-// ProfileLookup resolves a profile name to a conn.Profile. *conn.Pool
-// satisfies this interface — Login uses it to locate the upstream DSN
-// for an authenticate-then-issue-token round trip.
+// ProfileLookup resolves a profile name to a conn.Profile and enumerates
+// the registered profile names. *conn.Pool satisfies this interface —
+// Login uses Lookup to locate the upstream DSN for an authenticate-then-
+// issue-token round trip; Profiles uses Names to enumerate the registered
+// profiles for the connection-picker UI without leaking DSNs.
 type ProfileLookup interface {
 	Lookup(name string) (conn.Profile, error)
+	Names() []string
 }
 
 // Config carries dependencies for GraphServer.

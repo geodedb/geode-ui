@@ -216,6 +216,9 @@ export interface PolicyList {
 export interface PolicyParam {
   name: string;
 }
+export interface ProfileList {
+  profiles: Array<Record<string, unknown>>;
+}
 export interface QueryReq {
   graph?: string;
   page_size?: number;
@@ -1167,6 +1170,15 @@ export class GenAPIClient {
       ["name"], copyRecord(req),
     );
   }
+  async profiles(req: Empty): Promise<ProfileList> {
+    return this.request<ProfileList>(
+      "GET",
+      "/api/v1/profiles",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
   async query(req: QueryReq): Promise<QueryResp> {
     return this.request<QueryResp>(
       "POST",
@@ -1453,6 +1465,9 @@ export function useDeleteName(client: GenAPIClient, req: PolicyParam, deps: Read
 }
 export function useGetName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = []): RequestState<Policy> {
   return usePromise(() => client.getName(req), deps);
+}
+export function useProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<ProfileList> {
+  return usePromise(() => client.profiles(req), deps);
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));

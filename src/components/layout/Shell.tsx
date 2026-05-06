@@ -2,6 +2,7 @@ import React from 'react'
 import { Link, Outlet } from 'react-router-dom'
 import styled from 'styled-components'
 import { useAuth } from '../../auth/AuthProvider'
+import { ConnectionPicker } from './ConnectionPicker'
 
 const Top = styled.nav`
   display: flex;
@@ -45,6 +46,7 @@ export const Shell: React.FC = () => {
     <>
       <Top>
         <Brand>Geode</Brand>
+        <ConnectionPicker />
         <NavLink to="/">Query</NavLink>
         <NavLink to="/schema">Schema</NavLink>
         <NavLink to="/admin">Admin</NavLink>

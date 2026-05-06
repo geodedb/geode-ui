@@ -974,6 +974,44 @@ func (c *Client) GetName(ctx context.Context, req *types.PolicyParam) (*types.Po
 	}
 	return &out, nil
 }
+// Profiles performs GET /api/v1/profiles.
+func (c *Client) Profiles(ctx context.Context, req *types.Empty) (*types.ProfileList, error) {
+	target, err := c.buildURL("/api/v1/profiles")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.ProfileList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Query performs POST /api/v1/query.
 func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryResp, error) {
 	target, err := c.buildURL("/api/v1/query")
