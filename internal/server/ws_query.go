@@ -163,22 +163,36 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 	return writeMsg(conn, queryStreamMsg{Kind: "end"})
 }
 
-// readMsg reads one text-frame JSON message from conn. Returns an
-// error if the frame is not a text frame or the payload doesn't parse
-// as queryStreamMsg.
+// readMsg reads one application-protocol message from conn. Transport-
+// level frames (ping/pong) are silently consumed so the caller — most
+// notably the cancel-reader goroutine in Query — does not exit on the
+// first server-initiated keepalive pong. A close frame surfaces as an
+// error so the caller can unwind cleanly; binary frames are rejected
+// because the protocol is JSON-only.
 func readMsg(conn *wsx.Conn) (queryStreamMsg, error) {
-	op, data, err := conn.ReadMessage()
-	if err != nil {
-		return queryStreamMsg{}, err
+	for {
+		op, data, err := conn.ReadMessage()
+		if err != nil {
+			return queryStreamMsg{}, err
+		}
+		switch op {
+		case wsx.OpText:
+			var m queryStreamMsg
+			if err := json.Unmarshal(data, &m); err != nil {
+				return queryStreamMsg{}, fmt.Errorf("ws: parse: %w", err)
+			}
+			return m, nil
+		case wsx.OpPing, wsx.OpPong:
+			// Transport-level keepalive; not part of the application protocol.
+			continue
+		case wsx.OpClose:
+			return queryStreamMsg{}, errors.New("ws: peer closed connection")
+		case wsx.OpBinary:
+			return queryStreamMsg{}, errors.New("ws: unexpected binary frame")
+		default:
+			return queryStreamMsg{}, fmt.Errorf("ws: unexpected opcode 0x%x", op)
+		}
 	}
-	if op != wsx.OpText {
-		return queryStreamMsg{}, errors.New("ws: expected text message")
-	}
-	var m queryStreamMsg
-	if err := json.Unmarshal(data, &m); err != nil {
-		return queryStreamMsg{}, fmt.Errorf("ws: parse: %w", err)
-	}
-	return m, nil
 }
 
 // writeMsg marshals m and writes a single text frame.
