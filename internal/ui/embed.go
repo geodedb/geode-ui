@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"strings"
 )
 
 //go:embed all:dist
@@ -19,16 +20,10 @@ func Handler() (http.Handler, error) {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := fs.Stat(sub, trimLeadingSlash(r.URL.Path)); err != nil {
+		if _, err := fs.Stat(sub, strings.TrimPrefix(r.URL.Path, "/")); err != nil {
+			// rewrite to index for SPA fallback
 			r.URL.Path = "/"
 		}
 		fileServer.ServeHTTP(w, r)
 	}), nil
-}
-
-func trimLeadingSlash(p string) string {
-	if len(p) > 0 && p[0] == '/' {
-		return p[1:]
-	}
-	return p
 }
