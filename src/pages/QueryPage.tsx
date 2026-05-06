@@ -1,12 +1,64 @@
-import React, { useState } from 'react'
+import React, { useReducer, useRef, useState } from 'react'
 import styled from 'styled-components'
 import type { QueryResp } from '@api'
 import { GqlEditor } from '../components/editor/GqlEditor'
 import { TableView } from '../components/results/TableView'
 import { JsonView } from '../components/results/JsonView'
+import { GraphView } from '../components/results/GraphView'
 import { client } from '../api/client'
+import { streamQuery, StreamHandle, StreamMsg } from '../lib/queryStream'
 
 type Tab = 'table' | 'json' | 'graph'
+
+type StreamState = {
+  status: 'idle' | 'running' | 'done' | 'error'
+  columns: { name: string; type: string }[]
+  rows: unknown[][]
+  rowCount: number
+  elapsedMs: number
+  error: string | null
+}
+
+type StreamAction =
+  | { type: 'reset' }
+  | { type: 'start' }
+  | { type: 'msg'; msg: StreamMsg }
+  | { type: 'closed' }
+
+const initialStream: StreamState = {
+  status: 'idle',
+  columns: [],
+  rows: [],
+  rowCount: 0,
+  elapsedMs: 0,
+  error: null,
+}
+
+function streamReducer(state: StreamState, action: StreamAction): StreamState {
+  switch (action.type) {
+    case 'reset':
+      return initialStream
+    case 'start':
+      return { ...initialStream, status: 'running' }
+    case 'msg': {
+      const m = action.msg
+      if (m.kind === 'schema') return { ...state, columns: m.columns }
+      if (m.kind === 'row') return { ...state, rows: [...state.rows, m.row] }
+      if (m.kind === 'summary') {
+        return { ...state, rowCount: m.row_count, elapsedMs: m.elapsed_ms }
+      }
+      if (m.kind === 'error') {
+        return { ...state, status: 'error', error: `${m.code}: ${m.message}` }
+      }
+      if (m.kind === 'end') return { ...state, status: 'done' }
+      return state
+    }
+    case 'closed':
+      return state.status === 'running' ? { ...state, status: 'done' } : state
+    default:
+      return state
+  }
+}
 
 const Bar = styled.div`
   margin-top: 8px;
@@ -43,6 +95,22 @@ const Tabs = styled.div`
   gap: 8px;
   margin: 16px 0 8px;
 `
+const ToggleLabel = styled.label`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+`
+
+function streamStateToResp(s: StreamState): QueryResp {
+  return {
+    columns: s.columns as unknown as Array<Record<string, unknown>>,
+    rows: s.rows as Array<Array<unknown>>,
+    row_count: s.rowCount || s.rows.length,
+    elapsed_ms: s.elapsedMs,
+  }
+}
 
 export const QueryPage: React.FC = () => {
   const [stmt, setStmt] = useState('MATCH (n) RETURN n LIMIT 25')
@@ -50,8 +118,11 @@ export const QueryPage: React.FC = () => {
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState<Tab>('table')
+  const [streamMode, setStreamMode] = useState(false)
+  const [stream, dispatch] = useReducer(streamReducer, initialStream)
+  const handleRef = useRef<StreamHandle | null>(null)
 
-  const run = async (): Promise<void> => {
+  const runSync = async (): Promise<void> => {
     setBusy(true)
     setErr(null)
     try {
@@ -64,6 +135,45 @@ export const QueryPage: React.FC = () => {
     }
   }
 
+  const runStream = (): void => {
+    setErr(null)
+    setResp(null)
+    dispatch({ type: 'start' })
+    setBusy(true)
+    const h = streamQuery(stmt, undefined, (m) => {
+      dispatch({ type: 'msg', msg: m })
+      if (m.kind === 'end' || m.kind === 'error') setBusy(false)
+    })
+    handleRef.current = h
+    h.done.then(() => {
+      dispatch({ type: 'closed' })
+      setBusy(false)
+      handleRef.current = null
+    })
+  }
+
+  const run = (): void => {
+    if (streamMode) {
+      runStream()
+    } else {
+      runSync()
+    }
+  }
+
+  const cancel = (): void => {
+    handleRef.current?.cancel()
+    handleRef.current = null
+    setBusy(false)
+  }
+
+  let activeResp: QueryResp | null
+  if (streamMode) {
+    activeResp = stream.status === 'idle' ? null : streamStateToResp(stream)
+  } else {
+    activeResp = resp
+  }
+  const activeErr = streamMode ? stream.error || err : err
+
   return (
     <div>
       <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
@@ -71,14 +181,32 @@ export const QueryPage: React.FC = () => {
         <RunBtn onClick={run} disabled={busy}>
           {busy ? 'Running…' : 'Run (⌘+Enter)'}
         </RunBtn>
-        {resp && (
+        {streamMode && busy && (
+          <RunBtn onClick={cancel} disabled={!busy}>
+            Cancel
+          </RunBtn>
+        )}
+        <ToggleLabel>
+          <input
+            type="checkbox"
+            checked={streamMode}
+            onChange={(e) => {
+              setStreamMode(e.target.checked)
+              dispatch({ type: 'reset' })
+              setResp(null)
+              setErr(null)
+            }}
+          />
+          Stream
+        </ToggleLabel>
+        {activeResp && (
           <span>
-            {resp.row_count} rows · {resp.elapsed_ms} ms
+            {activeResp.row_count} rows · {activeResp.elapsed_ms} ms
           </span>
         )}
-        {err && <Err>{err}</Err>}
+        {activeErr && <Err>{activeErr}</Err>}
       </Bar>
-      {resp && (
+      {activeResp && (
         <>
           <Tabs role="tablist">
             {(['table', 'json', 'graph'] as const).map((t) => (
@@ -87,9 +215,9 @@ export const QueryPage: React.FC = () => {
               </TabBtn>
             ))}
           </Tabs>
-          {tab === 'table' && <TableView resp={resp} />}
-          {tab === 'json' && <JsonView data={resp} />}
-          {tab === 'graph' && <div>graph (TODO C5)</div>}
+          {tab === 'table' && <TableView resp={activeResp} />}
+          {tab === 'json' && <JsonView data={activeResp} />}
+          {tab === 'graph' && <GraphView resp={activeResp} />}
         </>
       )}
     </div>
