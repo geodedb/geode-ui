@@ -1,163 +1,90 @@
-# ui
+# Geode UI
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26.2-00ADD8.svg)](https://go.dev/)
 [![Node.js](https://img.shields.io/badge/Node.js-22.14.0+-green.svg)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18.2.0-blue.svg)](https://reactjs.org/)
 
-A React application built with SPYDER components
+A self-contained Go binary that embeds a React + TypeScript SPA and exposes the
+entire Geode graph database client surface as an HTTP/WebSocket API. Includes a
+Neo4j-style interactive graph visualization, a Monaco GQL editor, schema
+explorer, and admin/ops UIs for users, roles, policies, grants, backups,
+restores, migrations, and the audit log.
 
-## Features
-
-- **React 18 + TypeScript**: Modern React with full type safety
-- **SPYDER Components**: Built with `@devnw/components` cybersecurity component library
-- **Theming**: styled-components v6 with `ExtendedTheme`
-- **Webpack 5**: Optimized build with HMR, code splitting, and CSS extraction
-- **Testing**: Jest + React Testing Library
-- **CI/CD**: GitLab CI with lint, test, build, and deploy
-
-## Prerequisites
-
-- Node.js 22.14.0+
-- npm 10+
-- GitLab Personal Access Token (for `@devnw/components` private registry)
-
-## Setup
-
-### 1. Configure Private Registry
-
-The `@devnw/components` package is hosted on GitLab's private package registry.
-See [docs/PRIVATE_REGISTRY.md](docs/PRIVATE_REGISTRY.md) for detailed setup instructions.
-
-**Quick setup:**
+## Quick start
 
 ```bash
-# Create a GitLab Personal Access Token with read_api scope, then:
-echo "//gitlab.com/api/v4/packages/npm/:_authToken=YOUR_TOKEN" >> ~/.npmrc
+# Build (Go 1.26.2 + Node 22.14+)
+make build
+
+# Generate a JWT secret
+SECRET=$(openssl rand -hex 32)
+
+# Run, pointing at a local Geode at quic://127.0.0.1:3141
+./bin/geode-ui -listen :8080 -jwt-secret-hex "$SECRET"
+
+# Open http://localhost:8080 and sign in with your Geode credentials
 ```
 
-### 2. Install Dependencies
+## Architecture
 
-```bash
-npm install
+A single Go binary serves:
+
+- `/`              → SPA from `go:embed dist/` (`internal/ui/embed.go`)
+- `/api/v1/...`    → genapi-generated REST handlers (44 endpoints)
+- `/ws/query`      → streaming GQL query (WebSocket)
+- `/mcp`           → genapi-generated MCP HTTP transport (one `query` tool)
+- `/healthz`       → liveness
+
+Outbound, the server fans out to one or more Geode servers via the
+`geodedb.com/geode` driver, multiplexed through a profile-aware connection
+pool (`internal/conn`).
+
+## Configuration
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `-listen` | `:8080` | HTTP listen address |
+| `-jwt-secret-hex` | (required) | hex-encoded HS256 secret, ≥32 bytes; generate with `openssl rand -hex 32` |
+| `-jwt-ttl` | `8h` | JWT TTL (1m..24h) |
+| `-profiles` | (none) | path to JSON profile config; defaults to a single `default` profile pointing at `quic://127.0.0.1:3141` |
+
+Profiles JSON example:
+
+```json
+[
+  { "name": "local", "dsn": "quic://127.0.0.1:3141" },
+  { "name": "prod",  "dsn": "quic://geode-prod.internal:3141", "tls_ca_file": "/etc/certs/ca.pem" }
+]
 ```
 
-### 3. Start Developing
+## Docker
 
-```bash
-# Start dev server on http://localhost:3000
-make dev
+A multi-stage build (Node web build → Go static binary → minimal Alpine
+runtime) lives in [deploy/Dockerfile](deploy/Dockerfile). An example compose
+file is in [deploy/docker-compose.example.yml](deploy/docker-compose.example.yml).
 
-# Or use npm directly
-npm start
-```
+> **Note:** until `geodedb.com/geode` ships to a public Go module proxy, the
+> Docker build context must include a sibling `geode-client-go/` checkout next
+> to `geode-ui/`. See the Dockerfile header comments for details.
 
 ## Development
 
-```bash
-# Start development server with hot reload
-make dev
-
-# Run tests
-make test
-
-# Run tests in watch mode
-make test-watch
-
-# Lint code
-make lint
-
-# Format code
-make fmt
-
-# Full CI pipeline locally
-make ci
-```
-
-## Using the Component Library
-
-Import components from `@devnw/components`:
-
-```tsx
-import {
-  DataTable,
-  AlertBadge,
-  MetricsCard,
-  AppShell,
-  Modal,
-  Toast,
-} from '@devnw/components'
-```
-
-For tree-shaking, use subpath imports:
-
-```tsx
-import { Line } from '@devnw/components/components/Chart/Line'
-import { DataTable } from '@devnw/components/components/DataTable'
-```
-
-### Theming
-
-Wrap your app with `ThemeProvider` and use `ThemeBuilder` to create themes:
-
-```tsx
-import { ThemeBuilder, ThemeProvider } from '@devnw/components'
-
-const theme = ThemeBuilder.build({
-  colors: {
-    primary: '#1a56db',
-    secondary: '#7c3aed',
-  }
-})
-
-const App = () => (
-  <ThemeProvider theme={theme}>
-    {/* Your app */}
-  </ThemeProvider>
-)
-```
-
-### Authorization (RBAC)
-
-Use the deny-by-default authorization system:
-
-```tsx
-import { AuthzProvider, AuthzGate, useCan } from '@devnw/components'
-
-// Wrap app with provider
-<AuthzProvider permissions={['dashboard:read', 'settings:admin']}>
-  <AuthzGate require="settings:admin" fallback={<AccessDenied />}>
-    <AdminPanel />
-  </AuthzGate>
-</AuthzProvider>
-```
-
-### Icons
-
-Use the adapter-based icon system:
-
-```tsx
-import { IconProvider, Icon } from '@devnw/components'
-import { fontAwesomeAdapter } from '@devnw/components/icons/adapters/fontAwesomeAdapter'
-
-<IconProvider adapter={fontAwesomeAdapter}>
-  <Icon name="shield" size="lg" />
-</IconProvider>
-```
-
-## Building
+See [CONTRIBUTING.md](CONTRIBUTING.md). Quick targets:
 
 ```bash
-# Production build
-make build
-
-# Output in dist/
-ls dist/
+make help            # list all targets
+make generate        # regenerate gen/ from geode.json
+make build           # production build (SPA + Go binary)
+make test            # all tests (Go + JS)
+make lint            # all linters
+make web-dev         # webpack dev server (port 3000, proxies to :8080)
 ```
 
 ## Documentation
 
-- [Private Registry Setup](docs/PRIVATE_REGISTRY.md)
-- [SPYDER Component Docs](https://devnw.gitlab.io/react/components/) (Storybook)
+- [Architecture overview](docs/README.md)
+- [Private registry setup](docs/PRIVATE_REGISTRY.md)
 
 ## Contributing
 
@@ -169,4 +96,4 @@ See [SECURITY.md](SECURITY.md) for security policy and vulnerability reporting.
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+Apache License 2.0 — see [LICENSE](LICENSE) for details.

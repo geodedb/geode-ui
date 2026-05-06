@@ -165,3 +165,80 @@ pages:
     url: $CI_PAGES_URL
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ============================================================================
+# GO PIPELINE
+# ============================================================================
+#
+# These jobs cover the Go side of the project (backend API server, generated
+# code, and the multi-stage Docker image). They reuse the existing
+# install/lint/test/build stages declared above.
+
+.go_defaults: &go_defaults
+  image: golang:1.26-alpine
+  variables:
+    GOEXPERIMENT: jsonv2
+    GOTOOLCHAIN: go1.26.2
+    CGO_ENABLED: "0"
+  before_script: []
+  cache: []
+
+go:lint:
+  <<: *go_defaults
+  stage: lint
+  script:
+    - apk add --no-cache git make
+    - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+    - golangci-lint run
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+go:generate-verify:
+  <<: *go_defaults
+  stage: lint
+  script:
+    - apk add --no-cache make git nodejs npm
+    - npm ci
+    - go install devnw.dev/genapi/cmd/genapi@latest
+    - make generate
+    - git diff --exit-code -- gen/ || (echo "make generate produced changes — commit them"; exit 1)
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+go:test:
+  <<: *go_defaults
+  stage: test
+  script:
+    - apk add --no-cache git make nodejs npm
+    - npm ci
+    - npm run build
+    - go test -race -cover -failfast ./...
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Builds the multi-stage Dockerfile in deploy/. The Dockerfile expects a
+# sibling geode-client-go/ checkout next to the geode-ui/ context root (see
+# deploy/Dockerfile header). For CI, fetch the sibling repo into a temporary
+# parent dir so docker build sees the expected layout.
+docker:build:
+  stage: build
+  image: docker:25
+  services:
+    - docker:25-dind
+  before_script: []
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+  script:
+    - apk add --no-cache git
+    - mkdir -p /tmp/ctx/geode-ui
+    - cp -r . /tmp/ctx/geode-ui/
+    - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
+    - cd /tmp/ctx
+    - docker build -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA; fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
