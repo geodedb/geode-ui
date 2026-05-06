@@ -22,6 +22,11 @@ var ErrNotImplemented = errors.New("not implemented")
 // Embed UnimplementedServer and override only the methods you need.
 type ServerInterface interface {
 	Login(w http.ResponseWriter, r *http.Request, req *types.LoginReq) (*types.LoginResp, error)
+	Graphs(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.GraphList, error)
+	Constraints(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.ConstraintList, error)
+	EdgeTypes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.EdgeTypeList, error)
+	Indexes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.IndexList, error)
+	Labels(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.LabelList, error)
 	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error)
 	Healthz(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.HealthResp, error)
 }
@@ -31,6 +36,26 @@ type ServerInterface interface {
 type UnimplementedServer struct{}
 
 func (UnimplementedServer) Login(_ http.ResponseWriter, _ *http.Request, _ *types.LoginReq) (*types.LoginResp, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Graphs(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.GraphList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Constraints(_ http.ResponseWriter, _ *http.Request, _ *types.GraphParam) (*types.ConstraintList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) EdgeTypes(_ http.ResponseWriter, _ *http.Request, _ *types.GraphParam) (*types.EdgeTypeList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Indexes(_ http.ResponseWriter, _ *http.Request, _ *types.GraphParam) (*types.IndexList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Labels(_ http.ResponseWriter, _ *http.Request, _ *types.GraphParam) (*types.LabelList, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -126,6 +151,126 @@ func (s catchAllServer) Login(w http.ResponseWriter, r *http.Request, req *types
 	}, req)
 }
 
+func (s catchAllServer) Graphs(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.GraphList, error) {
+	return callCatchAll[*types.GraphList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/graphs",
+		MuxPattern:         "GET /api/v1/graphs",
+		MethodName:         "Graphs",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.GraphList",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "GraphList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Constraints(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.ConstraintList, error) {
+	return callCatchAll[*types.ConstraintList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/graphs/{graph}/constraints",
+		MuxPattern:         "GET /api/v1/graphs/{graph}/constraints",
+		MethodName:         "Constraints",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.GraphParam",
+		ResponseType:       "*types.ConstraintList",
+		RequestSchema:      "GraphParam",
+		ResponseSchema:     "ConstraintList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"graph"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.EdgeTypeList, error) {
+	return callCatchAll[*types.EdgeTypeList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/graphs/{graph}/edge-types",
+		MuxPattern:         "GET /api/v1/graphs/{graph}/edge-types",
+		MethodName:         "EdgeTypes",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.GraphParam",
+		ResponseType:       "*types.EdgeTypeList",
+		RequestSchema:      "GraphParam",
+		ResponseSchema:     "EdgeTypeList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"graph"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Indexes(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.IndexList, error) {
+	return callCatchAll[*types.IndexList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/graphs/{graph}/indexes",
+		MuxPattern:         "GET /api/v1/graphs/{graph}/indexes",
+		MethodName:         "Indexes",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.GraphParam",
+		ResponseType:       "*types.IndexList",
+		RequestSchema:      "GraphParam",
+		ResponseSchema:     "IndexList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"graph"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Labels(w http.ResponseWriter, r *http.Request, req *types.GraphParam) (*types.LabelList, error) {
+	return callCatchAll[*types.LabelList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/graphs/{graph}/labels",
+		MuxPattern:         "GET /api/v1/graphs/{graph}/labels",
+		MethodName:         "Labels",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.GraphParam",
+		ResponseType:       "*types.LabelList",
+		RequestSchema:      "GraphParam",
+		ResponseSchema:     "LabelList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"graph"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
 func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error) {
 	return callCatchAll[*types.QueryResp](s.handler, w, r, RouteInfo{
 		Method:             "POST",
@@ -210,6 +355,214 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		req.Username = r.FormValue("username")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Login(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Graphs *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Graphs = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/graphs", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Graphs",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/graphs"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_get_Graphs != nil { lim, rem, reset := bkt_get_Graphs.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Graphs.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Graphs(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Constraints *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Constraints = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/graphs/{graph}/constraints", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Constraints",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/graphs/{graph}/constraints"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_get_Constraints != nil { lim, rem, reset := bkt_get_Constraints.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Constraints.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.GraphParam
+		req.Graph = r.URL.Query().Get("graph")
+		req.Graph = r.PathValue("graph")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Constraints(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_EdgeTypes *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_EdgeTypes = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/graphs/{graph}/edge-types", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "EdgeTypes",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/graphs/{graph}/edge-types"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_get_EdgeTypes != nil { lim, rem, reset := bkt_get_EdgeTypes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_EdgeTypes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.GraphParam
+		req.Graph = r.URL.Query().Get("graph")
+		req.Graph = r.PathValue("graph")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.EdgeTypes(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Indexes *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Indexes = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/graphs/{graph}/indexes", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Indexes",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/graphs/{graph}/indexes"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_get_Indexes != nil { lim, rem, reset := bkt_get_Indexes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Indexes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.GraphParam
+		req.Graph = r.URL.Query().Get("graph")
+		req.Graph = r.PathValue("graph")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Indexes(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Labels *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Labels = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/graphs/{graph}/labels", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Labels",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/graphs/{graph}/labels"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_get_Labels != nil { lim, rem, reset := bkt_get_Labels.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Labels.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.GraphParam
+		req.Graph = r.URL.Query().Get("graph")
+		req.Graph = r.PathValue("graph")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Labels(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

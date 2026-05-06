@@ -122,6 +122,38 @@ components:
                 X-RateLimit-Reset:
                     $ref: '#/components/headers/X-RateLimit-Reset'
     schemas:
+        ConstraintList:
+            description: Generated schema for ConstraintList
+            example:
+                constraints:
+                    - {}
+            properties:
+                constraints:
+                    example: []
+                    items:
+                        type: object
+                    maxItems: 100
+                    type: array
+            required:
+                - constraints
+            type: object
+        EdgeTypeList:
+            description: Generated schema for EdgeTypeList
+            example:
+                types:
+                    - example
+            properties:
+                types:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - types
+            type: object
         ErrorResponse:
             description: Standard error response
             example:
@@ -135,6 +167,23 @@ components:
                     type: string
             required:
                 - error
+            type: object
+        GraphList:
+            description: Generated schema for GraphList
+            example:
+                graphs:
+                    - example
+            properties:
+                graphs:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - graphs
             type: object
         HealthResp:
             description: Generated schema for HealthResp
@@ -158,6 +207,38 @@ components:
             required:
                 - status
                 - version
+            type: object
+        IndexList:
+            description: Generated schema for IndexList
+            example:
+                indexes:
+                    - {}
+            properties:
+                indexes:
+                    example: []
+                    items:
+                        type: object
+                    maxItems: 100
+                    type: array
+            required:
+                - indexes
+            type: object
+        LabelList:
+            description: Generated schema for LabelList
+            example:
+                labels:
+                    - example
+            properties:
+                labels:
+                    example: []
+                    items:
+                        maxLength: 2048
+                        pattern: ^.*$
+                        type: string
+                    maxItems: 100
+                    type: array
+            required:
+                - labels
             type: object
         LoginReq:
             description: Generated schema for LoginReq
@@ -442,6 +523,227 @@ paths:
             summary: POST /api/v1/auth/login
             tags:
                 - Login
+    /api/v1/graphs:
+        get:
+            description: GET /api/v1/graphs operation
+            operationId: getApiV1Graphs
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GraphList'
+                    description: GET /api/v1/graphs success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/graphs
+            tags:
+                - Graphs
+    /api/v1/graphs/{graph}/constraints:
+        get:
+            description: GET /api/v1/graphs/{graph}/constraints operation
+            operationId: getApiV1GraphsGraphConstraints
+            parameters:
+                - description: GET /api/v1/graphs/{graph}/constraints path parameter graph
+                  in: path
+                  name: graph
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConstraintList'
+                    description: GET /api/v1/graphs/{graph}/constraints success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/graphs/{graph}/constraints
+            tags:
+                - Constraints
+    /api/v1/graphs/{graph}/edge-types:
+        get:
+            description: GET /api/v1/graphs/{graph}/edge-types operation
+            operationId: getApiV1GraphsGraphEdgeTypes
+            parameters:
+                - description: GET /api/v1/graphs/{graph}/edge-types path parameter graph
+                  in: path
+                  name: graph
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EdgeTypeList'
+                    description: GET /api/v1/graphs/{graph}/edge-types success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/graphs/{graph}/edge-types
+            tags:
+                - EdgeTypes
+    /api/v1/graphs/{graph}/indexes:
+        get:
+            description: GET /api/v1/graphs/{graph}/indexes operation
+            operationId: getApiV1GraphsGraphIndexes
+            parameters:
+                - description: GET /api/v1/graphs/{graph}/indexes path parameter graph
+                  in: path
+                  name: graph
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/IndexList'
+                    description: GET /api/v1/graphs/{graph}/indexes success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/graphs/{graph}/indexes
+            tags:
+                - Indexes
+    /api/v1/graphs/{graph}/labels:
+        get:
+            description: GET /api/v1/graphs/{graph}/labels operation
+            operationId: getApiV1GraphsGraphLabels
+            parameters:
+                - description: GET /api/v1/graphs/{graph}/labels path parameter graph
+                  in: path
+                  name: graph
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/LabelList'
+                    description: GET /api/v1/graphs/{graph}/labels success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/graphs/{graph}/labels
+            tags:
+                - Labels
     /api/v1/query:
         post:
             description: POST /api/v1/query operation
@@ -605,8 +907,18 @@ servers:
     - description: API server
       url: https://api.devnw.com/v1
 tags:
+    - description: Operations for Constraints
+      name: Constraints
+    - description: Operations for EdgeTypes
+      name: EdgeTypes
+    - description: Operations for Graphs
+      name: Graphs
     - description: Operations for Healthz
       name: Healthz
+    - description: Operations for Indexes
+      name: Indexes
+    - description: Operations for Labels
+      name: Labels
     - description: Operations for Login
       name: Login
     - description: Operations for Ping

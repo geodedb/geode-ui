@@ -45,6 +45,46 @@
       "auth": "jwt",
       "rateLimit": 200,
       "maxBodyBytes": 524288
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs",
+      "requestSchema": "Empty",
+      "responseSchema": "GraphList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/labels",
+      "requestSchema": "GraphParam",
+      "responseSchema": "LabelList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/edge-types",
+      "requestSchema": "GraphParam",
+      "responseSchema": "EdgeTypeList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/indexes",
+      "requestSchema": "GraphParam",
+      "responseSchema": "IndexList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/constraints",
+      "requestSchema": "GraphParam",
+      "responseSchema": "ConstraintList",
+      "auth": "jwt",
+      "rateLimit": 100
     }
   ],
   "websocket": [
@@ -136,6 +176,70 @@
       "type": "object",
       "required": ["seq"],
       "properties": { "seq": { "type": "integer", "minimum": 0 } }
+    },
+    "GraphParam": {
+      "type": "object",
+      "required": ["graph"],
+      "properties": {
+        "graph": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "GraphList": {
+      "type": "object",
+      "required": ["graphs"],
+      "properties": {
+        "graphs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "LabelList": {
+      "type": "object",
+      "required": ["labels"],
+      "properties": {
+        "labels": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "EdgeTypeList": {
+      "type": "object",
+      "required": ["types"],
+      "properties": {
+        "types": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "IndexList": {
+      "type": "object",
+      "required": ["indexes"],
+      "properties": {
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":    { "type": "string" },
+              "type":    { "type": "string" },
+              "table":   { "type": "string" },
+              "columns": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "ConstraintList": {
+      "type": "object",
+      "required": ["constraints"],
+      "properties": {
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":    { "type": "string" },
+              "type":    { "type": "string" },
+              "table":   { "type": "string" },
+              "columns": { "type": "string" }
+            }
+          }
+        }
+      }
     },
     "QueryStreamMsg": {
       "type": "object",

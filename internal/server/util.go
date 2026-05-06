@@ -64,6 +64,45 @@ func sanitizeGraphName(name string) string {
 	return b.String()
 }
 
+// runQuery executes stmt against db with optional named arguments and
+// materialises the full result set into ([][]any, []string, nil) where the
+// first return is the rows (one []any per row, one element per column) and
+// the second is the column names in driver order.
+//
+// It is intended for short, fixed-shape catalog statements (SHOW GRAPHS,
+// CALL db.labels(), SHOW INDEXES, …) — multiple B-series handlers use it.
+// Long-running streaming queries should iterate rows directly to avoid
+// buffering the whole result set in memory.
+func runQuery(ctx context.Context, db *sql.DB, stmt string, args ...any) ([][]any, []string, error) {
+	rows, err := db.QueryContext(ctx, stmt, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var out [][]any
+	for rows.Next() {
+		row := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range row {
+			ptrs[i] = &row[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return out, cols, nil
+}
+
 // namedArgs converts a JSON-encoded params object into a slice of
 // sql.NamedArg suitable for db.QueryContext. Empty/null/missing input
 // returns (nil, nil); a syntactically invalid JSON value returns the

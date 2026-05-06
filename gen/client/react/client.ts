@@ -81,11 +81,29 @@ export class HTTPError extends Error {
     super(body ? `http status ${status}: ${body}` : `http status ${status}`);
   }
 }
+export interface ConstraintList {
+  constraints: Array<Record<string, unknown>>;
+}
+export interface EdgeTypeList {
+  types: Array<string>;
+}
 export interface Empty {
+}
+export interface GraphList {
+  graphs: Array<string>;
+}
+export interface GraphParam {
+  graph: string;
 }
 export interface HealthResp {
   status: string;
   version: string;
+}
+export interface IndexList {
+  indexes: Array<Record<string, unknown>>;
+}
+export interface LabelList {
+  labels: Array<string>;
 }
 export interface LoginReq {
   password: string;
@@ -794,6 +812,51 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
+  async graphs(req: Empty): Promise<GraphList> {
+    return this.request<GraphList>(
+      "GET",
+      "/api/v1/graphs",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
+  async constraints(req: GraphParam): Promise<ConstraintList> {
+    return this.request<ConstraintList>(
+      "GET",
+      "/api/v1/graphs/{graph}/constraints",
+      "jwt",
+      "query",
+      ["graph"], copyRecord(req),
+    );
+  }
+  async edgeTypes(req: GraphParam): Promise<EdgeTypeList> {
+    return this.request<EdgeTypeList>(
+      "GET",
+      "/api/v1/graphs/{graph}/edge-types",
+      "jwt",
+      "query",
+      ["graph"], copyRecord(req),
+    );
+  }
+  async indexes(req: GraphParam): Promise<IndexList> {
+    return this.request<IndexList>(
+      "GET",
+      "/api/v1/graphs/{graph}/indexes",
+      "jwt",
+      "query",
+      ["graph"], copyRecord(req),
+    );
+  }
+  async labels(req: GraphParam): Promise<LabelList> {
+    return this.request<LabelList>(
+      "GET",
+      "/api/v1/graphs/{graph}/labels",
+      "jwt",
+      "query",
+      ["graph"], copyRecord(req),
+    );
+  }
   async query(req: QueryReq): Promise<QueryResp> {
     return this.request<QueryResp>(
       "POST",
@@ -846,6 +909,21 @@ export function useGenAPIClient(config: ClientConfig): GenAPIClient {
 }
 export function useLoginMutation(client: GenAPIClient): MutationState<LoginReq, LoginResp> {
   return useMutationState((req) => client.login(req));
+}
+export function useGraphs(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<GraphList> {
+  return usePromise(() => client.graphs(req), deps);
+}
+export function useConstraints(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<ConstraintList> {
+  return usePromise(() => client.constraints(req), deps);
+}
+export function useEdgeTypes(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<EdgeTypeList> {
+  return usePromise(() => client.edgeTypes(req), deps);
+}
+export function useIndexes(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<IndexList> {
+  return usePromise(() => client.indexes(req), deps);
+}
+export function useLabels(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<LabelList> {
+  return usePromise(() => client.labels(req), deps);
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));

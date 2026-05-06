@@ -6,12 +6,54 @@ import (
 	"encoding/json/jsontext"
 )
 
+// ConstraintList generated from config schema
+type ConstraintList struct {
+	Constraints []jsontext.Value `json:"constraints" genapi:"constraints"`
+}
+
+// Valid validates ConstraintList fields against schema constraints.
+func (v ConstraintList) Valid() error {
+	return nil
+}
+
+// EdgeTypeList generated from config schema
+type EdgeTypeList struct {
+	Types []string `json:"types" genapi:"types"`
+}
+
+// Valid validates EdgeTypeList fields against schema constraints.
+func (v EdgeTypeList) Valid() error {
+	return nil
+}
+
 // Empty generated from config schema
 type Empty struct {
 }
 
 // Valid validates Empty fields against schema constraints.
 func (v Empty) Valid() error {
+	return nil
+}
+
+// GraphList generated from config schema
+type GraphList struct {
+	Graphs []string `json:"graphs" genapi:"graphs"`
+}
+
+// Valid validates GraphList fields against schema constraints.
+func (v GraphList) Valid() error {
+	return nil
+}
+
+// GraphParam generated from config schema
+type GraphParam struct {
+	Graph string `json:"graph" genapi:"graph"`
+}
+
+// Valid validates GraphParam fields against schema constraints.
+func (v GraphParam) Valid() error {
+	if len(v.Graph) < 1 { return errors.New("graph: too short") }
+	if len(v.Graph) > 256 { return errors.New("graph: too long") }
 	return nil
 }
 
@@ -30,6 +72,26 @@ func (v HealthResp) Valid() error {
 	}
 	if len(v.Version) < 1 { return errors.New("version: too short") }
 	if len(v.Version) > 64 { return errors.New("version: too long") }
+	return nil
+}
+
+// IndexList generated from config schema
+type IndexList struct {
+	Indexes []jsontext.Value `json:"indexes" genapi:"indexes"`
+}
+
+// Valid validates IndexList fields against schema constraints.
+func (v IndexList) Valid() error {
+	return nil
+}
+
+// LabelList generated from config schema
+type LabelList struct {
+	Labels []string `json:"labels" genapi:"labels"`
+}
+
+// Valid validates LabelList fields against schema constraints.
+func (v LabelList) Valid() error {
 	return nil
 }
 

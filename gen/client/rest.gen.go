@@ -160,6 +160,196 @@ func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginRe
 	}
 	return &out, nil
 }
+// Graphs performs GET /api/v1/graphs.
+func (c *Client) Graphs(ctx context.Context, req *types.Empty) (*types.GraphList, error) {
+	target, err := c.buildURL("/api/v1/graphs")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.GraphList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Constraints performs GET /api/v1/graphs/{graph}/constraints.
+func (c *Client) Constraints(ctx context.Context, req *types.GraphParam) (*types.ConstraintList, error) {
+	target, err := c.buildURL("/api/v1/graphs/{graph}/constraints")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.ConstraintList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// EdgeTypes performs GET /api/v1/graphs/{graph}/edge-types.
+func (c *Client) EdgeTypes(ctx context.Context, req *types.GraphParam) (*types.EdgeTypeList, error) {
+	target, err := c.buildURL("/api/v1/graphs/{graph}/edge-types")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.EdgeTypeList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Indexes performs GET /api/v1/graphs/{graph}/indexes.
+func (c *Client) Indexes(ctx context.Context, req *types.GraphParam) (*types.IndexList, error) {
+	target, err := c.buildURL("/api/v1/graphs/{graph}/indexes")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.IndexList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Labels performs GET /api/v1/graphs/{graph}/labels.
+func (c *Client) Labels(ctx context.Context, req *types.GraphParam) (*types.LabelList, error) {
+	target, err := c.buildURL("/api/v1/graphs/{graph}/labels")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.LabelList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Query performs POST /api/v1/query.
 func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryResp, error) {
 	target, err := c.buildURL("/api/v1/query")
