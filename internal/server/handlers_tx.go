@@ -134,6 +134,13 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 		}
 	}
 	id := s.cfg.TxStore.put(tx, userFromContext(r.Context()))
+	emitAudit(auditEventTxBegun,
+		"user", userFromContext(r.Context()),
+		"profile", profileFromContextOrDefault(r.Context()),
+		"txid", id,
+		"graph", req.Graph,
+		"read_only", req.ReadOnly,
+	)
 	return &gentypes.TxBeginResp{Txid: id}, nil
 }
 
@@ -216,6 +223,10 @@ func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentyp
 		})
 		return nil, nil
 	}
+	emitAudit(auditEventTxCommitted,
+		"user", userFromContext(r.Context()),
+		"txid", req.Txid,
+	)
 	return &gentypes.Empty{}, nil
 }
 
@@ -242,5 +253,9 @@ func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gent
 		})
 		return nil, nil
 	}
+	emitAudit(auditEventTxRollback,
+		"user", userFromContext(r.Context()),
+		"txid", req.Txid,
+	)
 	return &gentypes.Empty{}, nil
 }

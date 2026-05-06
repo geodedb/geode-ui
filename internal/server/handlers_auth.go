@@ -45,6 +45,11 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	}
 	ok, roles, err := s.authenticateUpstream(r.Context(), profile, req.Username, req.Password)
 	if err != nil {
+		emitAudit(auditEventLoginFailure,
+			"user", req.Username,
+			"profile", profile,
+			"reason", "upstream_error",
+		)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadGateway,
 			code:        "upstream_error",
@@ -53,6 +58,11 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		return nil, nil
 	}
 	if !ok {
+		emitAudit(auditEventLoginFailure,
+			"user", req.Username,
+			"profile", profile,
+			"reason", "invalid_credentials",
+		)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnauthorized,
 			code:        "invalid_credentials",
@@ -64,6 +74,11 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	if err != nil {
 		return nil, err
 	}
+	emitAudit(auditEventLoginSuccess,
+		"user", req.Username,
+		"profile", profile,
+		"roles", roles,
+	)
 	expiresIn := int64(exp.Sub(timeNow()).Seconds())
 	if expiresIn < 1 {
 		// Schema requires expires_in >= 1 — clamp to 1 second on the

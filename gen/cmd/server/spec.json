@@ -391,6 +391,15 @@
       "auth": "jwt",
       "rateLimit": 20,
       "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/audit",
+      "requestSchema": "AuditQuery",
+      "responseSchema": "AuditList",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
     }
   ],
   "websocket": [
@@ -842,6 +851,21 @@
       "required": ["name"],
       "properties": {
         "name": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "AuditQuery": {
+      "type": "object",
+      "properties": {
+        "since": { "type": "string", "maxLength": 64 },
+        "event": { "type": "string", "maxLength": 64 },
+        "user":  { "type": "string", "maxLength": 256 }
+      }
+    },
+    "AuditList": {
+      "type": "object",
+      "required": ["entries"],
+      "properties": {
+        "entries": { "type": "array", "items": { } }
       }
     }
   }

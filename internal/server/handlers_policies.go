@@ -78,6 +78,11 @@ func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventPolicyCreated,
+		"user", userFromContext(r.Context()),
+		"policy", req.Name,
+		"resource", req.Resource,
+	)
 	return &gentypes.Policy{
 		Name:       req.Name,
 		Expression: req.Expression,
@@ -122,6 +127,10 @@ func (s *GraphServer) DeleteName(w http.ResponseWriter, r *http.Request, req *ge
 	if _, err := runStatement(r.Context(), db, "DROP POLICY "+pname); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventPolicyDeleted,
+		"user", userFromContext(r.Context()),
+		"policy", req.Name,
+	)
 	return &gentypes.Empty{}, nil
 }
 

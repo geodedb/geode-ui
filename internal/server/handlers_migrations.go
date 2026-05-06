@@ -111,6 +111,10 @@ func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, 
 			applied = append(applied, asStr(row[0]))
 		}
 	}
+	emitAudit(auditEventMigrationRun,
+		"user", userFromContext(r.Context()),
+		"applied", applied,
+	)
 	return &gentypes.MigrationRunResp{Applied: applied}, nil
 }
 
@@ -138,6 +142,10 @@ func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventMigrationCreated,
+		"user", userFromContext(r.Context()),
+		"name", req.Name,
+	)
 	return &gentypes.MigrationRef{Name: req.Name}, nil
 }
 
@@ -157,5 +165,9 @@ func (s *GraphServer) Sign(w http.ResponseWriter, r *http.Request, req *gentypes
 	if _, err := runStatement(r.Context(), db, "MIGRATE SIGN "+mname); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventMigrationSigned,
+		"user", userFromContext(r.Context()),
+		"name", req.Name,
+	)
 	return &gentypes.Empty{}, nil
 }

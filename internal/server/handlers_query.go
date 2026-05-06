@@ -85,5 +85,12 @@ func (s *GraphServer) handleQuery(ctx context.Context, req *gentypes.QueryReq) (
 		}
 		return nil, err
 	}
+	emitAudit(auditEventQueryExecuted,
+		"user", userFromContext(ctx),
+		"profile", profileFromContextOrDefault(ctx),
+		"graph", req.Graph,
+		"rows", resp.RowCount,
+		"elapsed_ms", resp.ElapsedMs,
+	)
 	return resp, nil
 }

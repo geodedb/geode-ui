@@ -46,6 +46,13 @@ func (s *GraphServer) Grants(w http.ResponseWriter, r *http.Request, req *gentyp
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventGrantApplied,
+		"user", userFromContext(r.Context()),
+		"permission", req.Permission,
+		"resource", req.Resource,
+		"grantee", req.Grantee,
+		"grantee_kind", req.GranteeKind,
+	)
 	return &gentypes.Empty{}, nil
 }
 
@@ -62,6 +69,13 @@ func (s *GraphServer) Revoke(w http.ResponseWriter, r *http.Request, req *gentyp
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventGrantRevoked,
+		"user", userFromContext(r.Context()),
+		"permission", req.Permission,
+		"resource", req.Resource,
+		"grantee", req.Grantee,
+		"grantee_kind", req.GranteeKind,
+	)
 	return &gentypes.Empty{}, nil
 }
 

@@ -224,7 +224,7 @@ func TestUsers_AssignRole(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/roles", nil)
-	if _, err := s.Roles(rec, req, &gentypes.AssignRoleReq{Username: "alice", Role: "admin"}); err != nil {
+	if _, err := s.PostUsernameRoles(rec, req, &gentypes.AssignRoleReq{Username: "alice", Role: "admin"}); err != nil {
 		t.Fatalf("Roles: %v", err)
 	}
 	stmts := d.seen()

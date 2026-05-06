@@ -101,6 +101,11 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 			return nil, userResponseErr(w, err)
 		}
 	}
+	emitAudit(auditEventUserCreated,
+		"user", userFromContext(r.Context()),
+		"target", req.Username,
+		"roles", req.Roles,
+	)
 	return &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}, nil
 }
 
@@ -177,17 +182,35 @@ func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req
 	if _, err := runStatement(r.Context(), db, "DROP USER "+uname); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventUserDeleted,
+		"user", userFromContext(r.Context()),
+		"target", req.Username,
+	)
 	return &gentypes.Empty{}, nil
 }
 
 // Disable implements POST /api/v1/users/{username}/disable.
 func (s *GraphServer) Disable(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	return s.toggleUser(w, r.Context(), req.Username, "DISABLE")
+	resp, err := s.toggleUser(w, r.Context(), req.Username, "DISABLE")
+	if err == nil && resp != nil {
+		emitAudit(auditEventUserDisabled,
+			"user", userFromContext(r.Context()),
+			"target", req.Username,
+		)
+	}
+	return resp, err
 }
 
 // Enable implements POST /api/v1/users/{username}/enable.
 func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	return s.toggleUser(w, r.Context(), req.Username, "ENABLE")
+	resp, err := s.toggleUser(w, r.Context(), req.Username, "ENABLE")
+	if err == nil && resp != nil {
+		emitAudit(auditEventUserEnabled,
+			"user", userFromContext(r.Context()),
+			"target", req.Username,
+		)
+	}
+	return resp, err
 }
 
 // Password implements POST /api/v1/users/{username}/password.
@@ -207,14 +230,24 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 	if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	// Note: never log the password value itself; sensitiveKeys would
+	// redact it anyway but we omit it entirely to leave no trace.
+	emitAudit(auditEventUserPasswordSet,
+		"user", userFromContext(r.Context()),
+		"target", req.Username,
+	)
 	return &gentypes.Empty{}, nil
 }
 
-// Roles implements POST /api/v1/users/{username}/roles (assign a role).
-// The JSON body's username must match the path username — the wrapper
-// already overwrites req.Username with the path value, so the body field
-// is effectively ignored.
-func (s *GraphServer) Roles(w http.ResponseWriter, r *http.Request, req *gentypes.AssignRoleReq) (*gentypes.Empty, error) {
+// PostUsernameRoles implements POST /api/v1/users/{username}/roles
+// (assign a role). The JSON body's username must match the path username
+// — the wrapper already overwrites req.Username with the path value, so
+// the body field is effectively ignored.
+//
+// Naming: the genapi disambiguator collapses POST /users/{username}/roles
+// onto PostUsernameRoles (the URI-prefix fallback because both the
+// terminal segment `roles` and `Roles` collide with /api/v1/roles).
+func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, req *gentypes.AssignRoleReq) (*gentypes.Empty, error) {
 	db, err := s.userDB(r.Context())
 	if err != nil {
 		return nil, userResponseErr(w, err)
@@ -226,6 +259,11 @@ func (s *GraphServer) Roles(w http.ResponseWriter, r *http.Request, req *gentype
 	if err := assignRole(r.Context(), db, uname, req.Role); err != nil {
 		return nil, userResponseErr(w, err)
 	}
+	emitAudit(auditEventRoleAssigned,
+		"user", userFromContext(r.Context()),
+		"target", req.Username,
+		"role", req.Role,
+	)
 	return &gentypes.Empty{}, nil
 }
 

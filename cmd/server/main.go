@@ -14,6 +14,7 @@ import (
 	"time"
 
 	genapi "geodedb.com/geode-ui/gen/api"
+	genmcp "geodedb.com/geode-ui/gen/mcp"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
 	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/internal/conn"
@@ -101,6 +102,15 @@ func main() {
 	genws.RegisterGeneratedWS(mux, wsSrv, genws.WSOptions{
 		AuthJWT: srv.AuthJWT,
 	})
+
+	// MCP surface — geode.json declares one tool ("query") on the http
+	// transport. genmcp.Register populates the package-level
+	// MCPHandler / MCPSTDIOFunc; we expose the HTTP handler at /mcp so
+	// MCP clients can reach the JSON-RPC envelope. The tool delegates
+	// straight to GraphServer.handleQuery so HTTP and MCP callers see
+	// identical query semantics, validation, and timeout handling.
+	genmcp.Register(server.NewMCPServer(srv))
+	mux.HandleFunc("/mcp", genmcp.HandleMCPHTTP)
 
 	uiHandler, err := ui.Handler()
 	if err != nil {

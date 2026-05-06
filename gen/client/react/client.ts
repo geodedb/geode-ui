@@ -85,6 +85,14 @@ export interface AssignRoleReq {
   role: string;
   username: string;
 }
+export interface AuditList {
+  entries: Array<unknown>;
+}
+export interface AuditQuery {
+  event?: string;
+  since?: string;
+  user?: string;
+}
 export interface BackupCleanupResp {
   freed_bytes?: number;
   removed: number;
@@ -945,6 +953,15 @@ export class GenAPIClient {
       socket.addEventListener("error", onError);
     });
   }
+  async audit(req: AuditQuery): Promise<AuditList> {
+    return this.request<AuditList>(
+      "GET",
+      "/api/v1/audit",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
   async login(req: LoginReq): Promise<LoginResp> {
     return this.request<LoginResp>(
       "POST",
@@ -1354,6 +1371,9 @@ export function useGenAPIClient(config: ClientConfig): GenAPIClient {
     clientRef.current = new GenAPIClient(config);
   }, [config.baseUrl, config.bearerToken, config.apiKeySigner, config.fetchImpl, config.headers, config.webSocketFactory, config.wsOrigin, config.wsProtocols]);
   return clientRef.current;
+}
+export function useAudit(client: GenAPIClient, req: AuditQuery, deps: ReadonlyArray<unknown> = []): RequestState<AuditList> {
+  return usePromise(() => client.audit(req), deps);
 }
 export function useLoginMutation(client: GenAPIClient): MutationState<LoginReq, LoginResp> {
   return useMutationState((req) => client.login(req));

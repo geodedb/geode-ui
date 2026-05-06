@@ -81,6 +81,11 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventRoleCreated,
+		"user", userFromContext(r.Context()),
+		"role", req.Name,
+		"permissions", req.Permissions,
+	)
 	return &gentypes.Role{
 		Name:        req.Name,
 		Description: req.Description,
@@ -125,6 +130,10 @@ func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *ge
 	if _, err := runStatement(r.Context(), db, "DROP ROLE "+rname); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventRoleDeleted,
+		"user", userFromContext(r.Context()),
+		"role", req.Role,
+	)
 	return &gentypes.Empty{}, nil
 }
 

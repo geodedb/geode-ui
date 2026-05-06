@@ -113,9 +113,19 @@ func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *g
 	if len(rows) == 0 {
 		// No row returned — surface an empty BackupRef rather than 500
 		// so the client can decide whether to treat it as success.
+		emitAudit(auditEventBackupCreated,
+			"user", userFromContext(r.Context()),
+			"graph", req.Graph,
+		)
 		return &gentypes.BackupRef{}, nil
 	}
-	return backupRefFromRow(cols, rows[0]), nil
+	ref := backupRefFromRow(cols, rows[0])
+	emitAudit(auditEventBackupCreated,
+		"user", userFromContext(r.Context()),
+		"graph", req.Graph,
+		"file", ref.File,
+	)
+	return ref, nil
 }
 
 // GetFile implements GET /api/v1/backups/{file} (backup info).
@@ -161,6 +171,10 @@ func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *ge
 	if _, err := runStatement(r.Context(), db, "DROP BACKUP "+fname); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventBackupDeleted,
+		"user", userFromContext(r.Context()),
+		"file", req.File,
+	)
 	return &gentypes.Empty{}, nil
 }
 
@@ -179,9 +193,16 @@ func (s *GraphServer) Cleanup(w http.ResponseWriter, r *http.Request, _ *gentype
 		return nil, userResponseErr(w, userErr(err))
 	}
 	if len(rows) == 0 {
+		emitAudit(auditEventBackupCleanup, "user", userFromContext(r.Context()))
 		return &gentypes.BackupCleanupResp{}, nil
 	}
-	return backupCleanupRespFromRow(cols, rows[0]), nil
+	resp := backupCleanupRespFromRow(cols, rows[0])
+	emitAudit(auditEventBackupCleanup,
+		"user", userFromContext(r.Context()),
+		"removed", resp.Removed,
+		"freed_bytes", resp.FreedBytes,
+	)
+	return resp, nil
 }
 
 // Restore implements POST /api/v1/restore (restore from a backup).
@@ -208,6 +229,11 @@ func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *genty
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
 		return nil, userResponseErr(w, userErr(err))
 	}
+	emitAudit(auditEventBackupRestored,
+		"user", userFromContext(r.Context()),
+		"file", req.File,
+		"target_time", req.TargetTime,
+	)
 	return &gentypes.Empty{}, nil
 }
 

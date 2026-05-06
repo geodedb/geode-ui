@@ -17,6 +17,31 @@ func (v AssignRoleReq) Valid() error {
 	return nil
 }
 
+// AuditList generated from config schema
+type AuditList struct {
+	Entries []jsontext.Value `json:"entries" genapi:"entries"`
+}
+
+// Valid validates AuditList fields against schema constraints.
+func (v AuditList) Valid() error {
+	return nil
+}
+
+// AuditQuery generated from config schema
+type AuditQuery struct {
+	Event string `json:"event" genapi:"event"`
+	Since string `json:"since" genapi:"since"`
+	User string `json:"user" genapi:"user"`
+}
+
+// Valid validates AuditQuery fields against schema constraints.
+func (v AuditQuery) Valid() error {
+	if len(v.Event) > 64 { return errors.New("event: too long") }
+	if len(v.Since) > 64 { return errors.New("since: too long") }
+	if len(v.User) > 256 { return errors.New("user: too long") }
+	return nil
+}
+
 // BackupCleanupResp generated from config schema
 type BackupCleanupResp struct {
 	FreedBytes int64 `json:"freed_bytes" genapi:"freed_bytes"`
