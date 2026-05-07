@@ -64,12 +64,20 @@ services:
     # ("Password reset required"). Instead, send a deliberately-bad
     # password and accept ANY auth-error response as proof the server
     # is reachable. This mirrors seed-bootstrap.sh:wait_for_wire().
+    #
+    # IMPORTANT: probe with a NONEXISTENT username, not the real admin.
+    # Geode v0.5.11 (geode_auth_lib.zig:1466) locks a user account for 5
+    # minutes after 5 failed-password attempts. The healthcheck fires
+    # every 5s, so probing as `-U geode -P x` would lock the admin
+    # account inside 25s and break the entire e2e auth chain. An
+    # unknown user produces the identical "Authentication failed"
+    # response without incrementing any real account's failure counter.
     healthcheck:
       test:
       - CMD-SHELL
       - >-
         geode query --insecure-tls-skip-verify
-        --server 127.0.0.1:3141 -U geode -P x 'RETURN 1' 2>&1
+        --server 127.0.0.1:3141 -U _healthcheck_probe_ -P x 'RETURN 1' 2>&1
         | grep -qiE 'auth|password|status_class|reset'
       interval: 5s
       timeout: 5s

@@ -90,12 +90,18 @@ wait_for_wire() {
     log "waiting for ${GEODE_HOST}:${GEODE_PORT} (timeout ${GEODE_WAIT_SECS}s)..."
     local i out
     for ((i = 1; i <= GEODE_WAIT_SECS; i++)); do
-        # Use a deliberately-bad password to probe; we just need ANY
-        # response that proves the server processed our message.
+        # Probe with a deliberately-bad password against a NONEXISTENT
+        # username — never the real admin. Geode v0.5.11 locks a user
+        # for 5 minutes after 5 failed-password attempts; a probe that
+        # used `-U ${GEODE_ADMIN_USER}` would burn 1-5 attempts here
+        # and could lock the admin before the rotation step runs.
+        # An unknown user produces the same "Authentication failed"
+        # response (auth check happens before we know the user exists)
+        # without touching any real account's counter.
         out=$(geode query \
             --insecure-tls-skip-verify \
             --server "${GEODE_HOST}:${GEODE_PORT}" \
-            -U "${GEODE_ADMIN_USER}" -P "x" \
+            -U "_seed_wire_probe_" -P "x" \
             "RETURN 1" 2>&1 || true)
         if printf '%s' "$out" | grep -qiE 'auth|Authentication|password|invalid|incorrect|reset required|status_class'; then
             log "geode wire is up"
