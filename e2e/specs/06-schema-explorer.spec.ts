@@ -10,6 +10,23 @@ test.describe('schema explorer', () => {
     await expect(page.getByRole('button', { name: seed.graph })).toBeVisible()
   })
 
+  test('does not surface the __geode_security system graph', async ({
+    authedPage: page,
+  }) => {
+    // Regression: SHOW GRAPHS upstream returns __geode_security alongside
+    // user graphs. The server must filter __-prefixed names so the
+    // SchemaExplorer's "first graph" auto-selection lands on a real
+    // user-data graph instead of the system graph.
+    await page.goto('/schema')
+    await expect(page.getByRole('button', { name: seed.graph })).toBeVisible()
+    // Wait a beat for /api/v1/graphs to settle, then assert the system
+    // graph button is absent. We use exact match because partial matches
+    // could collide with similar user graph names.
+    await expect(
+      page.getByRole('button', { name: '__geode_security', exact: true })
+    ).toHaveCount(0)
+  })
+
   test('clicking a graph populates the labels pane', async ({
     authedPage: page,
   }) => {

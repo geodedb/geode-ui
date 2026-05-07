@@ -129,6 +129,40 @@ func TestGraphs_StringList(t *testing.T) {
 	}
 }
 
+// TestGraphs_HidesSystemGraphs is the regression for the user-reported
+// "non-security graph nodes and edges should be in their own graph"
+// complaint. SHOW GRAPHS returns the upstream Geode security graph
+// `__geode_security` alongside user-defined graphs; the SchemaExplorer
+// auto-selects the first entry and the operator ends up staring at
+// system Users/Roles instead of their data. The Graphs handler must
+// strip any graph whose name starts with `__` from the public API
+// response — those are implementation details of the security graph
+// layer and have dedicated admin endpoints (/api/v1/users etc.).
+func TestGraphs_HidesSystemGraphs(t *testing.T) {
+	d := &fakeDriver{rows: map[string]fakeResult{
+		"SHOW GRAPHS": {
+			cols: []string{"name"},
+			rows: [][]driver.Value{
+				{"__geode_security"},
+				{"movies"},
+				{"default"},
+				{"__internal_audit"},
+			},
+		},
+	}}
+	s := newStubServer(t, "fake_graphs_filtered", d)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	resp, err := s.Graphs(rec, req, &gentypes.Empty{})
+	if err != nil {
+		t.Fatalf("Graphs: %v", err)
+	}
+	if got, want := resp.Graphs, []string{"movies", "default"}; !equalStrings(got, want) {
+		t.Fatalf("Graphs=%v want %v (system graphs must be filtered)", got, want)
+	}
+}
+
 func TestLabels_StringList(t *testing.T) {
 	d := &fakeDriver{rows: map[string]fakeResult{
 		"CALL db.labels()": {

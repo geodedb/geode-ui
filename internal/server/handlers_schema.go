@@ -32,12 +32,38 @@ import (
 // remap that would silently drop new fields.
 
 // Graphs implements GET /api/v1/graphs.
+//
+// The upstream Geode SHOW GRAPHS verb lists every graph in the engine,
+// including the internal security graph (`__geode_security`) and any
+// future double-underscore-prefixed system graphs. Those are
+// implementation details of the security/audit layer — the dedicated
+// admin endpoints (/api/v1/users, /api/v1/roles, /api/v1/audit) own
+// the user-facing surface for that data. We strip them from the public
+// /api/v1/graphs response so the SchemaExplorer's "first graph" auto-
+// selection lands on a real user-data graph, not the system graph
+// (the alphabetically-first slot would otherwise put `__geode_security`
+// at index 0 and bury actual data behind a misleading default).
 func (s *GraphServer) Graphs(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.GraphList, error) {
 	names, err := s.queryStrings(r.Context(), "", "SHOW GRAPHS")
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
-	return &gentypes.GraphList{Graphs: names}, nil
+	return &gentypes.GraphList{Graphs: filterSystemGraphs(names)}, nil
+}
+
+// filterSystemGraphs drops any graph name that begins with the
+// double-underscore "system" prefix Geode uses for internal graphs
+// (e.g. `__geode_security`). Returns a fresh slice; the input slice is
+// not mutated. Order is preserved.
+func filterSystemGraphs(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if len(n) >= 2 && n[0] == '_' && n[1] == '_' {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // Labels implements GET /api/v1/graphs/{graph}/labels.
