@@ -73,18 +73,42 @@ func TestPool_Names(t *testing.T) {
 }
 
 func TestPool_DefaultConfigSensibleValues(t *testing.T) {
+	// Pool sizing must match the documented operational target of
+	// 2000 rps sustained / 400 rps burst (PERF-F11 / issue #55).
 	cfg := DefaultPoolConfig()
-	if cfg.MaxOpenConns != 16 {
-		t.Errorf("MaxOpenConns: got %d, want 16", cfg.MaxOpenConns)
+	if cfg.MaxOpenConns != 64 {
+		t.Errorf("MaxOpenConns: got %d, want 64", cfg.MaxOpenConns)
 	}
-	if cfg.MaxIdleConns != 4 {
-		t.Errorf("MaxIdleConns: got %d, want 4", cfg.MaxIdleConns)
+	if cfg.MaxIdleConns != 16 {
+		t.Errorf("MaxIdleConns: got %d, want 16", cfg.MaxIdleConns)
 	}
 	if cfg.ConnMaxLifetime != 5*time.Minute {
 		t.Errorf("ConnMaxLifetime: got %v, want 5m", cfg.ConnMaxLifetime)
 	}
 	if cfg.ConnMaxIdleTime != 25*time.Second {
 		t.Errorf("ConnMaxIdleTime: got %v, want 25s", cfg.ConnMaxIdleTime)
+	}
+}
+
+// TestPool_DB_AppliesDefaultLimits verifies the bumped defaults flow
+// through to the underlying *sql.DB via SetMaxOpenConns. Stats()
+// exposes MaxOpenConnections, which we read back to confirm the value
+// the database/sql layer is actually enforcing.
+func TestPool_DB_AppliesDefaultLimits(t *testing.T) {
+	p, err := NewPool([]Profile{
+		{Name: "local", DSN: "quic://127.0.0.1:3141"},
+	})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+
+	db, err := p.DB("local")
+	if err != nil {
+		t.Fatalf("DB(local): %v", err)
+	}
+	if got := db.Stats().MaxOpenConnections; got != 64 {
+		t.Errorf("Stats().MaxOpenConnections: got %d, want 64", got)
 	}
 }
 

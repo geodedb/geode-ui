@@ -17,13 +17,16 @@ import (
 // geode-client-go/driver.go: sql.Register("geode", &Driver{}).
 const driverName = "geode"
 
-// Default pool settings. Mirrors the recommendations in
-// geode-client-go/pool.go (DefaultMaxOpenConns, DefaultMaxIdleConns, etc.)
-// so that lazily-opened *sql.DB handles match the Geode driver's preferred
-// QUIC stream-multiplexing characteristics out of the box.
+// Default pool settings. Sized for the documented operational target of
+// 2000 rps sustained with a 400 rps burst (PERF-F11 / issue #55). The
+// previous defaults of 16 open / 4 idle saturated under that load and
+// caused tail-latency spikes; 64 open / 16 idle keeps QUIC stream
+// multiplexing healthy without exhausting the upstream Geode server's
+// connection budget. ConnMaxIdleTime stays at 25s, just under the
+// server-side QUIC idle timeout (default 30s).
 const (
-	defaultMaxOpenConns    = 16
-	defaultMaxIdleConns    = 4
+	defaultMaxOpenConns    = 64
+	defaultMaxIdleConns    = 16
 	defaultConnMaxLifetime = 5 * time.Minute
 	defaultConnMaxIdleTime = 25 * time.Second
 )
@@ -39,8 +42,9 @@ type PoolConfig struct {
 }
 
 // DefaultPoolConfig returns the recommended defaults for a Geode connection
-// pool: 16 open / 4 idle / 5 minute lifetime / 25 second idle, matching the
-// guidance in geode-client-go/pool.go.
+// pool: 64 open / 16 idle / 5 minute lifetime / 25 second idle, sized for
+// the documented 2000 rps sustained / 400 rps burst operational target
+// (PERF-F11 / issue #55).
 func DefaultPoolConfig() *PoolConfig {
 	return &PoolConfig{
 		MaxOpenConns:    defaultMaxOpenConns,
