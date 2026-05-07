@@ -145,7 +145,13 @@ func main() {
 		slog.Error("ui handler", "err", err)
 		os.Exit(1)
 	}
-	mux.Handle("/", uiHandler)
+	// Wrap only the SPA path with CSP + COOP — those headers protect the
+	// HTML document the browser renders (Monaco, styled-components,
+	// frame-ancestors lockdown) and would just bloat every JSON response
+	// if applied globally. The structural fix belongs in genapi's
+	// httpx.WrapHandler alongside HSTS and X-Frame-Options; until that
+	// lands the SPA wrapper is the safe, minimal mitigation for SEC-F4.
+	mux.Handle("/", server.WithSPASecurityHeaders(uiHandler))
 
 	hcfg := httpx.Config{
 		ReadHeader:     5 * time.Second,
@@ -155,7 +161,10 @@ func main() {
 		MaxHeaderBytes: 16384,
 		MaxBodyBytes:   1 << 20,
 	}
-	handler := httpx.WrapHandler(hcfg, mux)
+	// Permissions-Policy is harmless and short enough to apply to every
+	// response; wrap the entire pipeline so SPA, API, WS upgrade, MCP
+	// endpoints all carry the directive.
+	handler := server.WithPermissionsPolicy(httpx.WrapHandler(hcfg, mux))
 
 	httpSrv := &http.Server{
 		Addr:              listen,
