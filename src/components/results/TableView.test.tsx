@@ -26,6 +26,7 @@ test('renders columns and rows', () => {
   render(
     <ThemeProvider theme={theme}>
       <TableView
+        expand={false}
         resp={{ columns: [{ name: 'n', type: 'node' }], rows: [['x'], ['y']] }}
       />
     </ThemeProvider>
@@ -54,6 +55,7 @@ test('renders node rows as label chip + structured property list', () => {
   render(
     <ThemeProvider theme={theme}>
       <TableView
+        expand={false}
         resp={{ columns: [{ name: 'r', type: 'node' }], rows: [[node]] }}
       />
     </ThemeProvider>
@@ -81,6 +83,7 @@ test('renders edge rows as type chip + structured property list', () => {
   render(
     <ThemeProvider theme={theme}>
       <TableView
+        expand={false}
         resp={{ columns: [{ name: 'e', type: 'edge' }], rows: [[edge]] }}
       />
     </ThemeProvider>
@@ -178,4 +181,43 @@ describe('formatCell', () => {
   test('arrays are JSON-stringified', () => {
     expect(formatCell([1, 2, 3])).toBe('[1,2,3]')
   })
+})
+
+test('TableView projects node columns into property columns by default', () => {
+  const node = {
+    id: 1,
+    labels: ['Person'],
+    properties: { name: 'Alice', born: 1980 },
+  }
+  render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        resp={{ columns: [{ name: 'n', type: 'NODE' }], rows: [[node]] }}
+      />
+    </ThemeProvider>
+  )
+  expect(screen.getByText('n._labels')).toBeInTheDocument()
+  expect(screen.getByText('n.name')).toBeInTheDocument()
+  expect(screen.getByText('n.born')).toBeInTheDocument()
+  expect(screen.getByText('Person')).toBeInTheDocument()
+  expect(screen.getByText('Alice')).toBeInTheDocument()
+  expect(screen.getByText('1980')).toBeInTheDocument()
+})
+
+test('TableView with expand=false renders node as a structured chip cell', () => {
+  const node = {
+    id: 1,
+    labels: ['Person'],
+    properties: { name: 'Alice' },
+  }
+  render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        expand={false}
+        resp={{ columns: [{ name: 'n', type: 'NODE' }], rows: [[node]] }}
+      />
+    </ThemeProvider>
+  )
+  expect(screen.getByText(':Person')).toBeInTheDocument()
+  expect(screen.queryByText('n._labels')).not.toBeInTheDocument()
 })

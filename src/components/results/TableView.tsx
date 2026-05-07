@@ -1,5 +1,6 @@
 import React from 'react'
 import styled from 'styled-components'
+import { projectColumns } from './projectColumns'
 
 const Wrap = styled.div`
   overflow: auto;
@@ -70,6 +71,11 @@ type Props = {
     columns: Array<Record<string, unknown>>
     rows: Array<Array<unknown>>
   }
+  // expand: when true (default), project node/edge columns into one
+  // column per property. When false, render the existing chip + dl
+  // structured cell — useful when the operator wants the raw graph
+  // shape rather than a flattened table.
+  expand?: boolean
 }
 
 function columnName(col: Record<string, unknown>, i: number): string {
@@ -215,33 +221,36 @@ const CellView: React.FC<{ value: unknown }> = ({ value }) => {
   return <>{formatCell(value)}</>
 }
 
-export const TableView: React.FC<Props> = ({ resp }) => (
-  <Wrap>
-    <Table>
-      <thead>
-        <tr>
-          {resp.columns.map((c, i) => (
-            // eslint-disable-next-line react/no-array-index-key
-            <Th key={`${columnName(c, i)}_${i}`}>
-              {columnName(c, i)}{' '}
-              <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
-            </Th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {resp.rows.map((row, i) => (
-          // eslint-disable-next-line react/no-array-index-key
-          <tr key={i}>
-            {row.map((cell, j) => (
+export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
+  const view = expand ? projectColumns(resp) : resp
+  return (
+    <Wrap>
+      <Table>
+        <thead>
+          <tr>
+            {view.columns.map((c, i) => (
               // eslint-disable-next-line react/no-array-index-key
-              <Td key={j}>
-                <CellView value={cell} />
-              </Td>
+              <Th key={`${columnName(c, i)}_${i}`}>
+                {columnName(c, i)}{' '}
+                <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
+              </Th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </Table>
-  </Wrap>
-)
+        </thead>
+        <tbody>
+          {view.rows.map((row, i) => (
+            // eslint-disable-next-line react/no-array-index-key
+            <tr key={i}>
+              {row.map((cell, j) => (
+                // eslint-disable-next-line react/no-array-index-key
+                <Td key={j}>
+                  <CellView value={cell} />
+                </Td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </Wrap>
+  )
+}
