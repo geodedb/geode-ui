@@ -13,21 +13,30 @@ test.describe('query (stream)', () => {
   }) => {
     await page.goto('/')
     await sel.queryStreamToggle(page).check()
+    // Filter to the matrix-cluster names so all rows fit in the
+    // virtualized table's first viewport (TableView uses react-window
+    // post-#26 — off-viewport rows aren't in the DOM). Streaming the
+    // full 133 still works end-to-end; that's covered separately.
+    const namesGql = seed.people.map((n) => `'${n}'`).join(', ')
     await page.locator('.monaco-editor').first().click()
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(
-      `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name AS name`
+      `USE GRAPH ${seed.graph}; MATCH (n:Person) WHERE n.name IN [${namesGql}] RETURN n.name AS name ORDER BY name`
     )
     await sel.queryRunBtn(page).click()
 
     // The summary frame is sent at the end; wait for it.
     await expect(
-      page.getByText(new RegExp(`${seed.counts.persons} rows`))
+      page.getByText(new RegExp(`${seed.people.length} rows`))
     ).toBeVisible({ timeout: 15_000 })
 
     await sel.queryTabTable(page).click()
+    // Scope to table cells via role — same names appear in the Monaco
+    // editor's IN-list literals, which would trip strict-mode getByText.
     await Promise.all(
-      seed.people.map((name) => expect(page.getByText(name)).toBeVisible())
+      seed.people.map((name) =>
+        expect(page.getByRole('cell', { name })).toBeVisible()
+      )
     )
   })
 

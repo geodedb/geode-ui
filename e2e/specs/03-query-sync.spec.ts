@@ -9,26 +9,52 @@ test.describe('query (sync)', () => {
     await page.goto('/')
     await expect(sel.queryRunBtn(page)).toBeVisible()
 
-    // Replace the editor's default statement with a deterministic query.
-    // Monaco doesn't expose a stable input role; we use Ctrl+A + type.
+    // Filter to the matrix-cluster names from seed.people so all rows
+    // fit in the virtualized table's first viewport (TableView uses
+    // react-window post-#26 — off-viewport rows aren't in the DOM).
+    // The 133-row total is asserted by the count-summary test below.
+    const namesGql = seed.people.map((n) => `'${n}'`).join(', ')
     await page.locator('.monaco-editor').first().click()
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(
-      `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name AS name ORDER BY name`
+      `USE GRAPH ${seed.graph}; MATCH (n:Person) WHERE n.name IN [${namesGql}] RETURN n.name AS name ORDER BY name`
     )
 
     await sel.queryRunBtn(page).click()
 
-    // Wait for the row-count summary to appear.
+    // Row-count summary lives outside the virtualized list, always
+    // rendered. Filtered query returns exactly seed.people.length rows.
     await expect(
-      page.getByText(new RegExp(`${seed.counts.persons} rows`))
+      page.getByText(new RegExp(`${seed.people.length} rows`))
     ).toBeVisible()
 
-    // Switch to table tab, verify the seeded names appear.
+    // Switch to table tab, verify the seeded names appear. Scope to
+    // the table cells via role — the same names also appear inside the
+    // Monaco editor as quoted IN-list literals, which would trip
+    // Playwright's strict-mode getByText.
     await sel.queryTabTable(page).click()
     await Promise.all(
-      seed.people.map((name) => expect(page.getByText(name)).toBeVisible())
+      seed.people.map((name) =>
+        expect(page.getByRole('cell', { name })).toBeVisible()
+      )
     )
+  })
+
+  test('row-count summary reflects total Person count', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/')
+    await page.locator('.monaco-editor').first().click()
+    await page.keyboard.press('ControlOrMeta+A')
+    await page.keyboard.type(
+      `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name AS name`
+    )
+    await sel.queryRunBtn(page).click()
+    // Summary line is outside the virtualized table; the 133 unfiltered
+    // rows are accepted by the server even if only ~16 are in the DOM.
+    await expect(
+      page.getByText(new RegExp(`${seed.counts.persons} rows`))
+    ).toBeVisible({ timeout: 10_000 })
   })
 
   test('a syntactically broken query surfaces an error banner', async ({

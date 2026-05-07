@@ -31,9 +31,16 @@ export const test = base.extend<Fixtures>({
     const ctx = await browser.newContext({
       storageState: await request.storageState(),
     })
-    // Profile is non-secret and still cached in localStorage by the SPA;
-    // seed it so first-render UI doesn't fall back to the picker.
+    // Seed the SPA's per-mount auth hint and profile cache.
+    //
+    // - geode-ui.session-hint: AuthProvider reads this from sessionStorage
+    //   on mount (it cannot see the HttpOnly auth cookie). Without it,
+    //   isAuthed starts false and ProtectedRoute redirects to /login even
+    //   though the cookie is valid.
+    // - geode-ui.profile: non-secret default profile name, cached in
+    //   localStorage so the picker doesn't reset on first render.
     await ctx.addInitScript(() => {
+      sessionStorage.setItem('geode-ui.session-hint', '1')
       localStorage.setItem('geode-ui.profile', 'default')
     })
     await use(ctx)
