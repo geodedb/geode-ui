@@ -53,6 +53,50 @@ describe('formatCell', () => {
     }
     expect(formatCell(node)).toBe("(:Person {name: 'Alice', born: 1980})")
   })
+  test('renders ALL node properties without truncation', () => {
+    // Reproduction for the user-reported "…" truncation: a real
+    // (:User {…}) row with many properties was rendered as
+    // "(:User {lockout_until: 0, is_default_user: true, …})" which
+    // hid the actually interesting fields (username, email, roles).
+    // Truncation belongs to the UI's responsibility for layout, not
+    // the formatter's responsibility for data.
+    const node = {
+      id: 7,
+      labels: ['User'],
+      properties: {
+        lockout_until: 0,
+        is_default_user: true,
+        username: 'alice',
+        email: 'alice@example.com',
+        created_at: '2025-01-01',
+        roles: ['admin'],
+      },
+    }
+    const out = formatCell(node)
+    expect(out).not.toContain('…')
+    expect(out).toContain("username: 'alice'")
+    expect(out).toContain("email: 'alice@example.com'")
+    expect(out).toContain('roles: ["admin"]')
+  })
+  test('renders ALL edge properties without truncation', () => {
+    const edge = {
+      id: 100,
+      start_node: 1,
+      end_node: 2,
+      type: 'ACTED_IN',
+      properties: {
+        role: 'Lead',
+        year: 2008,
+        billing_position: 1,
+        screen_time_min: 95,
+      },
+    }
+    const out = formatCell(edge)
+    expect(out).not.toContain('…')
+    expect(out).toContain("role: 'Lead'")
+    expect(out).toContain('billing_position: 1')
+    expect(out).toContain('screen_time_min: 95')
+  })
   test('renders nodes with multiple labels', () => {
     const node = { id: 1, labels: ['Person', 'Actor'], properties: {} }
     expect(formatCell(node)).toBe('(:Person:Actor)')

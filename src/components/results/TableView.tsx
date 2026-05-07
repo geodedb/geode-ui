@@ -22,10 +22,13 @@ const Th = styled.th`
 const Td = styled.td`
   padding: 6px;
   border-top: 1px solid ${({ theme }) => theme.colors.border};
-  white-space: nowrap;
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  vertical-align: top;
+  // Wrap on whitespace AND between long words / property pairs so
+  // a many-property node row doesn't overflow horizontally and chop
+  // off the trailing fields.
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 640px;
 `
 
 type Props = {
@@ -74,16 +77,33 @@ function isPath(o: AnyRecord): boolean {
   return Array.isArray(o.nodes) && Array.isArray(o.edges)
 }
 
-function summarizeProps(props: AnyRecord, max = 2): string {
-  const keys = Object.keys(props).slice(0, max)
+// formatPropValue renders a single property value in the cypher-style
+// summary. Strings are single-quoted (so 'Alice' vs Alice numeric is
+// unambiguous); arrays/objects fall through to JSON.stringify so the
+// representation stays compact but lossless. Nullish reads as the
+// literal "null" / "undefined" — same convention as Cypher's text
+// rendering of those values.
+function formatPropValue(v: unknown): string {
+  if (v === null) return 'null'
+  if (v === undefined) return 'undefined'
+  if (typeof v === 'string') return `'${v}'`
+  if (Array.isArray(v) || (typeof v === 'object' && v !== null)) {
+    return JSON.stringify(v)
+  }
+  return String(v)
+}
+
+// summarizeProps renders ALL keys of a node/edge property bag in a
+// cypher-like " {k: v, ...}" form. We deliberately do NOT truncate —
+// the previous "first 2 props + …" form was unhelpful for admin views
+// where the interesting fields (username, email, roles) routinely
+// landed past the cap. Cell-level wrapping (white-space: pre-wrap on
+// Td) keeps the row readable when the property bag is large.
+function summarizeProps(props: AnyRecord): string {
+  const keys = Object.keys(props)
   if (keys.length === 0) return ''
-  const pairs = keys.map((k) => {
-    const v = props[k]
-    const repr = typeof v === 'string' ? `'${v}'` : String(v)
-    return `${k}: ${repr}`
-  })
-  const more = Object.keys(props).length > max ? ', …' : ''
-  return ` {${pairs.join(', ')}${more}}`
+  const pairs = keys.map((k) => `${k}: ${formatPropValue(props[k])}`)
+  return ` {${pairs.join(', ')}}`
 }
 
 function formatNode(o: AnyRecord): string {
