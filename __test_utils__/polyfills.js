@@ -10,5 +10,7 @@ if (typeof globalThis.TextEncoder === 'undefined') {
 // doesn't blow up. Tests that exercise network calls should mock as needed.
 if (typeof globalThis.fetch === 'undefined') {
   globalThis.fetch = () =>
-    Promise.reject(new Error('fetch is not implemented in the test environment'))
+    Promise.reject(
+      new Error('fetch is not implemented in the test environment')
+    )
 }

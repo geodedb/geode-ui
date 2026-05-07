@@ -291,13 +291,13 @@ func TestUsers_QuoteIdent(t *testing.T) {
 	}{
 		{"alice", "`alice`", false},
 		{"alice-bob_42", "`alice-bob_42`", false},
-		{"with spaces", "`with spaces`", false},  // spaces are fine inside backticks
-		{"日本語", "`日本語`", false},                   // non-ASCII is fine — quoteIdent only blocks backticks/controls
-		{"", "", true},                            // empty rejected
-		{"al`ice", "", true},                      // backtick rejected
-		{"alice\nbob", "", true},                  // newline rejected
-		{"alice\x00bob", "", true},                // NUL rejected
-		{"alice\x7fbob", "", true},                // DEL rejected
+		{"with spaces", "`with spaces`", false}, // spaces are fine inside backticks
+		{"日本語", "`日本語`", false},                 // non-ASCII is fine — quoteIdent only blocks backticks/controls
+		{"", "", true},                          // empty rejected
+		{"al`ice", "", true},                    // backtick rejected
+		{"alice\nbob", "", true},                // newline rejected
+		{"alice\x00bob", "", true},              // NUL rejected
+		{"alice\x7fbob", "", true},              // DEL rejected
 	}
 	for _, tc := range cases {
 		got, err := quoteIdent(tc.in)

@@ -80,9 +80,16 @@ const RunBtn = styled.button`
     cursor: wait;
   }
 `
+function tabBtnBg(props: {
+  $active: boolean
+  theme: { colors: { surface: string } }
+}): string {
+  return props.$active ? props.theme.colors.surface : 'transparent'
+}
+
 const TabBtn = styled.button<{ $active: boolean }>`
   padding: 4px 10px;
-  background: ${({ $active, theme }) => ($active ? theme.colors.surface : 'transparent')};
+  background: ${tabBtnBg};
   color: ${({ theme }) => theme.colors.text};
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: 4px;

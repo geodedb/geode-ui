@@ -3,7 +3,11 @@ import { createClient } from '@api'
 import { auth } from './auth'
 
 function resolveBaseUrl(): string {
-  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+  if (
+    typeof window !== 'undefined' &&
+    window.location &&
+    window.location.origin
+  ) {
     return window.location.origin
   }
   return 'http://localhost'

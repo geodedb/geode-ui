@@ -39,8 +39,9 @@ class MockWebSocket implements MockWS {
 }
 
 beforeEach(() => {
-  lastInstance = null;
-  (window as any).WebSocket = MockWebSocket
+  lastInstance = null
+  // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
+  ;(window as any).WebSocket = MockWebSocket
   localStorage.setItem('geode-ui.access_token', 'tok123')
 })
 
@@ -50,9 +51,18 @@ test('sends start message on open and forwards messages', () => {
   const ws = lastInstance!
   ws.fire('open')
   expect(ws.send).toHaveBeenCalledWith(
-    JSON.stringify({ kind: 'start', statement: 'MATCH (n) RETURN n', graph: 'social' }),
+    JSON.stringify({
+      kind: 'start',
+      statement: 'MATCH (n) RETURN n',
+      graph: 'social',
+    })
   )
-  ws.fire('message', { data: JSON.stringify({ kind: 'schema', columns: [{ name: 'n', type: 'node' }] }) })
+  ws.fire('message', {
+    data: JSON.stringify({
+      kind: 'schema',
+      columns: [{ name: 'n', type: 'node' }],
+    }),
+  })
   ws.fire('message', { data: JSON.stringify({ kind: 'row', row: [1] }) })
   ws.fire('message', { data: JSON.stringify({ kind: 'end' }) })
   expect(msgs.map((m) => m.kind)).toEqual(['schema', 'row', 'end'])

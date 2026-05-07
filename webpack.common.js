@@ -34,10 +34,7 @@ const rules = [
   },
   {
     test: /\.(s*)css$/,
-    use: [
-      devMode ? 'style-loader' : MiniCssExtractPlugin.loader,
-      'css-loader',
-    ],
+    use: [devMode ? 'style-loader' : MiniCssExtractPlugin.loader, 'css-loader'],
   },
   {
     test: /\.(png|jp(e*)g|svg|gif)$/i,

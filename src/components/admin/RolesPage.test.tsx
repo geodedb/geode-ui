@@ -9,7 +9,11 @@ jest.mock('../../api/client', () => ({
   client: {
     getRoles: jest.fn().mockResolvedValue({
       roles: [
-        { name: 'admin', description: 'Full access', permissions: ['read', 'write'] },
+        {
+          name: 'admin',
+          description: 'Full access',
+          permissions: ['read', 'write'],
+        },
         { name: 'reader', description: 'Read-only', permissions: ['read'] },
       ],
     }),
@@ -42,7 +46,7 @@ test('renders role rows from the mocked client', async () => {
   render(
     <ThemeProvider theme={theme}>
       <RolesPage />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 
   await waitFor(() => {

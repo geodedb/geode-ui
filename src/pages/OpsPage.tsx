@@ -13,10 +13,19 @@ const Tabs = styled.nav`
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
 `
 
+function tabColor(props: {
+  $active: boolean
+  theme: { colors: { text: string; textSecondary: string } }
+}): string {
+  return props.$active
+    ? props.theme.colors.text
+    : props.theme.colors.textSecondary
+}
+
 const Tab = styled(Link)<{ $active: boolean }>`
   padding: 8px 12px;
   text-decoration: none;
-  color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.textSecondary)};
+  color: ${tabColor};
   border-bottom: 2px solid
     ${({ $active, theme }) => ($active ? theme.colors.primary : 'transparent')};
   margin-bottom: -1px;

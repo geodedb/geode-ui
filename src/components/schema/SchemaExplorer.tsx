@@ -51,11 +51,18 @@ const GraphList = styled.ul`
   gap: 4px;
 `
 
+function graphBtnBg(props: {
+  $active: boolean
+  theme: { colors: { background: string } }
+}): string {
+  return props.$active ? props.theme.colors.background : 'transparent'
+}
+
 const GraphBtn = styled.button<{ $active: boolean }>`
   text-align: left;
   padding: 6px 10px;
   width: 100%;
-  background: ${({ $active, theme }) => ($active ? theme.colors.background : 'transparent')};
+  background: ${graphBtnBg};
   color: ${({ theme }) => theme.colors.text};
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: 4px;
@@ -87,7 +94,9 @@ export const SchemaExplorer: React.FC = () => {
   const [active, setActive] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
   const [indexes, setIndexes] = useState<Array<Record<string, unknown>>>([])
-  const [constraints, setConstraints] = useState<Array<Record<string, unknown>>>([])
+  const [constraints, setConstraints] = useState<
+    Array<Record<string, unknown>>
+  >([])
 
   // Initial graph fetch. Empty deps -- runs once on mount. The first
   // returned graph becomes active so the right-hand panes have data.
@@ -159,7 +168,11 @@ export const SchemaExplorer: React.FC = () => {
       </Pane>
       <Pane>
         <h3>{active ? 'Edge types (' + active + ')' : 'Edge types'}</h3>
-        {active ? <EdgeTypeList graph={active} /> : <Empty>Select a graph.</Empty>}
+        {active ? (
+          <EdgeTypeList graph={active} />
+        ) : (
+          <Empty>Select a graph.</Empty>
+        )}
         {active && (
           <>
             <h4>Indexes</h4>

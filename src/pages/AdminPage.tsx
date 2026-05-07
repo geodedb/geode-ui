@@ -7,6 +7,15 @@ import styled from 'styled-components'
 // and Grants (D3). The active tab is derived from pathname rather than
 // React state so that deep-linking and the browser back button both
 // work correctly.
+function adminTabColor(props: {
+  $active: boolean
+  theme: { colors: { text: string; textSecondary: string } }
+}): string {
+  return props.$active
+    ? props.theme.colors.text
+    : props.theme.colors.textSecondary
+}
+
 const Tabs = styled.nav`
   display: flex;
   gap: 12px;
@@ -17,7 +26,7 @@ const Tabs = styled.nav`
 const Tab = styled(Link)<{ $active: boolean }>`
   padding: 8px 12px;
   text-decoration: none;
-  color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.textSecondary)};
+  color: ${adminTabColor};
   border-bottom: 2px solid
     ${({ $active, theme }) => ($active ? theme.colors.primary : 'transparent')};
   margin-bottom: -1px;

@@ -4,22 +4,12 @@ GOTOOLCHAIN ?= go1.26.2
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
-.PHONY: all help \
-        generate go-build go-test go-lint go-fmt go-tidy \
-        web-install web-build web-dev web-test web-lint web-fmt web-typecheck \
-        build test lint fmt ci clean dev pre-commit
+.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit
 
 all: lint test build
 
 help:
-	@echo "Targets:"
-	@echo "  make generate     Run genapi → gen/"
-	@echo "  make build        Build SPA into dist/ then Go binary into $(BIN)"
-	@echo "  make test         Run Go + JS tests"
-	@echo "  make lint         Run Go + JS linters"
-	@echo "  make dev          Run go server (terminal 1) and webpack dev (terminal 2)"
-	@echo "  make ci           Full CI sequence"
-	@echo "  make clean        Remove gen/, dist/, bin/, coverage"
+	@cat scripts/help.txt
 
 # ----- Code generation -----
 generate:

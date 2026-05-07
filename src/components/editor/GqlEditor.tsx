@@ -9,7 +9,12 @@ type Props = {
   height?: number
 }
 
-export const GqlEditor: React.FC<Props> = ({ value, onChange, onRun, height = 240 }) => {
+export const GqlEditor: React.FC<Props> = ({
+  value,
+  onChange,
+  onRun,
+  height = 240,
+}) => {
   const handleMount: OnMount = (editor, monaco) => {
     registerGqlLanguage(monaco)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun)
@@ -23,7 +28,11 @@ export const GqlEditor: React.FC<Props> = ({ value, onChange, onRun, height = 24
       value={value}
       onChange={(v) => onChange(v ?? '')}
       onMount={handleMount}
-      options={{ minimap: { enabled: false }, fontSize: 14, scrollBeyondLastLine: false }}
+      options={{
+        minimap: { enabled: false },
+        fontSize: 14,
+        scrollBeyondLastLine: false,
+      }}
     />
   )
 }

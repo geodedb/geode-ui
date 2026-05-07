@@ -25,7 +25,10 @@ const Side = styled.aside<{ $height: number }>`
   padding: 12px;
   background: ${({ theme }) => theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
-  pre { white-space: pre-wrap; word-break: break-all; }
+  pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
 `
 
 export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
@@ -43,8 +46,12 @@ export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
       layout: { name: 'cose', animate: false, padding: 24 },
       wheelSensitivity: 0.2,
     })
-    cy.on('tap', 'node', (ev) => setSelected({ kind: 'node', data: ev.target.data() }))
-    cy.on('tap', 'edge', (ev) => setSelected({ kind: 'edge', data: ev.target.data() }))
+    cy.on('tap', 'node', (ev) =>
+      setSelected({ kind: 'node', data: ev.target.data() })
+    )
+    cy.on('tap', 'edge', (ev) =>
+      setSelected({ kind: 'edge', data: ev.target.data() })
+    )
     cy.on('tap', (ev) => {
       if (ev.target === cy) setSelected(null)
     })
@@ -68,7 +75,9 @@ export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
             <pre>{JSON.stringify(selected.data, null, 2)}</pre>
           </>
         ) : (
-          <p style={{ opacity: 0.6 }}>Click a node or edge to inspect properties.</p>
+          <p style={{ opacity: 0.6 }}>
+            Click a node or edge to inspect properties.
+          </p>
         )}
       </Side>
     </Wrap>

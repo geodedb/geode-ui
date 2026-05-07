@@ -16,11 +16,13 @@ export type GqlEdge = {
 
 export type QueryRespLike = {
   rows?: unknown[][]
-  graph_summary?: { nodes?: GqlNode[]; edges?: GqlEdge[] } | Record<string, unknown>
+  graph_summary?:
+    | { nodes?: GqlNode[]; edges?: GqlEdge[] }
+    | Record<string, unknown>
 }
 
 function isGraphSummary(
-  s: unknown,
+  s: unknown
 ): s is { nodes?: GqlNode[]; edges?: GqlEdge[] } {
   return typeof s === 'object' && s !== null
 }

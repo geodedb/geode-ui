@@ -107,9 +107,9 @@ const Snippet = styled.code`
 // pickField walks a small set of plausible names because the server
 // payload uses different capitalizations across event types.
 const pickField = (e: AuditEntry, names: string[]): string => {
-  const found = names
-    .map((n) => e[n])
-    .find((v) => typeof v === 'string') as string | undefined
+  const found = names.map((n) => e[n]).find((v) => typeof v === 'string') as
+    | string
+    | undefined
   return found ?? ''
 }
 
@@ -142,7 +142,11 @@ const fieldsSnippet = (e: AuditEntry): string => {
 export const AuditLogPage: React.FC = () => {
   const [entries, setEntries] = useState<AuditEntry[]>([])
   const [err, setErr] = useState<string | null>(null)
-  const [filters, setFilters] = useState<Filters>({ since: '', event: '', user: '' })
+  const [filters, setFilters] = useState<Filters>({
+    since: '',
+    event: '',
+    user: '',
+  })
 
   // useEffect polls /api/v1/audit every 5 seconds while the page is
   // mounted. The cancelled flag prevents stale resolves from clobbering
@@ -158,7 +162,7 @@ export const AuditLogPage: React.FC = () => {
         })
         .then((r: { entries?: unknown[] }) => {
           if (cancelled) return
-          setEntries(((r.entries ?? []) as AuditEntry[]) ?? [])
+          setEntries((r.entries ?? []) as AuditEntry[])
           setErr(null)
         })
         .catch((e: unknown) => {
@@ -183,8 +187,18 @@ export const AuditLogPage: React.FC = () => {
         event: pickField(e, ['event', 'action']),
         snippet: fieldsSnippet(e),
       })),
-    [entries],
+    [entries]
   )
+
+  const onSinceChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    setFilters((f) => ({ ...f, since: e.target.value }))
+  }
+  const onEventChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    setFilters((f) => ({ ...f, event: e.target.value }))
+  }
+  const onUserChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    setFilters((f) => ({ ...f, user: e.target.value }))
+  }
 
   return (
     <Wrap>
@@ -195,7 +209,7 @@ export const AuditLogPage: React.FC = () => {
           <input
             placeholder="2025-01-01T00:00:00Z"
             value={filters.since}
-            onChange={(e) => setFilters((f) => ({ ...f, since: e.target.value }))}
+            onChange={onSinceChange}
           />
         </Field>
         <Field>
@@ -203,7 +217,7 @@ export const AuditLogPage: React.FC = () => {
           <input
             placeholder="event name"
             value={filters.event}
-            onChange={(e) => setFilters((f) => ({ ...f, event: e.target.value }))}
+            onChange={onEventChange}
           />
         </Field>
         <Field>
@@ -211,7 +225,7 @@ export const AuditLogPage: React.FC = () => {
           <input
             placeholder="username"
             value={filters.user}
-            onChange={(e) => setFilters((f) => ({ ...f, user: e.target.value }))}
+            onChange={onUserChange}
           />
         </Field>
       </FilterBar>

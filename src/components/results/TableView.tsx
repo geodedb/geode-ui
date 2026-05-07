@@ -59,7 +59,8 @@ export const TableView: React.FC<Props> = ({ resp }) => (
           {resp.columns.map((c, i) => (
             // eslint-disable-next-line react/no-array-index-key
             <Th key={`${columnName(c, i)}_${i}`}>
-              {columnName(c, i)} <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
+              {columnName(c, i)}{' '}
+              <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
             </Th>
           ))}
         </tr>

@@ -9,8 +9,18 @@ jest.mock('../../api/client', () => ({
   client: {
     getUsers: jest.fn().mockResolvedValue({
       users: [
-        { username: 'alice', email: 'alice@example.com', roles: ['admin'], disabled: false },
-        { username: 'bob', email: 'bob@example.com', roles: [], disabled: true },
+        {
+          username: 'alice',
+          email: 'alice@example.com',
+          roles: ['admin'],
+          disabled: false,
+        },
+        {
+          username: 'bob',
+          email: 'bob@example.com',
+          roles: [],
+          disabled: true,
+        },
       ],
     }),
     postUsers: jest.fn().mockResolvedValue({}),
@@ -44,7 +54,7 @@ test('renders user rows with username, email, and status from the mocked client'
   render(
     <ThemeProvider theme={theme}>
       <UsersPage />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 
   // Wait for the async getUsers() call to settle and the table to

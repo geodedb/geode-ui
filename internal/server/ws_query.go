@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"time"
 
-	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/gen/pkg/wsx"
+	genws "geodedb.com/geode-ui/gen/ws"
 )
 
 // WSServer implements the generated genws.WSServerInterface. It carries

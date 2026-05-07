@@ -274,7 +274,9 @@ export const MigrationsPage: React.FC = () => {
   )
 }
 
-const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
+  onClose,
+}) => {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [busy, setBusy] = useState(false)

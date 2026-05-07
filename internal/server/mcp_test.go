@@ -36,9 +36,9 @@ func (c *captureConn) QueryContext(_ context.Context, q string, _ []driver.Named
 
 type captureRows struct{}
 
-func (r *captureRows) Columns() []string             { return []string{"x"} }
-func (r *captureRows) Close() error                  { return nil }
-func (r *captureRows) Next(_ []driver.Value) error   { return io.EOF }
+func (r *captureRows) Columns() []string           { return []string{"x"} }
+func (r *captureRows) Close() error                { return nil }
+func (r *captureRows) Next(_ []driver.Value) error { return io.EOF }
 
 // sharedCapture is the package-singleton capture driver. We register it
 // once with database/sql (which only allows a single Register per

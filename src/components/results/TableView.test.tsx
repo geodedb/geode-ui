@@ -25,8 +25,10 @@ const theme = {
 test('renders columns and rows', () => {
   render(
     <ThemeProvider theme={theme}>
-      <TableView resp={{ columns: [{ name: 'n', type: 'node' }], rows: [['x'], ['y']] }} />
-    </ThemeProvider>,
+      <TableView
+        resp={{ columns: [{ name: 'n', type: 'node' }], rows: [['x'], ['y']] }}
+      />
+    </ThemeProvider>
   )
   expect(screen.getByText('n')).toBeInTheDocument()
   expect(screen.getByText('x')).toBeInTheDocument()

@@ -14,7 +14,12 @@ jest.mock('../../api/client', () => ({
     audit: jest.fn().mockResolvedValue({
       entries: [
         { timestamp: '2025-01-01T00:00:00Z', user: 'alice', event: 'login' },
-        { timestamp: '2025-01-01T00:00:01Z', user: 'bob', event: 'query', graph: 'default' },
+        {
+          timestamp: '2025-01-01T00:00:01Z',
+          user: 'bob',
+          event: 'query',
+          graph: 'default',
+        },
       ],
     }),
   },
@@ -44,7 +49,7 @@ test('renders audit entries from the mocked client', async () => {
   render(
     <ThemeProvider theme={theme}>
       <AuditLogPage />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 
   await waitFor(() => {

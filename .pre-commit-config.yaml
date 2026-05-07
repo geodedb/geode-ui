@@ -1,37 +1,71 @@
-# Pre-commit configuration
-# https://pre-commit.com/
+# yaml-language-server: $schema=https://json.schemastore.org/pre-commit-config.json
+# https://pre-commit.com
+#
+# Combined Go + React pipeline modeled on:
+#   ~/src/devnw/go/msft (Go discipline: detect-secrets baseline, checkmake,
+#       commitizen-branch on pre-push, single make-target uber-hook)
+#   ~/src/devnw/codepros/brancher/brancher (mixed-stack layered hooks:
+#       fast pre-commit checks + heavy pre-push gauntlet)
+#
+# pre-commit stage: file hygiene, formatters, fast linters
+# pre-push stage:   typecheck, full test suites, build verifications, generate-verify
 
 default_stages: [pre-commit]
 fail_fast: false
 
 repos:
-  # Standard pre-commit hooks
+  # ── Standard file hygiene ──────────────────────────────────────────────
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v5.0.0
+  rev: v6.0.0
   hooks:
   - id: trailing-whitespace
-    exclude: ^\.gitlab/
+    exclude: ^(\.gitlab/|gen/|.*\.svg$)
   - id: end-of-file-fixer
-    exclude: ^\.gitlab/
+    exclude: ^(\.gitlab/|gen/|.*\.svg$)
   - id: mixed-line-ending
     args: [--fix=lf]
+    exclude: ^gen/
   - id: check-yaml
-    args: [--unsafe]
+    args: [--allow-multiple-documents, --unsafe]
   - id: check-json
+    exclude: ^gen/
   - id: check-toml
+  - id: detect-private-key
   - id: check-added-large-files
     args: [--maxkb=1024]
   - id: check-merge-conflict
-  - id: detect-private-key
+  - id: check-case-conflict
+  - id: check-symlinks
+  - id: destroyed-symlinks
+  - id: check-executables-have-shebangs
+  - id: check-shebang-scripts-are-executable
 
-  # Shell linting
+  # ── Shell linting ──────────────────────────────────────────────────────
 - repo: https://github.com/shellcheck-py/shellcheck-py
-  rev: v0.10.0.1
+  rev: v0.11.0.1
   hooks:
   - id: shellcheck
     args: [--severity=error]
 
-  # Markdown linting
+  # ── Secrets ────────────────────────────────────────────────────────────
+- repo: https://github.com/Yelp/detect-secrets
+  rev: v1.5.0
+  hooks:
+  - id: detect-secrets
+    name: detect secrets
+    args:
+    - --baseline
+    - .secrets.baseline
+    - --exclude-files
+    - (^gen/|^node_modules/|^package-lock\.json$|^\.secrets\.baseline$|_test\.go$)
+
+  # ── Makefile lint ──────────────────────────────────────────────────────
+- repo: https://github.com/mrtazz/checkmake.git
+  rev: 0.2.2
+  hooks:
+  - id: checkmake
+
+  # ── Markdown linting ───────────────────────────────────────────────────
 - repo: https://github.com/igorshubovych/markdownlint-cli
   rev: v0.43.0
   hooks:
@@ -39,7 +73,7 @@ repos:
     args: [--config, .markdownlint.json]
     exclude: ^(CHANGELOG\.md|docs/superpowers/plans/.*|gen/.*)$
 
-  # YAML formatting
+  # ── YAML formatting ────────────────────────────────────────────────────
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
   rev: v2.14.0
   hooks:
@@ -47,16 +81,35 @@ repos:
     args: [--autofix, --indent, '2']
     exclude: ^(\.gitlab-ci\.yml|gen/.*)$
 
-  # Conventional commits
+  # ── Conventional commits ───────────────────────────────────────────────
 - repo: https://github.com/commitizen-tools/commitizen
-  rev: v4.1.0
+  rev: v4.12.1
   hooks:
   - id: commitizen
     stages: [commit-msg]
+  - id: commitizen-branch
+    stages: [pre-push]
 
-  # Local hooks
+  # ── geode-ui local hooks (Go + React) ──────────────────────────────────
 - repo: local
   hooks:
+      # ── pre-commit (fast: formatters + per-file linters) ───────────────
+  - id: gofmt-check
+    name: gofmt
+    entry: scripts/check-gofmt.sh
+    language: system
+    pass_filenames: false
+    files: \.go$
+    exclude: ^gen/
+
+  - id: go-vet
+    name: go vet
+    entry: scripts/run-go.sh vet ./...
+    language: system
+    pass_filenames: false
+    files: \.go$
+    exclude: ^gen/
+
   - id: eslint
     name: eslint
     entry: npx --no-install eslint --max-warnings=0
@@ -64,24 +117,86 @@ repos:
     files: \.(ts|tsx)$
     exclude: ^(node_modules/|gen/)
 
-  - id: typecheck
-    name: typescript check
-    entry: npx tsc --noEmit
+  - id: prettier-check
+    name: prettier:check
+    entry: npm run prettier:check --silent
     language: system
     pass_filenames: false
-    files: \.(ts|tsx)$
+    files: \.(ts|tsx|json|css)$
+    exclude: ^(node_modules/|gen/|package-lock\.json)
+
+      # ── pre-push (heavy: typecheck + tests + build verifications) ──────
+  - id: golangci-lint
+    name: golangci-lint
+    entry: scripts/run-go.sh tool-golangci
+    language: system
+    pass_filenames: false
     stages: [pre-push]
 
-  - id: check-todos
-    name: check TODOs
-    entry: |-
-      bash -c 'if grep -rn "TODO\|FIXME\|HACK\|XXX" src/ --include="*.ts" --include="*.tsx" 2>/dev/null; then echo "Warning: Found TODO/FIXME markers"; fi; exit 0'
+  - id: go-mod-tidy
+    name: go mod tidy (no diff)
+    entry: scripts/check-go-mod-tidy.sh
     language: system
     pass_filenames: false
-    verbose: true
+    stages: [pre-push]
+
+  - id: ts-typecheck
+    name: tsc --noEmit
+    entry: npm run test:ts --silent
+    language: system
+    pass_filenames: false
+    stages: [pre-push]
+
+  - id: go-test
+    name: go test -race
+    entry: scripts/run-go.sh test -race -cover -failfast ./...
+    language: system
+    pass_filenames: false
+    stages: [pre-push]
+
+  - id: js-test
+    name: jest --ci
+    entry: bash -c 'npm test -- --ci'
+    language: system
+    pass_filenames: false
+    stages: [pre-push]
+
+  - id: generate-verify
+    name: make generate (no diff)
+    entry: scripts/check-generate.sh
+    language: system
+    pass_filenames: false
+    stages: [pre-push]
+
+  - id: web-build
+    name: webpack production build
+    entry: bash -c 'npm run build --silent'
+    language: system
+    pass_filenames: false
+    stages: [pre-push]
+
+  - id: go-build
+    name: go build ./...
+    entry: scripts/run-go.sh build ./...
+    language: system
+    pass_filenames: false
+    stages: [pre-push]
 
 ci:
   autofix_prs: true
   autofix_commit_msg: '[pre-commit.ci] auto fixes'
   autoupdate_schedule: weekly
-  skip: [eslint, typecheck]
+  # CI runs its own pipeline (.gitlab-ci.yml); skip local hooks there.
+  skip:
+  - gofmt-check
+  - go-vet
+  - eslint
+  - prettier-check
+  - golangci-lint
+  - go-mod-tidy
+  - ts-typecheck
+  - go-test
+  - js-test
+  - generate-verify
+  - web-build
+  - go-build

@@ -50,7 +50,7 @@ test('renders fetched labels and stages a MATCH query on click', async () => {
       <MemoryRouter>
         <LabelList graph="default" />
       </MemoryRouter>
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 
   // Wait for client.labels() to settle and both labels to appear.

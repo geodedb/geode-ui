@@ -10,7 +10,13 @@ test('flattens nodes + edges from a query result', () => {
         { id: 2, labels: ['Person'], properties: { name: 'Bob' } },
       ],
       edges: [
-        { id: 100, start_node: 1, end_node: 2, type: 'KNOWS', properties: { since: 2020 } },
+        {
+          id: 100,
+          start_node: 1,
+          end_node: 2,
+          type: 'KNOWS',
+          properties: { since: 2020 },
+        },
       ],
     },
   }
@@ -24,5 +30,7 @@ test('flattens nodes + edges from a query result', () => {
 
 test('handles empty graph_summary', () => {
   expect(extractElements({} as any)).toEqual([])
-  expect(extractElements({ graph_summary: { nodes: [], edges: [] } } as any)).toEqual([])
+  expect(
+    extractElements({ graph_summary: { nodes: [], edges: [] } } as any)
+  ).toEqual([])
 })

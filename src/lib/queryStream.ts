@@ -15,7 +15,7 @@ export type StreamHandle = {
 export function streamQuery(
   statement: string,
   graph: string | undefined,
-  onMessage: (m: StreamMsg) => void,
+  onMessage: (m: StreamMsg) => void
 ): StreamHandle {
   const url = new URL('/ws/query', window.location.href)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'

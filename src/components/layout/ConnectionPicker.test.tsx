@@ -46,7 +46,7 @@ test('renders the persisted profile from localStorage as the initial value', asy
   render(
     <ThemeProvider theme={theme}>
       <ConnectionPicker />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
   // Initial state hydrates from auth.getProfile() before the async
   // /api/v1/profiles fetch resolves, so 'prod' is the displayed value.
@@ -65,7 +65,7 @@ test('hydrates the option list from the server response', async () => {
   render(
     <ThemeProvider theme={theme}>
       <ConnectionPicker />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
   // After the mocked client.profiles() promise resolves, the picker
   // replaces the single-element list ([auth.getProfile()]) with the
@@ -74,8 +74,8 @@ test('hydrates the option list from the server response', async () => {
     const opts = screen.getByRole('combobox').querySelectorAll('option')
     expect(opts.length).toBe(2)
   })
-  const opts = Array.from(screen.getByRole('combobox').querySelectorAll('option')).map(
-    (o) => o.value,
-  )
+  const opts = Array.from(
+    screen.getByRole('combobox').querySelectorAll('option')
+  ).map((o) => o.value)
   expect(opts).toEqual(['default', 'prod'])
 })

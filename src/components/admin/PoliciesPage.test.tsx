@@ -9,8 +9,16 @@ jest.mock('../../api/client', () => ({
   client: {
     getPolicies: jest.fn().mockResolvedValue({
       policies: [
-        { name: 'tenant_isolation', resource: 'graph:default', expression: 'tenant_id = $tenant' },
-        { name: 'rls_owner', resource: 'graph:billing', expression: 'owner = $user' },
+        {
+          name: 'tenant_isolation',
+          resource: 'graph:default',
+          expression: 'tenant_id = $tenant',
+        },
+        {
+          name: 'rls_owner',
+          resource: 'graph:billing',
+          expression: 'owner = $user',
+        },
       ],
     }),
     postPolicies: jest.fn().mockResolvedValue({}),
@@ -42,7 +50,7 @@ test('renders policy rows from the mocked client', async () => {
   render(
     <ThemeProvider theme={theme}>
       <PoliciesPage />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 
   await waitFor(() => {

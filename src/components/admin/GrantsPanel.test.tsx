@@ -37,7 +37,7 @@ test('renders the grants form with apply and revoke buttons', () => {
   render(
     <ThemeProvider theme={theme}>
       <GrantsPanel />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 
   expect(screen.getByText('Grants')).toBeInTheDocument()

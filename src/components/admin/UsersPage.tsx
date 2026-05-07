@@ -219,7 +219,9 @@ export const UsersPage: React.FC = () => {
                   {u.disabled ? (
                     <RowBtn onClick={() => onEnable(u.username)}>Enable</RowBtn>
                   ) : (
-                    <RowBtn onClick={() => onDisable(u.username)}>Disable</RowBtn>
+                    <RowBtn onClick={() => onDisable(u.username)}>
+                      Disable
+                    </RowBtn>
                   )}
                   <RowBtn onClick={() => onDelete(u.username)}>Delete</RowBtn>
                 </td>
