@@ -32,13 +32,24 @@ test.describe('schema explorer', () => {
     await page.getByRole('button', { name: seed.graph, exact: true }).click()
     await page.getByRole('button', { name: 'Person', exact: true }).click()
     await expect(page).toHaveURL(/\/$/)
-    // The editor should now contain MATCH (n:`Person`) RETURN n LIMIT 25 (or similar)
+    // The editor should now contain MATCH (n:Person) RETURN n LIMIT 25
     const editorText = await page
       .locator('.monaco-editor')
       .first()
       .textContent()
     expect(editorText).toContain('MATCH')
     expect(editorText).toContain('Person')
+    // The staged query MUST also be runnable end-to-end. Regression test
+    // for: Geode v0.5.11 rejects backtick-quoted identifiers, so the
+    // schema explorer must stage bare-name queries.
+    await page.getByRole('button', { name: /run/i }).click()
+    // Either we get rows (in this graph it's >= 1 since Person nodes
+    // exist) or a 0-row response — but NOT a 422 query_error banner.
+    await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
+      0,
+      { timeout: 8_000 }
+    )
+    await expect(page.getByText(/\d+ rows/)).toBeVisible({ timeout: 8_000 })
   })
 
   test('edge types pane lists ACTED_IN and DIRECTED', async ({

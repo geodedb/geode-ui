@@ -5,9 +5,10 @@ import { client } from '../../api/client'
 import { useQueryStore } from '../../lib/queryStore'
 
 // EdgeTypeList mirrors LabelList for relationship types. Clicking a
-// type stages a `MATCH ()-[r:`Type`]->() RETURN r LIMIT 25` statement
+// type stages a `MATCH ()-[r:Type]->() RETURN r LIMIT 25` statement
 // and navigates to '/'. The LIMIT 25 keeps the preview cheap on large
-// graphs; the user can edit before running.
+// graphs; the user can edit before running. Identifiers are emitted
+// bare — Geode v0.5.11 rejects backtick-quoted form (42000).
 const List = styled.ul`
   list-style: none;
   display: flex;
@@ -68,7 +69,7 @@ export const EdgeTypeList: React.FC<{ graph: string }> = ({ graph }) => {
         <li key={t}>
           <Btn
             onClick={() => {
-              setStaged('MATCH ()-[r:`' + t + '`]->() RETURN r LIMIT 25')
+              setStaged('MATCH ()-[r:' + t + ']->() RETURN r LIMIT 25')
               nav('/')
             }}
           >

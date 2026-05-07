@@ -59,8 +59,10 @@ test('renders fetched labels and stages a MATCH query on click', async () => {
     expect(screen.getByText('Movie')).toBeInTheDocument()
   })
 
-  // Click the Person button -- LabelList should hand a backtick-wrapped
-  // MATCH statement to the query store and trigger navigation.
+  // Click the Person button -- LabelList should hand a bare-identifier
+  // MATCH statement to the query store and trigger navigation. Bare
+  // identifiers are required because Geode v0.5.11 rejects backtick-
+  // quoted form (42000: expected identifier or keyword, got 'invalid').
   fireEvent.click(screen.getByText('Person'))
-  expect(setStaged).toHaveBeenCalledWith('MATCH (n:`Person`) RETURN n LIMIT 25')
+  expect(setStaged).toHaveBeenCalledWith('MATCH (n:Person) RETURN n LIMIT 25')
 })

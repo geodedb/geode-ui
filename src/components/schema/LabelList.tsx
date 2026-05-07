@@ -6,14 +6,14 @@ import { useQueryStore } from '../../lib/queryStore'
 
 // LabelList renders the node-label set returned by GET
 // /api/v1/graphs/{graph}/labels for the active graph. Clicking a label
-// stages a `MATCH (n:`Label`) RETURN n LIMIT 25` statement in the
+// stages a `MATCH (n:Label) RETURN n LIMIT 25` statement in the
 // queryStore and routes to '/'. QueryPage's mount-effect picks the
 // staged statement up and seeds the Monaco editor with it.
 //
-// The label is wrapped in backticks so labels containing reserved
-// characters (spaces, hyphens, etc.) parse cleanly. The LIMIT is fixed
-// at 25 to match the schema-explorer plan; users can edit the staged
-// statement before running it.
+// Labels are emitted bare (no backticks). Geode v0.5.11 rejects
+// backtick-quoted identifiers with `42000: expected identifier or
+// keyword, got 'invalid'`. If a future Geode supports backticks AND a
+// project starts using labels with reserved characters, revisit.
 const List = styled.ul`
   list-style: none;
   display: flex;
@@ -78,7 +78,7 @@ export const LabelList: React.FC<{ graph: string }> = ({ graph }) => {
         <li key={l}>
           <Btn
             onClick={() => {
-              setStaged('MATCH (n:`' + l + '`) RETURN n LIMIT 25')
+              setStaged('MATCH (n:' + l + ') RETURN n LIMIT 25')
               nav('/')
             }}
           >
