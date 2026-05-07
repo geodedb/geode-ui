@@ -105,8 +105,16 @@ func main() {
 	// Hand-rolled multipart upload endpoints — outside genapi because
 	// genapi's request-validator pipeline is JSON-only; multipart is
 	// the natural shape for "upload a backup or migration file".
-	mux.HandleFunc("/api/v1/backups/upload", srv.HandleBackupUpload)
-	mux.HandleFunc("/api/v1/migrations/upload", srv.HandleMigrationUpload)
+	//
+	// IMPORTANT: the method prefix is mandatory. Go 1.22+ ServeMux
+	// detects a conflict with the genapi-emitted `DELETE /api/v1/backups/{file}`
+	// (and similar for migrations) because a method-less pattern like
+	// `/api/v1/backups/upload` is "more specific" but matches more
+	// methods than `DELETE …/{file}`, which makes it ambiguous which
+	// route should win on a DELETE to /api/v1/backups/upload. Pinning
+	// the upload routes to POST removes the ambiguity.
+	mux.HandleFunc("POST /api/v1/backups/upload", srv.HandleBackupUpload)
+	mux.HandleFunc("POST /api/v1/migrations/upload", srv.HandleMigrationUpload)
 
 	// /ws/* surface lives on a separate server type because the
 	// generated WS interface emits "Query" for /ws/query, which would

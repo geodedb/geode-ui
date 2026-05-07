@@ -55,6 +55,13 @@ FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && \
     addgroup -S geode && adduser -S -G geode geode
 COPY --from=gobuild /out/geode-ui /usr/local/bin/geode-ui
+# Pre-create /var/lib/geode-ui/uploads owned by the runtime user so that
+# named-volume mounts at this path inherit the ownership (Docker copies
+# directory ownership from the image when the volume is empty on first
+# mount). Without this, the mounted volume is root:root and the
+# `geode` user can't write its multipart uploads.
+RUN mkdir -p /var/lib/geode-ui/uploads/backups /var/lib/geode-ui/uploads/migrations && \
+    chown -R geode:geode /var/lib/geode-ui
 USER geode
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/geode-ui"]
