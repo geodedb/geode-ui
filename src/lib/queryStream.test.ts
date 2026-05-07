@@ -114,6 +114,7 @@ test('demultiplexes batched rows frames into individual row callbacks', () => {
   const rowMsgs = msgs.filter(
     (m): m is { kind: 'row'; row: unknown[] } => m.kind === 'row'
   )
-  expect(rowMsgs[0].row).toEqual([1, 'alice'])
-  expect(rowMsgs[2].row).toEqual([3, 'carol'])
+  expect(rowMsgs).toHaveLength(3)
+  expect(rowMsgs[0]?.row).toEqual([1, 'alice'])
+  expect(rowMsgs[2]?.row).toEqual([3, 'carol'])
 })

@@ -53,7 +53,11 @@ function makeResp(rowCount: number): {
   }
   row_count: number
 } {
-  const nodes = []
+  const nodes: {
+    id: number
+    labels: string[]
+    properties: Record<string, never>
+  }[] = []
   for (let i = 0; i < rowCount; i += 1) {
     nodes.push({ id: i, labels: ['N'], properties: {} })
   }

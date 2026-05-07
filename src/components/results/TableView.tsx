@@ -264,12 +264,12 @@ type RowProps = {
 // VirtualRow renders one row inside the windowed list. react-window
 // supplies the absolute-position style; we lay cells out via a CSS
 // grid that mirrors the header column count.
-const VirtualRow: React.FC<RowComponentProps<RowProps>> = ({
+const VirtualRow = ({
   index,
   style,
   rows,
   columnCount,
-}) => {
+}: RowComponentProps<RowProps>) => {
   const row = rows[index] || []
   return (
     <RowOuter
