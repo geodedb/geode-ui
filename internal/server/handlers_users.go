@@ -137,6 +137,17 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 }
 
 // PatchUsername implements PATCH /api/v1/users/{username}.
+//
+// Q3 / issue #32: every sub-update (email, password, roles) is funnelled
+// through one BeginTx/Commit envelope so a partial failure cannot leave
+// the user with, say, the new email but the old password. On any
+// sub-statement error the transaction is rolled back before the
+// endpoint error reaches the client.
+//
+// If the patch carries no fields, no transaction is opened -- avoiding
+// a wasted BEGIN/COMMIT round-trip for clients that PATCH with an
+// empty body. quoteIdent runs unconditionally so a malformed username
+// is rejected with 400 before any driver work.
 func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UserUpdateReq) (*gentypes.User, error) {
 	db, err := s.userDB(r.Context())
 	if err != nil {
@@ -146,29 +157,69 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 	if err != nil {
 		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
 	}
+	// Pre-validate every quoted literal before opening the tx so a 400
+	// from a bad input does not leave a dangling open transaction.
+	var email string
 	if req.Email != "" {
-		email, qErr := quoteString(req.Email)
+		var qErr error
+		email, qErr = quoteString(req.Email)
 		if qErr != nil {
 			return nil, userResponseErr(w, badRequest("invalid_email", qErr.Error()))
 		}
-		if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET EMAIL "+email); err != nil {
-			return nil, userResponseErr(w, userErr(err))
-		}
 	}
+	var pw string
 	if req.Password != "" {
-		pw, qErr := quoteString(req.Password)
+		var qErr error
+		pw, qErr = quoteString(req.Password)
 		if qErr != nil {
 			return nil, userResponseErr(w, badRequest("invalid_password", qErr.Error()))
 		}
-		if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
-			return nil, userResponseErr(w, userErr(err))
+	}
+
+	// Empty patch -- nothing to commit.
+	if email == "" && pw == "" && len(req.Roles) == 0 {
+		return &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}, nil
+	}
+
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		return nil, userResponseErr(w, userErr(err))
+	}
+	// rollbackErr lets us surface the original failure even when the
+	// driver's Rollback returns a non-nil error of its own. The handler
+	// always prefers the original sub-statement error in the response.
+	commit := false
+	defer func() {
+		if !commit {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if email != "" {
+		if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
+			return nil, userResponseErr(w, userErr(execErr))
+		}
+	}
+	if pw != "" {
+		if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
+			return nil, userResponseErr(w, userErr(execErr))
 		}
 	}
 	for _, role := range req.Roles {
-		if err := assignRole(r.Context(), db, uname, role); err != nil {
-			return nil, userResponseErr(w, err)
+		roleIdent, qErr := quoteIdent(role)
+		if qErr != nil {
+			return nil, userResponseErr(w, badRequest("invalid_role", qErr.Error()))
+		}
+		if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO USER "+uname); execErr != nil {
+			return nil, userResponseErr(w, userErr(execErr))
 		}
 	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, userResponseErr(w, userErr(err))
+	}
+	commit = true
+
 	return &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}, nil
 }
 
