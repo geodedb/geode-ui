@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
-import { login } from '../api/auth'
 import { useAuth } from '../auth/AuthProvider'
 
 const Form = styled.form`
@@ -52,7 +51,7 @@ const ErrText = styled.p`
 `
 
 export const LoginPage: React.FC = () => {
-  const { setToken } = useAuth()
+  const { signIn } = useAuth()
   const nav = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -65,8 +64,7 @@ export const LoginPage: React.FC = () => {
     setBusy(true)
     setErr(null)
     try {
-      const r = await login(username, password, profile)
-      setToken(r.access_token)
+      await signIn(username, password, profile)
       nav('/', { replace: true })
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'login failed')

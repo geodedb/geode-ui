@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
 import { auth } from '../../api/auth'
+import { getCsrfToken } from '../../api/csrf'
 import { useApiResource } from '../../hooks/useApiResource'
 
 // MigrationsPage drives the /ops/migrations tab. Geode B8 endpoints:
@@ -309,11 +310,22 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
     try {
       const form = new FormData()
       form.append('file', f)
+      // SEC-F7 (#62 S3c): cookie-mode auth carries the JWT via the
+      // browser-managed geode-ui-auth cookie on credentials:'same-origin'.
+      // For a state-changing POST we must also attach the X-CSRF-Token
+      // header that pairs with the geode-ui-csrf cookie. The legacy
+      // bearer-token path is preserved when the backout flag is set
+      // (auth.getToken() returns the stored token only in legacy mode).
       const tok = auth.getToken() ?? ''
+      const csrf = getCsrfToken()
+      const headers: Record<string, string> = {}
+      if (tok) headers.Authorization = 'Bearer ' + tok
+      if (csrf) headers['X-CSRF-Token'] = csrf
       const res = await fetch('/api/v1/migrations/upload', {
         method: 'POST',
-        headers: tok ? { Authorization: 'Bearer ' + tok } : {},
+        headers,
         body: form,
+        credentials: 'same-origin',
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as {

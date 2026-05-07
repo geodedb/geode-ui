@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 import { client } from '../../api/client'
 import { auth } from '../../api/auth'
+import { getCsrfToken } from '../../api/csrf'
 
 // RestorePage drives the /ops/restore tab. Backed by Geode B7:
 //
@@ -110,11 +111,20 @@ export const RestorePage: React.FC = () => {
     try {
       const form = new FormData()
       form.append('file', f)
+      // SEC-F7 (#62 S3c): cookie carries the JWT (credentials:
+      // 'same-origin'); CSRF header must accompany state-changing
+      // requests. The legacy bearer path is retained for the backout
+      // flag escape hatch.
       const tok = auth.getToken() ?? ''
+      const csrf = getCsrfToken()
+      const headers: Record<string, string> = {}
+      if (tok) headers.Authorization = 'Bearer ' + tok
+      if (csrf) headers['X-CSRF-Token'] = csrf
       const res = await fetch('/api/v1/backups/upload', {
         method: 'POST',
-        headers: tok ? { Authorization: 'Bearer ' + tok } : {},
+        headers,
         body: form,
+        credentials: 'same-origin',
       })
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as {

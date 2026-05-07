@@ -39,14 +39,16 @@ export function streamQuery(
 ): StreamHandle {
   const url = new URL('/ws/query', window.location.href)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  // SEC-F7 (#62 S3c): same-origin WebSocket connections automatically
+  // include cookies on the upgrade request, so the server-side AuthJWT
+  // (which now reads the geode-ui-auth cookie) authenticates the
+  // browser session without any extra effort from the SPA. We retain
+  // the genapi.auth.bearer.<base64url(token)> subprotocol as a
+  // fallback for the legacy backout flag — when an operator has set
+  // localStorage['geode-ui.legacy-auth']='1', auth.getToken() returns
+  // the stored JWT and we attach it via the subprotocol channel just
+  // like the pre-cookie SPA did.
   const token = auth.getToken()
-  // Browsers cannot set custom Authorization headers on a WebSocket
-  // upgrade and the server's policy on /ws/query has AllowQueryBearer
-  // disabled (gen/ws/ws_handlers.gen.go RequestAuthPolicy). Pass the
-  // bearer through the subprotocol channel using the
-  // `genapi.auth.bearer.<base64url(token)>` shape that
-  // gen/pkg/securex/secure.go websocketProtocolAuth recognizes when
-  // RequestAuthPolicy.AllowSubprotocolBearer is true (the default).
   const protocols: string[] = []
   if (token) {
     const encoded = base64UrlEncode(token)

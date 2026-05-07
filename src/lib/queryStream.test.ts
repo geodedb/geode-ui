@@ -52,7 +52,10 @@ beforeEach(() => {
   lastInstance = null
   // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
   ;(window as any).WebSocket = MockWebSocket
-  localStorage.setItem('geode-ui.access_token', 'tok123')
+  // SEC-F7 (#62 S3c): cookie-mode tests start with no legacy token. The
+  // bearer-fallback test below opts into legacy mode explicitly.
+  localStorage.removeItem('geode-ui.legacy-auth')
+  localStorage.removeItem('geode-ui.access_token')
 })
 
 test('sends start message on open and forwards messages', () => {
@@ -80,12 +83,29 @@ test('sends start message on open and forwards messages', () => {
   expect(ws.send).toHaveBeenLastCalledWith(JSON.stringify({ kind: 'cancel' }))
 })
 
-test('passes the bearer token via the genapi.auth.bearer subprotocol', () => {
+test('cookie mode: opens WS without subprotocol auth (cookie carries JWT)', () => {
+  // SEC-F7 (#62 S3c): same-origin WebSocket upgrades automatically
+  // include cookies, so the server-side AuthJWT cookie reader picks
+  // up the geode-ui-auth JWT without any subprotocol channel. The
+  // SPA must NOT attach a bearer subprotocol when no legacy token is
+  // present.
+  streamQuery('RETURN 1', undefined, () => {})
+  expect(lastInstance!.protocols).toEqual([])
+  expect(lastInstance!.url).not.toContain('access_token')
+})
+
+test('legacy fallback: bearer subprotocol attached when backout flag is set', () => {
+  // The backout flag is documented in src/api/auth.ts as the emergency
+  // escape hatch for an operator chasing a regression while the cookie
+  // path is being rolled out. With the flag set, auth.getToken()
+  // returns the stored bearer token and queryStream attaches it via
+  // the genapi.auth.bearer.<base64url(token)> subprotocol exactly as
+  // the pre-cookie SPA did.
+  localStorage.setItem('geode-ui.legacy-auth', '1')
+  localStorage.setItem('geode-ui.access_token', 'tok123')
   streamQuery('RETURN 1', undefined, () => {})
   // Token 'tok123' base64url-encoded (no padding) is 'dG9rMTIz'.
   expect(lastInstance!.protocols).toContain('genapi.auth.bearer.dG9rMTIz')
-  // The URL should NOT contain access_token any more — the subprotocol
-  // channel replaces the query-param transport for browser-safe bearers.
   expect(lastInstance!.url).not.toContain('access_token')
 })
 
