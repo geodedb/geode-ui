@@ -2,6 +2,7 @@ const path = require('path')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
+const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin')
 
 const devMode = process.env.NODE_ENV !== 'production'
 
@@ -13,6 +14,16 @@ const plugins = [
   new MiniCssExtractPlugin({
     filename: devMode ? '[name].css' : '[name].[contenthash].css',
     chunkFilename: devMode ? '[id].css' : '[id].[contenthash].css',
+  }),
+  // Bundles monaco-editor and its workers into the SPA build instead of
+  // loading from cdn.jsdelivr.net at runtime. Required because our CSP
+  // (default-src 'self'; script-src 'self' 'wasm-unsafe-eval') blocks
+  // CDN scripts. The custom GQL language is registered at runtime via
+  // src/components/editor/gqlLanguage.ts; we only need JSON from the
+  // built-ins (for query result inspection) plus core editor features.
+  new MonacoWebpackPlugin({
+    languages: ['json'],
+    filename: devMode ? '[name].worker.js' : '[name].[contenthash].worker.js',
   }),
 ]
 
