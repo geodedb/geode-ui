@@ -36,7 +36,7 @@
 # and the geode binary. It mirrors upstream's Dockerfile.release layout
 # (debian:bookworm-slim runtime, non-root user, /data volume).
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -53,6 +53,10 @@ RUN apt-get update \
     && useradd -r -u 10001 -m -d /home/geode geode \
     && mkdir -p /data \
     && chown geode:geode /data
+
+# Declare /data as a volume so docker doesn't accidentally bury Geode state
+# inside the container layer when run without `-v`.
+VOLUME ["/data"]
 
 # Copy the host-built v0.5.11 binary. Build context is the parent of
 # geode-ui (..), so geode/ resolves to the sibling Geode checkout.
