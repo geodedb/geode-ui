@@ -364,9 +364,23 @@ func userResponseErr(w http.ResponseWriter, err error) error {
 // userErr wraps a driver-level error from a user-management statement
 // as a 422 endpointError with code=user_admin_error so the client gets a
 // stable code distinct from auth/transport failures.
+//
+// When the upstream returns the canonical "engine doesn't recognize
+// this verb" signal (status_class=42000 + parse-error tokens), upgrade
+// the response to a 501 wire_feature_missing with a clear description.
+// That tells the SPA "this operation cannot be performed on this Geode
+// version" — distinct from "your input was bad" — and lets it surface
+// a friendlier message than raw "geode: 42000: parse error".
 func userErr(err error) error {
 	if err == nil {
 		return nil
+	}
+	if isWireFeatureMissing(err) {
+		return &endpointError{
+			status:      http.StatusNotImplemented,
+			code:        "wire_feature_missing",
+			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA may have surfaced this CTA prematurely",
+		}
 	}
 	return &endpointError{
 		status:      http.StatusUnprocessableEntity,
