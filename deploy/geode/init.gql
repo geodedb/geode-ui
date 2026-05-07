@@ -1,0 +1,64 @@
+/*
+ * Seeds the e2e movies graph used by every Playwright test.
+ *
+ * Total: 6 nodes labeled Person, 3 nodes labeled Movie, 9 ACTED_IN edges,
+ *        3 DIRECTED edges. Properties: Person {name, born},
+ *        Movie {title, year}, edge ACTED_IN {role}.
+ *
+ * Counts are pinned in e2e/helpers/gqlData.ts so test assertions stay in
+ * sync if this file ever grows.
+ *
+ * Geode v0.5.11 GQL dialect notes
+ * --------------------------------
+ *   * `--` line comments are rejected (GB02: double-hyphen comments
+ *     disabled). Use C-style block comments only. `//` line comments
+ *     parse but raise a GB03:DoubleSolidusComment flagger finding, so
+ *     we avoid them too.
+ *   * Statements are terminated with `;`. The `geode query` client
+ *     accepts a multi-statement script either via stdin (`... -`) or via
+ *     `--file <path>`.
+ *   * `CREATE INDEX ON :Label(prop)` is NOT in the v0.5.11 dialect.
+ *     Geode manages indexes internally; the schema explorer reads label
+ *     and property metadata directly from the storage layer, so no
+ *     explicit index DDL is required for tests.
+ *   * `USE GRAPH <name>` must be issued before each statement that
+ *     touches graph data when running over the wire (the server does
+ *     not retain graph context across statements within a single
+ *     `query` call). We repeat `USE GRAPH movies` per statement so the
+ *     file is safe to run statement-by-statement (e.g. when a bootstrap
+ *     script splits on `;`) or as one batch.
+ *   * Multi-pattern MATCH (`MATCH (a), (b)`) is accepted and produces
+ *     the Cartesian product, which is what we want for relationship
+ *     seeding.
+ */
+
+CREATE GRAPH movies;
+
+/* People (6) */
+USE GRAPH movies; CREATE (:Person {name: 'Alice Wonder',   born: 1980});
+USE GRAPH movies; CREATE (:Person {name: 'Bob Builder',    born: 1975});
+USE GRAPH movies; CREATE (:Person {name: 'Carol Singer',   born: 1990});
+USE GRAPH movies; CREATE (:Person {name: 'Dave Smith',     born: 1985});
+USE GRAPH movies; CREATE (:Person {name: 'Eve Adams',      born: 1992});
+USE GRAPH movies; CREATE (:Person {name: 'Frank Director', born: 1965});
+
+/* Movies (3) */
+USE GRAPH movies; CREATE (:Movie {title: 'The Graph',         year: 2020});
+USE GRAPH movies; CREATE (:Movie {title: 'Edges of Reality',  year: 2022});
+USE GRAPH movies; CREATE (:Movie {title: 'Walk the Path',     year: 2024});
+
+/* ACTED_IN edges (9 total) */
+USE GRAPH movies; MATCH (p:Person {name: 'Alice Wonder'}),   (m:Movie {title: 'The Graph'})        CREATE (p)-[:ACTED_IN {role: 'Mathematician'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Bob Builder'}),    (m:Movie {title: 'The Graph'})        CREATE (p)-[:ACTED_IN {role: 'Engineer'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Carol Singer'}),   (m:Movie {title: 'The Graph'})        CREATE (p)-[:ACTED_IN {role: 'Narrator'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Dave Smith'}),     (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:ACTED_IN {role: 'Detective'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Eve Adams'}),      (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:ACTED_IN {role: 'Hacker'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Alice Wonder'}),   (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:ACTED_IN {role: 'Professor'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Bob Builder'}),    (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:ACTED_IN {role: 'Foreman'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Carol Singer'}),   (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:ACTED_IN {role: 'Composer'}]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Dave Smith'}),     (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:ACTED_IN {role: 'Inspector'}]->(m);
+
+/* DIRECTED edges (3 total - Frank directs all three) */
+USE GRAPH movies; MATCH (p:Person {name: 'Frank Director'}), (m:Movie {title: 'The Graph'})        CREATE (p)-[:DIRECTED]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Frank Director'}), (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:DIRECTED]->(m);
+USE GRAPH movies; MATCH (p:Person {name: 'Frank Director'}), (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:DIRECTED]->(m);
