@@ -64,5 +64,28 @@ test('renders fetched labels and stages a MATCH query on click', async () => {
   // identifiers are required because Geode v0.5.11 rejects backtick-
   // quoted form (42000: expected identifier or keyword, got 'invalid').
   fireEvent.click(screen.getByText('Person'))
-  expect(setStaged).toHaveBeenCalledWith('MATCH (n:Person) RETURN n LIMIT 25')
+  // Regression: must include `USE GRAPH <graph>;` prefix so Geode runs
+  // the MATCH against the active graph. Without the prefix the query
+  // executes against no graph and silently returns 0 rows.
+  expect(setStaged).toHaveBeenCalledWith(
+    'USE GRAPH default; MATCH (n:Person) RETURN n LIMIT 25'
+  )
+})
+
+test('passes the active graph through to the staged statement', async () => {
+  setStaged.mockClear()
+  render(
+    <ThemeProvider theme={theme}>
+      <MemoryRouter>
+        <LabelList graph="movies" />
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+  await waitFor(() => {
+    expect(screen.getByText('Person')).toBeInTheDocument()
+  })
+  fireEvent.click(screen.getByText('Person'))
+  expect(setStaged).toHaveBeenCalledWith(
+    'USE GRAPH movies; MATCH (n:Person) RETURN n LIMIT 25'
+  )
 })
