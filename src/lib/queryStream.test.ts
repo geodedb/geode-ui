@@ -4,6 +4,7 @@ type Listener = (arg?: any) => void
 
 interface MockWS {
   url: string
+  protocols: string[]
   listeners: Record<string, Listener[]>
   send: jest.Mock
   close: jest.Mock
@@ -15,14 +16,23 @@ let lastInstance: MockWS | null = null
 class MockWebSocket implements MockWS {
   url: string
 
+  protocols: string[]
+
   listeners: Record<string, Listener[]> = {}
 
   send = jest.fn()
 
   close = jest.fn()
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     this.url = url
+    if (Array.isArray(protocols)) {
+      this.protocols = protocols
+    } else if (typeof protocols === 'string') {
+      this.protocols = [protocols]
+    } else {
+      this.protocols = []
+    }
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     lastInstance = this
   }
@@ -70,7 +80,11 @@ test('sends start message on open and forwards messages', () => {
   expect(ws.send).toHaveBeenLastCalledWith(JSON.stringify({ kind: 'cancel' }))
 })
 
-test('appends access_token query param', () => {
+test('passes the bearer token via the genapi.auth.bearer subprotocol', () => {
   streamQuery('RETURN 1', undefined, () => {})
-  expect(lastInstance!.url).toContain('access_token=tok123')
+  // Token 'tok123' base64url-encoded (no padding) is 'dG9rMTIz'.
+  expect(lastInstance!.protocols).toContain('genapi.auth.bearer.dG9rMTIz')
+  // The URL should NOT contain access_token any more — the subprotocol
+  // channel replaces the query-param transport for browser-safe bearers.
+  expect(lastInstance!.url).not.toContain('access_token')
 })
