@@ -33,7 +33,9 @@ test.describe('auth', () => {
     await sel.loginPassword(page).fill('wrong')
     await sel.loginSubmit(page).click()
     await expect(
-      page.getByText(/invalid|unauthorized|incorrect|authentication failed|failed/i)
+      page.getByText(
+        /invalid|unauthorized|incorrect|authentication failed|failed/i
+      )
     ).toBeVisible()
     await expect(page).toHaveURL(/\/login/)
   })
@@ -58,7 +60,9 @@ test.describe('auth', () => {
     await sel.logout(page).click()
     await expect(page).toHaveURL(/\/login$/)
     // localStorage cleared
-    const token = await page.evaluate(() => localStorage.getItem('geode-ui.access_token'))
+    const token = await page.evaluate(() =>
+      localStorage.getItem('geode-ui.access_token')
+    )
     expect(token).toBeNull()
   })
 })

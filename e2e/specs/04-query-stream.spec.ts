@@ -8,29 +8,28 @@ import { seed } from '../helpers/gqlData'
 // end-to-end against the seeded movies graph.
 
 test.describe('query (stream)', () => {
-  test(
-    'toggles stream mode, runs, and accumulates rows progressively',
-    async ({ authedPage: page }) => {
-      await page.goto('/')
-      await sel.queryStreamToggle(page).check()
-      await page.locator('.monaco-editor').first().click()
-      await page.keyboard.press('ControlOrMeta+A')
-      await page.keyboard.type(
-        `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name AS name`
-      )
-      await sel.queryRunBtn(page).click()
+  test('toggles stream mode, runs, and accumulates rows progressively', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/')
+    await sel.queryStreamToggle(page).check()
+    await page.locator('.monaco-editor').first().click()
+    await page.keyboard.press('ControlOrMeta+A')
+    await page.keyboard.type(
+      `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name AS name`
+    )
+    await sel.queryRunBtn(page).click()
 
-      // The summary frame is sent at the end; wait for it.
-      await expect(
-        page.getByText(new RegExp(`${seed.counts.persons} rows`))
-      ).toBeVisible({ timeout: 15_000 })
+    // The summary frame is sent at the end; wait for it.
+    await expect(
+      page.getByText(new RegExp(`${seed.counts.persons} rows`))
+    ).toBeVisible({ timeout: 15_000 })
 
-      await sel.queryTabTable(page).click()
-      await Promise.all(
-        seed.people.map((name) => expect(page.getByText(name)).toBeVisible())
-      )
-    }
-  )
+    await sel.queryTabTable(page).click()
+    await Promise.all(
+      seed.people.map((name) => expect(page.getByText(name)).toBeVisible())
+    )
+  })
 
   test('cancel button aborts a streaming query', async ({
     authedPage: page,

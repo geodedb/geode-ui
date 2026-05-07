@@ -27,9 +27,7 @@ test.describe('query (sync)', () => {
     // Switch to table tab, verify the seeded names appear.
     await sel.queryTabTable(page).click()
     await Promise.all(
-      seed.people.map((name) =>
-        expect(page.getByText(name)).toBeVisible()
-      )
+      seed.people.map((name) => expect(page.getByText(name)).toBeVisible())
     )
   })
 

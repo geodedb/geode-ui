@@ -12,20 +12,32 @@ const MCP_PORT = Number(process.env.MCP_PORT ?? '8090')
 // matching on the `result`/`error` keys instead of on `id`.
 
 type RpcReq = { jsonrpc: '2.0'; id: number; method: string; params?: unknown }
-type RpcResp = { jsonrpc: '2.0'; id?: number; result?: unknown; error?: unknown }
+type RpcResp = {
+  jsonrpc: '2.0'
+  id?: number
+  result?: unknown
+  error?: unknown
+}
 
 // Run a sequence of JSON-RPC requests over a single bridge connection
 // (each connection is a fresh `geode mcp --stdio` process; tools/list
 // requires `initialize` first per session). Returns one parsed
 // response per non-notification request, in order.
-async function rpcSession(reqs: RpcReq[], timeoutMs = 8_000): Promise<RpcResp[]> {
+async function rpcSession(
+  reqs: RpcReq[],
+  timeoutMs = 8_000
+): Promise<RpcResp[]> {
   return new Promise((resolve, reject) => {
     const sock = net.createConnection({ host: MCP_HOST, port: MCP_PORT })
     const responses: RpcResp[] = []
     let buf = ''
     const timer = setTimeout(() => {
       sock.destroy()
-      reject(new Error(`MCP RPC timed out after ${timeoutMs}ms (got ${responses.length}/${reqs.length})`))
+      reject(
+        new Error(
+          `MCP RPC timed out after ${timeoutMs}ms (got ${responses.length}/${reqs.length})`
+        )
+      )
     }, timeoutMs)
 
     sock.on('data', (chunk) => {
@@ -48,7 +60,8 @@ async function rpcSession(reqs: RpcReq[], timeoutMs = 8_000): Promise<RpcResp[]>
         // Real responses always carry `result` or `error`.
         .filter(
           (parsed): parsed is RpcResp =>
-            !!parsed && (parsed.result !== undefined || parsed.error !== undefined),
+            !!parsed &&
+            (parsed.result !== undefined || parsed.error !== undefined)
         )
       responses.push(...completed)
       if (responses.length >= reqs.length) {
@@ -96,7 +109,8 @@ test.describe('mcp', () => {
     expect(resp.id).toBe(1)
     expect(resp.result || resp.error).toBeDefined()
     // serverInfo.name is part of MCP — sanity check it's a Geode server.
-    const info = (resp.result as { serverInfo?: { name?: string } } | undefined)?.serverInfo
+    const info = (resp.result as { serverInfo?: { name?: string } } | undefined)
+      ?.serverInfo
     if (info?.name) expect(info.name).toMatch(/geode/i)
   })
 
@@ -109,9 +123,10 @@ test.describe('mcp', () => {
     expect(toolsResp, 'tools/list response missing').toBeDefined()
     test.skip(
       Boolean(toolsResp?.error),
-      `MCP tools/list returned error: ${JSON.stringify(toolsResp?.error)}`,
+      `MCP tools/list returned error: ${JSON.stringify(toolsResp?.error)}`
     )
-    const tools = (toolsResp?.result as { tools?: unknown[] } | undefined)?.tools
+    const tools = (toolsResp?.result as { tools?: unknown[] } | undefined)
+      ?.tools
     expect(tools).toBeDefined()
     expect((tools ?? []).length).toBeGreaterThan(0)
   })

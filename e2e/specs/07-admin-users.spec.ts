@@ -4,12 +4,16 @@ import { sel } from '../helpers/selectors'
 const newUsername = `e2e_user_${Date.now()}`
 
 test.describe('admin / users', () => {
-  test('users page lists at least the admin user', async ({ authedPage: page }) => {
+  test('users page lists at least the admin user', async ({
+    authedPage: page,
+  }) => {
     await page.goto('/admin/users')
     // Either we see the table populated, or we see a 422 admin-not-supported
     // error banner. Both are acceptable on Geode versions where SHOW USERS
     // is not yet on the wire — the UI still shouldn't crash.
-    const banner = page.getByText(/schema_error|not supported|unimplemented|parse error|expected token|insufficient role|http status 4\d\d/i)
+    const banner = page.getByText(
+      /schema_error|not supported|unimplemented|parse error|expected token|insufficient role|http status 4\d\d/i
+    )
     const row = page.getByText(/geode/) // 'geode' is the admin username
     await expect(row.or(banner).first()).toBeVisible()
     test.skip(
@@ -18,7 +22,9 @@ test.describe('admin / users', () => {
     )
   })
 
-  test('+ New user opens a modal and POST to /api/v1/users', async ({ authedPage: page }) => {
+  test('+ New user opens a modal and POST to /api/v1/users', async ({
+    authedPage: page,
+  }) => {
     await page.goto('/admin/users')
     // Wait for either the table to populate or the banner to appear, so
     // the skip-gate has a stable signal regardless of network timing.
@@ -31,7 +37,9 @@ test.describe('admin / users', () => {
       .catch(() => undefined)
     test.skip(
       await page
-        .getByText(/not supported|schema_error|parse error|expected token|insufficient role|http status 4\d\d/i)
+        .getByText(
+          /not supported|schema_error|parse error|expected token|insufficient role|http status 4\d\d/i
+        )
         .isVisible({ timeout: 1_000 })
         .catch(() => false),
       'admin GQL not on wire'
@@ -56,7 +64,9 @@ test.describe('admin / users', () => {
       .catch(() => undefined)
     test.skip(
       await page
-        .getByText(/not supported|schema_error|parse error|expected token|insufficient role|http status 4\d\d/i)
+        .getByText(
+          /not supported|schema_error|parse error|expected token|insufficient role|http status 4\d\d/i
+        )
         .isVisible({ timeout: 1_000 })
         .catch(() => false),
       'admin GQL not on wire'

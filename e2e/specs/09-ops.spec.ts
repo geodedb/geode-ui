@@ -13,10 +13,14 @@ test.describe('ops', () => {
     await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible()
   })
 
-  test('audit tab polls and renders the table', async ({ authedPage: page }) => {
+  test('audit tab polls and renders the table', async ({
+    authedPage: page,
+  }) => {
     await page.goto('/ops/audit')
     await expect(page.getByText(/Audit log/)).toBeVisible()
-    await expect(page.getByRole('columnheader', { name: 'Event' })).toBeVisible()
+    await expect(
+      page.getByRole('columnheader', { name: 'Event' })
+    ).toBeVisible()
   })
 
   test('audit table contains a query_executed entry within 10s', async ({
@@ -26,7 +30,9 @@ test.describe('ops', () => {
     // Visit the app first so localStorage is reachable (the
     // addInitScript fixture only takes effect after a navigation).
     await page.goto('/')
-    const token = await page.evaluate(() => localStorage.getItem('geode-ui.access_token'))
+    const token = await page.evaluate(() =>
+      localStorage.getItem('geode-ui.access_token')
+    )
     expect(token).toBeTruthy()
     // Probe the audit endpoint directly. Geode v0.5.11 returns 403
     // `securex: insufficient role` for /api/v1/audit even for the
@@ -37,7 +43,7 @@ test.describe('ops', () => {
     })
     test.skip(
       !probe.ok(),
-      `audit endpoint not readable on this Geode build (status ${probe.status()})`,
+      `audit endpoint not readable on this Geode build (status ${probe.status()})`
     )
     await request.post('/api/v1/query', {
       headers: {
@@ -51,10 +57,14 @@ test.describe('ops', () => {
       },
     })
     await page.goto('/ops/audit')
-    await expect(page.getByText('query_executed').first()).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText('query_executed').first()).toBeVisible({
+      timeout: 10_000,
+    })
   })
 
-  test('restore tab pre-fills file from BackupPage navigation', async ({ authedPage: page }) => {
+  test('restore tab pre-fills file from BackupPage navigation', async ({
+    authedPage: page,
+  }) => {
     await page.goto('/ops/restore')
     const fileInput = page.getByPlaceholder(/backup file/i).first()
     await expect(fileInput).toBeVisible()
