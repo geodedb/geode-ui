@@ -349,52 +349,6 @@ func (s *GraphServer) userDB(ctx context.Context) (*sql.DB, error) {
 	return db, nil
 }
 
-// userResponseErr is the user-handlers analogue of schemaResponseErr —
-// inline-writes endpoint errors and returns nil so the wrapper does not
-// emit a second body, and passes through non-endpoint errors as-is so
-// they surface as 500.
-func userResponseErr(w http.ResponseWriter, err error) error {
-	if ep := asEndpointError(err); ep != nil {
-		writeEndpointError(w, ep)
-		return nil
-	}
-	return err
-}
-
-// userErr wraps a driver-level error from a user-management statement
-// as a 422 endpointError with code=user_admin_error so the client gets a
-// stable code distinct from auth/transport failures.
-//
-// When the upstream returns the canonical "engine doesn't recognize
-// this verb" signal (status_class=42000 + parse-error tokens), upgrade
-// the response to a 501 wire_feature_missing with a clear description.
-// That tells the SPA "this operation cannot be performed on this Geode
-// version" — distinct from "your input was bad" — and lets it surface
-// a friendlier message than raw "geode: 42000: parse error".
-func userErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	if isWireFeatureMissing(err) {
-		return &endpointError{
-			status:      http.StatusNotImplemented,
-			code:        "wire_feature_missing",
-			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA may have surfaced this CTA prematurely",
-		}
-	}
-	return &endpointError{
-		status:      http.StatusUnprocessableEntity,
-		code:        "user_admin_error",
-		description: err.Error(),
-	}
-}
-
-// badRequest is a small helper for 400 endpointErrors emitted from
-// validation failures inside the user handlers.
-func badRequest(code, desc string) error {
-	return &endpointError{status: http.StatusBadRequest, code: code, description: desc}
-}
-
 // userRowToMap turns a driver row into a plain map[string]any keyed by
 // column name. Used for SHOW USERS where the row shape is open and the
 // UI consumes whatever columns Geode emits today.
