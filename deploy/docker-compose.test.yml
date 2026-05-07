@@ -136,7 +136,30 @@ services:
     depends_on:
       geode-init:
         condition: service_completed_successfully
-    command: [mcp, serve, --port, '8090', -e, geode:3141]
+    # v0.5.11's `geode mcp serve --port` is unusable for compose:
+    # (1) the CLI returns immediately after spawning the HTTP listener
+    # thread, so the process exits and the thread dies; (2) the
+    # listener binds 127.0.0.1, with no `--bind` flag. We bridge the
+    # stable stdio transport over TCP via socat instead — identical
+    # pattern to geode-lsp. socat itself isn't in the slim runtime,
+    # so install it on first start (test container only).
+    user: root
+    environment:
+      MCP_GEODE_ENDPOINT: ${MCP_GEODE_ENDPOINT:-geode:3141}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-e2e-mcp-token}
+    entrypoint: [/bin/bash, -c]
+    command:
+    - |
+      set -euo pipefail
+      if ! command -v socat >/dev/null 2>&1; then
+        apt-get update
+        apt-get install -y --no-install-recommends socat
+        rm -rf /var/lib/apt/lists/*
+      fi
+      exec /mcp/mcp-bridge.sh
+    volumes:
+    - ./geode/mcp-bridge.sh:/mcp/mcp-bridge.sh:ro
+    - ./geode/mcp-stdio-launch.sh:/mcp/mcp-stdio-launch.sh:ro
     ports:
     - 8090:8090
     # No wget/curl/nc in the geode runtime image; bash 5+ is present, so
