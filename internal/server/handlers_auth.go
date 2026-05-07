@@ -40,10 +40,14 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		})
 		return nil, nil
 	}
-	profile := req.Profile
-	if profile == "" {
-		profile = "default"
-	}
+	// SEC-N3 (#65): canonicalise the profile early so audit logs, rate-
+	// limit buckets (loginlimiter.go), and the upstream auth attempt all
+	// agree on the bucket key. Empty or whitespace-only profile resolves
+	// to "default" — preserved for backward compatibility with the
+	// existing SPA which submits "" when the user has not picked a
+	// profile. Any future requirement to *forbid* implicit-default would
+	// be a clean follow-up: replace this call with an explicit 400 here.
+	profile := canonicalProfile(req.Profile)
 	ok, roles, err := s.authenticateUpstream(r.Context(), profile, req.Username, req.Password)
 	if err != nil {
 		emitAudit(auditEventLoginFailure,

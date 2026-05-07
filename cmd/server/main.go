@@ -161,10 +161,17 @@ func main() {
 		MaxHeaderBytes: 16384,
 		MaxBodyBytes:   1 << 20,
 	}
+	// Per-IP / per-(profile, username) login limiter (SEC-F2 #58, SEC-N7
+	// #66). Mounted around the mux so it observes /api/v1/auth/login
+	// before the genapi-emitted route handler runs. The structural fix
+	// belongs in genapi (per-IP partitioning in gen/pkg/httpx); a
+	// follow-up issue is filed.
+	loginLimiter := server.NewLoginLimiter(server.LoginLimiterDefaults())
+	limited := server.WrapLoginLimit(loginLimiter, mux)
 	// Permissions-Policy is harmless and short enough to apply to every
 	// response; wrap the entire pipeline so SPA, API, WS upgrade, MCP
 	// endpoints all carry the directive.
-	handler := server.WithPermissionsPolicy(httpx.WrapHandler(hcfg, mux))
+	handler := server.WithPermissionsPolicy(httpx.WrapHandler(hcfg, limited))
 
 	httpSrv := &http.Server{
 		Addr:              listen,
