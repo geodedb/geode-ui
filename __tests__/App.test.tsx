@@ -3,8 +3,12 @@ import { render, screen } from '@testing-library/react'
 import App from '../src/App'
 
 describe('App', () => {
-  it('renders without crashing', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  test('redirects unauthenticated users to login', () => {
     render(<App />)
-    expect(screen.getByText(/Getting Started/i)).toBeTruthy()
+    expect(screen.getByText(/Sign in/i)).toBeInTheDocument()
   })
 })

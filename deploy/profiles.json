@@ -1,0 +1,7 @@
+[
+  {
+    "name": "default",
+    "dsn": "quic://geode:Geode%20E2E%20Bootstrap%20Password%202024@geode:3141?insecure_tls_skip_verify=true",
+    "description": "in-cluster geode instance for the e2e test stack (admin creds embedded; this profile is used by the connection pool, while login still rotates through injectCreds for JWT issuance)"
+  }
+]

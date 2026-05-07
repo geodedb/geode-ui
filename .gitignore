@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+internal/ui/dist/
 build/
 
 # Testing
@@ -38,3 +39,18 @@ yarn-error.log*
 
 # Debug
 firebase-debug.log
+
+# Generated code: tracked in-tree so PRs can review handler-name diffs.
+# Run `make generate` to refresh; do not edit files in gen/ by hand.
+
+# Go build artifacts
+/bin/
+
+# Coverage
+*.out
+coverage.txt
+
+# Playwright
+/e2e/playwright-report/
+/e2e/test-results/
+/e2e/.cache/

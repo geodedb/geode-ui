@@ -1,0 +1,898 @@
+{
+  "server": {
+    "bind": "0.0.0.0:8080",
+    "tls": { "cert_path": "", "key_path": "" },
+    "timeouts": {
+      "read_header_ms": 5000,
+      "read_ms": 30000,
+      "write_ms": 60000,
+      "idle_ms": 120000
+    },
+    "limits": {
+      "max_header_bytes": 16384,
+      "max_body_bytes": 1048576
+    }
+  },
+  "security": {
+    "auth": { "api_key": false, "jwt": true },
+    "cors": { "enabled": true, "origins": ["http://localhost:3000"] },
+    "rate_limit": { "global_rps": 2000, "burst": 400 }
+  },
+  "api": [
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "requestSchema": "Empty",
+      "responseSchema": "HealthResp",
+      "auth": "",
+      "rateLimit": 50
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "requestSchema": "LoginReq",
+      "responseSchema": "LoginResp",
+      "auth": "",
+      "rateLimit": 20,
+      "form_encoded": true,
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/query",
+      "requestSchema": "QueryReq",
+      "responseSchema": "QueryResp",
+      "auth": "jwt",
+      "rateLimit": 200,
+      "maxBodyBytes": 524288
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs",
+      "requestSchema": "Empty",
+      "responseSchema": "GraphList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/labels",
+      "requestSchema": "GraphParam",
+      "responseSchema": "LabelList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/edge-types",
+      "requestSchema": "GraphParam",
+      "responseSchema": "EdgeTypeList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/indexes",
+      "requestSchema": "GraphParam",
+      "responseSchema": "IndexList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/constraints",
+      "requestSchema": "GraphParam",
+      "responseSchema": "ConstraintList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx",
+      "requestSchema": "TxBeginReq",
+      "responseSchema": "TxBeginResp",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/run",
+      "requestSchema": "TxRunReq",
+      "responseSchema": "QueryResp",
+      "auth": "jwt",
+      "rateLimit": 200,
+      "maxBodyBytes": 524288
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/commit",
+      "requestSchema": "TxIDParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 50
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/rollback",
+      "requestSchema": "TxIDParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 50
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "requestSchema": "Empty",
+      "responseSchema": "UserList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "requestSchema": "UserCreateReq",
+      "responseSchema": "User",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/{username}",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "User",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/{username}",
+      "requestSchema": "UserUpdateReq",
+      "responseSchema": "User",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/{username}",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/disable",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/enable",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/password",
+      "requestSchema": "PasswordChangeReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/{username}/roles",
+      "requestSchema": "AssignRoleReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/{username}/permissions",
+      "requestSchema": "UsernameParam",
+      "responseSchema": "PermissionList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles",
+      "requestSchema": "Empty",
+      "responseSchema": "RoleList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/roles",
+      "requestSchema": "RoleCreateReq",
+      "responseSchema": "Role",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles/{role}",
+      "requestSchema": "RoleParam",
+      "responseSchema": "Role",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/roles/{role}",
+      "requestSchema": "RoleParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/policies",
+      "requestSchema": "Empty",
+      "responseSchema": "PolicyList",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/policies",
+      "requestSchema": "PolicyCreateReq",
+      "responseSchema": "Policy",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/policies/{name}",
+      "requestSchema": "PolicyParam",
+      "responseSchema": "Policy",
+      "auth": "jwt",
+      "rateLimit": 100,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/policies/{name}",
+      "requestSchema": "PolicyParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/grants",
+      "requestSchema": "GrantReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 30,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/grants/revoke",
+      "requestSchema": "GrantReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 30,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/backups",
+      "requestSchema": "Empty",
+      "responseSchema": "BackupList",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/backups",
+      "requestSchema": "BackupCreateReq",
+      "responseSchema": "BackupRef",
+      "auth": "jwt",
+      "rateLimit": 10,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/backups/{file}",
+      "requestSchema": "BackupFileParam",
+      "responseSchema": "BackupInfo",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/backups/{file}",
+      "requestSchema": "BackupFileParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/backups/cleanup",
+      "requestSchema": "Empty",
+      "responseSchema": "BackupCleanupResp",
+      "auth": "jwt",
+      "rateLimit": 10,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/restore",
+      "requestSchema": "RestoreReq",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 5,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/migrations",
+      "requestSchema": "Empty",
+      "responseSchema": "MigrationStatus",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/migrations/run",
+      "requestSchema": "Empty",
+      "responseSchema": "MigrationRunResp",
+      "auth": "jwt",
+      "rateLimit": 5,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/migrations",
+      "requestSchema": "MigrationCreateReq",
+      "responseSchema": "MigrationRef",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 4096
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/migrations/{name}/sign",
+      "requestSchema": "MigrationParam",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/audit",
+      "requestSchema": "AuditQuery",
+      "responseSchema": "AuditList",
+      "auth": "jwt",
+      "rateLimit": 50,
+      "required_roles": ["admin"]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/profiles",
+      "requestSchema": "Empty",
+      "responseSchema": "ProfileList",
+      "auth": "jwt",
+      "rateLimit": 50
+    }
+  ],
+  "websocket": [
+    {
+      "path": "/ws/ping",
+      "proto": "json",
+      "messageSchema": "PingMsg",
+      "auth": "jwt",
+      "ping_interval_ms": 30000,
+      "max_frame_bytes": 65536,
+      "max_message_bytes": 1048576,
+      "allow_any_origin": true
+    },
+    {
+      "path": "/ws/query",
+      "proto": "json",
+      "messageSchema": "QueryStreamMsg",
+      "auth": "jwt",
+      "ping_interval_ms": 15000,
+      "max_frame_bytes": 1048576,
+      "max_message_bytes": 16777216,
+      "allow_any_origin": true
+    }
+  ],
+  "mcp": {
+    "transport": ["http"],
+    "tools": [
+      { "name": "query", "paramsSchema": "QueryReq", "resultSchema": "QueryResp" }
+    ]
+  },
+  "schemas": {
+    "Empty": { "type": "object", "properties": {} },
+    "HealthResp": {
+      "type": "object",
+      "required": ["status", "version"],
+      "properties": {
+        "status":  { "type": "string", "enum": ["ok"] },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "LoginReq": {
+      "type": "object",
+      "required": ["username", "password"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "password": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "profile":  { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "LoginResp": {
+      "type": "object",
+      "required": ["access_token", "token_type", "expires_in"],
+      "properties": {
+        "access_token": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "token_type":   { "type": "string", "enum": ["Bearer"] },
+        "expires_in":   { "type": "integer", "minimum": 1, "maximum": 86400 }
+      }
+    },
+    "QueryReq": {
+      "type": "object",
+      "required": ["statement"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "maxLength": 524288 },
+        "params":    { "type": "object", "properties": {} },
+        "graph":     { "type": "string", "maxLength": 256 },
+        "page_size": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "timeout_ms":{ "type": "integer", "minimum": 1, "maximum": 600000 }
+      }
+    },
+    "QueryResp": {
+      "type": "object",
+      "required": ["columns", "rows", "row_count", "elapsed_ms"],
+      "properties": {
+        "columns":    { "type": "array",  "items": { "type": "object", "properties": {
+          "name":  { "type": "string" },
+          "type":  { "type": "string" }
+        } } },
+        "rows":       { "type": "array",  "items": { "type": "array", "items": { } } },
+        "row_count":  { "type": "integer", "minimum": 0 },
+        "elapsed_ms": { "type": "integer", "minimum": 0 },
+        "graph_summary": {
+          "type": "object",
+          "properties": {
+            "nodes": { "type": "array", "items": { } },
+            "edges": { "type": "array", "items": { } }
+          }
+        }
+      }
+    },
+    "PingMsg": {
+      "type": "object",
+      "required": ["seq"],
+      "properties": { "seq": { "type": "integer", "minimum": 0 } }
+    },
+    "GraphParam": {
+      "type": "object",
+      "required": ["graph"],
+      "properties": {
+        "graph": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "GraphList": {
+      "type": "object",
+      "required": ["graphs"],
+      "properties": {
+        "graphs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "LabelList": {
+      "type": "object",
+      "required": ["labels"],
+      "properties": {
+        "labels": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "EdgeTypeList": {
+      "type": "object",
+      "required": ["types"],
+      "properties": {
+        "types": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "IndexList": {
+      "type": "object",
+      "required": ["indexes"],
+      "properties": {
+        "indexes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":    { "type": "string" },
+              "type":    { "type": "string" },
+              "table":   { "type": "string" },
+              "columns": {}
+            }
+          }
+        }
+      }
+    },
+    "ConstraintList": {
+      "type": "object",
+      "required": ["constraints"],
+      "properties": {
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":    { "type": "string" },
+              "type":    { "type": "string" },
+              "table":   { "type": "string" },
+              "columns": {}
+            }
+          }
+        }
+      }
+    },
+    "TxBeginReq": {
+      "type": "object",
+      "properties": {
+        "read_only": { "type": "boolean" },
+        "graph":     { "type": "string", "maxLength": 256 }
+      }
+    },
+    "TxBeginResp": {
+      "type": "object",
+      "required": ["txid"],
+      "properties": {
+        "txid": { "type": "string", "minLength": 16, "maxLength": 64 }
+      }
+    },
+    "TxRunReq": {
+      "type": "object",
+      "required": ["txid", "statement"],
+      "properties": {
+        "txid":      { "type": "string" },
+        "statement": { "type": "string", "minLength": 1 },
+        "params":    { "type": "object", "properties": {} }
+      }
+    },
+    "TxIDParam": {
+      "type": "object",
+      "required": ["txid"],
+      "properties": {
+        "txid": { "type": "string", "minLength": 16, "maxLength": 64 }
+      }
+    },
+    "QueryStreamMsg": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind":      { "type": "string", "enum": ["start", "schema", "row", "summary", "error", "end", "cancel"] },
+        "statement": { "type": "string", "maxLength": 524288 },
+        "graph":     { "type": "string", "maxLength": 256 },
+        "params":    { "type": "object", "properties": {} },
+        "columns":   { "type": "array", "items": { } },
+        "row":       { "type": "array", "items": { } },
+        "elapsed_ms":{ "type": "integer", "minimum": 0 },
+        "row_count": { "type": "integer", "minimum": 0 },
+        "code":      { "type": "string", "maxLength": 64 },
+        "message":   { "type": "string", "maxLength": 4096 }
+      }
+    },
+    "User": {
+      "type": "object",
+      "required": ["username", "email"],
+      "properties": {
+        "username":     { "type": "string" },
+        "email":        { "type": "string" },
+        "roles":        { "type": "array", "items": { "type": "string" } },
+        "disabled":     { "type": "boolean" },
+        "mfa_enrolled": { "type": "boolean" }
+      }
+    },
+    "UserList": {
+      "type": "object",
+      "required": ["users"],
+      "properties": {
+        "users": { "type": "array", "items": { } }
+      }
+    },
+    "UserCreateReq": {
+      "type": "object",
+      "required": ["username", "email"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "email":    { "type": "string", "minLength": 3, "maxLength": 256 },
+        "password": { "type": "string", "maxLength": 4096 },
+        "roles":    { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "UserUpdateReq": {
+      "type": "object",
+      "required": ["username"],
+      "properties": {
+        "username": { "type": "string" },
+        "email":    { "type": "string" },
+        "password": { "type": "string" },
+        "roles":    { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "UsernameParam": {
+      "type": "object",
+      "required": ["username"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "PasswordChangeReq": {
+      "type": "object",
+      "required": ["username", "new_password"],
+      "properties": {
+        "username":     { "type": "string" },
+        "old_password": { "type": "string" },
+        "new_password": { "type": "string", "minLength": 8 }
+      }
+    },
+    "AssignRoleReq": {
+      "type": "object",
+      "required": ["username", "role"],
+      "properties": {
+        "username": { "type": "string" },
+        "role":     { "type": "string" }
+      }
+    },
+    "PermissionList": {
+      "type": "object",
+      "required": ["permissions"],
+      "properties": {
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "permission": { "type": "string" },
+              "resource":   { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "Role": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "permissions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "RoleList": {
+      "type": "object",
+      "required": ["roles"],
+      "properties": {
+        "roles": { "type": "array", "items": { } }
+      }
+    },
+    "RoleCreateReq": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "permissions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "RoleParam": {
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "Policy": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":       { "type": "string", "minLength": 1, "maxLength": 256 },
+        "expression": { "type": "string", "maxLength": 4096 },
+        "resource":   { "type": "string", "maxLength": 256 }
+      }
+    },
+    "PolicyList": {
+      "type": "object",
+      "required": ["policies"],
+      "properties": {
+        "policies": { "type": "array", "items": { } }
+      }
+    },
+    "PolicyCreateReq": {
+      "type": "object",
+      "required": ["name", "expression"],
+      "properties": {
+        "name":       { "type": "string", "minLength": 1, "maxLength": 256 },
+        "expression": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "resource":   { "type": "string", "maxLength": 256 }
+      }
+    },
+    "PolicyParam": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "GrantReq": {
+      "type": "object",
+      "required": ["permission", "grantee"],
+      "properties": {
+        "permission":   { "type": "string", "minLength": 1, "maxLength": 256 },
+        "resource":     { "type": "string", "maxLength": 256 },
+        "grantee":      { "type": "string", "minLength": 1, "maxLength": 256 },
+        "grantee_kind": { "type": "string", "enum": ["", "user", "role"] }
+      }
+    },
+    "BackupRef": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file":       { "type": "string", "minLength": 1, "maxLength": 256 },
+        "path":       { "type": "string", "maxLength": 1024 },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "created_at": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "BackupInfo": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file":        { "type": "string" },
+        "path":        { "type": "string" },
+        "size_bytes":  { "type": "integer" },
+        "created_at":  { "type": "string" },
+        "graph_count": { "type": "integer" },
+        "node_count":  { "type": "integer" },
+        "edge_count":  { "type": "integer" }
+      }
+    },
+    "BackupList": {
+      "type": "object",
+      "required": ["backups"],
+      "properties": {
+        "backups": { "type": "array", "items": { } }
+      }
+    },
+    "BackupCreateReq": {
+      "type": "object",
+      "properties": {
+        "graph":  { "type": "string", "maxLength": 256 },
+        "output": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "BackupFileParam": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "BackupCleanupResp": {
+      "type": "object",
+      "required": ["removed"],
+      "properties": {
+        "removed":     { "type": "integer", "minimum": 0 },
+        "freed_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "RestoreReq": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "target_time": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "MigrationStatus": {
+      "type": "object",
+      "required": ["pending", "applied"],
+      "properties": {
+        "pending": { "type": "array", "items": { "type": "string" } },
+        "applied": { "type": "array", "items": { } }
+      }
+    },
+    "MigrationRunResp": {
+      "type": "object",
+      "required": ["applied"],
+      "properties": {
+        "applied": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "MigrationCreateReq": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "MigrationRef": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":       { "type": "string" },
+        "path":       { "type": "string" },
+        "created_at": { "type": "string" }
+      }
+    },
+    "MigrationParam": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "AuditQuery": {
+      "type": "object",
+      "properties": {
+        "since": { "type": "string", "maxLength": 64 },
+        "event": { "type": "string", "maxLength": 64 },
+        "user":  { "type": "string", "maxLength": 256 }
+      }
+    },
+    "AuditList": {
+      "type": "object",
+      "required": ["entries"],
+      "properties": {
+        "entries": { "type": "array", "items": { } }
+      }
+    },
+    "ProfileList": {
+      "type": "object",
+      "required": ["profiles"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name":        { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

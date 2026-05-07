@@ -1,6 +1,6 @@
 module.exports = {
   preset: 'ts-jest',
-  roots: ['<rootDir>/__tests__'],
+  roots: ['<rootDir>/__tests__', '<rootDir>/src'],
   testEnvironment: 'jsdom',
   transform: {
     '^.+\\.tsx?$': [
@@ -22,7 +22,7 @@ module.exports = {
       },
     ],
   },
-  setupFilesAfterSetup: ['<rootDir>/__test_utils__/afterEnv.js'],
+  setupFilesAfterEnv: ['<rootDir>/__test_utils__/afterEnv.js'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   setupFiles: ['<rootDir>/__test_utils__/polyfills.js'],
   moduleNameMapper: {
@@ -31,6 +31,8 @@ module.exports = {
     '^.+\\.(jpg|jpeg|png|gif|webp|avif|svg|eot|otf|ttf|woff|woff2)$':
       '<rootDir>/__test_utils__/mocks/fileMock.js',
     '^@/(.*)$': '<rootDir>/src/$1',
+    '^@api$': '<rootDir>/gen/client/react/index.ts',
+    '^@api/(.*)$': '<rootDir>/gen/client/react/$1',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(@devnw)/)',

@@ -1,0 +1,47 @@
+# Example docker-compose for running geode-ui alongside a Geode database.
+#
+# Build context note:
+#   The geode-ui Dockerfile depends on a sibling `geode-client-go/` directory
+#   (see deploy/Dockerfile header). For that reason the build context here
+#   is `..` (the parent directory of geode-ui), and you must run docker-compose
+#   from a checkout layout that looks like:
+#
+#     parent/
+#       geode-ui/             ← this repo (compose lives in deploy/)
+#       geode-client-go/      ← sibling driver checkout
+#
+#   With that layout, run:
+#     cd parent
+#     docker compose -f geode-ui/deploy/docker-compose.example.yml up --build
+#
+#   Or copy this file out of deploy/ to a parent that owns both repos.
+
+version: '3.8'
+services:
+  geode:
+    # Replace with the real Geode image when available; placeholder for local dev.
+    image: ghcr.io/geodedb/geode:latest
+    ports:
+    - 3141:3141
+    volumes:
+    - geode-data:/data
+    command: [serve, --data-dir, /data, --listen, 0.0.0.0:3141]
+
+  geode-ui:
+    build:
+      # Parent of geode-ui (so geode-client-go is a sibling in the context).
+      context: ../..
+      dockerfile: geode-ui/deploy/Dockerfile
+    depends_on:
+    - geode
+    ports:
+    - 8080:8080
+    environment:
+      # Generate with: openssl rand -hex 32
+      JWT_SECRET_HEX: REPLACE_WITH_OPENSSL_RAND_HEX_32
+    command: [-listen, :8080, -jwt-secret-hex, '${JWT_SECRET_HEX}', -profiles, /etc/geode-ui/profiles.json]
+    volumes:
+    - ./profiles.json:/etc/geode-ui/profiles.json:ro
+
+volumes:
+  geode-data:

@@ -19,6 +19,22 @@ module.exports = merge(common, {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      {
+        context: ['/ws'],
+        target: 'ws://localhost:8080',
+        changeOrigin: true,
+        ws: true,
+      },
+      {
+        context: ['/mcp'],
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      {
+        context: ['/healthz'],
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     ],
   },
 })

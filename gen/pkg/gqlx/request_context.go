@@ -1,0 +1,22 @@
+package gqlx
+
+import (
+	"context"
+	"net/http"
+)
+
+type requestContextKey struct{}
+
+// ContextWithRequest stores the active HTTP request in a context for resolver auth checks.
+func ContextWithRequest(ctx context.Context, r *http.Request) context.Context {
+	return context.WithValue(ctx, requestContextKey{}, r)
+}
+
+// RequestFromContext retrieves the active HTTP request when present.
+func RequestFromContext(ctx context.Context) (*http.Request, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	r, ok := ctx.Value(requestContextKey{}).(*http.Request)
+	return r, ok
+}

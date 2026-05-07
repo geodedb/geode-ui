@@ -1,0 +1,14 @@
+Targets:
+  make generate     Run genapi → gen/
+  make build        Build SPA into internal/ui/dist/ then Go binary into bin/geode-ui
+  make test         Run Go + JS tests
+  make lint         Run Go + JS linters
+  make fmt          Format Go + JS sources
+  make dev          Run go server (terminal 1) and webpack dev (terminal 2)
+  make ci           Full CI sequence
+  make clean        Remove gen/, internal/ui/dist/, bin/, coverage
+  make pre-commit   Format, tidy, lint, test (matches the pre-commit hook chain)
+  make e2e-up       Bring up the e2e docker stack (geode + ui + mcp + lsp + init)
+  make e2e-down     Tear down the e2e stack and clear named volumes
+  make e2e-test     Run Playwright tests against a running e2e stack
+  make e2e-ci       e2e-up + e2e-test + e2e-down (one-shot CI shape)

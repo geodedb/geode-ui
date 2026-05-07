@@ -1,5 +1,22 @@
 import React from 'react'
-import styled, { ThemeProvider, createGlobalStyle } from 'styled-components'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { ThemeProvider, createGlobalStyle } from 'styled-components'
+import { AuthProvider } from './auth/AuthProvider'
+import { ProtectedRoute } from './auth/ProtectedRoute'
+import { Shell } from './components/layout/Shell'
+import { LoginPage } from './pages/LoginPage'
+import { QueryPage } from './pages/QueryPage'
+import { SchemaPage } from './pages/SchemaPage'
+import { AdminPage } from './pages/AdminPage'
+import { UsersPage } from './components/admin/UsersPage'
+import { RolesPage } from './components/admin/RolesPage'
+import { PoliciesPage } from './components/admin/PoliciesPage'
+import { GrantsPanel } from './components/admin/GrantsPanel'
+import { OpsPage } from './pages/OpsPage'
+import { BackupPage } from './components/ops/BackupPage'
+import { RestorePage } from './components/ops/RestorePage'
+import { MigrationsPage } from './components/ops/MigrationsPage'
+import { AuditLogPage } from './components/ops/AuditLogPage'
 
 const theme = {
   colors: {
@@ -37,38 +54,40 @@ const GlobalStyle = createGlobalStyle`
   }
 `
 
-const Container = styled.div`
-  max-width: 960px;
-  margin: 0 auto;
-  padding: ${({ theme }) => theme.spacing.xl};
-`
+const ProtectedShell: React.FC = () => (
+  <ProtectedRoute>
+    <Shell />
+  </ProtectedRoute>
+)
 
-const Header = styled.header`
-  text-align: center;
-  padding: ${({ theme }) => theme.spacing.xl} 0;
-`
-
-const Title = styled.h1`
-  font-size: 2rem;
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.text};
-  margin-bottom: ${({ theme }) => theme.spacing.sm};
-`
-
-const Subtitle = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 1.1rem;
-`
-
-const App = () => (
+const App: React.FC = () => (
   <ThemeProvider theme={theme}>
     <GlobalStyle />
-    <Container>
-      <Header>
-        <Title>Geode UI</Title>
-        <Subtitle>Graph database admin & query workbench</Subtitle>
-      </Header>
-    </Container>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<ProtectedShell />}>
+            <Route index element={<QueryPage />} />
+            <Route path="schema" element={<SchemaPage />} />
+            <Route path="admin" element={<AdminPage />}>
+              <Route index element={<Navigate to="users" replace />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="roles" element={<RolesPage />} />
+              <Route path="policies" element={<PoliciesPage />} />
+              <Route path="grants" element={<GrantsPanel />} />
+            </Route>
+            <Route path="ops" element={<OpsPage />}>
+              <Route index element={<Navigate to="backups" replace />} />
+              <Route path="backups" element={<BackupPage />} />
+              <Route path="restore" element={<RestorePage />} />
+              <Route path="migrations" element={<MigrationsPage />} />
+              <Route path="audit" element={<AuditLogPage />} />
+            </Route>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   </ThemeProvider>
 )
 

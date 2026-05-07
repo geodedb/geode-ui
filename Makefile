@@ -1,106 +1,113 @@
-# ui - React Application Makefile
-# SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2024-2025 CodePros
+SHELL := /usr/bin/env bash
+GOEXPERIMENT ?= jsonv2
+GOTOOLCHAIN ?= go1.26.2
+GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
+BIN := bin/geode-ui
 
-.PHONY: all build test dev ci clean lint fmt help
-.PHONY: pre-commit-install pre-commit pre-commit-run
+.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
 
-# Default target: lint and test
-all: lint test
-	@echo "All checks passed!"
+all: lint test build
 
-# Start development server
-dev:
-	@echo "Starting development server..."
-	@npm start
-
-# Production build
-build:
-	@echo "Building ui..."
-	@npm run build
-
-# Run all tests
-test:
-	@echo "Running tests..."
-	@npm test -- --ci
-
-# Run tests in watch mode
-test-watch:
-	@echo "Starting test watcher..."
-	@npm run test:watch
-
-# TypeScript type checking
-typecheck:
-	@echo "Checking types..."
-	@npm run test:ts
-
-# Run linter
-lint:
-	@echo "Linting..."
-	@npm run lint
-
-# Fix lint issues
-lint-fix:
-	@echo "Fixing lint issues..."
-	@npm run lint:fix
-
-# Format code
-fmt:
-	@echo "Formatting code..."
-	@npm run prettier:fix
-
-# Check formatting
-fmt-check:
-	@echo "Checking formatting..."
-	@npm run prettier:check
-
-# Full CI pipeline (clean slate)
-ci: clean lint typecheck test build
-	@echo "CI pipeline passed!"
-
-# Clean build artifacts
-clean:
-	@echo "Cleaning..."
-	@npm run clean
-
-# Pre-commit hook management
-pre-commit-install:
-	@echo "Installing pre-commit hooks..."
-	@pre-commit install
-	@pre-commit install --hook-type commit-msg
-	@pre-commit install --hook-type pre-push
-
-pre-commit:
-	@echo "Running pre-commit checks..."
-	@pre-commit run --all-files
-
-pre-commit-run: pre-commit
-
-# Display help
 help:
-	@echo "ui - React Application"
-	@echo ""
-	@echo "Usage: make [target]"
-	@echo ""
-	@echo "Development:"
-	@echo "  all                  Lint and test (default)"
-	@echo "  dev                  Start development server (port 3000)"
-	@echo "  build                Production build"
-	@echo "  ci                   Full CI: clean + lint + typecheck + test + build"
-	@echo ""
-	@echo "Testing:"
-	@echo "  test                 Run test suite"
-	@echo "  test-watch           Run tests in watch mode"
-	@echo "  typecheck            TypeScript type checking"
-	@echo ""
-	@echo "Code Quality:"
-	@echo "  lint                 Run ESLint"
-	@echo "  lint-fix             Fix ESLint issues"
-	@echo "  fmt                  Format with Prettier"
-	@echo "  fmt-check            Check formatting"
-	@echo "  pre-commit           Run pre-commit hooks"
-	@echo "  pre-commit-install   Install pre-commit hooks"
-	@echo ""
-	@echo "Maintenance:"
-	@echo "  clean                Remove build artifacts"
-	@echo "  help                 Show this help message"
+	@cat scripts/help.txt
+
+# ----- Code generation -----
+generate:
+	$(GOENV) genapi generate --config geode.json --out gen/ --with-tests
+	$(GOENV) go mod tidy
+
+# ----- Go build/test -----
+go-build: web-build
+	$(GOENV) go build -o $(BIN) ./cmd/server
+
+go-test:
+	$(GOENV) go test -race -cover -failfast ./...
+
+go-lint:
+	$(GOENV) golangci-lint run
+
+go-fmt:
+	$(GOENV) gofmt -s -w .
+	$(GOENV) goimports -w .
+
+go-tidy:
+	$(GOENV) go mod tidy
+
+# ----- Web build/test (delegates to npm scripts) -----
+web-install:
+	npm ci
+
+web-build:
+	npm run build
+
+web-dev:
+	npm start
+
+web-test:
+	npm test -- --ci
+
+web-lint:
+	npm run lint
+
+web-fmt:
+	npm run prettier:fix
+
+web-typecheck:
+	npm run test:ts
+
+# ----- Aggregates -----
+build: generate go-build
+test: web-test go-test
+lint: web-lint go-lint
+fmt: go-fmt web-fmt
+ci: web-install lint web-typecheck test build
+clean:
+	rm -rf gen internal/ui/dist bin coverage.txt *.out
+
+dev:
+	@echo "Run 'make web-dev' in one terminal and './$(BIN) -listen :8080' in another"
+
+# ----- E2E stack -----
+COMPOSE := docker compose -f deploy/docker-compose.test.yml
+
+# Prerequisite: build the geode binary on the host because the
+# Dockerfile.geode runtime stage COPYs ../geode/zig-out/bin/geode.
+# Zig caches builds, so this is idempotent and fast on rebuilds.
+e2e-deps:
+	@if [ ! -f ../geode/zig-out/bin/geode ]; then \
+	  echo "==> building geode binary at ../geode (one-time, takes ~5 min cold)"; \
+	  cd ../geode && zig build -Doptimize=ReleaseSafe; \
+	else \
+	  echo "==> ../geode/zig-out/bin/geode already present (skipping zig build)"; \
+	fi
+
+# Bring up the test stack (build images, run init, leave services running).
+e2e-up: e2e-deps
+	$(COMPOSE) up -d --build
+	@echo "stack is up — http://localhost:8080 (UI), :8090 (MCP), :2087 (LSP), :3141/udp (Geode)"
+
+# Tear down + delete named volumes (full reset for next run).
+e2e-down:
+	$(COMPOSE) down -v
+
+# Tail logs from every service (Ctrl-C to detach).
+e2e-logs:
+	$(COMPOSE) logs -f
+
+# Run Playwright against an already-running stack (assumes e2e-up was called).
+# Playwright lands in E8+; this guards if e2e/ isn't populated yet.
+e2e-test:
+	@[ -d e2e ] || (echo "==> e2e/ directory not yet present — Playwright not installed (Phase 2 of the plan)"; exit 1)
+	cd e2e && npx playwright test
+
+# Full CI run: bring up, wait for health, run tests, tear down.
+e2e-ci: e2e-up
+	@echo "==> waiting for geode-ui health..."
+	@for i in $$(seq 1 30); do \
+	  if wget -qO- http://localhost:8080/healthz 2>/dev/null | grep -q ok; then break; fi; \
+	  sleep 2; \
+	done
+	$(MAKE) e2e-test
+	$(MAKE) e2e-down
+
+pre-commit: fmt go-tidy lint test

@@ -34,10 +34,7 @@ const rules = [
   },
   {
     test: /\.(s*)css$/,
-    use: [
-      devMode ? 'style-loader' : MiniCssExtractPlugin.loader,
-      'css-loader',
-    ],
+    use: [devMode ? 'style-loader' : MiniCssExtractPlugin.loader, 'css-loader'],
   },
   {
     test: /\.(png|jp(e*)g|svg|gif)$/i,
@@ -50,7 +47,7 @@ const rules = [
 ]
 
 const SRC_DIR = path.join(__dirname, '/src')
-const DIST_DIR = path.join(__dirname, '/dist')
+const DIST_DIR = path.join(__dirname, '/internal/ui/dist')
 
 module.exports = {
   stats: { warnings: false },
@@ -72,6 +69,7 @@ module.exports = {
         'styled-components'
       ),
       '@': path.resolve(__dirname, 'src'),
+      '@api': path.resolve(__dirname, 'gen/client/react'),
     },
   },
   optimization: {

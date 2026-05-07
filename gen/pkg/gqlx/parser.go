@@ -1,0 +1,664 @@
+package gqlx
+
+import (
+	"fmt"
+	"strconv"
+)
+
+// Parse lexes the input GraphQL document string and builds an AST.
+// It rejects introspection queries (__schema, __type) at the root level
+// but allows __typename in nested selections.
+func Parse(input string) (*Document, error) {
+	tokens, err := Lex(input)
+	if err != nil {
+		return nil, fmt.Errorf("lex error: %w", err)
+	}
+
+	p := &parser{tokens: tokens}
+	doc, err := p.parseDocument()
+	if err != nil {
+		return nil, err
+	}
+
+	// After a successful parse the only token left should be EOF.
+	if p.peek().Kind != TokEOF {
+		tok := p.peek()
+		return nil, fmt.Errorf("parse error at %d:%d: unexpected token %s after document", tok.Line, tok.Col, tok.Kind)
+	}
+
+	return doc, nil
+}
+
+// parser holds the state for recursive-descent parsing of a token stream.
+type parser struct {
+	tokens []Token
+	pos    int
+}
+
+// peek returns the current token without consuming it.
+func (p *parser) peek() Token {
+	if p.pos >= len(p.tokens) {
+		return Token{Kind: TokEOF}
+	}
+	return p.tokens[p.pos]
+}
+
+// next consumes and returns the current token.
+func (p *parser) next() Token {
+	t := p.peek()
+	if p.pos < len(p.tokens) {
+		p.pos++
+	}
+	return t
+}
+
+// expect consumes the current token, returning an error if it does not
+// match the expected kind.
+func (p *parser) expect(kind TokenKind) (Token, error) {
+	t := p.next()
+	if t.Kind != kind {
+		return t, fmt.Errorf("parse error at %d:%d: expected %s, got %s",
+			t.Line, t.Col, kind, t.Kind)
+	}
+	return t, nil
+}
+
+// skip consumes the current token only if it matches the given kind.
+// Returns true if a token was consumed.
+func (p *parser) skip(kind TokenKind) bool {
+	if p.peek().Kind == kind {
+		p.pos++
+		return true
+	}
+	return false
+}
+
+// parseDocument parses the top-level document: a sequence of operations
+// and fragment definitions.
+func (p *parser) parseDocument() (*Document, error) {
+	doc := &Document{}
+
+	for p.peek().Kind != TokEOF {
+		tok := p.peek()
+
+		switch {
+		case tok.Kind == TokLBrace:
+			// Anonymous query shorthand: { ... }
+			op, err := p.parseOperation()
+			if err != nil {
+				return nil, err
+			}
+			doc.Operations = append(doc.Operations, op)
+
+		case tok.Kind == TokName &&
+			(tok.Value == "query" || tok.Value == "mutation" || tok.Value == "subscription"):
+			op, err := p.parseOperation()
+			if err != nil {
+				return nil, err
+			}
+			doc.Operations = append(doc.Operations, op)
+
+		case tok.Kind == TokName && tok.Value == "fragment":
+			frag, err := p.parseFragmentDef()
+			if err != nil {
+				return nil, err
+			}
+			doc.Fragments = append(doc.Fragments, frag)
+
+		default:
+			return nil, fmt.Errorf("parse error at %d:%d: unexpected token %s",
+				tok.Line, tok.Col, tok.Kind)
+		}
+	}
+
+	return doc, nil
+}
+
+// parseOperation parses a query, mutation, subscription, or anonymous query.
+func (p *parser) parseOperation() (*Operation, error) {
+	op := &Operation{Type: OperationQuery}
+
+	tok := p.peek()
+
+	// Check for operation type keyword. If present, consume it.
+	if tok.Kind == TokName {
+		switch tok.Value {
+		case "query":
+			op.Type = OperationQuery
+			p.next()
+		case "mutation":
+			op.Type = OperationMutation
+			p.next()
+		case "subscription":
+			op.Type = OperationSubscription
+			p.next()
+		}
+		// Otherwise this is an anonymous query starting with { ... }
+	}
+
+	// Optional operation name (only after a type keyword was consumed).
+	if p.peek().Kind == TokName {
+		op.Name = p.next().Value
+	}
+
+	// Optional variable definitions.
+	if p.peek().Kind == TokLParen {
+		vars, err := p.parseVariableDefs()
+		if err != nil {
+			return nil, err
+		}
+		op.Variables = vars
+	}
+
+	// Optional directives.
+	dirs, err := p.parseDirectives()
+	if err != nil {
+		return nil, err
+	}
+	op.Directives = dirs
+
+	// Selection set (required).
+	sels, err := p.parseSelectionSet(true)
+	if err != nil {
+		return nil, err
+	}
+	op.Selections = sels
+
+	return op, nil
+}
+
+// parseSelectionSet parses { selection+ }. When rootLevel is true,
+// introspection fields (__schema, __type) are rejected.
+func (p *parser) parseSelectionSet(rootLevel bool) ([]Selection, error) {
+	if _, err := p.expect(TokLBrace); err != nil {
+		return nil, err
+	}
+
+	var sels []Selection
+	for p.peek().Kind != TokRBrace {
+		if p.peek().Kind == TokEOF {
+			return nil, fmt.Errorf("parse error: unexpected end of input, expected '}'")
+		}
+
+		sel, err := p.parseSelection(rootLevel)
+		if err != nil {
+			return nil, err
+		}
+		sels = append(sels, sel)
+	}
+
+	if _, err := p.expect(TokRBrace); err != nil {
+		return nil, err
+	}
+
+	return sels, nil
+}
+
+// parseSelection parses a single selection: field, fragment spread, or
+// inline fragment.
+func (p *parser) parseSelection(rootLevel bool) (Selection, error) {
+	if p.peek().Kind == TokSpread {
+		return p.parseSpread()
+	}
+	return p.parseField(rootLevel)
+}
+
+// parseField parses a field selection, including optional alias, arguments,
+// directives, and nested selection set.
+func (p *parser) parseField(rootLevel bool) (*Field, error) {
+	f := &Field{}
+
+	nameTok, err := p.expect(TokName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check for alias: if next token is ':', this name is an alias.
+	if p.peek().Kind == TokColon {
+		p.next() // consume ':'
+		f.Alias = nameTok.Value
+		fieldTok, err2 := p.expect(TokName)
+		if err2 != nil {
+			return nil, err2
+		}
+		f.Name = fieldTok.Value
+	} else {
+		f.Name = nameTok.Value
+	}
+
+	// Introspection blocking at root level.
+	if rootLevel && (f.Name == "__schema" || f.Name == "__type") {
+		return nil, fmt.Errorf("introspection field %q is not allowed: %w",
+			f.Name, ErrIntrospection)
+	}
+
+	// Optional arguments.
+	if p.peek().Kind == TokLParen {
+		args, err2 := p.parseArguments()
+		if err2 != nil {
+			return nil, err2
+		}
+		f.Arguments = args
+	}
+
+	// Optional directives.
+	dirs, err := p.parseDirectives()
+	if err != nil {
+		return nil, err
+	}
+	f.Directives = dirs
+
+	// Optional nested selection set.
+	if p.peek().Kind == TokLBrace {
+		sels, err2 := p.parseSelectionSet(false)
+		if err2 != nil {
+			return nil, err2
+		}
+		f.Selections = sels
+	}
+
+	return f, nil
+}
+
+// parseSpread parses a fragment spread (... Name) or inline fragment
+// (... on Type { ... } or ... { ... }).
+func (p *parser) parseSpread() (Selection, error) {
+	if _, err := p.expect(TokSpread); err != nil {
+		return nil, err
+	}
+
+	tok := p.peek()
+
+	// Inline fragment with type condition: ... on Type { ... }
+	if tok.Kind == TokName && tok.Value == "on" {
+		return p.parseInlineFragment()
+	}
+
+	// Inline fragment without type condition: ... { ... }
+	if tok.Kind == TokLBrace {
+		return p.parseInlineFragment()
+	}
+
+	// Fragment spread: ... Name
+	return p.parseFragmentSpread()
+}
+
+// parseFragmentSpread parses: Name Directives?
+func (p *parser) parseFragmentSpread() (*FragmentSpread, error) {
+	nameTok, err := p.expect(TokName)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs, err := p.parseDirectives()
+	if err != nil {
+		return nil, err
+	}
+
+	return &FragmentSpread{
+		Name:       nameTok.Value,
+		Directives: dirs,
+	}, nil
+}
+
+// parseInlineFragment parses: (on TypeCondition)? Directives? SelectionSet
+func (p *parser) parseInlineFragment() (*InlineFragment, error) {
+	inf := &InlineFragment{}
+
+	// Optional "on Type".
+	if p.peek().Kind == TokName && p.peek().Value == "on" {
+		p.next() // consume "on"
+		typeTok, err := p.expect(TokName)
+		if err != nil {
+			return nil, err
+		}
+		inf.TypeCondition = typeTok.Value
+	}
+
+	// Optional directives.
+	dirs, err := p.parseDirectives()
+	if err != nil {
+		return nil, err
+	}
+	inf.Directives = dirs
+
+	// Selection set.
+	sels, err := p.parseSelectionSet(false)
+	if err != nil {
+		return nil, err
+	}
+	inf.Selections = sels
+
+	return inf, nil
+}
+
+// parseFragmentDef parses:
+//
+//	fragment Name on TypeCondition Directives? SelectionSet
+func (p *parser) parseFragmentDef() (*FragmentDef, error) {
+	// Consume "fragment" keyword (already validated as TokName "fragment").
+	p.next()
+
+	nameTok, err := p.expect(TokName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Expect "on" keyword.
+	onTok, err := p.expect(TokName)
+	if err != nil {
+		return nil, err
+	}
+	if onTok.Value != "on" {
+		return nil, fmt.Errorf("parse error at %d:%d: expected 'on', got %q",
+			onTok.Line, onTok.Col, onTok.Value)
+	}
+
+	typeTok, err := p.expect(TokName)
+	if err != nil {
+		return nil, err
+	}
+
+	dirs, err := p.parseDirectives()
+	if err != nil {
+		return nil, err
+	}
+
+	sels, err := p.parseSelectionSet(false)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FragmentDef{
+		Name:          nameTok.Value,
+		TypeCondition: typeTok.Value,
+		Directives:    dirs,
+		Selections:    sels,
+	}, nil
+}
+
+// parseVariableDefs parses: ( $name: Type = default, ... )
+func (p *parser) parseVariableDefs() ([]*VariableDef, error) {
+	if _, err := p.expect(TokLParen); err != nil {
+		return nil, err
+	}
+
+	var vars []*VariableDef
+	for p.peek().Kind != TokRParen {
+		if p.peek().Kind == TokEOF {
+			return nil, fmt.Errorf("parse error: unexpected end of input in variable definitions")
+		}
+
+		v, err := p.parseVariableDef()
+		if err != nil {
+			return nil, err
+		}
+		vars = append(vars, v)
+	}
+
+	if _, err := p.expect(TokRParen); err != nil {
+		return nil, err
+	}
+	return vars, nil
+}
+
+// parseVariableDef parses: $name : Type (= defaultValue)?
+func (p *parser) parseVariableDef() (*VariableDef, error) {
+	if _, err := p.expect(TokDollar); err != nil {
+		return nil, err
+	}
+
+	nameTok, err := p.expect(TokName)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := p.expect(TokColon); err != nil {
+		return nil, err
+	}
+
+	typeRef, err := p.parseTypeRef()
+	if err != nil {
+		return nil, err
+	}
+
+	vd := &VariableDef{
+		Name: nameTok.Value,
+		Type: typeRef,
+	}
+
+	// Optional default value.
+	if p.skip(TokEquals) {
+		val, err2 := p.parseValue()
+		if err2 != nil {
+			return nil, err2
+		}
+		vd.Default = val
+	}
+
+	return vd, nil
+}
+
+// parseTypeRef parses a type reference: NamedType | [Type] | Type!
+func (p *parser) parseTypeRef() (TypeRef, error) {
+	var ref TypeRef
+
+	if p.peek().Kind == TokLBracket {
+		// List type: [ Type ]
+		p.next() // consume '['
+		inner, err := p.parseTypeRef()
+		if err != nil {
+			return ref, err
+		}
+		if _, err := p.expect(TokRBracket); err != nil {
+			return ref, err
+		}
+		ref.Elem = &inner
+	} else {
+		// Named type.
+		nameTok, err := p.expect(TokName)
+		if err != nil {
+			return ref, err
+		}
+		ref.Name = nameTok.Value
+	}
+
+	// Optional non-null marker.
+	if p.skip(TokBang) {
+		ref.NonNull = true
+	}
+
+	return ref, nil
+}
+
+// parseArguments parses: ( name: value, ... )
+func (p *parser) parseArguments() ([]*Argument, error) {
+	if _, err := p.expect(TokLParen); err != nil {
+		return nil, err
+	}
+
+	var args []*Argument
+	for p.peek().Kind != TokRParen {
+		if p.peek().Kind == TokEOF {
+			return nil, fmt.Errorf("parse error: unexpected end of input in arguments")
+		}
+
+		nameTok, err := p.expect(TokName)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := p.expect(TokColon); err != nil {
+			return nil, err
+		}
+
+		val, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+
+		args = append(args, &Argument{
+			Name:  nameTok.Value,
+			Value: val,
+		})
+	}
+
+	if _, err := p.expect(TokRParen); err != nil {
+		return nil, err
+	}
+
+	return args, nil
+}
+
+// parseValue parses a GraphQL value literal.
+func (p *parser) parseValue() (Value, error) {
+	tok := p.peek()
+
+	switch tok.Kind {
+	case TokString:
+		p.next()
+		return &StringValue{V: tok.Value}, nil
+
+	case TokInt:
+		p.next()
+		v, err := strconv.ParseInt(tok.Value, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse error at %d:%d: invalid integer %q: %w",
+				tok.Line, tok.Col, tok.Value, err)
+		}
+		return &IntValue{V: v}, nil
+
+	case TokFloat:
+		p.next()
+		v, err := strconv.ParseFloat(tok.Value, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse error at %d:%d: invalid float %q: %w",
+				tok.Line, tok.Col, tok.Value, err)
+		}
+		return &FloatValue{V: v}, nil
+
+	case TokName:
+		p.next()
+		switch tok.Value {
+		case "true":
+			return &BoolValue{V: true}, nil
+		case "false":
+			return &BoolValue{V: false}, nil
+		case "null":
+			return &NullValue{}, nil
+		default:
+			return &EnumValue{V: tok.Value}, nil
+		}
+
+	case TokDollar:
+		p.next() // consume '$'
+		nameTok, err := p.expect(TokName)
+		if err != nil {
+			return nil, err
+		}
+		return &VariableValue{Name: nameTok.Value}, nil
+
+	case TokLBracket:
+		return p.parseListValue()
+
+	case TokLBrace:
+		return p.parseObjectValue()
+
+	default:
+		return nil, fmt.Errorf("parse error at %d:%d: unexpected token %s in value",
+			tok.Line, tok.Col, tok.Kind)
+	}
+}
+
+// parseListValue parses: [ value, ... ]
+func (p *parser) parseListValue() (Value, error) {
+	if _, err := p.expect(TokLBracket); err != nil {
+		return nil, err
+	}
+
+	var values []Value
+	for p.peek().Kind != TokRBracket {
+		if p.peek().Kind == TokEOF {
+			return nil, fmt.Errorf("parse error: unexpected end of input in list value")
+		}
+		val, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, val)
+	}
+
+	if _, err := p.expect(TokRBracket); err != nil {
+		return nil, err
+	}
+
+	return &ListValue{Values: values}, nil
+}
+
+// parseObjectValue parses: { name: value, ... }
+func (p *parser) parseObjectValue() (Value, error) {
+	if _, err := p.expect(TokLBrace); err != nil {
+		return nil, err
+	}
+
+	var fields []*ObjectField
+	for p.peek().Kind != TokRBrace {
+		if p.peek().Kind == TokEOF {
+			return nil, fmt.Errorf("parse error: unexpected end of input in object value")
+		}
+
+		nameTok, err := p.expect(TokName)
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := p.expect(TokColon); err != nil {
+			return nil, err
+		}
+
+		val, err := p.parseValue()
+		if err != nil {
+			return nil, err
+		}
+
+		fields = append(fields, &ObjectField{
+			Name:  nameTok.Value,
+			Value: val,
+		})
+	}
+
+	if _, err := p.expect(TokRBrace); err != nil {
+		return nil, err
+	}
+
+	return &ObjectValue{Fields: fields}, nil
+}
+
+// parseDirectives parses zero or more directives: @name(args...)*
+func (p *parser) parseDirectives() ([]*Directive, error) {
+	var dirs []*Directive
+
+	for p.peek().Kind == TokAt {
+		p.next() // consume '@'
+
+		nameTok, err := p.expect(TokName)
+		if err != nil {
+			return nil, err
+		}
+
+		d := &Directive{Name: nameTok.Value}
+
+		// Optional arguments.
+		if p.peek().Kind == TokLParen {
+			args, err2 := p.parseArguments()
+			if err2 != nil {
+				return nil, err2
+			}
+			d.Arguments = args
+		}
+
+		dirs = append(dirs, d)
+	}
+
+	return dirs, nil
+}
