@@ -4,7 +4,7 @@ GOTOOLCHAIN ?= go1.26.2
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
-.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit
+.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
 
 all: lint test build
 
@@ -66,5 +66,48 @@ clean:
 
 dev:
 	@echo "Run 'make web-dev' in one terminal and './$(BIN) -listen :8080' in another"
+
+# ----- E2E stack -----
+COMPOSE := docker compose -f deploy/docker-compose.test.yml
+
+# Prerequisite: build the geode binary on the host because the
+# Dockerfile.geode runtime stage COPYs ../geode/zig-out/bin/geode.
+# Zig caches builds, so this is idempotent and fast on rebuilds.
+e2e-deps:
+	@if [ ! -f ../geode/zig-out/bin/geode ]; then \
+	  echo "==> building geode binary at ../geode (one-time, takes ~5 min cold)"; \
+	  cd ../geode && zig build -Doptimize=ReleaseSafe; \
+	else \
+	  echo "==> ../geode/zig-out/bin/geode already present (skipping zig build)"; \
+	fi
+
+# Bring up the test stack (build images, run init, leave services running).
+e2e-up: e2e-deps
+	$(COMPOSE) up -d --build
+	@echo "stack is up — http://localhost:8080 (UI), :8090 (MCP), :2087 (LSP), :3141/udp (Geode)"
+
+# Tear down + delete named volumes (full reset for next run).
+e2e-down:
+	$(COMPOSE) down -v
+
+# Tail logs from every service (Ctrl-C to detach).
+e2e-logs:
+	$(COMPOSE) logs -f
+
+# Run Playwright against an already-running stack (assumes e2e-up was called).
+# Playwright lands in E8+; this guards if e2e/ isn't populated yet.
+e2e-test:
+	@[ -d e2e ] || (echo "==> e2e/ directory not yet present — Playwright not installed (Phase 2 of the plan)"; exit 1)
+	cd e2e && npx playwright test
+
+# Full CI run: bring up, wait for health, run tests, tear down.
+e2e-ci: e2e-up
+	@echo "==> waiting for geode-ui health..."
+	@for i in $$(seq 1 30); do \
+	  if wget -qO- http://localhost:8080/healthz 2>/dev/null | grep -q ok; then break; fi; \
+	  sleep 2; \
+	done
+	$(MAKE) e2e-test
+	$(MAKE) e2e-down
 
 pre-commit: fmt go-tidy lint test
