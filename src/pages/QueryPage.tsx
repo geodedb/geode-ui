@@ -147,7 +147,16 @@ export const QueryPage: React.FC = () => {
     setBusy(true)
     setErr(null)
     try {
-      const r = await client.query({ statement: stmt })
+      // The server validator (gen/types/types.gen.go QueryReq.Valid) treats
+      // page_size and timeout_ms as required (>= 1). The TS interface
+      // marks them optional but the Go zero-value of int64 is 0, so
+      // omitting them yields "page_size: too small". Send sensible
+      // defaults so the synchronous query path is usable.
+      const r = await client.query({
+        statement: stmt,
+        page_size: 1000,
+        timeout_ms: 30000,
+      })
       setResp(r)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'query failed')

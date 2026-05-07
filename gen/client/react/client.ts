@@ -848,7 +848,11 @@ export class GenAPIClient {
 
   constructor(config: ClientConfig) {
     this.config = { ...config, baseUrl: normalizeBaseURL(config.baseUrl) };
-    this.fetchImpl = this.config.fetchImpl ?? fetch;
+    // Native `fetch` must be invoked with `this === window`; calling it
+    // as `this.fetchImpl(...)` would bind `this` to the class instance
+    // and Chrome throws "Illegal invocation". Bind to globalThis when
+    // the caller didn't supply an override.
+    this.fetchImpl = this.config.fetchImpl ?? fetch.bind(globalThis);
   }
 
   private async request<T>(
