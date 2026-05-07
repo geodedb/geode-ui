@@ -53,8 +53,21 @@ func (s *GraphServer) AuthJWT(r *http.Request) error {
 	ctx = context.WithValue(ctx, userCtxKey, claims.Subject)
 	ctx = context.WithValue(ctx, profileCtxKey, claims.Profile)
 	ctx = context.WithValue(ctx, rolesCtxKey, claims.Roles)
-	ctx = context.WithValue(ctx, authSourceCtxKey, sourceForRequest(r))
+	src := sourceForRequest(r)
+	ctx = context.WithValue(ctx, authSourceCtxKey, src)
 	*r = *r.WithContext(ctx)
+	// The genapi-emitted per-route middleware (gen/api/handlers_gen.go)
+	// re-parses claims out of `Authorization: Bearer ...` to enforce
+	// `required_roles` — it doesn't read the AuthJWT-populated context.
+	// When the token arrived via cookie or query string the header is
+	// empty and that re-parse fails with 401, blocking every admin
+	// endpoint. Since the token has already been validated here, set
+	// the header so the downstream re-parse succeeds. This is a
+	// targeted shim for SEC-F7 cookie-mode; the structural fix is to
+	// have genapi consume the context, tracked as a follow-up issue.
+	if src != authSourceHeader {
+		r.Header.Set("Authorization", "Bearer "+tok)
+	}
 	return nil
 }
 

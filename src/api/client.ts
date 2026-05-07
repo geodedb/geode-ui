@@ -27,6 +27,15 @@ function resolveBaseUrl(): string {
 // On a 403 from a state-changing request we attempt one auto-refresh
 // of the CSRF token and retry. This handles the case where the cookie
 // expired between page load and the next mutation.
+// COOKIE_MODE_PLACEHOLDER satisfies the generated client's non-empty
+// bearer-token guard (gen/client/react/client.ts: `if (!token) throw
+// new Error("missing bearer token")`). The wrapper strips the resulting
+// Authorization header before the request leaves the SPA — the server
+// reads the JWT from the geode-ui-auth cookie instead. The structural
+// fix belongs in genapi (cookie-auth as a first-class auth mode);
+// tracked as the genapi follow-up to SEC-F7.
+const COOKIE_MODE_PLACEHOLDER = '__cookie_mode_placeholder__'
+
 function makeFetchImpl(): typeof fetch {
   const native = fetch.bind(globalThis)
   return async (
@@ -36,6 +45,13 @@ function makeFetchImpl(): typeof fetch {
     const method = (init?.method ?? 'GET').toUpperCase()
     const needsCsrf = isCsrfRequired(method)
     let headers = new Headers(init?.headers ?? {})
+    // Cookie-mode (default post-S3c): auth.getToken() returns null. The
+    // generated client attached Authorization: Bearer <placeholder>;
+    // strip it so server-side AuthJWT falls through to the cookie. In
+    // legacy backout mode (token is a real JWT) the header stays.
+    if (!auth.getToken()) {
+      headers.delete('Authorization')
+    }
     if (needsCsrf) {
       const tok = getCsrfToken()
       if (tok) headers.set('X-CSRF-Token', tok)
@@ -52,6 +68,7 @@ function makeFetchImpl(): typeof fetch {
       const fresh = await refreshCsrfToken()
       if (fresh) {
         headers = new Headers(init?.headers ?? {})
+        if (!auth.getToken()) headers.delete('Authorization')
         headers.set('X-CSRF-Token', fresh)
         res = await native(input, { ...reqInit, headers })
       }
@@ -62,10 +79,11 @@ function makeFetchImpl(): typeof fetch {
 
 export const client = createClient({
   baseUrl: resolveBaseUrl(),
-  // Bearer token is only present in legacy backout mode (SEC-F7 backout
-  // flag). In normal cookie-mode operation auth.getToken() returns null
-  // and the bearer header is not attached — the cookie carries the JWT
-  // instead.
-  bearerToken: () => auth.getToken() ?? '',
+  // In cookie-mode auth.getToken() is null; the generated client refuses
+  // to send a request without a non-empty bearer, so we hand it a
+  // placeholder that the fetchImpl wrapper strips before the request
+  // leaves the SPA. In legacy backout mode the real JWT flows through
+  // and the Authorization header is kept.
+  bearerToken: () => auth.getToken() ?? COOKIE_MODE_PLACEHOLDER,
   fetchImpl: makeFetchImpl(),
 })
