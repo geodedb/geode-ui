@@ -127,6 +127,7 @@ export const QueryPage: React.FC = () => {
   const [busy, setBusy] = useState(false)
   const [tab, setTab] = useState<Tab>('table')
   const [streamMode, setStreamMode] = useState(false)
+  const [expand, setExpand] = useState(true)
   const [stream, dispatch] = useReducer(streamReducer, initialStream)
   const handleRef = useRef<StreamHandle | null>(null)
 
@@ -143,9 +144,26 @@ export const QueryPage: React.FC = () => {
     }
   }, [staged, clearStaged])
 
-  const runSync = async (): Promise<void> => {
-    setBusy(true)
+  // resetRunState clears every per-run piece of state so a previous
+  // run's leftovers (rows, errors, an in-flight WebSocket) cannot
+  // leak into the next click. Without this, two sync runs back-to-
+  // back show the *first* result for a moment until the second
+  // resolves; a sync run after a stream run can show stale stream
+  // rows; and a stream-cancel followed by a sync run leaves
+  // handleRef pointing at a closed socket.
+  const resetRunState = (): void => {
     setErr(null)
+    setResp(null)
+    dispatch({ type: 'reset' })
+    if (handleRef.current) {
+      handleRef.current.cancel()
+      handleRef.current = null
+    }
+  }
+
+  const runSync = async (): Promise<void> => {
+    resetRunState()
+    setBusy(true)
     try {
       // The server validator (gen/types/types.gen.go QueryReq.Valid) treats
       // page_size and timeout_ms as required (>= 1). The TS interface
@@ -166,8 +184,7 @@ export const QueryPage: React.FC = () => {
   }
 
   const runStream = (): void => {
-    setErr(null)
-    setResp(null)
+    resetRunState()
     dispatch({ type: 'start' })
     setBusy(true)
     const h = streamQuery(stmt, undefined, (m) => {
@@ -229,6 +246,14 @@ export const QueryPage: React.FC = () => {
           />
           Stream
         </ToggleLabel>
+        <ToggleLabel>
+          <input
+            type="checkbox"
+            checked={expand}
+            onChange={(e) => setExpand(e.target.checked)}
+          />
+          Expand graph cells
+        </ToggleLabel>
         {activeResp && (
           <span>
             {activeResp.row_count} rows · {activeResp.elapsed_ms} ms
@@ -245,7 +270,7 @@ export const QueryPage: React.FC = () => {
               </TabBtn>
             ))}
           </Tabs>
-          {tab === 'table' && <TableView resp={activeResp} />}
+          {tab === 'table' && <TableView resp={activeResp} expand={expand} />}
           {tab === 'json' && <JsonView data={activeResp} />}
           {tab === 'graph' && <GraphView resp={activeResp} />}
         </>
