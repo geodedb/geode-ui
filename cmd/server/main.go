@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,11 +30,13 @@ func main() {
 		profilesFile string
 		secretHex    string
 		jwtTTL       time.Duration
+		adminUsers   string
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
 	flag.StringVar(&secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
 	flag.DurationVar(&jwtTTL, "jwt-ttl", 8*time.Hour, "JWT TTL (1m..24h)")
+	flag.StringVar(&adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -75,12 +78,20 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	adminSet := map[string]bool{}
+	for _, u := range strings.Split(adminUsers, ",") {
+		if name := strings.TrimSpace(u); name != "" {
+			adminSet[name] = true
+		}
+	}
+
 	srv := server.New(server.Config{
-		Version:  "v0.1.0",
-		Pool:     pool,
-		Profiles: pool,
-		JWT:      issuer,
-		TxStore:  server.NewTxStore(),
+		Version:        "v0.1.0",
+		Pool:           pool,
+		Profiles:       pool,
+		JWT:            issuer,
+		TxStore:        server.NewTxStore(),
+		AdminUsernames: adminSet,
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,

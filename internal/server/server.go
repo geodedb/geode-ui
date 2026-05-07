@@ -43,6 +43,14 @@ type Config struct {
 	// Login to authenticate against the upstream Geode by opening a
 	// short-lived *sql.DB with the user's submitted credentials.
 	Profiles ProfileLookup
+	// AdminUsernames is the set of upstream usernames to grant the
+	// "admin" role on a successful login. Geode v0.5.11's wire dialect
+	// does not yet expose a queryable role-enumeration form, so without
+	// this list the bootstrap admin's JWT carries no roles and every
+	// genapi-emitted role gate (required_roles=["admin"] on user/role/
+	// policy/grant/backup/migration/audit endpoints) returns 403.
+	// Populate from the -admin-users CLI flag in main.go.
+	AdminUsernames map[string]bool
 }
 
 // GraphServer implements gen/api.ServerInterface.

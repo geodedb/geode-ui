@@ -71,6 +71,15 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		})
 		return nil, nil
 	}
+	// Grant the "admin" role to configured bootstrap admins. Geode v0.5.11
+	// doesn't expose a queryable role-enumeration form (see
+	// authenticateUpstream comment), so without this the bootstrap user
+	// would carry empty roles and every required_roles=["admin"] gate
+	// would 403. AdminUsernames is configured at startup via -admin-users.
+	if s.cfg.AdminUsernames[req.Username] {
+		roles = appendUnique(roles, "admin")
+	}
+
 	token, exp, err := s.cfg.JWT.Issue(req.Username, profile, roles)
 	if err != nil {
 		return nil, err
@@ -166,6 +175,18 @@ func (s *GraphServer) authenticateUpstream(ctx context.Context, profile, usernam
 	}
 	// Roles unavailable in v0.5.11 wire dialect — see function comment.
 	return true, nil, nil
+}
+
+// appendUnique appends s to roles unless it is already present (case-
+// insensitive — the role gate uses securex.RoleFromString which is also
+// case-insensitive). Returns the (possibly-extended) slice.
+func appendUnique(roles []string, s string) []string {
+	for _, r := range roles {
+		if strings.EqualFold(r, s) {
+			return roles
+		}
+	}
+	return append(roles, s)
 }
 
 // isAuthError reports whether err carries a GQL status class that

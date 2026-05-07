@@ -177,3 +177,29 @@ func quietCtx(t *testing.T) context.Context {
 	t.Cleanup(cancel)
 	return ctx
 }
+
+// TestAppendUnique covers the role-list helper used by Login to add the
+// admin role for configured bootstrap users without producing duplicates.
+func TestAppendUnique(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		add  string
+		want []string
+	}{
+		{"appends to empty", nil, "admin", []string{"admin"}},
+		{"appends new", []string{"user"}, "admin", []string{"user", "admin"}},
+		{"skips exact dup", []string{"admin"}, "admin", []string{"admin"}},
+		{"skips case-insensitive dup", []string{"ADMIN"}, "admin", []string{"ADMIN"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := appendUnique(tc.in, tc.add)
+			if !equalStrings(got, tc.want) {
+				t.Fatalf("got=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+// equalStrings is defined in handlers_schema_test.go (same package).
