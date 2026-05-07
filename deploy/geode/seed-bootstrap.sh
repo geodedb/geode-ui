@@ -53,6 +53,36 @@ set -euo pipefail
 GEODE_HOST="${GEODE_HOST:-geode}"
 GEODE_PORT="${GEODE_PORT:-3141}"
 GEODE_ADMIN_USER="${GEODE_ADMIN_USER:-geode}"
+
+# Geode v0.5.11's `geode query --server` does NOT resolve hostnames; it
+# expects host:port where host is an IP literal (otherwise the client
+# bails with `InvalidAddress`/`query execution failed`). Resolve the
+# compose service name to an IP up-front so subsequent queries reach
+# the server. Block until DNS yields an answer (depends_on guarantees
+# the geode container is up but not that the embedded resolver has the
+# service entry yet on first start).
+resolve_host() {
+    local host="$1" ip i
+    for ((i = 1; i <= 30; i++)); do
+        ip=$(getent hosts "$host" 2>/dev/null | awk '{print $1; exit}')
+        if [[ -n "${ip:-}" ]]; then
+            printf '%s' "$ip"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+if [[ "$GEODE_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    GEODE_ADDR="${GEODE_HOST}:${GEODE_PORT}"
+else
+    GEODE_IP=$(resolve_host "$GEODE_HOST") || {
+        printf '[seed] could not resolve %s to an IP\n' "$GEODE_HOST" >&2
+        exit 1
+    }
+    GEODE_ADDR="${GEODE_IP}:${GEODE_PORT}"
+fi
 GEODE_ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD:-Geode E2E Bootstrap Password 2024}"
 E2E_USER="${E2E_USER:-e2e_admin}"
 E2E_PASSWORD="${E2E_PASSWORD:-E2E Admin User Password 2024}"
@@ -66,7 +96,7 @@ err() { printf '[seed] %s\n' "$*" >&2; }
 query_admin() {
     geode query \
         --insecure-tls-skip-verify \
-        --server "${GEODE_HOST}:${GEODE_PORT}" \
+        --server "${GEODE_ADDR}" \
         -U "${GEODE_ADMIN_USER}" \
         -P "${GEODE_ADMIN_PASSWORD}" \
         "$@"
@@ -78,7 +108,7 @@ query_with_pw() {
     shift
     geode query \
         --insecure-tls-skip-verify \
-        --server "${GEODE_HOST}:${GEODE_PORT}" \
+        --server "${GEODE_ADDR}" \
         -U "${GEODE_ADMIN_USER}" \
         -P "${pw}" \
         "$@"
@@ -87,7 +117,7 @@ query_with_pw() {
 # Step 1: wait for the QUIC wire to come up. Any auth-rejected reply
 # proves the wire is up; we only care about reachability here.
 wait_for_wire() {
-    log "waiting for ${GEODE_HOST}:${GEODE_PORT} (timeout ${GEODE_WAIT_SECS}s)..."
+    log "waiting for ${GEODE_HOST}:${GEODE_PORT} (resolved ${GEODE_ADDR}, timeout ${GEODE_WAIT_SECS}s)..."
     local i out
     for ((i = 1; i <= GEODE_WAIT_SECS; i++)); do
         # Probe with a deliberately-bad password against a NONEXISTENT
@@ -100,7 +130,7 @@ wait_for_wire() {
         # without touching any real account's counter.
         out=$(geode query \
             --insecure-tls-skip-verify \
-            --server "${GEODE_HOST}:${GEODE_PORT}" \
+            --server "${GEODE_ADDR}" \
             -U "_seed_wire_probe_" -P "x" \
             "RETURN 1" 2>&1 || true)
         if printf '%s' "$out" | grep -qiE 'auth|Authentication|password|invalid|incorrect|reset required|status_class'; then
@@ -177,7 +207,7 @@ ensure_e2e_user() {
         | query_admin - 2>&1 || true)
     if echo "RETURN 1" | geode query \
         --insecure-tls-skip-verify \
-        --server "${GEODE_HOST}:${GEODE_PORT}" \
+        --server "${GEODE_ADDR}" \
         -U "${E2E_USER}" -P "${E2E_PASSWORD}" - >/dev/null 2>&1; then
         log "e2e user '${E2E_USER}' authenticates over the wire"
     else
