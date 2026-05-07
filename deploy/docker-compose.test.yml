@@ -1,0 +1,170 @@
+# E2E test stack for geode-ui. Brings up:
+#   - geode        (database, v0.5.11; offline `auth init` writes the
+#                   bootstrap password to /data/admin-password.txt before
+#                   `geode serve` starts)
+#   - geode-init   (one-shot: rotate the captured bootstrap password,
+#                   seed the movies graph, then exit 0)
+#   - geode-ui     (Go API + embedded SPA, built from geode-ui/deploy/Dockerfile)
+#   - geode-mcp    (MCP HTTP transport, port 8090, points at the geode service)
+#   - geode-lsp    (LSP-over-TCP bridge via socat, port 2087)
+#
+# Build context for the geode + geode-ui images is the GRANDPARENT
+# directory of this compose file (../.. — i.e. the directory that
+# contains the geode/, geode-ui/, and geode-client-go/ sibling
+# checkouts). Both Dockerfiles reach across siblings: the geode image
+# COPYs ../geode/zig-out/bin/geode, and the geode-ui image COPYs
+# ../geode-client-go/ to satisfy the local `replace` in go.mod.
+#
+# Bring up:  make e2e-up    (= docker compose -f deploy/docker-compose.test.yml up -d --build)
+# Tear down: make e2e-down  (= docker compose -f deploy/docker-compose.test.yml down -v)
+#
+# Required: prior `cd ../geode && zig build -Doptimize=ReleaseSafe` so the
+# geode binary is staged at ../geode/zig-out/bin/geode for the geode image's COPY.
+#
+# Auth wiring (v0.5.11 has no offline 'set known password' flag):
+#   1. geode-entrypoint.sh runs `geode auth init` once on a fresh data
+#      dir, parses the random "Generated password: <hex>" line, and
+#      writes the password to /data/admin-password.txt (mode 0600).
+#      A /data/.bootstrap-extracted marker prevents re-running on
+#      subsequent starts.
+#   2. The same `geode-data` volume is mounted into geode-init at
+#      /shared-data (read-only). seed-bootstrap.sh reads
+#      /shared-data/admin-password.txt and rotates the admin password
+#      to GEODE_ADMIN_PASSWORD via `ALTER USER ... SET PASSWORD ...`.
+#   3. Once rotated, geode-init seeds the movies graph and exits.
+#   4. geode-ui, geode-mcp, and geode-lsp wait for geode-init to finish
+#      before starting (depends_on / service_completed_successfully).
+
+name: geode-e2e
+
+services:
+  geode:
+    image: geode:v0.5.11
+    build:
+      context: ../..
+      dockerfile: geode-ui/deploy/geode/Dockerfile.geode
+    # Override the image entrypoint with our wrapper. We keep tini as
+    # PID 1 so SIGTERM/SIGINT propagate cleanly to `geode serve`.
+    entrypoint: [/usr/bin/tini, --, /geode-entrypoint.sh]
+    command:
+    - --data-dir
+    - /data
+    - --listen
+    - 0.0.0.0:3141
+    - --log-level
+    - info
+    volumes:
+    - geode-data:/data
+    - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
+    ports:
+    - 3141:3141/udp
+    # The wire is up well before any password rotation has happened, so
+    # we cannot use a normal `geode query 'RETURN 1'` probe — pre-
+    # rotation, every authenticated query rejects with status_class=08P01
+    # ("Password reset required"). Instead, send a deliberately-bad
+    # password and accept ANY auth-error response as proof the server
+    # is reachable. This mirrors seed-bootstrap.sh:wait_for_wire().
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - >-
+        geode query --insecure-tls-skip-verify
+        --server 127.0.0.1:3141 -U geode -P x 'RETURN 1' 2>&1
+        | grep -qiE 'auth|password|status_class|reset'
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  geode-init:
+    image: geode:v0.5.11
+    depends_on:
+      geode:
+        condition: service_healthy
+    entrypoint: [/seed/seed-bootstrap.sh]
+    environment:
+      GEODE_HOST: geode
+      GEODE_PORT: '3141'
+      GEODE_ADMIN_USER: ${GEODE_ADMIN_USER:-geode}
+      GEODE_ADMIN_PASSWORD: ${GEODE_ADMIN_PASSWORD:-Geode E2E Bootstrap Password 2024}
+      E2E_USER: ${E2E_USER:-e2e_admin}
+      E2E_PASSWORD: ${E2E_PASSWORD:-E2E Admin User Password 2024}
+      GEODE_INIT_GQL: /seed/init.gql
+    volumes:
+      # Read the bootstrap password the geode container wrote to /data.
+    - geode-data:/shared-data:ro
+    - ./geode/seed-bootstrap.sh:/seed/seed-bootstrap.sh:ro
+    - ./geode/init.gql:/seed/init.gql:ro
+    restart: no
+
+  geode-ui:
+    image: geode-ui:e2e
+    build:
+      context: ../..
+      dockerfile: geode-ui/deploy/Dockerfile
+    depends_on:
+      geode-init:
+        condition: service_completed_successfully
+    command:
+    - -listen
+    - :8080
+    - -jwt-secret-hex
+    - ${JWT_SECRET_HEX:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+    - -profiles
+    - /etc/geode-ui/profiles.json
+    volumes:
+    - ./profiles.json:/etc/geode-ui/profiles.json:ro
+    ports:
+    - 8080:8080
+    healthcheck:
+      test: [CMD-SHELL, wget -qO- http://127.0.0.1:8080/healthz | grep -q '"status":"ok"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  geode-mcp:
+    image: geode:v0.5.11
+    depends_on:
+      geode-init:
+        condition: service_completed_successfully
+    command: [mcp, serve, --port, '8090', -e, geode:3141]
+    ports:
+    - 8090:8090
+    # No wget/curl/nc in the geode runtime image; bash 5+ is present, so
+    # use its /dev/tcp builtin as a portable TCP-reachability probe.
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - bash -c 'exec 3<>/dev/tcp/127.0.0.1/8090' 2>/dev/null
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  geode-lsp:
+    image: geode:v0.5.11
+    depends_on:
+      geode-init:
+        condition: service_completed_successfully
+    # socat isn't in the slim runtime image. Install it on first start
+    # (test container only — we accept the apt-get cost), then exec the
+    # bridge. Running as root because apt-get needs to write to /var/lib.
+    user: root
+    entrypoint: [/bin/bash, -c]
+    command:
+    - |
+      set -euo pipefail
+      if ! command -v socat >/dev/null 2>&1; then
+        apt-get update
+        apt-get install -y --no-install-recommends socat
+        rm -rf /var/lib/apt/lists/*
+      fi
+      exec /lsp/lsp-bridge.sh
+    volumes:
+    - ./geode/lsp-bridge.sh:/lsp/lsp-bridge.sh:ro
+    ports:
+    - 2087:2087
+
+volumes:
+  geode-data:

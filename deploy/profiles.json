@@ -1,0 +1,7 @@
+[
+  {
+    "name": "default",
+    "dsn": "quic://geode:3141?insecure_tls_skip_verify=true",
+    "description": "in-cluster geode instance for the e2e test stack"
+  }
+]
