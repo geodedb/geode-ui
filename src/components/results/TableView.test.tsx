@@ -204,6 +204,29 @@ test('TableView projects node columns into property columns by default', () => {
   expect(screen.getByText('1980')).toBeInTheDocument()
 })
 
+// PERF-F5 (issue #26): TableView used to map every row to a <tr>, so
+// page_size=1000 produced ~1000 rows in the DOM at once. With windowing
+// only the visible slice + overscan should be in the DOM. We render
+// 1000 rows and assert the DOM has substantially fewer than 1000.
+test('TableView virtualizes large row sets (DOM contains << total rows)', () => {
+  const rows: unknown[][] = []
+  for (let i = 0; i < 1000; i += 1) rows.push([`row-${i}`])
+  const { container } = render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        expand={false}
+        resp={{ columns: [{ name: 'n', type: 'STRING' }], rows }}
+      />
+    </ThemeProvider>
+  )
+  const rowEls = container.querySelectorAll('[data-row-index]')
+  // Without virtualization there would be 1000 rows. With virtualization
+  // (jsdom has no layout, so react-window falls back to defaultHeight)
+  // we expect substantially fewer, certainly < 100.
+  expect(rowEls.length).toBeGreaterThan(0)
+  expect(rowEls.length).toBeLessThan(100)
+})
+
 test('TableView with expand=false renders node as a structured chip cell', () => {
   const node = {
     id: 1,

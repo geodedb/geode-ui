@@ -1,32 +1,61 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import styled from 'styled-components'
+import { List, RowComponentProps } from 'react-window'
 import { projectColumns } from './projectColumns'
 
+// PERF-F5 + PERF-F6 (issue #26):
+//
+// (F5) The previous implementation rendered every row from
+// view.rows.map(...) into the DOM. With page_size=1000 that meant
+// ~1000 <tr> nodes plus their nested CellView trees, which collapsed
+// scroll performance and ballooned memory. We now render the body
+// rows through react-window so only the visible slice + a small
+// overscan is materialized.
+//
+// (F6) projectColumns(resp) used to run on every render even when
+// neither resp nor expand changed. We now memoize it on those inputs.
+// projectColumns itself was also folded into a single discovery pass
+// per column instead of three (kindOf + orderedKeys + project).
+//
+// We deliberately keep header semantics in a real <table> wrapper
+// for accessibility/sticky-header behavior; the body is a windowed
+// list rendered as a styled grid that mirrors the column layout. This
+// is a pragmatic compromise — react-window v2's row-component API
+// doesn't render <tr> directly. Existing assertions that look up
+// cells by visible text still pass.
+
+const VIRTUAL_ROW_HEIGHT = 36
+const VIRTUAL_BODY_HEIGHT = 480
+
 const Wrap = styled.div`
-  overflow: auto;
-  max-height: 480px;
   border: 1px solid ${({ theme }) => theme.colors.border};
 `
-const Table = styled.table`
+const HeaderTable = styled.table`
   width: 100%;
   border-collapse: collapse;
   color: ${({ theme }) => theme.colors.text};
+  table-layout: fixed;
 `
 const Th = styled.th`
-  position: sticky;
-  top: 0;
   background: ${({ theme }) => theme.colors.surface};
   text-align: left;
   padding: 6px;
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  color: ${({ theme }) => theme.colors.text};
 `
-const Td = styled.td`
-  padding: 6px;
+const RowOuter = styled.div`
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   border-top: 1px solid ${({ theme }) => theme.colors.border};
+  color: ${({ theme }) => theme.colors.text};
+`
+const Cell = styled.div`
+  padding: 6px;
   vertical-align: top;
   white-space: pre-wrap;
   word-break: break-word;
-  max-width: 640px;
+  overflow: hidden;
 `
 
 const NodeChip = styled.span`
@@ -138,7 +167,7 @@ function formatPropValue(v: unknown): string {
 // the previous "first 2 props + …" form was unhelpful for admin views
 // where the interesting fields (username, email, roles) routinely
 // landed past the cap. Cell-level wrapping (white-space: pre-wrap on
-// Td) keeps the row readable when the property bag is large.
+// the cell) keeps the row readable when the property bag is large.
 function summarizeProps(props: AnyRecord): string {
   const keys = Object.keys(props)
   if (keys.length === 0) return ''
@@ -178,7 +207,12 @@ export function formatCell(v: unknown): string {
 // collapsing into a wall of text. Everything else falls through to
 // formatCell, keeping the string contract for primitives, paths,
 // arrays, and unknown objects (and preserving copy-paste behavior).
-const CellView: React.FC<{ value: unknown }> = ({ value }) => {
+//
+// Wrapping in React.memo (PERF-F6 / issue #26) lets the windowed list
+// skip re-renders for cells whose `value` reference hasn't changed —
+// a real win during streaming where the visible slice's row references
+// are stable but the parent re-renders on every batch.
+const CellView: React.FC<{ value: unknown }> = React.memo(({ value }) => {
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     const o = value as AnyRecord
     if (isNode(o)) {
@@ -219,13 +253,55 @@ const CellView: React.FC<{ value: unknown }> = ({ value }) => {
     }
   }
   return <>{formatCell(value)}</>
+})
+CellView.displayName = 'CellView'
+
+type RowProps = {
+  rows: unknown[][]
+  columnCount: number
+}
+
+// VirtualRow renders one row inside the windowed list. react-window
+// supplies the absolute-position style; we lay cells out via a CSS
+// grid that mirrors the header column count.
+const VirtualRow: React.FC<RowComponentProps<RowProps>> = ({
+  index,
+  style,
+  rows,
+  columnCount,
+}) => {
+  const row = rows[index] || []
+  return (
+    <RowOuter
+      data-row-index={index}
+      style={{
+        ...style,
+        gridAutoColumns: `repeat(${columnCount}, 1fr)`,
+      }}
+    >
+      {row.map((cell, j) => (
+        // eslint-disable-next-line react/no-array-index-key
+        <Cell key={j}>
+          <CellView value={cell} />
+        </Cell>
+      ))}
+    </RowOuter>
+  )
 }
 
 export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
-  const view = expand ? projectColumns(resp) : resp
+  const view = useMemo(
+    () => (expand ? projectColumns(resp) : resp),
+    [resp, expand]
+  )
+  const rowProps = useMemo<RowProps>(
+    () => ({ rows: view.rows, columnCount: view.columns.length }),
+    [view.rows, view.columns]
+  )
+
   return (
     <Wrap>
-      <Table>
+      <HeaderTable>
         <thead>
           <tr>
             {view.columns.map((c, i) => (
@@ -237,20 +313,15 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
             ))}
           </tr>
         </thead>
-        <tbody>
-          {view.rows.map((row, i) => (
-            // eslint-disable-next-line react/no-array-index-key
-            <tr key={i}>
-              {row.map((cell, j) => (
-                // eslint-disable-next-line react/no-array-index-key
-                <Td key={j}>
-                  <CellView value={cell} />
-                </Td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+      </HeaderTable>
+      <List
+        rowComponent={VirtualRow}
+        rowCount={view.rows.length}
+        rowHeight={VIRTUAL_ROW_HEIGHT}
+        rowProps={rowProps}
+        defaultHeight={VIRTUAL_BODY_HEIGHT}
+        style={{ height: VIRTUAL_BODY_HEIGHT }}
+      />
     </Wrap>
   )
 }

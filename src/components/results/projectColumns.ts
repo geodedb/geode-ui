@@ -11,6 +11,15 @@
 //
 // Returns the original shape verbatim if no row contains a node or
 // edge — projection only fires when there's something to project.
+//
+// PERF-F6 (issue #26): the previous implementation made three passes
+// over `rows` for every node/edge column (kindOf + orderedKeys + the
+// final cell projection). For a 1000-row response with several node
+// columns that's O(rows*cols*3). The current implementation walks the
+// rows exactly once per node/edge column to discover its kind + the
+// union of property keys, then walks the rows once more to materialize
+// the output table. Net effect: 2x rows*cols of work instead of
+// 4x (3 discovery passes + 1 build).
 
 export type Col = { name: string; type: string }
 export type ProjResp = { columns: Col[]; rows: unknown[][] }
@@ -41,48 +50,62 @@ function isEdge(o: unknown): o is AnyRecord {
 }
 
 type Kind = 'node' | 'edge' | 'other'
-function kindOf(rows: unknown[][], colIdx: number, declared: string): Kind {
-  if (declared && declared.toUpperCase() === 'NODE') return 'node'
-  if (declared && declared.toUpperCase() === 'EDGE') return 'edge'
-  let resolved: Kind | null = null
-  rows.some((row) => {
-    const cell = row[colIdx]
-    if (cell == null) return false
-    if (isNode(cell)) {
-      resolved = 'node'
-      return true
-    }
-    if (isEdge(cell)) {
-      resolved = 'edge'
-      return true
-    }
-    resolved = 'other'
-    return true
-  })
-  return resolved ?? 'other'
-}
-
-function orderedKeys(rows: unknown[][], colIdx: number): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  rows.forEach((row) => {
-    const cell = row[colIdx]
-    if (!cell || typeof cell !== 'object') return
-    const props = (cell as AnyRecord).properties as AnyRecord | undefined
-    if (!props) return
-    Object.keys(props).forEach((k) => {
-      if (!seen.has(k)) {
-        seen.add(k)
-        out.push(k)
-      }
-    })
-  })
-  return out
-}
 
 type Plan =
   | { kind: 'other'; name: string; type: string }
   | { kind: 'node' | 'edge'; name: string; type: string; keys: string[] }
+
+// discoverPlan walks the rows once per column, decides the column kind
+// (using the declared type when present, else the first non-null cell's
+// shape), and accumulates the first-seen-property-key order. This
+// fuses what used to be the kindOf and orderedKeys passes into a
+// single sweep so we only walk the row set once per column instead of
+// three times.
+function discoverPlan(
+  rows: unknown[][],
+  colIdx: number,
+  declaredType: string,
+  name: string
+): Plan {
+  let kind: Kind | null = null
+  if (declaredType && declaredType.toUpperCase() === 'NODE') kind = 'node'
+  else if (declaredType && declaredType.toUpperCase() === 'EDGE') kind = 'edge'
+
+  const seen = new Set<string>()
+  const keys: string[] = []
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i]
+    const cell = row ? row[colIdx] : null
+    if (cell != null) {
+      if (kind === null) {
+        if (isNode(cell)) kind = 'node'
+        else if (isEdge(cell)) kind = 'edge'
+        else kind = 'other'
+      }
+
+      if (kind !== 'node' && kind !== 'edge') break
+
+      if (typeof cell === 'object') {
+        const props = (cell as AnyRecord).properties as AnyRecord | undefined
+        if (props) {
+          const propKeys = Object.keys(props)
+          for (let k = 0; k < propKeys.length; k += 1) {
+            const key = propKeys[k] as string
+            if (!seen.has(key)) {
+              seen.add(key)
+              keys.push(key)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (kind === null) kind = 'other'
+  if (kind === 'other') return { kind: 'other', name, type: declaredType }
+  return { kind, name, type: declaredType, keys }
+}
 
 export function projectColumns(resp: {
   columns: Array<{ name: string; type: string } | Record<string, unknown>>
@@ -96,73 +119,80 @@ export function projectColumns(resp: {
     }
   })
 
-  const plan: Plan[] = cols.map((c, i) => {
-    const k = kindOf(resp.rows, i, c.type)
-    if (k === 'other') return { kind: 'other', name: c.name, type: c.type }
-    return {
-      kind: k,
-      name: c.name,
-      type: c.type,
-      keys: orderedKeys(resp.rows, i),
-    }
-  })
+  const plan: Plan[] = cols.map((c, i) =>
+    discoverPlan(resp.rows, i, c.type, c.name)
+  )
 
   if (plan.every((p) => p.kind === 'other')) {
     return { columns: cols, rows: resp.rows }
   }
 
   const outCols: Col[] = []
-  plan.forEach((p) => {
+  for (let i = 0; i < plan.length; i += 1) {
+    const p = plan[i] as Plan
     if (p.kind === 'node') {
       outCols.push({ name: `${p.name}._labels`, type: 'STRING' })
-      p.keys.forEach((k) => outCols.push({ name: `${p.name}.${k}`, type: '' }))
+      for (let k = 0; k < p.keys.length; k += 1) {
+        outCols.push({ name: `${p.name}.${p.keys[k]}`, type: '' })
+      }
     } else if (p.kind === 'edge') {
       outCols.push({ name: `${p.name}._type`, type: 'STRING' })
-      p.keys.forEach((k) => outCols.push({ name: `${p.name}.${k}`, type: '' }))
+      for (let k = 0; k < p.keys.length; k += 1) {
+        outCols.push({ name: `${p.name}.${p.keys[k]}`, type: '' })
+      }
     } else {
       outCols.push({ name: p.name, type: p.type })
     }
-  })
+  }
 
-  const outRows: unknown[][] = resp.rows.map((row) => {
+  const outRows: unknown[][] = new Array(resp.rows.length)
+  for (let r = 0; r < resp.rows.length; r += 1) {
+    const row = resp.rows[r] as unknown[]
     const out: unknown[] = []
-    plan.forEach((p, i) => {
+    for (let i = 0; i < plan.length; i += 1) {
+      const p = plan[i] as Plan
       const cell = row[i]
       if (p.kind === 'node') {
         if (cell && typeof cell === 'object') {
-          const r = cell as AnyRecord
-          const labels = (r.labels as string[]) || []
+          const rec = cell as AnyRecord
+          const labels = (rec.labels as string[]) || []
           out.push(labels.join(':'))
-          const props = (r.properties as AnyRecord) || {}
-          p.keys.forEach((k) => {
+          const props = (rec.properties as AnyRecord) || {}
+          for (let k = 0; k < p.keys.length; k += 1) {
+            const key = p.keys[k] as string
             out.push(
-              Object.prototype.hasOwnProperty.call(props, k) ? props[k] : null
+              Object.prototype.hasOwnProperty.call(props, key)
+                ? props[key]
+                : null
             )
-          })
+          }
         } else {
           out.push(null)
-          p.keys.forEach(() => out.push(null))
+          for (let k = 0; k < p.keys.length; k += 1) out.push(null)
         }
       } else if (p.kind === 'edge') {
         if (cell && typeof cell === 'object') {
-          const r = cell as AnyRecord
-          out.push(r.type as string)
-          const props = (r.properties as AnyRecord) || {}
-          p.keys.forEach((k) => {
+          const rec = cell as AnyRecord
+          out.push(rec.type as string)
+          const props = (rec.properties as AnyRecord) || {}
+          for (let k = 0; k < p.keys.length; k += 1) {
+            const key = p.keys[k] as string
             out.push(
-              Object.prototype.hasOwnProperty.call(props, k) ? props[k] : null
+              Object.prototype.hasOwnProperty.call(props, key)
+                ? props[key]
+                : null
             )
-          })
+          }
         } else {
           out.push(null)
-          p.keys.forEach(() => out.push(null))
+          for (let k = 0; k < p.keys.length; k += 1) out.push(null)
         }
       } else {
         out.push(cell)
       }
-    })
-    return out
-  })
+    }
+    outRows[r] = out
+  }
 
   return { columns: outCols, rows: outRows }
 }

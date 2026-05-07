@@ -110,6 +110,38 @@ describe('projectColumns', () => {
     expect(out.rows).toEqual([])
   })
 
+  test('single-pass: large input produces correct projection (1k rows)', () => {
+    // Regression test for PERF-F6 (issue #26): the previous
+    // implementation walked rows three times per node/edge column
+    // (kindOf + orderedKeys + final project). The single-pass
+    // refactor must produce byte-identical output. Use a 1000-row
+    // input with two key shapes to exercise the union-of-keys path.
+    const rows: unknown[][] = []
+    for (let i = 0; i < 1000; i += 1) {
+      const props =
+        i % 2 === 0
+          ? { name: `n${i}`, age: i }
+          : { name: `n${i}`, email: `n${i}@x` }
+      rows.push([{ id: i, labels: ['Person'], properties: props }])
+    }
+    const out = projectColumns({
+      columns: [{ name: 'p', type: 'NODE' }],
+      rows,
+    })
+    // First-seen-key order: name, age (from row 0), then email (row 1).
+    expect(out.columns.map((c) => c.name)).toEqual([
+      'p._labels',
+      'p.name',
+      'p.age',
+      'p.email',
+    ])
+    expect(out.rows.length).toBe(1000)
+    // Even-indexed rows have age set, email null.
+    expect(out.rows[0]).toEqual(['Person', 'n0', 0, null])
+    // Odd-indexed rows have age null, email set.
+    expect(out.rows[1]).toEqual(['Person', 'n1', null, 'n1@x'])
+  })
+
   test('null cells in node columns project to null for every expansion', () => {
     const resp = {
       columns: [{ name: 'n', type: 'NODE' }],

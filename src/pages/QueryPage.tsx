@@ -6,60 +6,15 @@ import { TableView } from '../components/results/TableView'
 import { JsonView } from '../components/results/JsonView'
 import { GraphView } from '../components/results/GraphView'
 import { client } from '../api/client'
-import { streamQuery, StreamHandle, StreamMsg } from '../lib/queryStream'
+import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryStore } from '../lib/queryStore'
+import {
+  StreamState,
+  initialStreamState,
+  streamReducer,
+} from './queryStreamReducer'
 
 type Tab = 'table' | 'json' | 'graph'
-
-type StreamState = {
-  status: 'idle' | 'running' | 'done' | 'error'
-  columns: { name: string; type: string }[]
-  rows: unknown[][]
-  rowCount: number
-  elapsedMs: number
-  error: string | null
-}
-
-type StreamAction =
-  | { type: 'reset' }
-  | { type: 'start' }
-  | { type: 'msg'; msg: StreamMsg }
-  | { type: 'closed' }
-
-const initialStream: StreamState = {
-  status: 'idle',
-  columns: [],
-  rows: [],
-  rowCount: 0,
-  elapsedMs: 0,
-  error: null,
-}
-
-function streamReducer(state: StreamState, action: StreamAction): StreamState {
-  switch (action.type) {
-    case 'reset':
-      return initialStream
-    case 'start':
-      return { ...initialStream, status: 'running' }
-    case 'msg': {
-      const m = action.msg
-      if (m.kind === 'schema') return { ...state, columns: m.columns }
-      if (m.kind === 'row') return { ...state, rows: [...state.rows, m.row] }
-      if (m.kind === 'summary') {
-        return { ...state, rowCount: m.row_count, elapsedMs: m.elapsed_ms }
-      }
-      if (m.kind === 'error') {
-        return { ...state, status: 'error', error: `${m.code}: ${m.message}` }
-      }
-      if (m.kind === 'end') return { ...state, status: 'done' }
-      return state
-    }
-    case 'closed':
-      return state.status === 'running' ? { ...state, status: 'done' } : state
-    default:
-      return state
-  }
-}
 
 const Bar = styled.div`
   margin-top: 8px;
@@ -128,7 +83,7 @@ export const QueryPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('table')
   const [streamMode, setStreamMode] = useState(false)
   const [expand, setExpand] = useState(true)
-  const [stream, dispatch] = useReducer(streamReducer, initialStream)
+  const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
 
   // The schema explorer (D1) stages a statement in queryStore and

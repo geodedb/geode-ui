@@ -14,3 +14,15 @@ if (typeof globalThis.fetch === 'undefined') {
       new Error('fetch is not implemented in the test environment')
     )
 }
+
+// react-window v2 uses ResizeObserver to track its container size.
+// jsdom doesn't ship one, so install a no-op stub. The component
+// falls back to defaultHeight/defaultWidth when no observed size is
+// reported, which is what we want in unit tests.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}
