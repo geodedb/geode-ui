@@ -91,7 +91,7 @@ const initReq: RpcReq = {
 test.describe('mcp', () => {
   test('responds to initialize on the MCP TCP bridge', async () => {
     const [resp] = await rpcSession([initReq])
-    expect(resp).toBeDefined()
+    if (!resp) throw new Error('no MCP response received')
     expect(resp.jsonrpc).toBe('2.0')
     expect(resp.id).toBe(1)
     expect(resp.result || resp.error).toBeDefined()
