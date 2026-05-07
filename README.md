@@ -81,6 +81,51 @@ make lint            # all linters
 make web-dev         # webpack dev server (port 3000, proxies to :8080)
 ```
 
+## E2E testing
+
+The repo ships a docker-compose stack and a Playwright suite that drives the
+full UI surface against a real Geode v0.5.11 database.
+
+```bash
+make e2e-deps        # build geode binary on the host (one-time, ~5 min cold)
+make e2e-up          # build images, run init, leave services running
+make e2e-test        # run Playwright against the running stack
+make e2e-down        # tear down + clear volumes
+make e2e-ci          # one-shot: up + test + down (CI-shaped)
+```
+
+Services brought up by the stack:
+
+| Service     | Port           | Purpose                          |
+|-------------|----------------|----------------------------------|
+| geode       | 3141/udp       | Geode v0.5.11 graph database     |
+| geode-init  | one-shot       | Bootstraps admin + seeds movies  |
+| geode-ui    | 8080           | Go API + embedded React SPA      |
+| geode-mcp   | 8090           | MCP TCP bridge (socat to stdio)  |
+| geode-lsp   | 2087           | LSP TCP bridge (socat to stdio)  |
+
+Seeded data is the canonical movies graph (6 People, 3 Movies, 9 ACTED_IN
+edges, 3 DIRECTED edges). See [deploy/geode/init.gql](deploy/geode/init.gql).
+
+Playwright suites live under `e2e/specs/` and follow the page-object
+pattern with shared fixtures in `e2e/fixtures.ts`. Default suite is 10
+specs / 31 tests:
+
+- `01-auth.spec.ts` — login, redirect, token persistence, logout
+- `02-connection-picker.spec.ts` — profile dropdown
+- `03-query-sync.spec.ts` — sync MATCH, error banner, JSON tab
+- `04-query-stream.spec.ts` — WS streaming, cancel
+- `05-query-graph.spec.ts` — Cytoscape canvas, empty-state
+- `06-schema-explorer.spec.ts` — graphs/labels/edges, stage-and-go
+- `07-admin-users.spec.ts` — users CRUD (graceful skip on engine gaps)
+- `08-admin-roles-policies.spec.ts` — roles/policies/grants pages
+- `09-ops.spec.ts` — backups/migrations/audit/restore
+- `10-mcp-endpoint.spec.ts` — MCP TCP bridge JSON-RPC smoke
+
+Some tests gracefully skip when Geode v0.5.11 returns
+`securex: insufficient role` for admin endpoints — this is a known
+engine gap, not a UI regression.
+
 ## Documentation
 
 - [Architecture overview](docs/README.md)
