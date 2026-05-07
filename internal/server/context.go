@@ -24,6 +24,11 @@ const (
 	// rolesCtxKey is the roles claim ([]string) carried in the JWT and
 	// used by genapi's required_roles enforcement.
 	rolesCtxKey
+	// authSourceCtxKey records which transport AuthJWT used to extract
+	// the JWT (Authorization header, cookie, or querystring). Read by
+	// the CSRF middleware (S3b / SEC-F7) to decide whether a request is
+	// in scope for double-submit enforcement.
+	authSourceCtxKey
 )
 
 // profileFromContext returns the connection-profile name attached to ctx,

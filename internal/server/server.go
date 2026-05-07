@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 
@@ -57,6 +58,22 @@ type Config struct {
 	// and <UploadDir>/migrations. Empty disables the upload endpoints
 	// (they return 503).
 	UploadDir string
+	// SecureCookies controls whether the auth + CSRF cookies set by
+	// Login (SEC-F7 / #62) include the `Secure` attribute. Production
+	// deployments MUST set this to true; only local-dev setups serving
+	// the SPA over plain HTTP should leave it false. main.go exposes
+	// this via the `-secure-cookies` CLI flag, defaulting true. With
+	// SecureCookies=true, browsers refuse to attach the cookie to a
+	// non-TLS request, so accidentally launching against `http://` in
+	// production fails closed rather than silently leaking the JWT.
+	SecureCookies bool
+	// testAuthenticate is an optional override for authenticateUpstream
+	// used by handler tests that don't want to spin up the database/sql
+	// driver. When non-nil, Login calls this in place of
+	// authenticateUpstream. nil in production. Lower-case so the field
+	// stays package-private; tests in the same package can set it
+	// directly on a Config literal.
+	testAuthenticate func(ctx context.Context, profile, username, password string) (bool, []string, error)
 }
 
 // GraphServer implements gen/api.ServerInterface.

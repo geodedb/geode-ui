@@ -205,6 +205,157 @@ func TestAppendUnique(t *testing.T) {
 
 // equalStrings is defined in handlers_schema_test.go (same package).
 
+// TestLogin_SetsAuthCookie (SEC-F7 / #62 S3a) is a stub that exercises
+// the cookie-write side of Login on an Authoritative path: a happy
+// successful login MUST emit a `geode-ui-auth` cookie carrying the
+// minted JWT, with HttpOnly + SameSite=Strict + Path=/ + Max-Age set
+// to the issuer TTL in seconds. Secure is conditional (see SecureCookies
+// config — defaults true for production).
+//
+// The test wires a fake ProfileLookup that accepts any credentials by
+// stub-driver dial (we use a custom DSN that bypasses the normal driver).
+// Since authenticateUpstream needs a real driver round-trip, this test
+// short-circuits by setting a fakeAuthenticator on Config.
+func TestLogin_SetsAuthCookie(t *testing.T) {
+	srv := New(Config{
+		JWT:           newTestIssuer(t),
+		Profiles:      fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+		SecureCookies: true,
+		// authenticator override for tests — see Config.testAuthenticate.
+		testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+			return true, []string{"admin"}, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	resp, err := srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "p", Profile: "default",
+	})
+	if err != nil {
+		t.Fatalf("err=%v want nil", err)
+	}
+	if resp == nil {
+		t.Fatalf("resp=nil want LoginResp")
+	}
+	cookies := w.Result().Cookies()
+	var got *http.Cookie
+	for _, c := range cookies {
+		if c.Name == AuthCookieName {
+			got = c
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected %s cookie; got %v", AuthCookieName, cookies)
+	}
+	if got.Value != resp.AccessToken {
+		t.Fatalf("cookie value mismatch: cookie=%q resp.access_token=%q", got.Value, resp.AccessToken)
+	}
+	if !got.HttpOnly {
+		t.Fatalf("cookie HttpOnly=false want true")
+	}
+	if got.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie SameSite=%v want SameSiteStrictMode", got.SameSite)
+	}
+	if got.Path != "/" {
+		t.Fatalf("cookie Path=%q want /", got.Path)
+	}
+	if got.MaxAge < 1 {
+		t.Fatalf("cookie MaxAge=%d want >=1", got.MaxAge)
+	}
+	if !got.Secure {
+		t.Fatalf("cookie Secure=false want true (SecureCookies=true)")
+	}
+}
+
+// TestLogin_InsecureCookieFlag (SEC-F7 / #62 S3a) — when SecureCookies
+// is false, the emitted cookie omits the Secure attribute so it works
+// over plain HTTP for local dev.
+func TestLogin_InsecureCookieFlag(t *testing.T) {
+	srv := New(Config{
+		JWT:           newTestIssuer(t),
+		Profiles:      fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+		SecureCookies: false,
+		testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+			return true, nil, nil
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	if _, err := srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "p",
+	}); err != nil {
+		t.Fatalf("err=%v want nil", err)
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == AuthCookieName && c.Secure {
+			t.Fatalf("cookie Secure=true want false (SecureCookies=false)")
+		}
+	}
+}
+
+// TestLogin_NoCookieOnFailure (SEC-F7 / #62 S3a) — a failed login MUST
+// NOT emit an auth cookie. This guards against a future regression that
+// would set the cookie before the credential check.
+func TestLogin_NoCookieOnFailure(t *testing.T) {
+	srv := New(Config{
+		JWT:           newTestIssuer(t),
+		Profiles:      fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+		SecureCookies: true,
+		testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+			return false, nil, nil // bad credentials
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	if _, err := srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "wrong",
+	}); err != nil {
+		t.Fatalf("err=%v want nil", err)
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == AuthCookieName {
+			t.Fatalf("did not expect %s cookie on failed login", AuthCookieName)
+		}
+	}
+}
+
+// TestLogout_ClearsAuthCookie (SEC-F7 / #62 S3a) — POST
+// /api/v1/auth/logout returns 204 and emits a Set-Cookie that clears
+// the geode-ui-auth cookie (Max-Age=0, empty value).
+func TestLogout_ClearsAuthCookie(t *testing.T) {
+	srv := New(Config{SecureCookies: true})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+	cookies := w.Result().Cookies()
+	var got *http.Cookie
+	for _, c := range cookies {
+		if c.Name == AuthCookieName {
+			got = c
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("expected %s cookie clearing; got %v", AuthCookieName, cookies)
+	}
+	if got.Value != "" {
+		t.Fatalf("logout cookie value=%q want empty", got.Value)
+	}
+	if got.MaxAge != -1 {
+		t.Fatalf("logout cookie MaxAge=%d want -1", got.MaxAge)
+	}
+	if got.Path != "/" {
+		t.Fatalf("logout cookie Path=%q want /", got.Path)
+	}
+	if !got.HttpOnly {
+		t.Fatalf("logout cookie HttpOnly=false want true")
+	}
+}
+
 // TestIsWireFeatureMissing pins the parse-error detection used by the
 // admin-list handlers (GetUsers/Roles/Policies/Backups/Migrations) to
 // degrade to an empty 200 instead of a 422 when Geode v0.5.11 doesn't

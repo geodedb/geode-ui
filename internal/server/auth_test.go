@@ -213,3 +213,91 @@ func TestAuthJWT_EmptyToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", authErr)
 	}
 }
+
+// TestAuthJWT_CookieFallback (SEC-F7 / #62 S3a) confirms a request with
+// no Authorization header but a `geode-ui-auth` cookie carrying a valid
+// JWT is authenticated. This is the new transport for SPA traffic so
+// the access token never sits in localStorage where DOM-XSS could
+// exfiltrate it.
+func TestAuthJWT_CookieFallback(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{JWT: iss})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"})
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: tok})
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	if got := userFromContext(r.Context()); got != "alice" {
+		t.Fatalf("user=%q want alice", got)
+	}
+}
+
+// TestAuthJWT_HeaderTakesPrecedenceOverCookie (SEC-F7 / #62 S3a) — when
+// both an Authorization header and a `geode-ui-auth` cookie carry tokens
+// for different subjects, the Authorization header wins. Mirrors the
+// pre-existing precedence over `?access_token=`.
+func TestAuthJWT_HeaderTakesPrecedenceOverCookie(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{JWT: iss})
+	headerTok, _, err := iss.Issue("alice", "default", nil)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	cookieTok, _, err := iss.Issue("mallory", "default", nil)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	r.Header.Set("Authorization", "Bearer "+headerTok)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: cookieTok})
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	if got := userFromContext(r.Context()); got != "alice" {
+		t.Fatalf("user=%q want alice (header wins over cookie)", got)
+	}
+}
+
+// TestAuthJWT_CookieTakesPrecedenceOverQuery (SEC-F7 / #62 S3a) — when
+// the Authorization header is absent but both a cookie and the
+// `?access_token=` querystring fallback are present, the cookie wins.
+// The querystring fallback exists for WS-only scenarios where browsers
+// can't attach cookies; if a cookie is present it's the more trusted
+// source.
+func TestAuthJWT_CookieTakesPrecedenceOverQuery(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{JWT: iss})
+	cookieTok, _, err := iss.Issue("alice", "default", nil)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	queryTok, _, err := iss.Issue("mallory", "default", nil)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/ws/query?access_token="+queryTok, nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: cookieTok})
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	if got := userFromContext(r.Context()); got != "alice" {
+		t.Fatalf("user=%q want alice (cookie wins over query)", got)
+	}
+}
+
+// TestAuthJWT_EmptyCookieFallsThrough confirms an empty-string
+// `geode-ui-auth` cookie does not short-circuit other auth sources or
+// produce a parse-error 401; the request behaves as if no cookie were
+// present at all.
+func TestAuthJWT_EmptyCookieFallsThrough(t *testing.T) {
+	srv := New(Config{JWT: newTestIssuer(t)})
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: ""})
+	if err := srv.AuthJWT(r); err == nil {
+		t.Fatal("expected error for empty cookie + no other auth")
+	}
+}

@@ -48,7 +48,11 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	// profile. Any future requirement to *forbid* implicit-default would
 	// be a clean follow-up: replace this call with an explicit 400 here.
 	profile := canonicalProfile(req.Profile)
-	ok, roles, err := s.authenticateUpstream(r.Context(), profile, req.Username, req.Password)
+	authenticate := s.cfg.testAuthenticate
+	if authenticate == nil {
+		authenticate = s.authenticateUpstream
+	}
+	ok, roles, err := authenticate(r.Context(), profile, req.Username, req.Password)
 	if err != nil {
 		emitAudit(auditEventLoginFailure,
 			"user", req.Username,
@@ -100,11 +104,56 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		// past the expiry between Issue() and the Sub() call.
 		expiresIn = 1
 	}
+	// SEC-F7 (#62): also emit the access token as an HttpOnly +
+	// SameSite=Strict cookie so the SPA can drop the localStorage
+	// transport and become resistant to DOM-XSS exfiltration of the
+	// JWT. The cookie's Max-Age tracks the JWT TTL so a stale browser
+	// session can't keep replaying a token whose JWT exp has passed.
+	// We still return the token in the response body so programmatic
+	// callers (CLIs, MCP) keep working unchanged.
+	http.SetCookie(w, &http.Cookie{
+		Name:     AuthCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   int(expiresIn),
+		HttpOnly: true,
+		Secure:   s.cfg.SecureCookies,
+		SameSite: http.SameSiteStrictMode,
+	})
 	return &gentypes.LoginResp{
 		AccessToken: token,
 		TokenType:   "Bearer",
 		ExpiresIn:   expiresIn,
 	}, nil
+}
+
+// HandleLogout (SEC-F7 / #62) clears the geode-ui-auth cookie and
+// returns 204. Idempotent — safe to call without an authenticated
+// session. Server-side JWT revocation is out of scope (tracked
+// separately under SEC-N2); the cookie clear is sufficient for
+// browser-side logout because SameSite=Strict prevents cross-site
+// replay even if the JWT is still cryptographically valid.
+//
+// Wired in cmd/server/main.go as a hand-rolled mux.HandleFunc rather
+// than through genapi because the route is intentionally
+// authentication-optional: a client that has lost track of its session
+// must still be able to ask the server to clear the cookie.
+func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     AuthCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1, // delete; net/http renders MaxAge=-1 as "Max-Age=0".
+		HttpOnly: true,
+		Secure:   s.cfg.SecureCookies,
+		SameSite: http.SameSiteStrictMode,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // authenticateUpstream opens a fresh *sql.DB for the named profile with

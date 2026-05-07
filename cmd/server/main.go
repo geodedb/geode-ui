@@ -26,12 +26,13 @@ import (
 
 func main() {
 	var (
-		listen       string
-		profilesFile string
-		secretHex    string
-		jwtTTL       time.Duration
-		adminUsers   string
-		uploadDir    string
+		listen        string
+		profilesFile  string
+		secretHex     string
+		jwtTTL        time.Duration
+		adminUsers    string
+		uploadDir     string
+		secureCookies bool
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
@@ -39,6 +40,7 @@ func main() {
 	flag.DurationVar(&jwtTTL, "jwt-ttl", 8*time.Hour, "JWT TTL (1m..24h)")
 	flag.StringVar(&adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
 	flag.StringVar(&uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
+	flag.BoolVar(&secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -95,6 +97,7 @@ func main() {
 		TxStore:        server.NewTxStore(),
 		AdminUsernames: adminSet,
 		UploadDir:      uploadDir,
+		SecureCookies:  secureCookies,
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
@@ -115,6 +118,14 @@ func main() {
 	// the upload routes to POST removes the ambiguity.
 	mux.HandleFunc("POST /api/v1/backups/upload", srv.HandleBackupUpload)
 	mux.HandleFunc("POST /api/v1/migrations/upload", srv.HandleMigrationUpload)
+
+	// SEC-F7 (#62): hand-rolled logout — clears the geode-ui-auth
+	// cookie and returns 204. Anonymous-allowed so a client that has
+	// lost its token (cleared cookies, expired JWT) can still ask the
+	// server to clear any stale cookie that may remain. Server-side
+	// JWT revocation is out of scope for #62 — tracked separately as
+	// SEC-N2.
+	mux.HandleFunc("POST /api/v1/auth/logout", srv.HandleLogout)
 
 	// /ws/* surface lives on a separate server type because the
 	// generated WS interface emits "Query" for /ws/query, which would
