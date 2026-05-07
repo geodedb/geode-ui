@@ -127,6 +127,13 @@ func main() {
 	// SEC-N2.
 	mux.HandleFunc("POST /api/v1/auth/logout", srv.HandleLogout)
 
+	// SEC-F7 (#62 S3b): CSRF token endpoint. GET issues a fresh token
+	// in both a NON-HttpOnly cookie (for SPA reading) and the JSON
+	// response body. The double-submit middleware below enforces a
+	// matching X-CSRF-Token header on cookie-authenticated state-
+	// changing requests.
+	mux.HandleFunc("/api/v1/csrf", srv.HandleCSRF)
+
 	// /ws/* surface lives on a separate server type because the
 	// generated WS interface emits "Query" for /ws/query, which would
 	// collide with the API "Query" method on *GraphServer. Both
@@ -179,10 +186,16 @@ func main() {
 	// follow-up issue is filed.
 	loginLimiter := server.NewLoginLimiter(server.LoginLimiterDefaults())
 	limited := server.WrapLoginLimit(loginLimiter, mux)
+	// SEC-F7 (#62 S3b): CSRF double-submit middleware. Inspects the
+	// raw request's auth cookie to decide whether to enforce — runs
+	// upstream of AuthJWT but the path-exempt + method-safe guards
+	// handle the boundaries. Bearer-authenticated and unauthenticated
+	// requests pass through.
+	csrfWrapped := server.CSRFMiddleware(limited)
 	// Permissions-Policy is harmless and short enough to apply to every
 	// response; wrap the entire pipeline so SPA, API, WS upgrade, MCP
 	// endpoints all carry the directive.
-	handler := server.WithPermissionsPolicy(httpx.WrapHandler(hcfg, limited))
+	handler := server.WithPermissionsPolicy(httpx.WrapHandler(hcfg, csrfWrapped))
 
 	httpSrv := &http.Server{
 		Addr:              listen,
