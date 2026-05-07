@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -94,15 +95,30 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 }
 
 // authenticateUpstream opens a fresh *sql.DB for the named profile with
-// the submitted credentials inlined into its DSN, then issues
-// `SHOW USER ROLES` and harvests the role names. A successful query
-// (returning ok=true) means the upstream accepted the credentials; a
-// query error is treated as a failed authentication (ok=false) — the
-// Geode driver typically reports an auth failure as the first
-// QueryContext error rather than at sql.Open time.
+// the submitted credentials inlined into its DSN, then issues a
+// no-op probe (`RETURN 1`) to force the driver to actually round-trip
+// auth to Geode. A successful probe (returning ok=true) means the
+// upstream accepted the credentials. A driver/transport error is
+// classified by the GQL status class (ISO/IEC 39075 §3.1.6):
 //
-// errors are reserved for *infrastructure* problems (unknown profile,
-// driver init failure, scan error) — callers translate those to 502.
+//   - 28000 ("invalid authorization specification") and 08P01
+//     ("password reset required") indicate auth failure — surface as
+//     401 invalid_credentials.
+//   - Anything else (parse error, network failure, server error)
+//     indicates the credentials were *not* the problem — return as
+//     a 502 upstream_error so the client doesn't silently retype its
+//     password against an unrelated server bug.
+//
+// Roles are best-effort. Geode v0.5.11's wire dialect does not yet
+// expose a queryable role-enumeration form (`SHOW USER ROLES`,
+// `SHOW ROLES`, etc. all return status_class=42000 "parse error").
+// Until the server adds one we return an empty role list — the JWT
+// still carries the (sub, profile), and per-graph authorization is
+// enforced by Geode itself on subsequent queries.
+//
+// `error`s from this function are reserved for *infrastructure*
+// problems (unknown profile, driver init failure) — callers translate
+// those to 502.
 func (s *GraphServer) authenticateUpstream(ctx context.Context, profile, username, password string) (bool, []string, error) {
 	prof, err := s.cfg.Profiles.Lookup(profile)
 	if err != nil {
@@ -115,28 +131,68 @@ func (s *GraphServer) authenticateUpstream(ctx context.Context, profile, usernam
 	}
 	defer func() { _ = db.Close() }()
 
-	rows, err := db.QueryContext(ctx, "SHOW USER ROLES")
+	// `RETURN 1` is the smallest valid GQL statement. It forces the
+	// driver to open a session, complete the auth handshake, and emit
+	// a row — every step that can fail authentication.
+	rows, err := db.QueryContext(ctx, "RETURN 1")
 	if err != nil {
-		// Driver reports auth failure here — surface as failed login,
-		// not as a 502. We deliberately discard the error message
-		// because the upstream may include the username verbatim,
-		// which would leak through the 401 description.
-		return false, nil, nil
+		// Treat 28000 (auth) and 08P01 (password reset required) as
+		// invalid credentials. Everything else is an upstream issue —
+		// surface a generic ok=false so the user is not told their
+		// password is wrong because of, say, a parse-error server bug.
+		// We deliberately discard the error message because the
+		// upstream may include the username verbatim, which would
+		// leak through any 4xx description.
+		if isAuthError(err) {
+			return false, nil, nil
+		}
+		return false, nil, err
 	}
 	defer func() { _ = rows.Close() }()
 
-	var roles []string
 	for rows.Next() {
-		var role string
-		if err := rows.Scan(&role); err != nil {
+		// Drain the result; we don't need the values, just confirmation
+		// that the server actually sent a row (i.e. auth succeeded).
+		var ignore any
+		if err := rows.Scan(&ignore); err != nil {
 			return false, nil, err
 		}
-		roles = append(roles, role)
 	}
 	if err := rows.Err(); err != nil {
+		if isAuthError(err) {
+			return false, nil, nil
+		}
 		return false, nil, err
 	}
-	return true, roles, nil
+	// Roles unavailable in v0.5.11 wire dialect — see function comment.
+	return true, nil, nil
+}
+
+// isAuthError reports whether err carries a GQL status class that
+// indicates an authentication problem rather than an unrelated query
+// or transport failure. Handles both wrapped and bare errors via
+// errors.As + a fallback string match for transports that don't yet
+// expose a typed StatusClass.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	type statusClasser interface{ StatusClass() string }
+	var sc statusClasser
+	if errors.As(err, &sc) {
+		switch sc.StatusClass() {
+		case "28000", // invalid_authorization_specification
+			"08P01": // password reset required (Geode-specific)
+			return true
+		}
+		return false
+	}
+	// Fallback: substring match. Older driver versions wrap the
+	// status_class JSON into a generic error.
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "authentication failed") ||
+		strings.Contains(msg, "invalid credentials") ||
+		strings.Contains(msg, "password reset required")
 }
 
 // injectCreds rewrites a Geode DSN to carry the supplied username and
