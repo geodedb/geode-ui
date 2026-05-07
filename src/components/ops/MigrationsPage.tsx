@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { auth } from '../../api/auth'
 
 // MigrationsPage drives the /ops/migrations tab. Geode B8 endpoints:
 //
@@ -279,8 +280,56 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
 }) => {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Stage the migration content via the multipart endpoint. Server
+  // returns the canonical filename; we record it locally so the
+  // subsequent postMigrations call can reference it once Geode's wire
+  // dialect grows a "CREATE MIGRATION FROM FILE" form. Today the file
+  // is simply staged on disk for an operator to pick up.
+  const onUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setUploading(true)
+    setErr(null)
+    try {
+      const form = new FormData()
+      form.append('file', f)
+      const tok = auth.getToken() ?? ''
+      const res = await fetch('/api/v1/migrations/upload', {
+        method: 'POST',
+        headers: tok ? { Authorization: 'Bearer ' + tok } : {},
+        body: form,
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as {
+          error_description?: string
+          error?: string
+        }
+        throw new Error(
+          j.error_description || j.error || 'upload failed (' + res.status + ')'
+        )
+      }
+      const j = (await res.json()) as { file: string }
+      setUploadedFile(j.file)
+      // Default the migration name to the upload filename if the
+      // operator hasn't typed one yet.
+      if (!name) {
+        setName(j.file.replace(/\.[^.]+$/, ''))
+      }
+    } catch (e2: unknown) {
+      setErr(e2 instanceof Error ? e2.message : String(e2))
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -304,6 +353,29 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
           onSubmit={submit}
           style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
         >
+          <label
+            htmlFor="migration-upload-input"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              fontSize: '0.85rem',
+            }}
+          >
+            Upload migration file (.gql / .sql)
+            <input
+              id="migration-upload-input"
+              ref={fileInputRef}
+              type="file"
+              onChange={onUpload}
+              disabled={uploading || busy}
+            />
+          </label>
+          {uploadedFile && (
+            <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
+              Staged: {uploadedFile}
+            </span>
+          )}
           <input
             placeholder="name"
             value={name}
@@ -316,8 +388,10 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
+          <NewBtn type="submit" disabled={busy || uploading}>
+            {busy && '...'}
+            {!busy && uploading && 'uploading...'}
+            {!busy && !uploading && 'Create'}
           </NewBtn>
           {err && <Err>{err}</Err>}
         </form>

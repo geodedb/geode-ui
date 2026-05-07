@@ -31,12 +31,14 @@ func main() {
 		secretHex    string
 		jwtTTL       time.Duration
 		adminUsers   string
+		uploadDir    string
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
 	flag.StringVar(&secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
 	flag.DurationVar(&jwtTTL, "jwt-ttl", 8*time.Hour, "JWT TTL (1m..24h)")
 	flag.StringVar(&adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
+	flag.StringVar(&uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -92,12 +94,19 @@ func main() {
 		JWT:            issuer,
 		TxStore:        server.NewTxStore(),
 		AdminUsernames: adminSet,
+		UploadDir:      uploadDir,
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
 		GlobalRate:  2000,
 		GlobalBurst: 400,
 	})
+
+	// Hand-rolled multipart upload endpoints — outside genapi because
+	// genapi's request-validator pipeline is JSON-only; multipart is
+	// the natural shape for "upload a backup or migration file".
+	mux.HandleFunc("/api/v1/backups/upload", srv.HandleBackupUpload)
+	mux.HandleFunc("/api/v1/migrations/upload", srv.HandleMigrationUpload)
 
 	// /ws/* surface lives on a separate server type because the
 	// generated WS interface emits "Query" for /ws/query, which would

@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { auth } from '../../api/auth'
 
 // RestorePage drives the /ops/restore tab. Backed by Geode B7:
 //
@@ -64,8 +65,10 @@ export const RestorePage: React.FC = () => {
   const [file, setFile] = useState('')
   const [targetTime, setTargetTime] = useState('')
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // BackupPage navigates here with location.state.file when the user
   // clicks "Restore" on a row; populate the file field on first render.
@@ -91,6 +94,54 @@ export const RestorePage: React.FC = () => {
     }
   }
 
+  // onUpload posts the selected file to the hand-rolled multipart
+  // endpoint /api/v1/backups/upload. Server validates filename
+  // (alphanumeric+._- only), enforces 64 MiB cap, and returns the
+  // stored filename. We populate the `file` field with the result so
+  // the operator can immediately submit Restore against it.
+  const onUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setUploading(true)
+    setErr(null)
+    setOkMsg(null)
+    try {
+      const form = new FormData()
+      form.append('file', f)
+      const tok = auth.getToken() ?? ''
+      const res = await fetch('/api/v1/backups/upload', {
+        method: 'POST',
+        headers: tok ? { Authorization: 'Bearer ' + tok } : {},
+        body: form,
+      })
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as {
+          error_description?: string
+          error?: string
+        }
+        throw new Error(
+          j.error_description || j.error || 'upload failed (' + res.status + ')'
+        )
+      }
+      const j = (await res.json()) as { file: string; size_bytes: number }
+      setFile(j.file)
+      setOkMsg(
+        'Uploaded ' +
+          j.file +
+          ' (' +
+          j.size_bytes +
+          ' bytes). Ready to restore.'
+      )
+    } catch (e2: unknown) {
+      setErr(e2 instanceof Error ? e2.message : String(e2))
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
   return (
     <Wrap>
       <Heading>Restore</Heading>
@@ -98,6 +149,15 @@ export const RestorePage: React.FC = () => {
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
+        <Field>
+          Upload backup file
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={onUpload}
+            disabled={uploading || busy}
+          />
+        </Field>
         <Field>
           File
           <input
@@ -115,8 +175,10 @@ export const RestorePage: React.FC = () => {
             onChange={(e) => setTargetTime(e.target.value)}
           />
         </Field>
-        <Btn type="submit" disabled={busy}>
-          {busy ? '...' : 'Restore'}
+        <Btn type="submit" disabled={busy || uploading}>
+          {busy && '...'}
+          {!busy && uploading && 'uploading...'}
+          {!busy && !uploading && 'Restore'}
         </Btn>
       </form>
       {err && <Banner $tone="err">{err}</Banner>}

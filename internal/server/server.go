@@ -51,6 +51,12 @@ type Config struct {
 	// policy/grant/backup/migration/audit endpoints) returns 403.
 	// Populate from the -admin-users CLI flag in main.go.
 	AdminUsernames map[string]bool
+	// UploadDir is the directory where multipart uploads (backup files
+	// for restore, migration content) are persisted. The hand-rolled
+	// upload handlers (handlers_uploads.go) write into <UploadDir>/backups
+	// and <UploadDir>/migrations. Empty disables the upload endpoints
+	// (they return 503).
+	UploadDir string
 }
 
 // GraphServer implements gen/api.ServerInterface.

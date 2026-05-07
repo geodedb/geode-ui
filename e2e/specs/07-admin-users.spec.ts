@@ -18,7 +18,9 @@ test.describe('admin / users', () => {
     // Wait for either the page's empty-state, the admin row, or any
     // engine-gap banner. All three are valid resting states.
     await page
-      .getByText(/geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i)
+      .getByText(
+        /geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i
+      )
       .first()
       .waitFor({ timeout: 6_000 })
       .catch(() => undefined)
@@ -28,7 +30,7 @@ test.describe('admin / users', () => {
         .first()
         .isVisible({ timeout: 1_000 })
         .catch(() => false),
-      'SHOW USERS not on the Geode wire yet (v0.5.11) — page renders an empty list',
+      'SHOW USERS not on the Geode wire yet (v0.5.11) — page renders an empty list'
     )
     await expect(page.getByText(/geode/)).toBeVisible()
   })
@@ -38,7 +40,9 @@ test.describe('admin / users', () => {
   }) => {
     await page.goto('/admin/users')
     await page
-      .getByText(/geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i)
+      .getByText(
+        /geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i
+      )
       .first()
       .waitFor({ timeout: 6_000 })
       .catch(() => undefined)
@@ -48,7 +52,7 @@ test.describe('admin / users', () => {
         .first()
         .isVisible({ timeout: 1_000 })
         .catch(() => false),
-      'SHOW USERS / CREATE USER not on the Geode wire yet (v0.5.11)',
+      'SHOW USERS / CREATE USER not on the Geode wire yet (v0.5.11)'
     )
     await sel.newUserBtn(page).click()
     await page.getByPlaceholder('username').fill(newUsername)
@@ -62,7 +66,9 @@ test.describe('admin / users', () => {
   test('Delete row removes the user', async ({ authedPage: page }) => {
     await page.goto('/admin/users')
     await page
-      .getByText(/geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i)
+      .getByText(
+        /geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i
+      )
       .first()
       .waitFor({ timeout: 6_000 })
       .catch(() => undefined)
@@ -72,14 +78,14 @@ test.describe('admin / users', () => {
         .first()
         .isVisible({ timeout: 1_000 })
         .catch(() => false),
-      'SHOW USERS / DROP USER not on the Geode wire yet (v0.5.11)',
+      'SHOW USERS / DROP USER not on the Geode wire yet (v0.5.11)'
     )
     test.skip(
       !(await page
         .getByText(newUsername)
         .isVisible({ timeout: 1_000 })
         .catch(() => false)),
-      'previous create test was skipped',
+      'previous create test was skipped'
     )
 
     page.once('dialog', (d) => d.accept()) // window.confirm

@@ -120,8 +120,11 @@ services:
     - ${JWT_SECRET_HEX:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
     - -profiles
     - /etc/geode-ui/profiles.json
+    - -upload-dir
+    - /var/lib/geode-ui/uploads
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
+    - geode-ui-uploads:/var/lib/geode-ui/uploads
     ports:
     - 8080:8080
     healthcheck:
@@ -199,6 +202,7 @@ services:
 
 volumes:
   geode-data:
+  geode-ui-uploads:
 
 # Hosts that route 10.0.0.0/8, 172.16.0.0/12, and 192.168.0.0/16 through
 # a VPN/overlay (e.g. Tailscale `abs`) leave Docker's default

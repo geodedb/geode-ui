@@ -39,9 +39,11 @@ services:
     environment:
       # Generate with: openssl rand -hex 32
       JWT_SECRET_HEX: REPLACE_WITH_OPENSSL_RAND_HEX_32
-    command: [-listen, :8080, -jwt-secret-hex, '${JWT_SECRET_HEX}', -profiles, /etc/geode-ui/profiles.json]
+    command: [-listen, :8080, -jwt-secret-hex, '${JWT_SECRET_HEX}', -profiles, /etc/geode-ui/profiles.json, -upload-dir, /var/lib/geode-ui/uploads]
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
+    - geode-ui-uploads:/var/lib/geode-ui/uploads
 
 volumes:
   geode-data:
+  geode-ui-uploads:
