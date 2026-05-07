@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1.7
+#
+# Builds geode:v0.5.11 for the geode-ui e2e test stack.
+#
+# Why a host-side build (not a from-source compile inside Docker)?
+# ----------------------------------------------------------------
+# The official Geode repo (../geode) builds with Zig and a large set of
+# vendored sibling deps. Specifically:
+#
+#   * build.zig.zon pins .minimum_zig_version = "0.16.0" — there is no
+#     stable Zig 0.16.0 release tarball at a predictable URL yet.
+#   * Zig's package fetcher cannot resolve git deps inside a default Docker
+#     build (no git creds, no host tooling). The official Geode Dockerfile
+#     works around this by COPYing a pre-populated /root/.cache/zig/p/
+#     into the build context — that cache is not committed to the repo
+#     (docker/zig-packages/ ships empty).
+#   * A from-source Docker build of the full Geode tree takes 5-10 minutes
+#     and pulls in ~250 MB of Zig deps.
+#
+# So this Dockerfile takes the same approach as upstream `Dockerfile.release`:
+# the binary is built on the host (which already has Zig + the warm package
+# cache for any developer who has run a Geode build) and copied into a slim
+# Debian runtime image. The build context is the parent of geode-ui so that
+# `geode/zig-out/bin/geode` is reachable as `geode/zig-out/bin/geode`.
+#
+# Prerequisite (run from the geode source checkout, sibling to geode-ui):
+#   cd ../geode && zig build -Doptimize=ReleaseSafe
+#
+# Build (run from geode-ui/):
+#   docker build -f deploy/geode/Dockerfile.geode -t geode:v0.5.11 ..
+#
+# Run:
+#   docker run --rm -p 3141:3141/udp geode:v0.5.11
+#
+# The image is intentionally minimal: ca-certificates, libssl3, tini,
+# and the geode binary. It mirrors upstream's Dockerfile.release layout
+# (debian:bookworm-slim runtime, non-root user, /data volume).
+
+FROM debian:bookworm-slim
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Runtime deps:
+#   ca-certificates   - TLS root store for outbound clients
+#   libssl3           - geode is dynamically linked against libssl/libcrypto
+#   tini              - PID-1 reaper so SIGTERM/SIGINT propagate cleanly
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl3 \
+        tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10001 -m -d /home/geode geode \
+    && mkdir -p /data \
+    && chown geode:geode /data
+
+# Copy the host-built v0.5.11 binary. Build context is the parent of
+# geode-ui (..), so geode/ resolves to the sibling Geode checkout.
+COPY geode/zig-out/bin/geode /usr/local/bin/geode
+
+RUN chmod +x /usr/local/bin/geode
+
+USER geode
+WORKDIR /home/geode
+
+# QUIC transport (UDP) and (in case future versions need it) TCP on 3141.
+EXPOSE 3141/udp 3141/tcp
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/geode"]
+CMD ["serve", "--data-dir", "/data", "--listen", "0.0.0.0:3141"]
