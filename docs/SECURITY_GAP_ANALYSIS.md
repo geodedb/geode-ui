@@ -46,15 +46,15 @@ geode-ui is an **admin-facing** SPA + thin reverse-proxy/auth-fronting server fo
 
 ## Findings — Stack Ranked by Risk Score
 
-| Rank | ID | Severity | Risk | Title | Issue | File:Line | Fix |
+| Rank | ID | Severity | Risk | Title | Issue | File:Line | Fix / Status |
 |------|-----|---------|------|-------|-------|-----------|-----|
-| 1 | F2 | High | **64** | /auth/login lacks per-IP and per-(profile,username) rate limiting | [#58](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/58) | `gen/api/handlers_gen.go:1471-1483`, `cmd/server/main.go:101-103` | Per-IP + per-(profile,username) buckets; lockout after N fails — **CLOSED** in geode-ui via `internal/server/loginlimiter.go` (5 rps/IP, burst 10; 5 fails/15min lockout). Genapi follow-up filed. |
-| 2 | F4 | High | **64** | Missing CSP, Permissions-Policy, COOP/COEP/CORP | [#60](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/60) | `gen/pkg/httpx/server.go:110-145` | Add headers in `httpx.WrapHandler` (genapi) — **CLOSED** in geode-ui via `internal/server/security_headers.go` (CSP+COOP on SPA, Permissions-Policy global). Genapi follow-up filed for structural fix. |
-| 3 | F7 | High | **48** | JWT in localStorage | [#62](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/62) | `src/api/auth.ts:30-36` | Move to Secure;HttpOnly;SameSite cookie + CSRF, or in-memory + refresh |
+| 1 | F2 | High | **64** | /auth/login lacks per-IP and per-(profile,username) rate limiting | [#58](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/58) | `gen/api/handlers_gen.go:1471-1483`, `cmd/server/main.go:101-103` | **Closed** 2026-05-07 (`8e9f5d2`) -- `internal/server/loginlimiter.go` (5 rps/IP, burst 10; 5 fails/15min lockout). Cross-closes N3 (#65) via `canonicalProfile()`; partially closes N7 (#66) for the login surface only. Genapi follow-up `genapi#215` filed for global per-IP partition. |
+| 2 | F4 | High | **64** | Missing CSP, Permissions-Policy, COOP/COEP/CORP | [#60](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/60) | `gen/pkg/httpx/server.go:110-145` | **Closed** 2026-05-07 (`1791a37`) -- `internal/server/security_headers.go` (CSP+COOP on SPA, Permissions-Policy global). Genapi follow-up `genapi#214` filed to move into `httpx.WrapHandler`. |
+| 3 | F7 | High | **48** | JWT in localStorage | [#62](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/62) | `src/api/auth.ts:30-36` | **Closed** 2026-05-07 (`56d4e5f` + `21955c4` + `4eb3dcd`) -- (1/3) server JWT cookie writer/reader (`internal/server/auth.go:65` `r.Cookie(...)`); (2/3) CSRF double-submit middleware; (3/3) SPA cookie-based auth + CSRF header. Backout: dual-mode `?access_token=` fallback retained (deprecated, F5/#71). |
 | 4 | N2 | Medium | **36** | No JWT revocation / no session invalidation on password change | [#64](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/64) | `internal/jwt/jwt.go`, `internal/server/handlers_auth.go` | Server-side JTI revocation set; revoke on password change |
-| 5 | N3 | Medium | **36** | Login silently defaults profile="" → "default" | [#65](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/65) | `internal/server/handlers_auth.go:43-46` | Require explicit profile OR rate-limit on resolved (profile,username) — **CLOSED** by canonicalising profile in `handlers_auth.go` and the rate-limiter via `canonicalProfile()`. |
+| 5 | N3 | Medium | **36** | Login silently defaults profile="" → "default" | [#65](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/65) | `internal/server/handlers_auth.go:43-46` | **Closed** 2026-05-07 (cross-closed via `8e9f5d2` for #58) -- profile canonicalised in `handlers_auth.go` and the rate-limiter via `canonicalProfile()`. |
 | 6 | F6+N6 | Medium | **36** | Audit log redaction gap (LogAudit not redacting; sensitiveKeys incomplete) | [#67](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/67) | `gen/pkg/obsx/log.go:381-382`, `internal/server/audit.go:56-70` | Centralize redaction in obsx.LogAudit; expand sensitiveKeys |
-| 7 | N7 | Medium | **32** | Global-only rate limiter (no per-IP partition) | [#66](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/66) | `cmd/server/main.go:101-103` | Per-IP token bucket alongside global — **CLOSED** for the login surface via `loginlimiter.go`. Genapi follow-up filed for the global per-IP partition across all routes. |
+| 7 | N7 | Medium | **32** | Global-only rate limiter (no per-IP partition) | [#66](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/66) | `cmd/server/main.go:101-103` | **Partially closed** 2026-05-07 (`8e9f5d2`) -- per-IP wrapper landed for `/auth/login` via `loginlimiter.go`. Structural per-IP across all routes deferred to `genapi#215` (httpx middleware). Issue remains open in geode-ui pending the genapi rollout. |
 | 8 | N1 | Medium | **24** | ALTER USER quoteString edge-case audit | [#63](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/63) | `internal/server/handlers_users.go:233` | Targeted unit tests on quoteString edge cases |
 | 9 | N4 | Low | **24** | No server-side password policy | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `internal/server/handlers_auth.go:99-103` | Min 12 chars; HIBP k-anon (optional) |
 | 10 | N10 | Low | **24** | User-enumeration timing channel on /auth/login | [#76](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/76) | `internal/server/handlers_auth.go:131-148` | Constant-time auth-failure path; unify 401 response |
@@ -67,7 +67,22 @@ geode-ui is an **admin-facing** SPA + thin reverse-proxy/auth-fronting server fo
 | 17 | N8 | Low | **8** | Missing public/.well-known/security.txt | [#75](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/75) | `public/.well-known/` (new) | Add per RFC 9116; verify SECURITY.md links to it |
 | 18 | F11 | Low | **4** | gosec G115 in genapi-emitted gqlx/subscription.go | [#77](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/77) | `gen/pkg/gqlx/subscription.go:394` | Fix in genapi at `~/src/devnw/apps/genapi`; regenerate |
 
-**Confidential issues** (Critical/High): F2 (#58), F4 (#60), F7 (#62) — created with `--confidential` because they describe an exploit chain or a credential-storage flaw with a concrete exfil path.
+**Confidential issues** (Critical/High): F2 (#58), F4 (#60), F7 (#62) — created with `--confidential` because they describe an exploit chain or a credential-storage flaw with a concrete exfil path. **All three closed in the 2026-05-07 closure run.**
+
+### Closure run 2026-05-07
+
+Three High-severity confidential issues + one cross-closed Medium + one partially closed Medium:
+
+- **F2 (#58)** -- closed via `8e9f5d2`. Per-IP (5 rps, burst 10) and per-(profile,username) (5 fails / 15 min lockout) limiter wired into `/auth/login`.
+- **F4 (#60)** -- closed via `1791a37`. CSP + COOP on SPA HTML; Permissions-Policy global.
+- **F7 (#62)** -- closed via `56d4e5f` + `21955c4` + `4eb3dcd`. Server cookie writer/reader (1/3), CSRF double-submit middleware (2/3), SPA refactor (3/3). Dual-mode kept on `?access_token=` for one minor (F5/#71 deprecation).
+- **N3 (#65)** -- cross-closed via `8e9f5d2` (profile canonicalisation lands in the same commit).
+- **N7 (#66)** -- partially closed via `8e9f5d2` for the login surface; structural fix tracked at `genapi#215`.
+
+Genapi follow-ups filed in the upstream project:
+
+- `genapi#214` -- move CSP/COOP/Permissions-Policy headers into `httpx.WrapHandler`.
+- `genapi#215` -- add per-IP global rate limit + per-route per-IP option in httpx.
 
 ## Threat-Model Verdict
 
