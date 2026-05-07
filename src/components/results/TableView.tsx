@@ -263,7 +263,9 @@ type RowProps = {
 
 // VirtualRow renders one row inside the windowed list. react-window
 // supplies the absolute-position style; we lay cells out via a CSS
-// grid that mirrors the header column count.
+// grid that mirrors the header column count. role="row" + role="cell"
+// keep the divs in the accessibility tree as part of the wrapping
+// grid (the surrounding Wrap carries role="grid").
 const VirtualRow = ({
   index,
   style,
@@ -273,6 +275,7 @@ const VirtualRow = ({
   const row = rows[index] || []
   return (
     <RowOuter
+      role="row"
       data-row-index={index}
       style={{
         ...style,
@@ -281,7 +284,7 @@ const VirtualRow = ({
     >
       {row.map((cell, j) => (
         // eslint-disable-next-line react/no-array-index-key
-        <Cell key={j}>
+        <Cell key={j} role="cell">
           <CellView value={cell} />
         </Cell>
       ))}
@@ -299,14 +302,19 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
     [view.rows, view.columns]
   )
 
+  // Explicit ARIA roles: react-window renders the body as div-based
+  // CSS grid (not a <tbody>), which severs the implicit columnheader
+  // role on the standalone <thead><tr><th>. Wrap the whole composition
+  // as role="grid" with explicit row/columnheader/cell roles so screen
+  // readers (and Playwright's getByRole) see a single coherent table.
   return (
-    <Wrap>
-      <HeaderTable>
+    <Wrap role="grid" aria-rowcount={view.rows.length}>
+      <HeaderTable role="presentation">
         <thead>
-          <tr>
+          <tr role="row">
             {view.columns.map((c, i) => (
               // eslint-disable-next-line react/no-array-index-key
-              <Th key={`${columnName(c, i)}_${i}`}>
+              <Th key={`${columnName(c, i)}_${i}`} role="columnheader">
                 {columnName(c, i)}{' '}
                 <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
               </Th>
