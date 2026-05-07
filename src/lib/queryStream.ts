@@ -1,5 +1,18 @@
 import { auth } from '../api/auth'
 
+// base64UrlEncode produces an unpadded base64url encoding of the given UTF-8
+// string. Matches encoding/base64.RawURLEncoding on the server side so the
+// `genapi.auth.bearer.<encoded>` subprotocol round-trips cleanly.
+function base64UrlEncode(value: string): string {
+  // Convert UTF-8 string -> base64 via TextEncoder + binary string trick.
+  const bytes = new TextEncoder().encode(value)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 1) {
+    bin += String.fromCharCode(bytes[i] as number)
+  }
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
 export type StreamMsg =
   | { kind: 'schema'; columns: { name: string; type: string }[] }
   | { kind: 'row'; row: unknown[] }
@@ -20,8 +33,22 @@ export function streamQuery(
   const url = new URL('/ws/query', window.location.href)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   const token = auth.getToken()
-  if (token) url.searchParams.set('access_token', token)
-  const ws = new WebSocket(url.toString())
+  // Browsers cannot set custom Authorization headers on a WebSocket
+  // upgrade and the server's policy on /ws/query has AllowQueryBearer
+  // disabled (gen/ws/ws_handlers.gen.go RequestAuthPolicy). Pass the
+  // bearer through the subprotocol channel using the
+  // `genapi.auth.bearer.<base64url(token)>` shape that
+  // gen/pkg/securex/secure.go websocketProtocolAuth recognizes when
+  // RequestAuthPolicy.AllowSubprotocolBearer is true (the default).
+  const protocols: string[] = []
+  if (token) {
+    const encoded = base64UrlEncode(token)
+    protocols.push(`genapi.auth.bearer.${encoded}`)
+  }
+  const ws =
+    protocols.length > 0
+      ? new WebSocket(url.toString(), protocols)
+      : new WebSocket(url.toString())
 
   let resolveDone: () => void = () => {}
   const done = new Promise<void>((r) => {

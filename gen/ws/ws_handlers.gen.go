@@ -52,6 +52,7 @@ var wsOptions = map[string]wsx.Options{
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		CheckOrigin: true,
+		AllowAnyOrigin: true,
 	},
 	"/ws/query": {
 		PingInterval: 15000 * time.Millisecond,
@@ -60,6 +61,7 @@ var wsOptions = map[string]wsx.Options{
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		CheckOrigin: true,
+		AllowAnyOrigin: true,
 	},
 }
 
