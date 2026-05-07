@@ -1,0 +1,31 @@
+# Per-Dockerfile ignore (BuildKit feature; activated by the `# syntax=`
+# directive at the top of deploy/Dockerfile). Patterns are evaluated
+# relative to the build context, which the compose files set to `../..`
+# (the parent of geode-ui/, holding geode/, geode-ui/, geode-client-go/
+# as siblings).
+#
+# Critical: geode-ui/node_modules/ on the host is pnpm-structured
+# (symlinks into .pnpm/) which clashes with the in-container `npm ci`
+# layout — COPY 'cannot replace to directory ... with file' when the two
+# overlay. Excluding host node_modules lets the container do its own
+# install cleanly.
+
+geode-ui/node_modules/
+geode-ui/**/node_modules/
+geode-ui/dist/
+geode-ui/build/
+geode-ui/internal/ui/dist/
+geode-ui/bin/
+geode-ui/coverage/
+geode-ui/test-results/
+geode-ui/e2e/playwright-report/
+geode-ui/e2e/test-results/
+geode-ui/.git/
+geode-ui/.claude/
+geode-ui/.vscode/
+geode-ui/.idea/
+geode-ui/*.swp
+geode-ui/*.log
+geode-ui/.DS_Store
+geode-ui/server
+geode-ui/geode-ui
