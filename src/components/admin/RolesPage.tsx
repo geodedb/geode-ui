@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // RolesPage drives the /admin/roles tab (Geode B5 endpoints):
 //
@@ -127,34 +128,33 @@ const Empty = styled.td`
 `
 
 export const RolesPage: React.FC = () => {
-  const [roles, setRoles] = useState<Role[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
-  const load = (): void => {
-    client
-      .getRoles({})
-      .then((r) => {
-        const list = (r.roles ?? []) as Role[]
-        setRoles(list)
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getRoles({})
+      return ((r.roles ?? []) as Role[]) ?? []
+    },
+    []
+  )
+  const roles = data ?? []
+  const err = actionErr ?? loadErr
 
   const onDelete = async (role: string): Promise<void> => {
     // eslint-disable-next-line no-alert
     if (!window.confirm('Delete role ' + role + '?')) return
     try {
       await client.deleteRole({ role })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -197,7 +197,7 @@ export const RolesPage: React.FC = () => {
         <CreateRoleModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}

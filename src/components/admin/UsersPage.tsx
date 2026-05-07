@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // UsersPage drives the /admin/users tab. The Geode B4 endpoints back
 // every action:
@@ -132,28 +133,29 @@ const Empty = styled.td`
 `
 
 export const UsersPage: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
-  // Centralized refresh: the create modal calls load() on close, and
-  // every row action (delete/disable/enable) calls it on success so the
-  // UI reflects the new state without needing optimistic updates.
-  const load = (): void => {
-    client
-      .getUsers({})
-      .then((r) => {
-        const list = (r.users ?? []) as User[]
-        setUsers(list)
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  // useApiResource owns the AbortController + mounted/aborted guards.
+  // The fetcher receives a signal which is forwarded to the typed
+  // client; the genapi-emitted client doesn't yet expose a per-call
+  // signal, so the hook still gates state updates correctly even if
+  // the underlying fetch isn't aborted. The signal is passed for when
+  // genapi grows passthrough in a future MR (see #29 commit body).
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getUsers({})
+      return ((r.users ?? []) as User[]) ?? []
+    },
+    []
+  )
+  const users = data ?? []
+  const err = actionErr ?? loadErr
 
   const onDelete = async (username: string): Promise<void> => {
     // window.confirm is intentional -- this is an admin destructive
@@ -162,27 +164,30 @@ export const UsersPage: React.FC = () => {
     if (!window.confirm('Delete user ' + username + '?')) return
     try {
       await client.deleteUsername({ username })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
   const onDisable = async (username: string): Promise<void> => {
     try {
       await client.disable({ username })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
   const onEnable = async (username: string): Promise<void> => {
     try {
       await client.enable({ username })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -234,7 +239,7 @@ export const UsersPage: React.FC = () => {
         <CreateUserModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}

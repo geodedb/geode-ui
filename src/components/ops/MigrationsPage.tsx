@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
 import { auth } from '../../api/auth'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // MigrationsPage drives the /ops/migrations tab. Geode B8 endpoints:
 //
@@ -145,41 +146,47 @@ const Empty = styled.td`
   text-align: center;
 `
 
+type MigrationsView = {
+  applied: Migration[]
+  pending: string[]
+}
+
 export const MigrationsPage: React.FC = () => {
-  const [applied, setApplied] = useState<Migration[]>([])
-  const [pending, setPending] = useState<string[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const load = (): void => {
-    client
-      .getMigrations({})
-      .then((r) => {
-        setApplied(((r.applied ?? []) as Migration[]) ?? [])
-        setPending(((r.pending ?? []) as string[]) ?? [])
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource<MigrationsView>(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getMigrations({})
+      return {
+        applied: ((r.applied ?? []) as Migration[]) ?? [],
+        pending: ((r.pending ?? []) as string[]) ?? [],
+      }
+    },
+    []
+  )
+  const applied = data?.applied ?? []
+  const pending = data?.pending ?? []
+  const err = actionErr ?? loadErr
 
   const onRunPending = async (): Promise<void> => {
     setBusy(true)
-    setErr(null)
+    setActionErr(null)
     setOkMsg(null)
     try {
       const r = await client.postMigrationsRun({})
       const n = (r.applied ?? []).length
       setOkMsg('Applied ' + n + ' migration(s).')
-      load()
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
@@ -188,9 +195,10 @@ export const MigrationsPage: React.FC = () => {
   const onSign = async (name: string): Promise<void> => {
     try {
       await client.sign({ name })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -267,7 +275,7 @@ export const MigrationsPage: React.FC = () => {
         <CreateMigrationModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}

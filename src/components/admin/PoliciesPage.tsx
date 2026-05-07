@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // PoliciesPage drives the /admin/policies tab (Geode B6 endpoints):
 //
@@ -133,34 +134,33 @@ const Code = styled.code`
 `
 
 export const PoliciesPage: React.FC = () => {
-  const [policies, setPolicies] = useState<Policy[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
-  const load = (): void => {
-    client
-      .getPolicies({})
-      .then((r) => {
-        const list = (r.policies ?? []) as Policy[]
-        setPolicies(list)
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getPolicies({})
+      return ((r.policies ?? []) as Policy[]) ?? []
+    },
+    []
+  )
+  const policies = data ?? []
+  const err = actionErr ?? loadErr
 
   const onDelete = async (name: string): Promise<void> => {
     // eslint-disable-next-line no-alert
     if (!window.confirm('Delete policy ' + name + '?')) return
     try {
       await client.deleteName({ name })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -205,7 +205,7 @@ export const PoliciesPage: React.FC = () => {
         <CreatePolicyModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}

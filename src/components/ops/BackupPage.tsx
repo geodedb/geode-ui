@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // BackupPage drives the /ops/backups tab. The Geode B7 endpoints back
 // every action:
@@ -146,34 +147,33 @@ const fmtBytes = (n?: number): string => {
 
 export const BackupPage: React.FC = () => {
   const navigate = useNavigate()
-  const [backups, setBackups] = useState<Backup[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
 
-  const load = (): void => {
-    client
-      .getBackups({})
-      .then((r) => {
-        const list = (r.backups ?? []) as Backup[]
-        setBackups(list)
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getBackups({})
+      return ((r.backups ?? []) as Backup[]) ?? []
+    },
+    []
+  )
+  const backups = data ?? []
+  const err = actionErr ?? loadErr
 
   const onDelete = async (file: string): Promise<void> => {
     // eslint-disable-next-line no-alert
     if (!window.confirm('Delete backup ' + file + '?')) return
     try {
       await client.deleteFile({ file })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -232,7 +232,7 @@ export const BackupPage: React.FC = () => {
         <CreateBackupModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}

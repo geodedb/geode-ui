@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import styled from 'styled-components'
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // AuditLogPage drives the /ops/audit tab. The Geode B11 endpoint backs
 // the table:
@@ -140,43 +141,67 @@ const fieldsSnippet = (e: AuditEntry): string => {
 }
 
 export const AuditLogPage: React.FC = () => {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [err, setErr] = useState<string | null>(null)
   const [filters, setFilters] = useState<Filters>({
     since: '',
     event: '',
     user: '',
   })
 
-  // useEffect polls /api/v1/audit every 5 seconds while the page is
-  // mounted. The cancelled flag prevents stale resolves from clobbering
-  // state after unmount or a filter change.
+  // useApiResource fetches once on mount and on every filter change,
+  // owning the AbortController + stale-resolve guard. We layer a
+  // setInterval on top to drive 5-second polling via refetch(), and
+  // gate it on document.visibilityState so background tabs don't keep
+  // hammering the server (perf finding F15, bundled here as a 1-line
+  // tweak per the gap plan).
+  const {
+    data,
+    error: err,
+    refetch,
+  } = useApiResource<AuditEntry[]>(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = (await client.audit({
+        since: filters.since,
+        event: filters.event,
+        user: filters.user,
+      })) as { entries?: unknown[] }
+      return (r.entries ?? []) as AuditEntry[]
+    },
+    [filters.since, filters.event, filters.user]
+  )
+  const entries = data ?? []
+
   useEffect(() => {
-    let cancelled = false
-    const poll = (): void => {
-      client
-        .audit({
-          since: filters.since,
-          event: filters.event,
-          user: filters.user,
-        })
-        .then((r: { entries?: unknown[] }) => {
-          if (cancelled) return
-          setEntries((r.entries ?? []) as AuditEntry[])
-          setErr(null)
-        })
-        .catch((e: unknown) => {
-          if (cancelled) return
-          setErr(e instanceof Error ? e.message : String(e))
-        })
+    const tick = (): void => {
+      // Skip refetches while the tab is hidden; the next visibility
+      // change will trigger a poll on the visibility listener path.
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'hidden'
+      ) {
+        return
+      }
+      refetch()
     }
-    poll()
-    const id = window.setInterval(poll, 5000)
+    const onVisibility = (): void => {
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'visible'
+      ) {
+        refetch()
+      }
+    }
+    const id = window.setInterval(tick, 5000)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility)
+    }
     return () => {
-      cancelled = true
       window.clearInterval(id)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
     }
-  }, [filters.since, filters.event, filters.user])
+  }, [refetch])
 
   const rows = useMemo(
     () =>
