@@ -78,7 +78,13 @@ export const LabelList: React.FC<{ graph: string }> = ({ graph }) => {
         <li key={l}>
           <Btn
             onClick={() => {
-              setStaged('MATCH (n:' + l + ') RETURN n LIMIT 25')
+              // Prepend `USE GRAPH <graph>;` so the staged query runs
+              // against the active graph when the operator clicks Run
+              // on the Query page. Without it Geode executes against
+              // no graph context and silently returns 0 rows.
+              setStaged(
+                'USE GRAPH ' + graph + '; MATCH (n:' + l + ') RETURN n LIMIT 25'
+              )
               nav('/')
             }}
           >

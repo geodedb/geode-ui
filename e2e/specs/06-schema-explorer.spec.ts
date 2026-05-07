@@ -39,17 +39,22 @@ test.describe('schema explorer', () => {
       .textContent()
     expect(editorText).toContain('MATCH')
     expect(editorText).toContain('Person')
-    // The staged query MUST also be runnable end-to-end. Regression test
-    // for: Geode v0.5.11 rejects backtick-quoted identifiers, so the
-    // schema explorer must stage bare-name queries.
+    // The staged query MUST also be runnable end-to-end. Regression
+    // test for two distinct bugs:
+    //   1. Geode v0.5.11 rejects backtick-quoted identifiers, so the
+    //      schema explorer must stage bare-name queries.
+    //   2. The staged statement must include `USE GRAPH <graph>;` —
+    //      without it Geode runs against no graph context and silently
+    //      returns 0 rows. We assert the EXACT seeded Person count
+    //      (NOT just /\d+ rows/) so a 0-row regression fails loudly.
     await page.getByRole('button', { name: /run/i }).click()
-    // Either we get rows (in this graph it's >= 1 since Person nodes
-    // exist) or a 0-row response — but NOT a 422 query_error banner.
     await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
       0,
       { timeout: 8_000 }
     )
-    await expect(page.getByText(/\d+ rows/)).toBeVisible({ timeout: 8_000 })
+    await expect(
+      page.getByText(new RegExp(`${seed.counts.persons} rows`))
+    ).toBeVisible({ timeout: 8_000 })
   })
 
   test('edge types pane lists ACTED_IN and DIRECTED', async ({
@@ -62,5 +67,31 @@ test.describe('schema explorer', () => {
         expect(page.getByRole('button', { name: t, exact: true })).toBeVisible()
       )
     )
+  })
+
+  test('clicking an edge type stages a runnable MATCH', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/schema')
+    await page.getByRole('button', { name: seed.graph, exact: true }).click()
+    await page.getByRole('button', { name: 'ACTED_IN', exact: true }).click()
+    await expect(page).toHaveURL(/\/$/)
+    const editorText = await page
+      .locator('.monaco-editor')
+      .first()
+      .textContent()
+    expect(editorText).toContain('MATCH')
+    expect(editorText).toContain('ACTED_IN')
+
+    // Run it. Same regression as the label test — without USE GRAPH the
+    // query silently returns 0 rows. We assert the exact seeded count.
+    await page.getByRole('button', { name: /run/i }).click()
+    await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
+      0,
+      { timeout: 8_000 }
+    )
+    await expect(
+      page.getByText(new RegExp(`${seed.counts.actedIn} rows`))
+    ).toBeVisible({ timeout: 8_000 })
   })
 })

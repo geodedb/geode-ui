@@ -69,7 +69,17 @@ export const EdgeTypeList: React.FC<{ graph: string }> = ({ graph }) => {
         <li key={t}>
           <Btn
             onClick={() => {
-              setStaged('MATCH ()-[r:' + t + ']->() RETURN r LIMIT 25')
+              // Prepend `USE GRAPH <graph>;` so the staged query runs
+              // against the active graph when the operator clicks Run.
+              // Without it Geode executes against no graph context
+              // and silently returns 0 rows.
+              setStaged(
+                'USE GRAPH ' +
+                  graph +
+                  '; MATCH ()-[r:' +
+                  t +
+                  ']->() RETURN r LIMIT 25'
+              )
               nav('/')
             }}
           >
