@@ -168,3 +168,17 @@ services:
 
 volumes:
   geode-data:
+
+# Hosts that route 10.0.0.0/8, 172.16.0.0/12, and 192.168.0.0/16 through
+# a VPN/overlay (e.g. Tailscale `abs`) leave Docker's default
+# `default-address-pools` (172.17.0.0/16…172.30.0.0/16) unable to claim
+# a free subnet — `docker network create` then fails with "all
+# predefined address pools have been fully subnetted". An explicit
+# more-specific subnet here wins over the broader VPN catch-all route.
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+      - subnet: 172.30.42.0/24
