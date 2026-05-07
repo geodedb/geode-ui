@@ -23,12 +23,46 @@ const Td = styled.td`
   padding: 6px;
   border-top: 1px solid ${({ theme }) => theme.colors.border};
   vertical-align: top;
-  // Wrap on whitespace AND between long words / property pairs so
-  // a many-property node row doesn't overflow horizontally and chop
-  // off the trailing fields.
   white-space: pre-wrap;
   word-break: break-word;
   max-width: 640px;
+`
+
+const NodeChip = styled.span`
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: ${({ theme }) => theme.colors.primary};
+  color: #fff;
+  margin-right: 4px;
+`
+
+const EdgeChip = styled(NodeChip)`
+  background: ${({ theme }) => theme.colors.surface};
+  color: ${({ theme }) => theme.colors.text};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+`
+
+const PropList = styled.dl`
+  margin: 4px 0 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  font-size: 0.85rem;
+
+  dt {
+    color: ${({ theme }) => theme.colors.textSecondary};
+    font-weight: 500;
+  }
+
+  dd {
+    margin: 0;
+    color: ${({ theme }) => theme.colors.text};
+    word-break: break-word;
+  }
 `
 
 type Props = {
@@ -132,6 +166,55 @@ export function formatCell(v: unknown): string {
   return String(v)
 }
 
+// CellView renders a single cell. For node and edge values it produces
+// a structured display — a label/type chip plus a two-column property
+// list — so a row with many properties stays readable instead of
+// collapsing into a wall of text. Everything else falls through to
+// formatCell, keeping the string contract for primitives, paths,
+// arrays, and unknown objects (and preserving copy-paste behavior).
+const CellView: React.FC<{ value: unknown }> = ({ value }) => {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const o = value as AnyRecord
+    if (isNode(o)) {
+      return (
+        <div>
+          <div>
+            {(o.labels as string[]).map((l) => (
+              <NodeChip key={l}>:{l}</NodeChip>
+            ))}
+          </div>
+          <PropList>
+            {Object.entries(o.properties as AnyRecord).map(([k, v2]) => (
+              <React.Fragment key={k}>
+                <dt>{k}</dt>
+                <dd>{formatPropValue(v2)}</dd>
+              </React.Fragment>
+            ))}
+          </PropList>
+        </div>
+      )
+    }
+    if (isEdge(o)) {
+      return (
+        <div>
+          <div>
+            <EdgeChip>:{o.type as string}</EdgeChip>
+          </div>
+          <PropList>
+            {Object.entries(o.properties as AnyRecord).map(([k, v2]) => (
+              <React.Fragment key={k}>
+                <dt>{k}</dt>
+                <dd>{formatPropValue(v2)}</dd>
+              </React.Fragment>
+            ))}
+          </PropList>
+        </div>
+      )
+    }
+  }
+  return <>{formatCell(value)}</>
+}
+
 export const TableView: React.FC<Props> = ({ resp }) => (
   <Wrap>
     <Table>
@@ -152,7 +235,9 @@ export const TableView: React.FC<Props> = ({ resp }) => (
           <tr key={i}>
             {row.map((cell, j) => (
               // eslint-disable-next-line react/no-array-index-key
-              <Td key={j}>{formatCell(cell)}</Td>
+              <Td key={j}>
+                <CellView value={cell} />
+              </Td>
             ))}
           </tr>
         ))}

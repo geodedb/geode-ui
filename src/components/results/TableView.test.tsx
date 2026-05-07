@@ -35,6 +35,63 @@ test('renders columns and rows', () => {
   expect(screen.getByText('y')).toBeInTheDocument()
 })
 
+// Regression for the "wall of text" complaint: a node row with many
+// properties must render a label chip + a structured key/value list
+// so each property is on its own row rather than concatenated into a
+// single 600-char string.
+test('renders node rows as label chip + structured property list', () => {
+  const node = {
+    id: 1,
+    labels: ['Role'],
+    properties: {
+      name: 'admin',
+      parent_role: 0,
+      created_at: 1778128562483,
+      is_system: true,
+      priority: 100,
+    },
+  }
+  render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        resp={{ columns: [{ name: 'r', type: 'node' }], rows: [[node]] }}
+      />
+    </ThemeProvider>
+  )
+  expect(screen.getByText(':Role')).toBeInTheDocument()
+  // Each property key should appear as its own <dt> element.
+  expect(screen.getByText('name')).toBeInTheDocument()
+  expect(screen.getByText('parent_role')).toBeInTheDocument()
+  expect(screen.getByText('created_at')).toBeInTheDocument()
+  expect(screen.getByText('is_system')).toBeInTheDocument()
+  expect(screen.getByText('priority')).toBeInTheDocument()
+  // Values render alongside.
+  expect(screen.getByText("'admin'")).toBeInTheDocument()
+  expect(screen.getByText('1778128562483')).toBeInTheDocument()
+})
+
+test('renders edge rows as type chip + structured property list', () => {
+  const edge = {
+    id: 100,
+    start_node: 1,
+    end_node: 2,
+    type: 'ACTED_IN',
+    properties: { role: 'Lead', year: 2008 },
+  }
+  render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        resp={{ columns: [{ name: 'e', type: 'edge' }], rows: [[edge]] }}
+      />
+    </ThemeProvider>
+  )
+  expect(screen.getByText(':ACTED_IN')).toBeInTheDocument()
+  expect(screen.getByText('role')).toBeInTheDocument()
+  expect(screen.getByText("'Lead'")).toBeInTheDocument()
+  expect(screen.getByText('year')).toBeInTheDocument()
+  expect(screen.getByText('2008')).toBeInTheDocument()
+})
+
 describe('formatCell', () => {
   test('renders nulls as empty string', () => {
     expect(formatCell(null)).toBe('')
