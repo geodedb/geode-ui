@@ -122,6 +122,11 @@ services:
     - /etc/geode-ui/profiles.json
     - -upload-dir
     - /var/lib/geode-ui/uploads
+      # The e2e stack runs over plain HTTP (port 8080). With the default
+      # `-secure-cookies=true`, the browser refuses to attach the auth
+      # cookie because Set-Cookie carries the `Secure` flag. Disable it
+      # for the test container so cookie-based auth works in Playwright.
+    - -secure-cookies=false
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
     - geode-ui-uploads:/var/lib/geode-ui/uploads

@@ -51,7 +51,7 @@ test.describe('auth', () => {
     await expect(sel.queryRunBtn(page)).toBeVisible()
   })
 
-  test('logout clears token and redirects', async ({ page }) => {
+  test('logout clears auth cookie and redirects', async ({ page, context }) => {
     await page.goto('/login')
     await sel.loginUsername(page).fill(USER)
     await sel.loginPassword(page).fill(PASS)
@@ -59,10 +59,10 @@ test.describe('auth', () => {
     await expect(page).toHaveURL(/\/$/)
     await sel.logout(page).click()
     await expect(page).toHaveURL(/\/login$/)
-    // localStorage cleared
-    const token = await page.evaluate(() =>
-      localStorage.getItem('geode-ui.access_token')
+    // Auth cookie cleared (Set-Cookie with Max-Age=0 from /auth/logout).
+    const authCookie = (await context.cookies()).find(
+      (c) => c.name === 'geode-ui-auth'
     )
-    expect(token).toBeNull()
+    expect(authCookie).toBeUndefined()
   })
 })

@@ -25,21 +25,19 @@ test.describe('ops', () => {
 
   test('audit table contains a query_executed entry within 10s', async ({
     authedPage: page,
+    authToken,
     request,
   }) => {
-    // Visit the app first so localStorage is reachable (the
-    // addInitScript fixture only takes effect after a navigation).
+    // Navigate so the SPA mounts (some assertions later depend on this).
     await page.goto('/')
-    const token = await page.evaluate(() =>
-      localStorage.getItem('geode-ui.access_token')
-    )
-    expect(token).toBeTruthy()
+    expect(authToken).toBeTruthy()
     // Probe the audit endpoint directly. Geode v0.5.11 returns 403
     // `securex: insufficient role` for /api/v1/audit even for the
     // bootstrap admin, so we skip the entry-content assertion when the
-    // engine refuses to surface audit logs at all.
+    // engine refuses to surface audit logs at all. Use Bearer auth
+    // (CSRF middleware skips the Authorization-header path).
     const probe = await request.get('/api/v1/audit?limit=1', {
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${authToken}` },
     })
     test.skip(
       !probe.ok(),
@@ -47,7 +45,7 @@ test.describe('ops', () => {
     )
     await request.post('/api/v1/query', {
       headers: {
-        authorization: `Bearer ${token}`,
+        authorization: `Bearer ${authToken}`,
         'content-type': 'application/json',
       },
       data: {
