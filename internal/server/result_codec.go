@@ -29,6 +29,12 @@ type queryRowScanner interface {
 // graph summary, and elapsed_ms measured from start. Both the synchronous
 // query handler and the transactional Run handler call this so the shape
 // stays consistent across endpoints.
+//
+// PERF-F1 / issue #18: this is a single-pass scan. Each row is scanned
+// once, fed through the inline graph-summary accumulator (visitRow), then
+// JSON-marshalled. The previous implementation buffered every row into a
+// [][]any slice and walked it again in extractGraphSummary -- two full
+// passes plus an extra row-sized allocation per result.
 func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp, error) {
 	cols, err := rows.Columns()
 	if err != nil {
@@ -50,30 +56,41 @@ func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp
 		colDescs[i] = jsontext.Value(raw)
 	}
 
-	var allRows [][]any
-	var rowJSON []jsontext.Value
+	// Single-pass row drain: scan -> fold into summary -> marshal -> append.
+	// We reuse one row backing array per iteration; the JSON marshaller
+	// snapshots its inputs so the next iteration can safely overwrite the
+	// slice contents.
+	rowJSON := make([]jsontext.Value, 0)
+	summary := newGraphSummaryAccum()
+	row := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range row {
+		ptrs[i] = &row[i]
+	}
+	rowCount := int64(0)
 	for rows.Next() {
-		row := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
+		// Reset before each Scan -- driver may leave previous values in
+		// place for null/skipped columns otherwise.
 		for i := range row {
-			ptrs[i] = &row[i]
+			row[i] = nil
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
-		allRows = append(allRows, row)
+		summary.visitRow(row)
 		raw, mErr := json.Marshal(row)
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal row: %w", mErr)
 		}
 		rowJSON = append(rowJSON, jsontext.Value(raw))
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	summary := extractGraphSummary(allRows)
-	summaryJSON, err := json.Marshal(summary)
+	graphSummary := summary.finish()
+	summaryJSON, err := json.Marshal(graphSummary)
 	if err != nil {
 		return nil, fmt.Errorf("marshal graph summary: %w", err)
 	}
@@ -81,18 +98,11 @@ func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp
 	return &gentypes.QueryResp{
 		Columns:      colDescs,
 		Rows:         rowJSON,
-		RowCount:     int64(len(allRows)),
+		RowCount:     rowCount,
 		ElapsedMs:    time.Since(start).Milliseconds(),
 		GraphSummary: jsontext.Value(summaryJSON),
 	}, nil
 }
-
-// extractGraphSummary walks the rows of a query result and pulls out any
-// nodes/edges/paths so the UI can render a graph view alongside the table.
-//
-// Geode returns nodes as map[string]any with keys {id, labels, properties},
-// edges as {id, start_node, end_node, type, properties}, paths as
-// {nodes: []map, edges: []map}. See geode-client-go/rows.go:118-138.
 
 // GraphNode is the JSON-friendly representation of a Geode node row cell.
 type GraphNode struct {
@@ -117,48 +127,89 @@ type GraphSummary struct {
 	Edges []GraphEdge `json:"edges"`
 }
 
+// graphSummaryAccum is the streaming state used by scanQueryResult to
+// extract the graph summary inline as rows are scanned. visitRow is
+// called once per row with the raw cell slice; finish returns the
+// finalised GraphSummary at end-of-stream.
+//
+// The accumulator is a thin wrapper around two dedup maps -- it deliberately
+// has no buffering of its own beyond the GraphSummary slices it builds.
+type graphSummaryAccum struct {
+	seenNode map[int64]struct{}
+	seenEdge map[int64]struct{}
+	out      GraphSummary
+}
+
+func newGraphSummaryAccum() *graphSummaryAccum {
+	return &graphSummaryAccum{
+		seenNode: map[int64]struct{}{},
+		seenEdge: map[int64]struct{}{},
+	}
+}
+
+// visit drains a single decoded JSON value (cell, list element, or nested
+// path member) into the accumulator. The recursion mirrors the previous
+// extractGraphSummary closure: nodes have {id, labels}, edges have
+// {id, start_node, end_node}, and paths have {nodes:[], edges:[]}.
+func (a *graphSummaryAccum) visit(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		if id, ok := nodeID(t); ok {
+			if _, dup := a.seenNode[id]; !dup {
+				a.out.Nodes = append(a.out.Nodes, asNode(t))
+				a.seenNode[id] = struct{}{}
+			}
+		}
+		if id, ok := edgeID(t); ok {
+			if _, dup := a.seenEdge[id]; !dup {
+				a.out.Edges = append(a.out.Edges, asEdge(t))
+				a.seenEdge[id] = struct{}{}
+			}
+		}
+		if nodes, ok := t["nodes"].([]any); ok {
+			for _, n := range nodes {
+				a.visit(n)
+			}
+		}
+		if edges, ok := t["edges"].([]any); ok {
+			for _, e := range edges {
+				a.visit(e)
+			}
+		}
+	case []any:
+		for _, item := range t {
+			a.visit(item)
+		}
+	}
+}
+
+// visitRow folds one row's worth of cells into the accumulator.
+func (a *graphSummaryAccum) visitRow(row []any) {
+	for _, cell := range row {
+		a.visit(cell)
+	}
+}
+
+// finish returns the GraphSummary built up so far. The accumulator is
+// not safe to reuse afterwards.
+func (a *graphSummaryAccum) finish() GraphSummary {
+	return a.out
+}
+
+// extractGraphSummary walks rows and returns a GraphSummary. Retained
+// for the test surface and any future caller that already has the rows
+// buffered; the production hot path now folds the work inline via
+// graphSummaryAccum during the single-pass scanQueryResult drain.
+//
+// Geode returns nodes as map[string]any with keys {id, labels, properties},
+// edges as {id, start_node, end_node, type, properties}, paths as
+// {nodes: []map, edges: []map}. See geode-client-go/rows.go:118-138.
 func extractGraphSummary(rows [][]any) GraphSummary {
-	seenNode := map[int64]struct{}{}
-	seenEdge := map[int64]struct{}{}
-	var summary GraphSummary
-	var visit func(v any)
-	visit = func(v any) {
-		switch t := v.(type) {
-		case map[string]any:
-			if id, ok := nodeID(t); ok {
-				if _, dup := seenNode[id]; !dup {
-					summary.Nodes = append(summary.Nodes, asNode(t))
-					seenNode[id] = struct{}{}
-				}
-			}
-			if id, ok := edgeID(t); ok {
-				if _, dup := seenEdge[id]; !dup {
-					summary.Edges = append(summary.Edges, asEdge(t))
-					seenEdge[id] = struct{}{}
-				}
-			}
-			if nodes, ok := t["nodes"].([]any); ok {
-				for _, n := range nodes {
-					visit(n)
-				}
-			}
-			if edges, ok := t["edges"].([]any); ok {
-				for _, e := range edges {
-					visit(e)
-				}
-			}
-		case []any:
-			for _, item := range t {
-				visit(item)
-			}
-		}
-	}
+	a := newGraphSummaryAccum()
 	for _, row := range rows {
-		for _, cell := range row {
-			visit(cell)
-		}
+		a.visitRow(row)
 	}
-	return summary
+	return a.finish()
 }
 
 // toInt64 best-effort coerces a decoded JSON value into an int64. JSON
