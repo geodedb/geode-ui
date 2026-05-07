@@ -62,16 +62,16 @@ test.describe('schema explorer', () => {
     //      schema explorer must stage bare-name queries.
     //   2. The staged statement must include `USE GRAPH <graph>;` —
     //      without it Geode runs against no graph context and silently
-    //      returns 0 rows. We assert the EXACT seeded Person count
-    //      (NOT just /\d+ rows/) so a 0-row regression fails loudly.
+    //      returns 0 rows. The staged template caps at LIMIT 25, and
+    //      the movies seed has more Person nodes than that, so we
+    //      assert exactly 25 rows (NOT /\d+ rows/, which would let a
+    //      0-row regression slip through).
     await page.getByRole('button', { name: /run/i }).click()
     await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
       0,
       { timeout: 8_000 }
     )
-    await expect(
-      page.getByText(new RegExp(`${seed.counts.persons} rows`))
-    ).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/25 rows/)).toBeVisible({ timeout: 8_000 })
   })
 
   test('edge types pane lists ACTED_IN and DIRECTED', async ({
@@ -101,14 +101,14 @@ test.describe('schema explorer', () => {
     expect(editorText).toContain('ACTED_IN')
 
     // Run it. Same regression as the label test — without USE GRAPH the
-    // query silently returns 0 rows. We assert the exact seeded count.
+    // query silently returns 0 rows. The staged template caps at
+    // LIMIT 25 and the seed has more ACTED_IN edges than that, so we
+    // assert exactly 25 rows.
     await page.getByRole('button', { name: /run/i }).click()
     await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
       0,
       { timeout: 8_000 }
     )
-    await expect(
-      page.getByText(new RegExp(`${seed.counts.actedIn} rows`))
-    ).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/25 rows/)).toBeVisible({ timeout: 8_000 })
   })
 })

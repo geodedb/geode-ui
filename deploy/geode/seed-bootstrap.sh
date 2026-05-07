@@ -250,8 +250,8 @@ seed_movies() {
     fi
 
     if movies_graph_exists; then
-        if count_movies_nodes | grep -q '"c":9'; then
-            log "movies graph already populated (9 nodes); skipping seed"
+        if count_movies_nodes | grep -q '"c":171'; then
+            log "movies graph already populated (171 nodes); skipping seed"
             return 0
         fi
         log "movies graph exists but is incomplete; dropping for clean reseed"
@@ -266,7 +266,9 @@ seed_movies() {
     query_admin -f "${GEODE_INIT_GQL}" >/dev/null 2>&1 || true
 }
 
-# Step 5: verify the seed produced exactly 9 nodes.
+# Step 5: verify the seed produced exactly the expected node count.
+# 171 = 38 Movie + 133 Person nodes from the Neo4j Movies dataset.
+# Counts pinned in deploy/geode/seed/SOURCES.md and e2e/helpers/gqlData.ts.
 verify_seed() {
     if ! movies_graph_exists; then
         err "verification failed: graph 'movies' does not exist"
@@ -274,11 +276,11 @@ verify_seed() {
     fi
     local out
     out=$(count_movies_nodes)
-    if printf '%s' "$out" | grep -q '"c":9'; then
-        log "verified: 9 nodes in graph 'movies'"
+    if printf '%s' "$out" | grep -q '"c":171'; then
+        log "verified: 171 nodes in graph 'movies'"
         return 0
     fi
-    err "expected 9 nodes, got: $out"
+    err "expected 171 nodes, got: $out"
     return 1
 }
 

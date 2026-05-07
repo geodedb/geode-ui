@@ -1,64 +1,459 @@
 /*
- * Seeds the e2e movies graph used by every Playwright test.
+ * Generated from deploy/geode/seed/movies.cypher by
+ * deploy/geode/seed/convert.py — DO NOT EDIT BY HAND.
  *
- * Total: 6 nodes labeled Person, 3 nodes labeled Movie, 9 ACTED_IN edges,
- *        3 DIRECTED edges. Properties: Person {name, born},
- *        Movie {title, year}, edge ACTED_IN {role}.
+ * Source: Neo4j Movies dataset
+ * <https://github.com/neo4j-graph-examples/movies>
+ * License: Apache 2.0
  *
- * Counts are pinned in e2e/helpers/gqlData.ts so test assertions stay in
- * sync if this file ever grows.
- *
- * Geode v0.5.11 GQL dialect notes
- * --------------------------------
- *   * `--` line comments are rejected (GB02: double-hyphen comments
- *     disabled). Use C-style block comments only. `//` line comments
- *     parse but raise a GB03:DoubleSolidusComment flagger finding, so
- *     we avoid them too.
- *   * Statements are terminated with `;`. The `geode query` client
- *     accepts a multi-statement script either via stdin (`... -`) or via
- *     `--file <path>`.
- *   * `CREATE INDEX ON :Label(prop)` is NOT in the v0.5.11 dialect.
- *     Geode manages indexes internally; the schema explorer reads label
- *     and property metadata directly from the storage layer, so no
- *     explicit index DDL is required for tests.
- *   * `USE GRAPH <name>` must be issued before each statement that
- *     touches graph data when running over the wire (the server does
- *     not retain graph context across statements within a single
- *     `query` call). We repeat `USE GRAPH movies` per statement so the
- *     file is safe to run statement-by-statement (e.g. when a bootstrap
- *     script splits on `;`) or as one batch.
- *   * Multi-pattern MATCH (`MATCH (a), (b)`) is accepted and produces
- *     the Cartesian product, which is what we want for relationship
- *     seeding.
+ * Geode v0.5.11 dialect quirks the converter handles:
+ *   - Cypher MERGE → CREATE (with cross-statement dedup).
+ *   - CREATE CONSTRAINT dropped (42000 parse error on wire).
+ *   - Array properties flattened to pipe-separated strings.
  */
 
 CREATE GRAPH movies;
 
-/* People (6) */
-USE GRAPH movies; CREATE (:Person {name: 'Alice Wonder',   born: 1980});
-USE GRAPH movies; CREATE (:Person {name: 'Bob Builder',    born: 1975});
-USE GRAPH movies; CREATE (:Person {name: 'Carol Singer',   born: 1990});
-USE GRAPH movies; CREATE (:Person {name: 'Dave Smith',     born: 1985});
-USE GRAPH movies; CREATE (:Person {name: 'Eve Adams',      born: 1992});
-USE GRAPH movies; CREATE (:Person {name: 'Frank Director', born: 1965});
+/* Nodes (171 total) */
+USE GRAPH movies; CREATE (:Movie {released: 1992, tagline: 'In the heart of the nation''s capital, in a courthouse of the U.S. government, one man will stop at nothing to keep his honor, and one will stop at nothing to find the truth.', title: 'A Few Good Men'});
+USE GRAPH movies; CREATE (:Movie {released: 1992, tagline: 'Once in a lifetime you get a chance to do something different.', title: 'A League of Their Own'});
+USE GRAPH movies; CREATE (:Movie {released: 1995, tagline: 'Houston, we have a problem.', title: 'Apollo 13'});
+USE GRAPH movies; CREATE (:Movie {released: 1997, tagline: 'A comedy from the heart that goes for the throat.', title: 'As Good as It Gets'});
+USE GRAPH movies; CREATE (:Movie {released: 1999, tagline: 'One robot''s 200 year journey to become an ordinary man.', title: 'Bicentennial Man'});
+USE GRAPH movies; CREATE (:Movie {released: 2000, tagline: 'At the edge of the world, his journey begins.', title: 'Cast Away'});
+USE GRAPH movies; CREATE (:Movie {released: 2007, tagline: 'A stiff drink. A little mascara. A lot of nerve. Who said they couldn''t bring down the Soviet empire.', title: 'Charlie Wilson''s War'});
+USE GRAPH movies; CREATE (:Movie {released: 2012, tagline: 'Everything is connected', title: 'Cloud Atlas'});
+USE GRAPH movies; CREATE (:Movie {released: 2008, tagline: '400 million people were waiting for the truth.', title: 'Frost/Nixon'});
+USE GRAPH movies; CREATE (:Movie {released: 1992, tagline: 'He didn''t want law. He wanted justice.', title: 'Hoffa'});
+USE GRAPH movies; CREATE (:Movie {released: 2000, tagline: 'The rest of his life begins now.', title: 'Jerry Maguire'});
+USE GRAPH movies; CREATE (:Movie {released: 1990, tagline: 'A story of love, lava and burning desire.', title: 'Joe Versus the Volcano'});
+USE GRAPH movies; CREATE (:Movie {released: 1995, tagline: 'The hottest data on earth. In the coolest head in town', title: 'Johnny Mnemonic'});
+USE GRAPH movies; CREATE (:Movie {released: 2009, tagline: 'Prepare to enter a secret world of assassins', title: 'Ninja Assassin'});
+USE GRAPH movies; CREATE (:Movie {released: 1975, tagline: 'If he''s crazy, what does that make you?', title: 'One Flew Over the Cuckoo''s Nest'});
+USE GRAPH movies; CREATE (:Movie {released: 2006, tagline: 'Based on the extraordinary true story of one man''s fight for freedom', title: 'RescueDawn'});
+USE GRAPH movies; CREATE (:Movie {released: 1993, tagline: 'What if someone you never met, someone you never saw, someone you never knew was the only someone for you?', title: 'Sleepless in Seattle'});
+USE GRAPH movies; CREATE (:Movie {released: 1999, tagline: 'First loves last. Forever.', title: 'Snow Falling on Cedars'});
+USE GRAPH movies; CREATE (:Movie {released: 2003, title: 'Something''s Gotta Give'});
+USE GRAPH movies; CREATE (:Movie {released: 2008, tagline: 'Speed has no limits', title: 'Speed Racer'});
+USE GRAPH movies; CREATE (:Movie {released: 1986, tagline: 'For some, it''s the last real taste of innocence, and the first real taste of life. But for everyone, it''s the time that memories are made of.', title: 'Stand By Me'});
+USE GRAPH movies; CREATE (:Movie {released: 1996, tagline: 'In every life there comes a time when that thing you dream becomes that thing you do', title: 'That Thing You Do'});
+USE GRAPH movies; CREATE (:Movie {released: 1996, tagline: 'Come as you are', title: 'The Birdcage'});
+USE GRAPH movies; CREATE (:Movie {released: 2006, tagline: 'Break The Codes', title: 'The Da Vinci Code'});
+USE GRAPH movies; CREATE (:Movie {released: 1997, tagline: 'Evil has its winning ways', title: 'The Devil''s Advocate'});
+USE GRAPH movies; CREATE (:Movie {released: 1999, tagline: 'Walk a mile you''ll never forget.', title: 'The Green Mile'});
+USE GRAPH movies; CREATE (:Movie {released: 1999, tagline: 'Welcome to the Real World', title: 'The Matrix'});
+USE GRAPH movies; CREATE (:Movie {released: 2003, tagline: 'Free your mind', title: 'The Matrix Reloaded'});
+USE GRAPH movies; CREATE (:Movie {released: 2003, tagline: 'Everything that has a beginning has an end', title: 'The Matrix Revolutions'});
+USE GRAPH movies; CREATE (:Movie {released: 2004, tagline: 'This Holiday Season... Believe', title: 'The Polar Express'});
+USE GRAPH movies; CREATE (:Movie {released: 2000, tagline: 'Pain heals, Chicks dig scars... Glory lasts forever', title: 'The Replacements'});
+USE GRAPH movies; CREATE (:Movie {released: 1986, tagline: 'I feel the need, the need for speed.', title: 'Top Gun'});
+USE GRAPH movies; CREATE (:Movie {released: 1996, tagline: 'Don''t Breathe. Don''t Look Back.', title: 'Twister'});
+USE GRAPH movies; CREATE (:Movie {released: 1992, tagline: 'It''s a hell of a thing, killing a man', title: 'Unforgiven'});
+USE GRAPH movies; CREATE (:Movie {released: 2006, tagline: 'Freedom! Forever!', title: 'V for Vendetta'});
+USE GRAPH movies; CREATE (:Movie {released: 1998, tagline: 'After life there is more. The end is just the beginning.', title: 'What Dreams May Come'});
+USE GRAPH movies; CREATE (:Movie {released: 1998, tagline: 'Can two friends sleep together and still love each other in the morning?', title: 'When Harry Met Sally'});
+USE GRAPH movies; CREATE (:Movie {released: 1998, tagline: 'At odds in life... in love on-line.', title: 'You''ve Got Mail'});
+USE GRAPH movies; CREATE (:Person {born: 1961, name: 'Aaron Sorkin'});
+USE GRAPH movies; CREATE (:Person {born: 1940, name: 'Al Pacino'});
+USE GRAPH movies; CREATE (:Person {name: 'Angela Scope'});
+USE GRAPH movies; CREATE (:Person {born: 1960, name: 'Annabella Sciorra'});
+USE GRAPH movies; CREATE (:Person {born: 1962, name: 'Anthony Edwards'});
+USE GRAPH movies; CREATE (:Person {born: 1976, name: 'Audrey Tautou'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'Ben Miles'});
+USE GRAPH movies; CREATE (:Person {born: 1955, name: 'Bill Paxton'});
+USE GRAPH movies; CREATE (:Person {born: 1953, name: 'Bill Pullman'});
+USE GRAPH movies; CREATE (:Person {born: 1948, name: 'Billy Crystal'});
+USE GRAPH movies; CREATE (:Person {born: 1961, name: 'Bonnie Hunt'});
+USE GRAPH movies; CREATE (:Person {born: 1970, name: 'Brooke Langton'});
+USE GRAPH movies; CREATE (:Person {born: 1949, name: 'Bruno Kirby'});
+USE GRAPH movies; CREATE (:Person {born: 1957, name: 'Cameron Crowe'});
+USE GRAPH movies; CREATE (:Person {born: 1956, name: 'Carrie Fisher'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'Carrie-Anne Moss'});
+USE GRAPH movies; CREATE (:Person {born: 1975, name: 'Charlize Theron'});
+USE GRAPH movies; CREATE (:Person {born: 1958, name: 'Chris Columbus'});
+USE GRAPH movies; CREATE (:Person {born: 1974, name: 'Christian Bale'});
+USE GRAPH movies; CREATE (:Person {born: 1980, name: 'Christina Ricci'});
+USE GRAPH movies; CREATE (:Person {born: 1948, name: 'Christopher Guest'});
+USE GRAPH movies; CREATE (:Person {born: 1930, name: 'Clint Eastwood'});
+USE GRAPH movies; CREATE (:Person {born: 1971, name: 'Corey Feldman'});
+USE GRAPH movies; CREATE (:Person {born: 1968, name: 'Cuba Gooding Jr.'});
+USE GRAPH movies; CREATE (:Person {born: 1944, name: 'Danny DeVito'});
+USE GRAPH movies; CREATE (:Person {born: 1973, name: 'Dave Chappelle'});
+USE GRAPH movies; CREATE (:Person {born: 1969, name: 'David Mitchell'});
+USE GRAPH movies; CREATE (:Person {born: 1953, name: 'David Morse'});
+USE GRAPH movies; CREATE (:Person {born: 1962, name: 'Demi Moore'});
+USE GRAPH movies; CREATE (:Person {born: 1946, name: 'Diane Keaton'});
+USE GRAPH movies; CREATE (:Person {born: 1968, name: 'Dina Meyer'});
+USE GRAPH movies; CREATE (:Person {born: 1950, name: 'Ed Harris'});
+USE GRAPH movies; CREATE (:Person {born: 1978, name: 'Emil Eifrem'});
+USE GRAPH movies; CREATE (:Person {born: 1985, name: 'Emile Hirsch'});
+USE GRAPH movies; CREATE (:Person {born: 1970, name: 'Ethan Hawke'});
+USE GRAPH movies; CREATE (:Person {born: 1959, name: 'Frank Darabont'});
+USE GRAPH movies; CREATE (:Person {born: 1938, name: 'Frank Langella'});
+USE GRAPH movies; CREATE (:Person {born: 1955, name: 'Gary Sinise'});
+USE GRAPH movies; CREATE (:Person {born: 1956, name: 'Geena Davis'});
+USE GRAPH movies; CREATE (:Person {born: 1930, name: 'Gene Hackman'});
+USE GRAPH movies; CREATE (:Person {born: 1963, name: 'Greg Kinnear'});
+USE GRAPH movies; CREATE (:Person {born: 1966, name: 'Halle Berry'});
+USE GRAPH movies; CREATE (:Person {born: 1963, name: 'Helen Hunt'});
+USE GRAPH movies; CREATE (:Person {born: 1950, name: 'Howard Deutch'});
+USE GRAPH movies; CREATE (:Person {born: 1960, name: 'Hugo Weaving'});
+USE GRAPH movies; CREATE (:Person {born: 1939, name: 'Ian McKellen'});
+USE GRAPH movies; CREATE (:Person {born: 1958, name: 'Ice-T'});
+USE GRAPH movies; CREATE (:Person {born: 1943, name: 'J.T. Walsh'});
+USE GRAPH movies; CREATE (:Person {born: 1937, name: 'Jack Nicholson'});
+USE GRAPH movies; CREATE (:Person {born: 1940, name: 'James Cromwell'});
+USE GRAPH movies; CREATE (:Person {born: 1940, name: 'James L. Brooks'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'James Marshall'});
+USE GRAPH movies; CREATE (:Person {name: 'James Thompson'});
+USE GRAPH movies; CREATE (:Person {born: 1943, name: 'Jan de Bont'});
+USE GRAPH movies; CREATE (:Person {born: 1970, name: 'Jay Mohr'});
+USE GRAPH movies; CREATE (:Person {born: 1974, name: 'Jerry O''Connell'});
+USE GRAPH movies; CREATE (:Person {name: 'Jessica Thompson'});
+USE GRAPH movies; CREATE (:Person {born: 1949, name: 'Jim Broadbent'});
+USE GRAPH movies; CREATE (:Person {born: 1941, name: 'Jim Cash'});
+USE GRAPH movies; CREATE (:Person {born: 1952, name: 'Joel Silver'});
+USE GRAPH movies; CREATE (:Person {born: 1965, name: 'John C. Reilly'});
+USE GRAPH movies; CREATE (:Person {born: 1966, name: 'John Cusack'});
+USE GRAPH movies; CREATE (:Person {born: 1960, name: 'John Goodman'});
+USE GRAPH movies; CREATE (:Person {born: 1940, name: 'John Hurt'});
+USE GRAPH movies; CREATE (:Person {born: 1950, name: 'John Patrick Stanley'});
+USE GRAPH movies; CREATE (:Person {born: 1996, name: 'Jonathan Lipnicki'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'Julia Roberts'});
+USE GRAPH movies; CREATE (:Person {born: 1964, name: 'Keanu Reeves'});
+USE GRAPH movies; CREATE (:Person {born: 1957, name: 'Kelly McGillis'});
+USE GRAPH movies; CREATE (:Person {born: 1962, name: 'Kelly Preston'});
+USE GRAPH movies; CREATE (:Person {born: 1958, name: 'Kevin Bacon'});
+USE GRAPH movies; CREATE (:Person {born: 1957, name: 'Kevin Pollak'});
+USE GRAPH movies; CREATE (:Person {born: 1966, name: 'Kiefer Sutherland'});
+USE GRAPH movies; CREATE (:Person {born: 1965, name: 'Lana Wachowski'});
+USE GRAPH movies; CREATE (:Person {born: 1961, name: 'Laurence Fishburne'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'Lilly Wachowski'});
+USE GRAPH movies; CREATE (:Person {born: 1977, name: 'Liv Tyler'});
+USE GRAPH movies; CREATE (:Person {born: 1963, name: 'Lori Petty'});
+USE GRAPH movies; CREATE (:Person {born: 1954, name: 'Madonna'});
+USE GRAPH movies; CREATE (:Person {born: 1942, name: 'Marshall Bell'});
+USE GRAPH movies; CREATE (:Person {born: 1966, name: 'Matthew Fox'});
+USE GRAPH movies; CREATE (:Person {born: 1929, name: 'Max von Sydow'});
+USE GRAPH movies; CREATE (:Person {born: 1961, name: 'Meg Ryan'});
+USE GRAPH movies; CREATE (:Person {born: 1957, name: 'Michael Clarke Duncan'});
+USE GRAPH movies; CREATE (:Person {born: 1969, name: 'Michael Sheen'});
+USE GRAPH movies; CREATE (:Person {born: 1931, name: 'Mike Nichols'});
+USE GRAPH movies; CREATE (:Person {born: 1932, name: 'Milos Forman'});
+USE GRAPH movies; CREATE (:Person {born: 1949, name: 'Nancy Meyers'});
+USE GRAPH movies; CREATE (:Person {name: 'Naomie Harris'});
+USE GRAPH movies; CREATE (:Person {born: 1981, name: 'Natalie Portman'});
+USE GRAPH movies; CREATE (:Person {born: 1956, name: 'Nathan Lane'});
+USE GRAPH movies; CREATE (:Person {born: 1971, name: 'Noah Wyle'});
+USE GRAPH movies; CREATE (:Person {born: 1941, name: 'Nora Ephron'});
+USE GRAPH movies; CREATE (:Person {born: 1960, name: 'Oliver Platt'});
+USE GRAPH movies; CREATE (:Person {born: 1968, name: 'Orlando Jones'});
+USE GRAPH movies; CREATE (:Person {born: 1968, name: 'Parker Posey'});
+USE GRAPH movies; CREATE (:Person {born: 1959, name: 'Patricia Clarkson'});
+USE GRAPH movies; CREATE (:Person {born: 1971, name: 'Paul Bettany'});
+USE GRAPH movies; CREATE (:Person {name: 'Paul Blythe'});
+USE GRAPH movies; CREATE (:Person {born: 1943, name: 'Penny Marshall'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'Philip Seymour Hoffman'});
+USE GRAPH movies; CREATE (:Person {born: 1982, name: 'Rain'});
+USE GRAPH movies; CREATE (:Person {born: 1971, name: 'Regina King'});
+USE GRAPH movies; CREATE (:Person {born: 1969, name: 'Renee Zellweger'});
+USE GRAPH movies; CREATE (:Person {born: 1930, name: 'Richard Harris'});
+USE GRAPH movies; CREATE (:Person {born: 1971, name: 'Rick Yune'});
+USE GRAPH movies; CREATE (:Person {born: 1956, name: 'Rita Wilson'});
+USE GRAPH movies; CREATE (:Person {born: 1970, name: 'River Phoenix'});
+USE GRAPH movies; CREATE (:Person {born: 1947, name: 'Rob Reiner'});
+USE GRAPH movies; CREATE (:Person {born: 1953, name: 'Robert Longo'});
+USE GRAPH movies; CREATE (:Person {born: 1951, name: 'Robert Zemeckis'});
+USE GRAPH movies; CREATE (:Person {born: 1951, name: 'Robin Williams'});
+USE GRAPH movies; CREATE (:Person {born: 1954, name: 'Ron Howard'});
+USE GRAPH movies; CREATE (:Person {born: 1962, name: 'Rosie O''Donnell'});
+USE GRAPH movies; CREATE (:Person {born: 1968, name: 'Sam Rockwell'});
+USE GRAPH movies; CREATE (:Person {born: 1953, name: 'Scott Hicks'});
+USE GRAPH movies; CREATE (:Person {born: 1961, name: 'Stefan Arndt'});
+USE GRAPH movies; CREATE (:Person {born: 1946, name: 'Stephen Rea'});
+USE GRAPH movies; CREATE (:Person {born: 1967, name: 'Steve Zahn'});
+USE GRAPH movies; CREATE (:Person {born: 1946, name: 'Susan Sarandon'});
+USE GRAPH movies; CREATE (:Person {born: 1947, name: 'Takeshi Kitano'});
+USE GRAPH movies; CREATE (:Person {born: 1944, name: 'Taylor Hackford'});
+USE GRAPH movies; CREATE (:Person {born: 1962, name: 'Tom Cruise'});
+USE GRAPH movies; CREATE (:Person {born: 1956, name: 'Tom Hanks'});
+USE GRAPH movies; CREATE (:Person {born: 1933, name: 'Tom Skerritt'});
+USE GRAPH movies; CREATE (:Person {born: 1965, name: 'Tom Tykwer'});
+USE GRAPH movies; CREATE (:Person {born: 1944, name: 'Tony Scott'});
+USE GRAPH movies; CREATE (:Person {born: 1959, name: 'Val Kilmer'});
+USE GRAPH movies; CREATE (:Person {born: 1949, name: 'Victor Garber'});
+USE GRAPH movies; CREATE (:Person {born: 1956, name: 'Vincent Ward'});
+USE GRAPH movies; CREATE (:Person {born: 1942, name: 'Werner Herzog'});
+USE GRAPH movies; CREATE (:Person {born: 1972, name: 'Wil Wheaton'});
+USE GRAPH movies; CREATE (:Person {born: 1954, name: 'Zach Grenier'});
 
-/* Movies (3) */
-USE GRAPH movies; CREATE (:Movie {title: 'The Graph',         year: 2020});
-USE GRAPH movies; CREATE (:Movie {title: 'Edges of Reality',  year: 2022});
-USE GRAPH movies; CREATE (:Movie {title: 'Walk the Path',     year: 2024});
+/* Relationships (253 total) */
+/* ACTED_IN (172) */
+USE GRAPH movies; MATCH (s:Person {name: 'Aaron Sorkin'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Man in Bar'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Al Pacino'}), (e:Movie {title: 'The Devil''s Advocate'}) CREATE (s)-[:ACTED_IN {roles: 'John Milton'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Annabella Sciorra'}), (e:Movie {title: 'What Dreams May Come'}) CREATE (s)-[:ACTED_IN {roles: 'Annie Collins-Nielsen'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Anthony Edwards'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:ACTED_IN {roles: 'Goose'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Audrey Tautou'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:ACTED_IN {roles: 'Sophie Neveu'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ben Miles'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:ACTED_IN {roles: 'Ryan Maslow'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ben Miles'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Cass Jones'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ben Miles'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:ACTED_IN {roles: 'Dascomb'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bill Paxton'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:ACTED_IN {roles: 'Bob Hinson'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bill Paxton'}), (e:Movie {title: 'Apollo 13'}) CREATE (s)-[:ACTED_IN {roles: 'Fred Haise'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bill Paxton'}), (e:Movie {title: 'Twister'}) CREATE (s)-[:ACTED_IN {roles: 'Bill Harding'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bill Pullman'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:ACTED_IN {roles: 'Walter'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Billy Crystal'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:ACTED_IN {roles: 'Harry Burns'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bonnie Hunt'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Laurel Boyd'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bonnie Hunt'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'Jan Edgecomb'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Brooke Langton'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:ACTED_IN {roles: 'Annabelle Farrell'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Bruno Kirby'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:ACTED_IN {roles: 'Jess'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Carrie Fisher'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:ACTED_IN {roles: 'Marie'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Carrie-Anne Moss'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:ACTED_IN {roles: 'Trinity'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Carrie-Anne Moss'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:ACTED_IN {roles: 'Trinity'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Carrie-Anne Moss'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:ACTED_IN {roles: 'Trinity'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Charlize Theron'}), (e:Movie {title: 'That Thing You Do'}) CREATE (s)-[:ACTED_IN {roles: 'Tina'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Charlize Theron'}), (e:Movie {title: 'The Devil''s Advocate'}) CREATE (s)-[:ACTED_IN {roles: 'Mary Ann Lomax'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Christian Bale'}), (e:Movie {title: 'RescueDawn'}) CREATE (s)-[:ACTED_IN {roles: 'Dieter Dengler'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Christina Ricci'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Trixie'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Christopher Guest'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Dr. Stone'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Clint Eastwood'}), (e:Movie {title: 'Unforgiven'}) CREATE (s)-[:ACTED_IN {roles: 'Bill Munny'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Corey Feldman'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Teddy Duchamp'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Cuba Gooding Jr.'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Cpl. Carl Hammaker'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Cuba Gooding Jr.'}), (e:Movie {title: 'As Good as It Gets'}) CREATE (s)-[:ACTED_IN {roles: 'Frank Sachs'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Cuba Gooding Jr.'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Rod Tidwell'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Cuba Gooding Jr.'}), (e:Movie {title: 'What Dreams May Come'}) CREATE (s)-[:ACTED_IN {roles: 'Albert Lewis'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Danny DeVito'}), (e:Movie {title: 'Hoffa'}) CREATE (s)-[:ACTED_IN {roles: 'Robert "Bobby" Ciaro'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Danny DeVito'}), (e:Movie {title: 'One Flew Over the Cuckoo''s Nest'}) CREATE (s)-[:ACTED_IN {roles: 'Martini'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Dave Chappelle'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:ACTED_IN {roles: 'Kevin Jackson'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'David Morse'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'Brutus "Brutal" Howell'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Demi Moore'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Lt. Cdr. JoAnne Galloway'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Diane Keaton'}), (e:Movie {title: 'Something''s Gotta Give'}) CREATE (s)-[:ACTED_IN {roles: 'Erica Barry'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Dina Meyer'}), (e:Movie {title: 'Johnny Mnemonic'}) CREATE (s)-[:ACTED_IN {roles: 'Jane'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ed Harris'}), (e:Movie {title: 'Apollo 13'}) CREATE (s)-[:ACTED_IN {roles: 'Gene Kranz'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Emil Eifrem'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:ACTED_IN {roles: 'Emil'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Emile Hirsch'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Speed Racer'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ethan Hawke'}), (e:Movie {title: 'Snow Falling on Cedars'}) CREATE (s)-[:ACTED_IN {roles: 'Ishmael Chambers'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Frank Langella'}), (e:Movie {title: 'Frost/Nixon'}) CREATE (s)-[:ACTED_IN {roles: 'Richard Nixon'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Gary Sinise'}), (e:Movie {title: 'Apollo 13'}) CREATE (s)-[:ACTED_IN {roles: 'Ken Mattingly'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Gary Sinise'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'Burt Hammersmith'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Geena Davis'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:ACTED_IN {roles: 'Dottie Hinson'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Gene Hackman'}), (e:Movie {title: 'The Birdcage'}) CREATE (s)-[:ACTED_IN {roles: 'Sen. Kevin Keeley'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Gene Hackman'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:ACTED_IN {roles: 'Jimmy McGinty'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Gene Hackman'}), (e:Movie {title: 'Unforgiven'}) CREATE (s)-[:ACTED_IN {roles: 'Little Bill Daggett'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Greg Kinnear'}), (e:Movie {title: 'As Good as It Gets'}) CREATE (s)-[:ACTED_IN {roles: 'Simon Bishop'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Greg Kinnear'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:ACTED_IN {roles: 'Frank Navasky'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Halle Berry'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:ACTED_IN {roles: 'Luisa Rey|Jocasta Ayrs|Ovid|Meronym'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Helen Hunt'}), (e:Movie {title: 'As Good as It Gets'}) CREATE (s)-[:ACTED_IN {roles: 'Carol Connelly'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Helen Hunt'}), (e:Movie {title: 'Cast Away'}) CREATE (s)-[:ACTED_IN {roles: 'Kelly Frears'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Helen Hunt'}), (e:Movie {title: 'Twister'}) CREATE (s)-[:ACTED_IN {roles: 'Dr. Jo Harding'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Hugo Weaving'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:ACTED_IN {roles: 'Bill Smoke|Haskell Moore|Tadeusz Kesselring|Nurse Noakes|Boardman Mephi|Old Georgie'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Hugo Weaving'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:ACTED_IN {roles: 'Agent Smith'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Hugo Weaving'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:ACTED_IN {roles: 'Agent Smith'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Hugo Weaving'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:ACTED_IN {roles: 'Agent Smith'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Hugo Weaving'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:ACTED_IN {roles: 'V'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ian McKellen'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:ACTED_IN {roles: 'Sir Leight Teabing'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ice-T'}), (e:Movie {title: 'Johnny Mnemonic'}) CREATE (s)-[:ACTED_IN {roles: 'J-Bone'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'J.T. Walsh'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Lt. Col. Matthew Andrew Markinson'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'J.T. Walsh'}), (e:Movie {title: 'Hoffa'}) CREATE (s)-[:ACTED_IN {roles: 'Frank Fitzsimmons'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jack Nicholson'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Col. Nathan R. Jessup'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jack Nicholson'}), (e:Movie {title: 'As Good as It Gets'}) CREATE (s)-[:ACTED_IN {roles: 'Melvin Udall'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jack Nicholson'}), (e:Movie {title: 'Hoffa'}) CREATE (s)-[:ACTED_IN {roles: 'Hoffa'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jack Nicholson'}), (e:Movie {title: 'One Flew Over the Cuckoo''s Nest'}) CREATE (s)-[:ACTED_IN {roles: 'Randle McMurphy'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jack Nicholson'}), (e:Movie {title: 'Something''s Gotta Give'}) CREATE (s)-[:ACTED_IN {roles: 'Harry Sanborn'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Cromwell'}), (e:Movie {title: 'Snow Falling on Cedars'}) CREATE (s)-[:ACTED_IN {roles: 'Judge Fielding'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Cromwell'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'Warden Hal Moores'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Marshall'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Pfc. Louden Downey'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jay Mohr'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Bob Sugar'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jerry O''Connell'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Frank Cushman'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jerry O''Connell'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Vern Tessio'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jim Broadbent'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:ACTED_IN {roles: 'Vyvyan Ayrs|Captain Molyneux|Timothy Cavendish'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'John C. Reilly'}), (e:Movie {title: 'Hoffa'}) CREATE (s)-[:ACTED_IN {roles: 'Peter "Pete" Connelly'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'John Cusack'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Denny Lachance'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'John Goodman'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Pops'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'John Hurt'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:ACTED_IN {roles: 'High Chancellor Adam Sutler'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jonathan Lipnicki'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Ray Boyd'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Julia Roberts'}), (e:Movie {title: 'Charlie Wilson''s War'}) CREATE (s)-[:ACTED_IN {roles: 'Joanne Herring'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'Johnny Mnemonic'}) CREATE (s)-[:ACTED_IN {roles: 'Johnny Mnemonic'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'Something''s Gotta Give'}) CREATE (s)-[:ACTED_IN {roles: 'Julian Mercer'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'The Devil''s Advocate'}) CREATE (s)-[:ACTED_IN {roles: 'Kevin Lomax'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:ACTED_IN {roles: 'Neo'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:ACTED_IN {roles: 'Neo'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:ACTED_IN {roles: 'Neo'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Keanu Reeves'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:ACTED_IN {roles: 'Shane Falco'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kelly McGillis'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:ACTED_IN {roles: 'Charlie'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kelly Preston'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Avery Bishop'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kevin Bacon'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Capt. Jack Ross'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kevin Bacon'}), (e:Movie {title: 'Apollo 13'}) CREATE (s)-[:ACTED_IN {roles: 'Jack Swigert'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kevin Bacon'}), (e:Movie {title: 'Frost/Nixon'}) CREATE (s)-[:ACTED_IN {roles: 'Jack Brennan'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kevin Pollak'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Lt. Sam Weinberg'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kiefer Sutherland'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Lt. Jonathan Kendrick'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Kiefer Sutherland'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Ace Merrill'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Laurence Fishburne'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:ACTED_IN {roles: 'Morpheus'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Laurence Fishburne'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:ACTED_IN {roles: 'Morpheus'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Laurence Fishburne'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:ACTED_IN {roles: 'Morpheus'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Liv Tyler'}), (e:Movie {title: 'That Thing You Do'}) CREATE (s)-[:ACTED_IN {roles: 'Faye Dolan'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lori Petty'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:ACTED_IN {roles: 'Kit Keller'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Madonna'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:ACTED_IN {roles: '"All the Way" Mae Mordabito'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Marshall Bell'}), (e:Movie {title: 'RescueDawn'}) CREATE (s)-[:ACTED_IN {roles: 'Admiral'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Marshall Bell'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Mr. Lachance'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Matthew Fox'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Racer X'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Max von Sydow'}), (e:Movie {title: 'Snow Falling on Cedars'}) CREATE (s)-[:ACTED_IN {roles: 'Nels Gudmundsson'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Max von Sydow'}), (e:Movie {title: 'What Dreams May Come'}) CREATE (s)-[:ACTED_IN {roles: 'The Tracker'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Meg Ryan'}), (e:Movie {title: 'Joe Versus the Volcano'}) CREATE (s)-[:ACTED_IN {roles: 'DeDe|Angelica Graynamore|Patricia Graynamore'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Meg Ryan'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:ACTED_IN {roles: 'Annie Reed'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Meg Ryan'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:ACTED_IN {roles: 'Carole'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Meg Ryan'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:ACTED_IN {roles: 'Sally Albright'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Meg Ryan'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:ACTED_IN {roles: 'Kathleen Kelly'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Michael Clarke Duncan'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'John Coffey'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Michael Sheen'}), (e:Movie {title: 'Frost/Nixon'}) CREATE (s)-[:ACTED_IN {roles: 'David Frost'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Naomie Harris'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:ACTED_IN {roles: 'Mika Coretti'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Natalie Portman'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:ACTED_IN {roles: 'Evey Hammond'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nathan Lane'}), (e:Movie {title: 'Joe Versus the Volcano'}) CREATE (s)-[:ACTED_IN {roles: 'Baw'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nathan Lane'}), (e:Movie {title: 'The Birdcage'}) CREATE (s)-[:ACTED_IN {roles: 'Albert Goldman'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Noah Wyle'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Cpl. Jeffrey Barnes'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Oliver Platt'}), (e:Movie {title: 'Bicentennial Man'}) CREATE (s)-[:ACTED_IN {roles: 'Rupert Burns'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Oliver Platt'}), (e:Movie {title: 'Frost/Nixon'}) CREATE (s)-[:ACTED_IN {roles: 'Bob Zelnick'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Orlando Jones'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:ACTED_IN {roles: 'Clifford Franklin'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Parker Posey'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:ACTED_IN {roles: 'Patricia Eden'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Patricia Clarkson'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'Melinda Moores'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Paul Bettany'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:ACTED_IN {roles: 'Silas'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Philip Seymour Hoffman'}), (e:Movie {title: 'Charlie Wilson''s War'}) CREATE (s)-[:ACTED_IN {roles: 'Gust Avrakotos'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Philip Seymour Hoffman'}), (e:Movie {title: 'Twister'}) CREATE (s)-[:ACTED_IN {roles: 'Dustin "Dusty" Davis'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rain'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:ACTED_IN {roles: 'Raizo'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rain'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Taejo Togokahn'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Regina King'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Marcee Tidwell'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Renee Zellweger'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Dorothy Boyd'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Richard Harris'}), (e:Movie {title: 'Unforgiven'}) CREATE (s)-[:ACTED_IN {roles: 'English Bob'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rick Yune'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:ACTED_IN {roles: 'Takeshi'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rick Yune'}), (e:Movie {title: 'Snow Falling on Cedars'}) CREATE (s)-[:ACTED_IN {roles: 'Kazuo Miyamoto'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rita Wilson'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:ACTED_IN {roles: 'Suzy'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'River Phoenix'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Chris Chambers'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Robin Williams'}), (e:Movie {title: 'Bicentennial Man'}) CREATE (s)-[:ACTED_IN {roles: 'Andrew Marin'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Robin Williams'}), (e:Movie {title: 'The Birdcage'}) CREATE (s)-[:ACTED_IN {roles: 'Armand Goldman'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Robin Williams'}), (e:Movie {title: 'What Dreams May Come'}) CREATE (s)-[:ACTED_IN {roles: 'Chris Nielsen'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rosie O''Donnell'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:ACTED_IN {roles: 'Doris Murphy'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rosie O''Donnell'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:ACTED_IN {roles: 'Becky'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Sam Rockwell'}), (e:Movie {title: 'Frost/Nixon'}) CREATE (s)-[:ACTED_IN {roles: 'James Reston, Jr.'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Sam Rockwell'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: '"Wild Bill" Wharton'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Stephen Rea'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:ACTED_IN {roles: 'Eric Finch'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Steve Zahn'}), (e:Movie {title: 'RescueDawn'}) CREATE (s)-[:ACTED_IN {roles: 'Duane'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Steve Zahn'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:ACTED_IN {roles: 'George Pappas'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Susan Sarandon'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:ACTED_IN {roles: 'Mom'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Takeshi Kitano'}), (e:Movie {title: 'Johnny Mnemonic'}) CREATE (s)-[:ACTED_IN {roles: 'Takahashi'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Cruise'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:ACTED_IN {roles: 'Lt. Daniel Kaffee'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Cruise'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:ACTED_IN {roles: 'Jerry Maguire'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Cruise'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:ACTED_IN {roles: 'Maverick'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:ACTED_IN {roles: 'Jimmy Dugan'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'Apollo 13'}) CREATE (s)-[:ACTED_IN {roles: 'Jim Lovell'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'Cast Away'}) CREATE (s)-[:ACTED_IN {roles: 'Chuck Noland'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'Charlie Wilson''s War'}) CREATE (s)-[:ACTED_IN {roles: 'Rep. Charlie Wilson'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:ACTED_IN {roles: 'Zachry|Dr. Henry Goose|Isaac Sachs|Dermot Hoggins'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'Joe Versus the Volcano'}) CREATE (s)-[:ACTED_IN {roles: 'Joe Banks'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:ACTED_IN {roles: 'Sam Baldwin'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'That Thing You Do'}) CREATE (s)-[:ACTED_IN {roles: 'Mr. White'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:ACTED_IN {roles: 'Dr. Robert Langdon'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:ACTED_IN {roles: 'Paul Edgecomb'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'The Polar Express'}) CREATE (s)-[:ACTED_IN {roles: 'Hero Boy|Father|Conductor|Hobo|Scrooge|Santa Claus'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:ACTED_IN {roles: 'Joe Fox'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Skerritt'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:ACTED_IN {roles: 'Viper'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Val Kilmer'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:ACTED_IN {roles: 'Iceman'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Victor Garber'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:ACTED_IN {roles: 'Greg'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Werner Herzog'}), (e:Movie {title: 'What Dreams May Come'}) CREATE (s)-[:ACTED_IN {roles: 'The Face'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Wil Wheaton'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:ACTED_IN {roles: 'Gordie Lachance'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Zach Grenier'}), (e:Movie {title: 'RescueDawn'}) CREATE (s)-[:ACTED_IN {roles: 'Squad Leader'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Zach Grenier'}), (e:Movie {title: 'Twister'}) CREATE (s)-[:ACTED_IN {roles: 'Eddie'}]->(e);
 
-/* ACTED_IN edges (9 total) */
-USE GRAPH movies; MATCH (p:Person {name: 'Alice Wonder'}),   (m:Movie {title: 'The Graph'})        CREATE (p)-[:ACTED_IN {role: 'Mathematician'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Bob Builder'}),    (m:Movie {title: 'The Graph'})        CREATE (p)-[:ACTED_IN {role: 'Engineer'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Carol Singer'}),   (m:Movie {title: 'The Graph'})        CREATE (p)-[:ACTED_IN {role: 'Narrator'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Dave Smith'}),     (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:ACTED_IN {role: 'Detective'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Eve Adams'}),      (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:ACTED_IN {role: 'Hacker'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Alice Wonder'}),   (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:ACTED_IN {role: 'Professor'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Bob Builder'}),    (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:ACTED_IN {role: 'Foreman'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Carol Singer'}),   (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:ACTED_IN {role: 'Composer'}]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Dave Smith'}),     (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:ACTED_IN {role: 'Inspector'}]->(m);
+/* DIRECTED (44) */
+USE GRAPH movies; MATCH (s:Person {name: 'Cameron Crowe'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Chris Columbus'}), (e:Movie {title: 'Bicentennial Man'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Clint Eastwood'}), (e:Movie {title: 'Unforgiven'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Danny DeVito'}), (e:Movie {title: 'Hoffa'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Frank Darabont'}), (e:Movie {title: 'The Green Mile'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Howard Deutch'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James L. Brooks'}), (e:Movie {title: 'As Good as It Gets'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Marshall'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Marshall'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jan de Bont'}), (e:Movie {title: 'Twister'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'John Patrick Stanley'}), (e:Movie {title: 'Joe Versus the Volcano'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Mike Nichols'}), (e:Movie {title: 'Charlie Wilson''s War'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Mike Nichols'}), (e:Movie {title: 'The Birdcage'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Milos Forman'}), (e:Movie {title: 'One Flew Over the Cuckoo''s Nest'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nancy Meyers'}), (e:Movie {title: 'Something''s Gotta Give'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nora Ephron'}), (e:Movie {title: 'Sleepless in Seattle'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nora Ephron'}), (e:Movie {title: 'You''ve Got Mail'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Penny Marshall'}), (e:Movie {title: 'A League of Their Own'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rob Reiner'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rob Reiner'}), (e:Movie {title: 'Stand By Me'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rob Reiner'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Robert Longo'}), (e:Movie {title: 'Johnny Mnemonic'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Robert Zemeckis'}), (e:Movie {title: 'Cast Away'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Robert Zemeckis'}), (e:Movie {title: 'The Polar Express'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ron Howard'}), (e:Movie {title: 'Apollo 13'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ron Howard'}), (e:Movie {title: 'Frost/Nixon'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Ron Howard'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Scott Hicks'}), (e:Movie {title: 'Snow Falling on Cedars'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Taylor Hackford'}), (e:Movie {title: 'The Devil''s Advocate'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Hanks'}), (e:Movie {title: 'That Thing You Do'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tom Tykwer'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Tony Scott'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Vincent Ward'}), (e:Movie {title: 'What Dreams May Come'}) CREATE (s)-[:DIRECTED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Werner Herzog'}), (e:Movie {title: 'RescueDawn'}) CREATE (s)-[:DIRECTED]->(e);
 
-/* DIRECTED edges (3 total - Frank directs all three) */
-USE GRAPH movies; MATCH (p:Person {name: 'Frank Director'}), (m:Movie {title: 'The Graph'})        CREATE (p)-[:DIRECTED]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Frank Director'}), (m:Movie {title: 'Edges of Reality'}) CREATE (p)-[:DIRECTED]->(m);
-USE GRAPH movies; MATCH (p:Person {name: 'Frank Director'}), (m:Movie {title: 'Walk the Path'})    CREATE (p)-[:DIRECTED]->(m);
+/* FOLLOWS (3) */
+USE GRAPH movies; MATCH (s:Person {name: 'Angela Scope'}), (e:Person {name: 'Jessica Thompson'}) CREATE (s)-[:FOLLOWS]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Thompson'}), (e:Person {name: 'Jessica Thompson'}) CREATE (s)-[:FOLLOWS]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Paul Blythe'}), (e:Person {name: 'Angela Scope'}) CREATE (s)-[:FOLLOWS]->(e);
+
+/* PRODUCED (15) */
+USE GRAPH movies; MATCH (s:Person {name: 'Cameron Crowe'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Joel Silver'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Joel Silver'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Joel Silver'}), (e:Movie {title: 'The Matrix'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Joel Silver'}), (e:Movie {title: 'The Matrix Reloaded'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Joel Silver'}), (e:Movie {title: 'The Matrix Revolutions'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Joel Silver'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'Ninja Assassin'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nancy Meyers'}), (e:Movie {title: 'Something''s Gotta Give'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nora Ephron'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Rob Reiner'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:PRODUCED]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Stefan Arndt'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:PRODUCED]->(e);
+
+/* REVIEWED (9) */
+USE GRAPH movies; MATCH (s:Person {name: 'Angela Scope'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:REVIEWED {rating: 62, summary: 'Pretty funny at times'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Thompson'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:REVIEWED {rating: 65, summary: 'Fun, but a little far fetched'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'James Thompson'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:REVIEWED {rating: 100, summary: 'The coolest football movie ever'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jessica Thompson'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:REVIEWED {rating: 95, summary: 'An amazing journey'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jessica Thompson'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:REVIEWED {rating: 92, summary: 'You had me at Jerry'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jessica Thompson'}), (e:Movie {title: 'The Birdcage'}) CREATE (s)-[:REVIEWED {rating: 45, summary: 'Slapstick redeemed only by the Robin Williams and Gene Hackman''s stellar performances'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jessica Thompson'}), (e:Movie {title: 'The Da Vinci Code'}) CREATE (s)-[:REVIEWED {rating: 68, summary: 'A solid romp'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jessica Thompson'}), (e:Movie {title: 'The Replacements'}) CREATE (s)-[:REVIEWED {rating: 65, summary: 'Silly, but fun'}]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jessica Thompson'}), (e:Movie {title: 'Unforgiven'}) CREATE (s)-[:REVIEWED {rating: 85, summary: 'Dark, but compelling'}]->(e);
+
+/* WROTE (10) */
+USE GRAPH movies; MATCH (s:Person {name: 'Aaron Sorkin'}), (e:Movie {title: 'A Few Good Men'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Cameron Crowe'}), (e:Movie {title: 'Jerry Maguire'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'David Mitchell'}), (e:Movie {title: 'Cloud Atlas'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Jim Cash'}), (e:Movie {title: 'Top Gun'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lana Wachowski'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'Speed Racer'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Lilly Wachowski'}), (e:Movie {title: 'V for Vendetta'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nancy Meyers'}), (e:Movie {title: 'Something''s Gotta Give'}) CREATE (s)-[:WROTE]->(e);
+USE GRAPH movies; MATCH (s:Person {name: 'Nora Ephron'}), (e:Movie {title: 'When Harry Met Sally'}) CREATE (s)-[:WROTE]->(e);
+
+/* Sentinels — see comment in convert.py emit_gql(). */
+USE GRAPH movies; CREATE (:__seed_sentinel {tag: 'absorb-double-exec'});
+USE GRAPH movies; MATCH (s:__seed_sentinel) DETACH DELETE s;
+USE GRAPH movies; RETURN 1;

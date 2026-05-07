@@ -9,16 +9,17 @@ test.describe('table column projection', () => {
     await page.goto('/')
     await expect(sel.queryRunBtn(page)).toBeVisible()
 
-    // Type a node-returning query.
+    // Pick a deterministic Person via name so the test isn't coupled
+    // to Geode's MATCH iteration order across the 133-person seed.
     await page.locator('.monaco-editor').first().click()
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(
-      `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n LIMIT 3`
+      `USE GRAPH ${seed.graph}; MATCH (n:Person) WHERE n.name = 'Keanu Reeves' RETURN n`
     )
     await sel.queryRunBtn(page).click()
 
     // Wait for the row-count summary so we know the run finished.
-    await expect(page.getByText(/\d+ rows/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/1 rows/)).toBeVisible({ timeout: 10_000 })
 
     // Default tab is table; assert the projected headers exist.
     await sel.queryTabTable(page).click()
@@ -31,7 +32,7 @@ test.describe('table column projection', () => {
 
     // And the row data is NOT a wall-of-text "(:Person {…})" string —
     // each property cell stands on its own.
-    await expect(page.getByText('Alice Wonder', { exact: true })).toBeVisible()
+    await expect(page.getByText('Keanu Reeves', { exact: true })).toBeVisible()
   })
 
   test('Expand toggle off falls back to chip+prop-list rendering', async ({
