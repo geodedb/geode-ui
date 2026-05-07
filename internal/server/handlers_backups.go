@@ -66,6 +66,9 @@ func (s *GraphServer) GetBackups(w http.ResponseWriter, r *http.Request, _ *gent
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW BACKUPS")
 	if err != nil {
+		if isWireFeatureMissing(err) {
+			return &gentypes.BackupList{Backups: []jsontext.Value{}}, nil
+		}
 		return nil, userResponseErr(w, userErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))

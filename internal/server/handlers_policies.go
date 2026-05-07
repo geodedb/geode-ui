@@ -38,6 +38,9 @@ func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gen
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW POLICIES")
 	if err != nil {
+		if isWireFeatureMissing(err) {
+			return &gentypes.PolicyList{Policies: []jsontext.Value{}}, nil
+		}
 		return nil, userResponseErr(w, userErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))

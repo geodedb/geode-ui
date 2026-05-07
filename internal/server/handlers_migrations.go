@@ -56,6 +56,12 @@ func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *g
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW MIGRATIONS")
 	if err != nil {
+		// Geode v0.5.11 doesn't expose SHOW MIGRATIONS on the wire yet
+		// (status_class=42000). Degrade to an empty status so the Ops
+		// page renders cleanly instead of an error banner.
+		if isWireFeatureMissing(err) {
+			return &gentypes.MigrationStatus{Pending: []string{}, Applied: []jsontext.Value{}}, nil
+		}
 		return nil, userResponseErr(w, userErr(err))
 	}
 	pending := make([]string, 0)

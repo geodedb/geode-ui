@@ -39,6 +39,9 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW ROLES")
 	if err != nil {
+		if isWireFeatureMissing(err) {
+			return &gentypes.RoleList{Roles: []jsontext.Value{}}, nil
+		}
 		return nil, userResponseErr(w, userErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))

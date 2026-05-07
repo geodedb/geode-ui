@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -203,3 +204,31 @@ func TestAppendUnique(t *testing.T) {
 }
 
 // equalStrings is defined in handlers_schema_test.go (same package).
+
+// TestIsWireFeatureMissing pins the parse-error detection used by the
+// admin-list handlers (GetUsers/Roles/Policies/Backups/Migrations) to
+// degrade to an empty 200 instead of a 422 when Geode v0.5.11 doesn't
+// recognize the SHOW <thing> verb.
+func TestIsWireFeatureMissing(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil err", nil, false},
+		{"42000 parse error", errors.New("geode: 42000: parse error"), true},
+		{"42000 expected token", errors.New("geode: 42000: expected token 'l_paren'"), true},
+		{"42000 expected identifier", errors.New("geode: 42000: expected identifier or keyword, got 'invalid'"), true},
+		{"plain 42000 only", errors.New("status_class=42000"), false}, // requires both signals
+		{"auth error", errors.New("geode: 28000: invalid credentials"), false},
+		{"network", errors.New("dial tcp: connection refused"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isWireFeatureMissing(tc.err)
+			if got != tc.want {
+				t.Fatalf("got=%v want=%v for %v", got, tc.want, tc.err)
+			}
+		})
+	}
+}
