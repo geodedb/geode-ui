@@ -88,3 +88,32 @@ test('passes the bearer token via the genapi.auth.bearer subprotocol', () => {
   // channel replaces the query-param transport for browser-safe bearers.
   expect(lastInstance!.url).not.toContain('access_token')
 })
+
+test('demultiplexes batched rows frames into individual row callbacks', () => {
+  // PERF-F2 / issue #21: server batches up to 64 rows per WS frame as
+  // {"kind":"rows","rows":[...]}; queryStream must split those back
+  // into individual {kind:"row"} callbacks so consumers keep the
+  // per-row contract.
+  const msgs: StreamMsg[] = []
+  streamQuery('MATCH (n) RETURN n', 'social', (m) => msgs.push(m))
+  const ws = lastInstance!
+  ws.fire('open')
+  ws.fire('message', {
+    data: JSON.stringify({
+      kind: 'rows',
+      rows: [
+        [1, 'alice'],
+        [2, 'bob'],
+        [3, 'carol'],
+      ],
+    }),
+  })
+  ws.fire('message', { data: JSON.stringify({ kind: 'end' }) })
+  expect(msgs.map((m) => m.kind)).toEqual(['row', 'row', 'row', 'end'])
+  // Verify per-row payload survived the demux untouched.
+  const rowMsgs = msgs.filter(
+    (m): m is { kind: 'row'; row: unknown[] } => m.kind === 'row'
+  )
+  expect(rowMsgs[0].row).toEqual([1, 'alice'])
+  expect(rowMsgs[2].row).toEqual([3, 'carol'])
+})

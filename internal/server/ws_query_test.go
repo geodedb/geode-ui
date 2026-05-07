@@ -7,6 +7,121 @@ import (
 	"geodedb.com/geode-ui/gen/pkg/wsx"
 )
 
+// fakeFrameWriter records every WriteMessage payload so tests can assert
+// frame counts and per-frame contents without spinning up a wsx.Conn.
+type fakeFrameWriter struct {
+	frames [][]byte
+}
+
+func (f *fakeFrameWriter) WriteMessage(op byte, payload []byte) error {
+	if op != wsx.OpText {
+		return nil
+	}
+	cp := make([]byte, len(payload))
+	copy(cp, payload)
+	f.frames = append(f.frames, cp)
+	return nil
+}
+
+// TestRowBatcher_BatchingFramesLessThanRows verifies PERF-F2 (issue #21):
+// when N rows pass through the batcher with batch size B, the writer
+// receives ceil(N/B) frames -- strictly fewer than N for any N > B.
+//
+// This is the canary regression test for the batching optimisation.
+func TestRowBatcher_BatchingFramesLessThanRows(t *testing.T) {
+	const rowCount = 200
+	w := &fakeFrameWriter{}
+	b := newRowBatcher(w, wsRowBatchSize)
+	for i := 0; i < rowCount; i++ {
+		if err := b.add([]any{int64(i), "x"}); err != nil {
+			t.Fatalf("add row %d: %v", i, err)
+		}
+	}
+	if err := b.flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if len(w.frames) >= rowCount {
+		t.Fatalf("frames=%d rowCount=%d -- expected batching to reduce frame count below row count",
+			len(w.frames), rowCount)
+	}
+	wantFrames := (rowCount + wsRowBatchSize - 1) / wsRowBatchSize
+	if len(w.frames) != wantFrames {
+		t.Fatalf("frames=%d want %d (ceil(%d/%d))",
+			len(w.frames), wantFrames, rowCount, wsRowBatchSize)
+	}
+}
+
+// TestRowBatcher_FrameSchema verifies the on-the-wire shape: each batch
+// frame is a {"kind":"rows","rows":[[...],[...]]} envelope. The client
+// (queryStream.ts) decomposes these back into individual row callbacks
+// so QueryPage and existing tests keep working.
+func TestRowBatcher_FrameSchema(t *testing.T) {
+	w := &fakeFrameWriter{}
+	b := newRowBatcher(w, 4)
+	for i := 0; i < 6; i++ {
+		if err := b.add([]any{int64(i)}); err != nil {
+			t.Fatalf("add: %v", err)
+		}
+	}
+	if err := b.flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if got := len(w.frames); got != 2 {
+		t.Fatalf("frames=%d want 2 (4-batch + 2-residual)", got)
+	}
+
+	var first struct {
+		Kind string  `json:"kind"`
+		Rows [][]any `json:"rows"`
+	}
+	if err := json.Unmarshal(w.frames[0], &first); err != nil {
+		t.Fatalf("first frame parse: %v", err)
+	}
+	if first.Kind != "rows" {
+		t.Fatalf("first.Kind=%q want rows", first.Kind)
+	}
+	if len(first.Rows) != 4 {
+		t.Fatalf("first.Rows len=%d want 4", len(first.Rows))
+	}
+
+	var second struct {
+		Kind string  `json:"kind"`
+		Rows [][]any `json:"rows"`
+	}
+	if err := json.Unmarshal(w.frames[1], &second); err != nil {
+		t.Fatalf("second frame parse: %v", err)
+	}
+	if len(second.Rows) != 2 {
+		t.Fatalf("second.Rows len=%d want 2 (residual)", len(second.Rows))
+	}
+}
+
+// TestRowBatcher_FlushIsIdempotent verifies that calling flush() with an
+// empty buffer is a no-op (no zero-row frames). Important so the
+// end-of-stream flush in Query() doesn't write spurious empty batches
+// when the result set's row count is an exact multiple of the batch
+// size.
+func TestRowBatcher_FlushIsIdempotent(t *testing.T) {
+	w := &fakeFrameWriter{}
+	b := newRowBatcher(w, 4)
+	for i := 0; i < 4; i++ {
+		_ = b.add([]any{int64(i)})
+	}
+	// First flush: should NOT emit an extra frame because the batch
+	// auto-flushed when it filled. Second flush: must be a no-op.
+	if err := b.flush(); err != nil {
+		t.Fatalf("flush 1: %v", err)
+	}
+	frameCountAfterFirstFlush := len(w.frames)
+	if err := b.flush(); err != nil {
+		t.Fatalf("flush 2: %v", err)
+	}
+	if len(w.frames) != frameCountAfterFirstFlush {
+		t.Fatalf("flush is not idempotent: frames %d -> %d",
+			frameCountAfterFirstFlush, len(w.frames))
+	}
+}
+
 // TestQueryStreamMsg_JSON exercises the round-trip through the json
 // tags: required field present, omitempty fields absent, and the
 // {"kind":"end"} compact-marshal invariant the streaming protocol

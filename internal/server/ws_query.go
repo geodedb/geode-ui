@@ -16,16 +16,122 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"geodedb.com/geode-ui/gen/pkg/wsx"
 	genws "geodedb.com/geode-ui/gen/ws"
 )
+
+// wsRowBatchSize is the number of rows packed into a single WebSocket
+// "rows" frame. Sized for a typical interactive query: 64 keeps frame
+// payloads small enough that the browser's WS message handler stays
+// responsive (microsecond range) while amortising the syscall and
+// QUIC-stream overhead of WriteMessage across an order of magnitude
+// fewer frames. PERF-F2 / issue #21.
+const wsRowBatchSize = 64
+
+// wsRowBufPool reuses bytes.Buffer instances for marshalling row
+// batches so the per-batch JSON encoding does not allocate a fresh
+// backing slice for every flush. Buffers are reset (not nil-cleared)
+// on Get so callers can append directly.
+var wsRowBufPool = sync.Pool{
+	New: func() any { return &bytes.Buffer{} },
+}
+
+// frameWriter is the WriteMessage subset of *wsx.Conn that the row
+// batcher exercises. Hoisting it as an interface lets ws_query_test
+// substitute a counter without spinning up a real WS connection.
+type frameWriter interface {
+	WriteMessage(op byte, payload []byte) error
+}
+
+// rowBatcher coalesces individual row scans into batched
+// {"kind":"rows","rows":[[...],...]} frames so the WS hot loop emits
+// ceil(N/B) frames for N rows instead of N. Each batch is marshalled
+// using a sync.Pool-backed bytes.Buffer.
+//
+// Concurrency: rowBatcher is single-writer. Query() owns the only
+// instance and the cancel-reader goroutine never touches it.
+type rowBatcher struct {
+	w        frameWriter
+	cap      int
+	buf      [][]any
+	envelope batchEnvelope
+}
+
+// batchEnvelope is the on-the-wire shape of a batched-rows frame. It
+// is structurally identical to the queryStreamMsg{Kind:"rows",...}
+// branch but kept narrow so json.Marshal does not pull in every
+// optional field of queryStreamMsg.
+type batchEnvelope struct {
+	Kind string  `json:"kind"`
+	Rows [][]any `json:"rows"`
+}
+
+// newRowBatcher returns a batcher that flushes when its row buffer
+// reaches batchSize. Each batcher is single-use per query and is
+// drained at end-of-stream by the caller via flush().
+func newRowBatcher(w frameWriter, batchSize int) *rowBatcher {
+	if batchSize <= 0 {
+		batchSize = wsRowBatchSize
+	}
+	return &rowBatcher{
+		w:   w,
+		cap: batchSize,
+		buf: make([][]any, 0, batchSize),
+	}
+}
+
+// add appends one scanned row to the current batch, auto-flushing
+// when the batch fills. The caller MUST treat row as immutable after
+// add (the rows are referenced until the next flush completes); the
+// production hot path materialises a fresh []any per scan to satisfy
+// this.
+func (b *rowBatcher) add(row []any) error {
+	b.buf = append(b.buf, row)
+	if len(b.buf) >= b.cap {
+		return b.flush()
+	}
+	return nil
+}
+
+// flush emits the current batch as a single "rows" frame and resets
+// the buffer. A flush with an empty buffer is a no-op so end-of-stream
+// drains do not produce zero-row frames.
+func (b *rowBatcher) flush() error {
+	if len(b.buf) == 0 {
+		return nil
+	}
+	buf := wsRowBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer wsRowBufPool.Put(buf)
+
+	b.envelope.Kind = "rows"
+	b.envelope.Rows = b.buf
+	enc := json.NewEncoder(buf)
+	if err := enc.Encode(&b.envelope); err != nil {
+		// Reset before bailing so a partial batch is not retried.
+		b.buf = b.buf[:0]
+		return err
+	}
+	// json.Encoder appends a trailing newline; trim it so the WS
+	// payload is a clean JSON document the client's JSON.parse can
+	// consume directly.
+	payload := buf.Bytes()
+	if n := len(payload); n > 0 && payload[n-1] == '\n' {
+		payload = payload[:n-1]
+	}
+	err := b.w.WriteMessage(wsx.OpText, payload)
+	b.buf = b.buf[:0]
+	return err
+}
 
 // WSServer implements the generated genws.WSServerInterface. It carries
 // the same Config as *GraphServer so it can reach the connection pool
@@ -129,6 +235,11 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 		return err
 	}
 
+	// Row hot loop: batch up to wsRowBatchSize scans per WS frame so
+	// 200 rows produce 4 frames instead of 200 (PERF-F2 / issue #21).
+	// The batcher's marshal buffer comes from wsRowBufPool to avoid
+	// per-batch heap churn under sustained streaming load.
+	batcher := newRowBatcher(conn, wsRowBatchSize)
 	var count int64
 	for rows.Next() {
 		row := make([]any, len(cols))
@@ -137,12 +248,21 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 			ptrs[i] = &row[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
+			// Drain any pending batch so partial progress reaches
+			// the client before the error frame.
+			_ = batcher.flush()
 			return writeErr(conn, "scan", err.Error())
 		}
-		if err := writeMsg(conn, queryStreamMsg{Kind: "row", Row: row}); err != nil {
+		if err := batcher.add(row); err != nil {
 			return err
 		}
 		count++
+	}
+	// Drain the residual partial batch before reading rows.Err so
+	// the client sees every successfully-scanned row even if the
+	// driver reports a late error or the context was cancelled.
+	if err := batcher.flush(); err != nil {
+		return err
 	}
 	if err := rows.Err(); err != nil {
 		// Distinguish caller-initiated cancellation from a true

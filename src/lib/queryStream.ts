@@ -20,6 +20,13 @@ export type StreamMsg =
   | { kind: 'error'; code: string; message: string }
   | { kind: 'end' }
 
+// WireMsg is the shape received over the WebSocket. The server batches
+// up to wsRowBatchSize rows into a single {"kind":"rows", rows:[...]}
+// frame for throughput; queryStream demultiplexes those back into
+// individual {kind:"row"} callbacks so existing consumers (QueryPage,
+// queryStream.test.ts) keep their per-row handler contract.
+type WireMsg = StreamMsg | { kind: 'rows'; rows: unknown[][] }
+
 export type StreamHandle = {
   cancel: () => void
   done: Promise<void>
@@ -60,7 +67,14 @@ export function streamQuery(
   })
   ws.addEventListener('message', (ev: MessageEvent) => {
     try {
-      onMessage(JSON.parse(ev.data) as StreamMsg)
+      const wire = JSON.parse(ev.data) as WireMsg
+      if (wire.kind === 'rows') {
+        // Demultiplex a batched-rows frame into individual row
+        // callbacks so consumers keep the per-row contract.
+        wire.rows.forEach((row) => onMessage({ kind: 'row', row }))
+        return
+      }
+      onMessage(wire)
     } catch {
       /* swallow */
     }
