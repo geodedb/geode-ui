@@ -161,6 +161,18 @@ ensure_admin_password() {
     log "testing target admin password"
     if echo "RETURN 1" | query_admin - >/dev/null 2>&1; then
         log "target admin password already active (skipping rotation)"
+        # Geode v0.5.11 caveat: the "must-reset" flag may still be set
+        # on this user account even though the target password
+        # authenticates via the CLI (the CLI tolerates the flag for
+        # `RETURN 1` and `ALTER USER`). On restarts this leaves the
+        # SPA wire-login broken with 08P01 because the wire path is
+        # strict. Recovering from the script side requires rotating to
+        # a *different* value (Geode treats target->target as a no-op
+        # for the flag), which would invalidate the configured
+        # GEODE_ADMIN_PASSWORD. Instead, the SPA's /auth/login surfaces
+        # a `must_reset` flag in this state and the UI guides the user
+        # through a reset; the server-side /auth/reset-password
+        # endpoint runs ALTER USER on their behalf with a new value.
         return 0
     fi
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"encoding/json/jsontext"
 
@@ -67,17 +68,54 @@ func filterSystemGraphs(names []string) []string {
 }
 
 // Labels implements GET /api/v1/graphs/{graph}/labels.
+//
+// Geode v0.5.11 quirk: `CALL db.labels()` is GRAPH-AGNOSTIC — it
+// ignores the `USE GRAPH <name>;` prefix and returns labels from the
+// internal `__geode_security` graph regardless of which graph the
+// caller targeted. So calling it for `movies` would surface
+// AuthChainRoot/Role/User instead of Movie/Person — extremely
+// misleading in the SPA's schema explorer.
+//
+// `MATCH (n) RETURN DISTINCT labels(n) AS l` is the only label-
+// discovery form Geode v0.5.11 accepts (UNWIND is a parse error in
+// this dialect; SHOW LABELS is also unsupported). The function
+// `labels(n)` returns a LIST<STRING> per node; we flatten in-process.
+// Empty/null lists are skipped so unlabeled nodes don't pollute the
+// result. The schema explorer caches per graph, so the O(N) scan
+// runs at most once per graph switch.
 func (s *GraphServer) Labels(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.LabelList, error) {
-	rows, err := s.queryStrings(r.Context(), req.Graph, "CALL db.labels()")
+	rows, err := s.queryStringLists(r.Context(), req.Graph,
+		"MATCH (n) RETURN DISTINCT labels(n) AS l")
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
-	return &gentypes.LabelList{Labels: rows}, nil
+	seen := make(map[string]struct{}, len(rows))
+	out := make([]string, 0, len(rows))
+	for _, list := range rows {
+		for _, label := range list {
+			if label == "" {
+				continue
+			}
+			if _, ok := seen[label]; ok {
+				continue
+			}
+			seen[label] = struct{}{}
+			out = append(out, label)
+		}
+	}
+	sort.Strings(out)
+	return &gentypes.LabelList{Labels: out}, nil
 }
 
 // EdgeTypes implements GET /api/v1/graphs/{graph}/edge-types.
+//
+// Same v0.5.11 quirk as Labels: `CALL db.relationshipTypes()` is
+// graph-agnostic and returns the security graph's HAS_ROLE/UNKNOWN
+// regardless of USE GRAPH. Switched to a MATCH-based discovery
+// query that respects the graph scope.
 func (s *GraphServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.EdgeTypeList, error) {
-	rows, err := s.queryStrings(r.Context(), req.Graph, "CALL db.relationshipTypes()")
+	rows, err := s.queryStrings(r.Context(), req.Graph,
+		"MATCH ()-[r]->() RETURN DISTINCT type(r) AS t ORDER BY t")
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
@@ -113,6 +151,66 @@ func schemaResponseErr(w http.ResponseWriter, err error) error {
 		return nil
 	}
 	return err
+}
+
+// queryStringLists runs stmt and returns each row's first column as a
+// []string, assuming the column type is LIST<STRING>. The geode
+// database/sql driver delivers list cells either as `[]any` (native
+// scan path) or as a JSON-encoded string (transport-level fallback);
+// we accept both shapes. Used by Labels() to flatten the LIST<STRING>
+// result of `RETURN DISTINCT labels(n)`.
+func (s *GraphServer) queryStringLists(ctx context.Context, graph, stmt string) ([][]string, error) {
+	db, err := s.schemaDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := runQuery(ctx, db, prefixUseGraph(graph, stmt))
+	if err != nil {
+		return nil, schemaErr(err)
+	}
+	out := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		out = append(out, asStringList(row[0]))
+	}
+	return out, nil
+}
+
+// asStringList coerces a list-shaped cell value into []string. Accepts
+// the driver's native `[]any` form, `[]string` (in case a future
+// driver delivers it pre-typed), and a JSON-encoded string fallback
+// for transports that surface lists as strings.
+func asStringList(v any) []string {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			out = append(out, asString(e))
+		}
+		return out
+	case string:
+		var parsed []string
+		if json.Unmarshal([]byte(t), &parsed) == nil {
+			return parsed
+		}
+		var parsedAny []any
+		if json.Unmarshal([]byte(t), &parsedAny) == nil {
+			out := make([]string, 0, len(parsedAny))
+			for _, e := range parsedAny {
+				out = append(out, asString(e))
+			}
+			return out
+		}
+		return []string{t}
+	default:
+		return []string{asString(v)}
+	}
 }
 
 // queryStrings runs stmt (optionally prefixed with a USE GRAPH clause) and
