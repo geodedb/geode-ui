@@ -35,23 +35,46 @@ const REBUILD_DEBOUNCE_MS = 250
 const Wrap = styled.div`
   display: grid;
   grid-template-columns: 1fr 280px;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.sm};
+
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    grid-template-columns: 1fr;
+  }
 `
+function canvasBg({ theme }: { theme: import('../../theme').Theme }): string {
+  // The Cytoscape canvas is its own surface — too dark in our brand
+  // dark mode (#1c0f2e) would lose contrast with edge labels, and a
+  // pure-white background in dark mode would strobe. Pick a deep-ink
+  // canvas in dark and pure white in light.
+  return theme.variant === 'dark' ? '#13091e' : '#ffffff'
+}
+
 const Canvas = styled.div<{ $height: number }>`
   height: ${({ $height }) => $height}px;
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  background: #fff;
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
+  background: ${canvasBg};
 `
 const Side = styled.aside<{ $height: number }>`
   height: ${({ $height }) => $height}px;
   overflow: auto;
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  padding: 12px;
-  background: ${({ theme }) => theme.colors.surface};
-  color: ${({ theme }) => theme.colors.text};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.bg.surface};
+  color: ${({ theme }) => theme.text.primary};
+
   pre {
     white-space: pre-wrap;
     word-break: break-all;
+  }
+
+  /* Below the md breakpoint the sidebar follows the canvas in stacked
+     order; cap its height so a long property dump doesn't push the
+     editor and the rest of the page off-screen on phone form factors. */
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    height: auto;
+    max-height: 320px;
   }
 `
 const ControlsBlock = styled.section`

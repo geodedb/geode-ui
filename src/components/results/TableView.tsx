@@ -28,51 +28,62 @@ const VIRTUAL_ROW_HEIGHT = 36
 const VIRTUAL_BODY_HEIGHT = 480
 
 const Wrap = styled.div`
-  border: 1px solid ${({ theme }) => theme.colors.border};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
+  overflow: hidden;
 `
 const HeaderTable = styled.table`
   width: 100%;
   border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
+  color: ${({ theme }) => theme.text.primary};
   table-layout: fixed;
 `
 const Th = styled.th`
-  background: ${({ theme }) => theme.colors.surface};
+  background: ${({ theme }) => theme.bg.subtle};
   text-align: left;
-  padding: 6px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  color: ${({ theme }) => theme.colors.text};
+  padding: 8px 10px;
+  border-bottom: 1px solid ${({ theme }) => theme.border.default};
+  color: ${({ theme }) => theme.text.secondary};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 `
 const RowOuter = styled.div`
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  border-top: 1px solid ${({ theme }) => theme.colors.border};
-  color: ${({ theme }) => theme.colors.text};
+  grid-auto-columns: minmax(120px, 1fr);
+  border-top: 1px solid ${({ theme }) => theme.border.subtle};
+  color: ${({ theme }) => theme.text.primary};
+
+  &:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+  }
 `
 const Cell = styled.div`
-  padding: 6px;
+  padding: 8px 10px;
   vertical-align: top;
   white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 `
 
 const NodeChip = styled.span`
   display: inline-block;
   padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 0.78rem;
-  font-weight: 600;
+  border-radius: ${({ theme }) => theme.radii.pill};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
   background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
+  color: ${({ theme }) => theme.text.onPrimary};
   margin-right: 4px;
 `
 
 const EdgeChip = styled(NodeChip)`
-  background: ${({ theme }) => theme.colors.surface};
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme }) => theme.bg.subtle};
+  color: ${({ theme }) => theme.text.primary};
+  border: 1px solid ${({ theme }) => theme.border.default};
 `
 
 const PropList = styled.dl`
@@ -81,16 +92,16 @@ const PropList = styled.dl`
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 2px 12px;
-  font-size: 0.85rem;
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 
   dt {
-    color: ${({ theme }) => theme.colors.textSecondary};
-    font-weight: 500;
+    color: ${({ theme }) => theme.text.secondary};
+    font-weight: ${({ theme }) => theme.font.weights.medium};
   }
 
   dd {
     margin: 0;
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme }) => theme.text.primary};
     word-break: break-word;
   }
 `
