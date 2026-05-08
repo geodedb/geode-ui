@@ -39,6 +39,11 @@ No release-blocking gaps. 4 of 7 are blocked on upstream Geode v0.6+; 2 are CI v
 | GAP-005 | e2e-21 MCP `tools/list` skip on jsonrpc error | Open (upstream-blocked) | Low | [#5](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/5) | `e2e/specs/10-mcp-endpoint.spec.ts:124-127` | Monitor MCP server response shape. |
 | GAP-006 | e2e job runtime status in CI not verified | Open (verification) | Low | [#6](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/6) | `.gitlab-ci.yml` declares e2e job; no recent run sampled | Sample latest pipeline once stack-up smoke passes. |
 | GAP-007 | docker-compose stack-up smoke not executed | Open (verification) | Low | [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7) | Requirement e2e-7 / T6 rebuild-and-push | One-shot `docker compose up` smoke; record outcome. |
+| GAP-008 | Pre-commit ratchets (lint:hardcoded-styles, lint:contrast, verify:translations, detect:hardcoded-strings) missing from CI | **Closed** 2026-05-08 | Medium | — | `.gitlab-ci.yml:audit-ratchets` job added | New `audit-ratchets` lint-stage job runs all four scripts on MR + main. |
+| GAP-009 | `electron:tsc/build/package` scripts not in CI | **Closed** 2026-05-08 | Medium | — | `.gitlab-ci.yml:electron-typecheck` job added | Type-checks `electron/main.ts` + `electron/preload.ts`; `allow_failure: true` until electron deps land. |
+| GAP-010 | CSP behavior under Electron `geode://` origin not documented | Open | Low | — | `internal/server/security_headers.go:51-61` + `electron/main.ts:36-38` | Document expected CSP resolution under custom protocol in `docs/ELECTRON.md`. |
+| GAP-011 | No e2e coverage for packaged Electron build | Open | Low | — | `e2e/specs/` (12 specs, all browser-only) | Add a Playwright (or @testing-library/electron) smoke test once `electron-builder` ships a release artifact. |
+| GAP-012 | Only one locale (`en.ts`) — language detector is a no-op | Open | Low | — | `src/services/i18n/locales/index.ts:24-29` | Either ship a second locale (e.g. `es.ts`) to validate the detection path or document the deferral in `docs/I18N.md`. |
 
 ## Closure run 2026-05-08
 
@@ -55,6 +60,26 @@ The remaining open items (GAP-002 through GAP-007) are split into:
 - **GAP-006 / GAP-007**: CI / docker-compose verification items —
   no code change; both verified live in this session
   (geode-e2e-geode-ui-1 healthy at the end of the bug-fix run).
+
+### Closure run 2026-05-08 (audit + close pass)
+
+Two new gaps surfaced and closed in the same pass after the audit
+run:
+
+- **GAP-008** — closed by adding `.gitlab-ci.yml:audit-ratchets`. The
+  four pre-commit ratchets (lint:hardcoded-styles, lint:contrast,
+  verify:translations, detect:hardcoded-strings) now also run as a CI
+  lint-stage job, so a contributor who pushes without the local
+  pre-commit hook still blocks at MR time.
+- **GAP-009** — closed by adding `.gitlab-ci.yml:electron-typecheck`.
+  The Electron main + preload now type-check independently of the SPA
+  tsc pass; `allow_failure: true` until the release engineer pulls
+  `electron` + `@types/node` into devDependencies (documented in
+  `docs/ELECTRON.md`).
+
+GAP-010 / GAP-011 / GAP-012 remain Open — each is a documentation or
+release-engineering item rather than a code defect, and warrants a
+focused PR scoped to that work.
 
 ## Detailed Gap Records
 

@@ -66,6 +66,28 @@ their own GAP files.
   `packageManager: npm@10.9.0` field land in this commit. Matches
   `engines.node ">=22.14.0"`.
 
+## New findings — 2026-05-08 audit pass
+
+| ID  | Title | Severity | Score | Status | File:Line | Action |
+|-----|-------|----------|-------|--------|-----------|--------|
+| Q-NEW-1 | Electron preload bridge has zero unit tests | High | 80 | **Closed** 2026-05-08 | `electron/preload.ts:22-40`, `electron/main.ts:108-115,289-297` → refactored to `electron/lib/safety.ts` | Path-traversal + URL-whitelist logic extracted into `electron/lib/safety.ts`; **58 unit tests** in `__tests__/electron-safety.test.ts` cover `isAllowedExternal`, `resolveProtocolAsset`, `contentTypeFor`. Tests pass without `electron` in deps. |
+| Q-NEW-2 | No lint preventing JSX HTML renderers consuming `t()` values | Medium | 36 | **Closed** 2026-05-08 | `scripts/check-html-renderers.mjs` (new) | New audit script greps for `__html` JSX prop + `<Trans>` usage; pre-commit + CI gate; zero hits at land time, strict mode. Discipline doc at `docs/I18N.md`. |
+| Q-NEW-3 | `<datalist>` materialises every node/edge id (no cap) | Medium | 48 | **Closed** 2026-05-08 (cross-closed via P-NEW-2) | `src/components/results/GraphView.tsx:402-417,421-436` | Capped at `ID_PICKER_OPTION_CAP = 1000` via `nodeIds.slice(0, CAP)` / `edgeIds.slice(0, CAP)`. Lookup Maps are NOT capped, so resolving a typed-in id beyond the cap still works. |
+| Q-NEW-4 | `cellLines` walks node `properties` with no key-count cap | Low | 16 | Open | `src/components/results/TableView.tsx:238-253` | Add upper bound on `propCount` (e.g. min(propCount, 32)) or short-circuit when row height already at `ROW_HEIGHT_MAX`. |
+| Q-NEW-5 | Theme contract has no compile-time / runtime structural test | Low | 16 | Open | `src/theme/{light,dark,types}.ts` | Add `expectType<Theme>(lightTheme)` style assertion + a runtime test asserting the two themes contain the same key set. |
+| Q-NEW-6 | `detect:hardcoded-strings` only scans `.tsx`, not `.ts` | Low | 8 | Open | `scripts/detect-hardcoded-strings.mjs:60-66`, `.pre-commit-config.yaml:166` | Extend the walk to include `.ts` (zustand stores, hook return literals, error throws). Currently a blind spot. |
+| Q-NEW-7 | `LocalizationProvider` swallows localStorage errors silently | Low | 8 | Open | `src/services/i18n/LocalizationProvider.tsx:128,140` | Add a debug-mode `console.warn` in non-production, or surface via a sentry/log channel; sandboxed Electron failure path is currently uninstrumented. |
+| Q-NEW-T1 | Tooling gap: no Storybook / visual-regression for primitives | Medium | 32 | Open | `src/components/ui/*` (11 files, 2 tests) | Adopt Storybook 9 (CSF format, mirrors @devnw/components convention); add Chromatic / Percy for visual diff. |
+| Q-NEW-T2 | Tooling gap: no bundle-size budget enforced | Medium | 32 | Open | `webpack.prod.js` | Wire `webpack-bundle-analyzer` + `performance.maxAssetSize`/`maxEntrypointSize` budgets; ratchet down monthly. |
+| Q-NEW-T3 | Tooling gap: no Lighthouse / Web Vitals CI gate | Low | 16 | Open | `.gitlab-ci.yml` | Add a Lighthouse CI job pinned to performance ≥ 80 / accessibility ≥ 90. |
+| Q-NEW-T4 | Tooling gap: no a11y unit harness | Low | 16 | Open | `__test_utils__/afterEnv.js` | Wire `jest-axe` / `@axe-core/react`; fail tests on critical a11y violations. |
+
+### Counts after 2026-05-08 audit pass
+
+- High: 5 (1 closed this session: Q-NEW-1; pre-existing 4 closed: Q1, Q2, Q4)
+- Medium: 7 (3 closed: Q11, Q-NEW-2, Q-NEW-3; 4 open: Q5, Q6, Q7, Q8, Q9 + tooling T1/T2)
+- Low: 9 (3 closed: Q13, Q14 deferred-CI, Q15; 6 open: Q-NEW-4 through Q-NEW-T4 + Q10)
+
 ## Findings by Category
 
 ### Architecture / Maintainability (Q1, Q3, Q9, Q10)

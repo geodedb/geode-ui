@@ -108,6 +108,19 @@ Four Low-severity hardening items closed in a single pass:
   `internal/ui/dist/.well-known/security.txt` so the embedded UI
   handler serves it as text/plain at `/.well-known/security.txt`.
 
+## New findings — 2026-05-08 audit pass
+
+| ID | Risk | Severity | Title | File:Line | Status / Action |
+|----|------|----------|-------|-----------|-----------------|
+| S-NEW-1 | 16 | Medium | Electron-packaging surface not yet finalized | `package.json:36-49` (no `electron`/`electron-builder` dep) | Open. Document the pin (Electron ^32, electron-builder ^25), enable ASAR, validate `nativeWindowOpen` defaults; `geode://` does not enforce same-origin on subresource fetches by `corsEnabled:false` design. |
+| S-NEW-2 | 4 | Low (informational) | `geode://` SPA fallback masks 404 | `electron/main.ts:122-128` | Open (informational). Any miss returns `index.html`; not exploitable, may break integrity-check expectations. Document, not a defect. |
+| S-NEW-3 | 36 | Medium | i18n `escapeValue: false` lacks `<Trans>` lint guard | `src/services/i18n/config.ts:39` + `scripts/check-html-renderers.mjs` | **Closed** 2026-05-08 (cross-closed via Q-NEW-2). New `check:html-renderers` audit script greps for the two HTML-rendering JSX patterns; pre-commit + CI gate, strict from day one (zero pre-existing hits). Discipline doc at `docs/I18N.md`. |
+| S-NEW-4 | 4 | Low (informational) | `data-theme` attribute is a fingerprint surface | `src/theme/ThemeContext.tsx:81-87` | Accepted. Reflects only user-controlled local state; not a finding. |
+| S-NEW-5 | 4 | Low (informational/policy) | `WithAccessTokenDeprecation` requires no auth | `internal/server/security_headers.go:107-119` | Accepted. Intentional — emits Sunset header on probes; unauthenticated attacker observing `Sunset:` learns the migration timeline (already public via N8 security.txt). Documented. |
+| S-NEW-6 | 8 | Low | `security.txt` mailto routability unverified | `public/.well-known/security.txt:7-9` | Open. Confirm `security@geodedb.com` routes to a monitored inbox + the PGP key URL resolves. Without verification, N8 closure is technically incomplete. |
+| S-NEW-7 | — | Info / net positive | Self-hosted brand fonts close CSP relaxation need | `src/assets/fonts/*.woff2`, `src/assets/fonts/fonts.css` | Net positive. CSP `font-src 'self' data:` no longer needs the `https://fonts.gstatic.com` allowance. No action. |
+| S-NEW-8 | 16 | Low | dompurify ^3.4.0 fix is now available; pnpm.overrides feasible | `package.json` (transitive via monaco-editor) | Open (refines F8 #68). 6+ XSS advisories in dompurify@3.2.7 fixed in 3.4.0; can pin via `pnpm.overrides` without monaco-major bump. |
+
 ## Threat-Model Verdict
 
 The geode-ui server has a **defensible foundation** — JWT lock-down to HS256 with mandatory `-jwt-secret-hex`, mux-level admin role enforcement on all destructive routes, multipart upload sanitization, and a fail-closed MCP mount. The dominant residual risk is **brute-forceable credential entry** (F2 + N3 + N4 compose into a credential-stuffing chain) combined with **token theft amplification** (F7 + F4 compose into a one-shot exfil chain on any future XSS).

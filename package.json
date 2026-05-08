@@ -19,6 +19,7 @@
     "lint:contrast": "node scripts/check-contrast.mjs",
     "verify:translations": "node scripts/validate-translations.mjs --required-locales=en --max-warnings-total=0",
     "detect:hardcoded-strings": "node scripts/detect-hardcoded-strings.mjs --strict",
+    "check:html-renderers": "node scripts/check-html-renderers.mjs",
     "prettier:check": "prettier --check 'src/**/*.{ts,tsx,json,css}'",
     "prettier:fix": "prettier --write 'src/**/*.{ts,tsx,json,css}'",
     "clean": "rm -rf dist build coverage",

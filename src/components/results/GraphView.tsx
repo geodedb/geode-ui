@@ -33,6 +33,16 @@ type Props = {
 
 const REBUILD_DEBOUNCE_MS = 250
 
+// P-NEW-2 / Q-NEW-3: cap the datalist option count rendered by the
+// keyboard pickers. A 5k-node graph would otherwise materialise 5k
+// <option> elements unconditionally, wasting DOM, retained memory,
+// and an extra style/layout pass on every <input> focus. Datalists
+// behave like type-ahead suggestions: 1000 entries is more than any
+// human will scroll, and the input still accepts an exact id beyond
+// the cap (the lookup Maps are NOT capped, so resolving a typed-in id
+// always works).
+const ID_PICKER_OPTION_CAP = 1000
+
 const Wrap = styled.div`
   display: grid;
   grid-template-columns: 1fr 280px;
@@ -400,7 +410,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
                   onChange={(e) => onPickNodeId(e.target.value)}
                 />
                 <datalist id="graph-node-ids">
-                  {nodeIds.map((id) => (
+                  {nodeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
                     <option key={id} value={id}>
                       {id}
                     </option>
@@ -419,7 +429,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
                   onChange={(e) => onPickEdgeId(e.target.value)}
                 />
                 <datalist id="graph-edge-ids">
-                  {edgeIds.map((id) => (
+                  {edgeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
                     <option key={id} value={id}>
                       {id}
                     </option>

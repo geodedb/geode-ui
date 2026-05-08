@@ -10,6 +10,12 @@ import {
 import path from 'node:path'
 import fs from 'node:fs/promises'
 
+import {
+  contentTypeFor,
+  isAllowedExternal,
+  resolveProtocolAsset,
+} from './lib/safety'
+
 // Geode UI — Electron main process.
 //
 // The renderer is the same React SPA that ships to the browser via the
@@ -98,23 +104,23 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 function registerProtocol(): void {
-  // Map geode://app/<path> to <DIST_DIR>/<path>. We resolve via path.join
-  // and then verify the resolved path stays within DIST_DIR so a
-  // crafted geode://app/../../etc/passwd request can't escape the
-  // sandbox.
+  // Path-traversal containment + content-type derivation live in
+  // ./lib/safety so they're testable without `electron` in deps —
+  // see __tests__/electron-safety.test.ts (Q-NEW-1 closure).
   protocol.handle(PROTOCOL_NAME, async (request) => {
     const url = new URL(request.url)
-    const requested =
-      decodeURIComponent(url.pathname.replace(/^\//, '')) || 'index.html'
-    const resolved = path.normalize(path.join(DIST_DIR, requested))
-    if (!resolved.startsWith(DIST_DIR + path.sep) && resolved !== DIST_DIR) {
-      return new Response('forbidden', { status: 403 })
+    const requested = decodeURIComponent(url.pathname)
+    const resolution = resolveProtocolAsset(DIST_DIR, requested)
+    if (!resolution.ok) {
+      return new Response(resolution.reason, {
+        status: resolution.reason === 'forbidden' ? 403 : 400,
+      })
     }
     try {
-      const data = await fs.readFile(resolved)
+      const data = await fs.readFile(resolution.filePath)
       return new Response(data, {
         status: 200,
-        headers: { 'Content-Type': contentType(resolved) },
+        headers: { 'Content-Type': contentTypeFor(resolution.filePath) },
       })
     } catch {
       // SPA fallback: any unknown path returns index.html so client-side
@@ -130,21 +136,6 @@ function registerProtocol(): void {
       }
     }
   })
-}
-
-function contentType(p: string): string {
-  if (p.endsWith('.html')) return 'text/html; charset=utf-8'
-  if (p.endsWith('.js') || p.endsWith('.mjs')) return 'text/javascript'
-  if (p.endsWith('.css')) return 'text/css'
-  if (p.endsWith('.json')) return 'application/json'
-  if (p.endsWith('.svg')) return 'image/svg+xml'
-  if (p.endsWith('.png')) return 'image/png'
-  if (p.endsWith('.jpg') || p.endsWith('.jpeg')) return 'image/jpeg'
-  if (p.endsWith('.woff2')) return 'font/woff2'
-  if (p.endsWith('.woff')) return 'font/woff'
-  if (p.endsWith('.ttf')) return 'font/ttf'
-  if (p.endsWith('.ico')) return 'image/x-icon'
-  return 'application/octet-stream'
 }
 
 function buildMenu(): void {
@@ -291,7 +282,7 @@ ipcMain.handle('geode:open-external', async (_evt, url: string) => {
   if (typeof url !== 'string') return false
   // Whitelist to https / mailto only — never let the renderer ask the
   // OS to launch arbitrary file:// or custom-protocol URLs.
-  if (!/^https:|^mailto:/.test(url)) return false
+  if (!isAllowedExternal(url)) return false
   await shell.openExternal(url)
   return true
 })

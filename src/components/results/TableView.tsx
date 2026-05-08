@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useRef } from 'react'
 import styled from 'styled-components'
 import { List, RowComponentProps } from 'react-window'
 import { projectColumns } from './projectColumns'
@@ -370,15 +370,21 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
     () => ({ rows: view.rows, columnCount: view.columns.length }),
     [view.rows, view.columns]
   )
-  // Memoize the height function so react-window doesn't see a fresh
-  // identity on every render (which would invalidate its row-position
-  // cache and force a full re-layout). The closure depends only on
-  // `view.rows`, so a streaming row append is the only retrigger.
+  // P-NEW-1: hold a single stable closure identity for the lifetime of
+  // the component. A naive useMemo([view.rows]) keeps the closure
+  // identity bound to the rows array, but the queryStreamReducer mints
+  // a fresh `rows` array on every appended frame — so under streaming
+  // the closure rebuilds per batch and react-window invalidates its
+  // row-position cache, regressing the F5/F6 win documented in
+  // PERF_GAP_ANALYSIS.md (#26). Read the latest rows through a ref
+  // instead so the closure identity is stable across renders.
+  const rowsRef = useRef(view.rows)
+  rowsRef.current = view.rows
   const rowHeight = useMemo(
     () =>
       (index: number): number =>
-        estimateRowHeight(view.rows[index] ?? []),
-    [view.rows]
+        estimateRowHeight(rowsRef.current[index] ?? []),
+    []
   )
 
   // Explicit ARIA roles: react-window renders the body as div-based

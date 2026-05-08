@@ -168,6 +168,17 @@ repos:
     files: \.tsx$
     exclude: ^(node_modules/|gen/|electron/)
 
+  # Q-NEW-2 / S-NEW-3: ban JSX HTML renderers so the i18n module's
+  # escapeValue: false setting can't become an XSS vector. See
+  # docs/I18N.md for the full rationale.
+  - id: check-html-renderers
+    name: check:html-renderers
+    entry: node scripts/check-html-renderers.mjs
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx)$
+    exclude: ^(node_modules/|gen/|electron/)
+
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint
     name: golangci-lint
@@ -239,6 +250,7 @@ ci:
   - lint-contrast
   - verify-translations
   - detect-hardcoded-strings
+  - check-html-renderers
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck

@@ -103,6 +103,42 @@ prettier:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Closes GAP-008: the four ratchet gates land in CI alongside the
+# existing pre-commit hooks. Local pre-commit + remote CI agree on
+# the same enforcement contract, so a contributor who skips the
+# pre-commit hook still blocks at MR time.
+audit-ratchets:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run lint:hardcoded-styles
+    - npm run lint:contrast
+    - npm run verify:translations
+    - npm run detect:hardcoded-strings
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Closes GAP-009: type-check the Electron main + preload independently
+# from the SPA tsc pass. The renderer tsconfig (tsconfig.json) does
+# not include electron/ — without this job, a regression in
+# electron/main.ts or electron/preload.ts would land silently and
+# only surface during a release-engineer's `pnpm electron:package`
+# run. The job is allow_failure for now because @types/node and
+# electron itself are not yet pulled into devDependencies; flip to
+# strict once the release pipeline goes live.
+electron-typecheck:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run electron:tsc
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - electron/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # ============================================================================
 # TEST STAGE
 # ============================================================================

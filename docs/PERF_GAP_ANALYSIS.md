@@ -52,6 +52,18 @@ Five P0/P1 perf issues closed in this run:
   refetches while `document.visibilityState === 'hidden'` and resumes
   on the `visibilitychange` listener. Marked closed in this round.
 
+## New findings — 2026-05-08 audit pass
+
+| ID | Title | Severity | PerfScore | Status | File:Line | Action / Closure |
+|----|-------|----------|-----------|--------|-----------|------------------|
+| P-NEW-1 | `estimateRowHeight` closure invalidates react-window cache per stream batch | P1 | 64 | **Closed** 2026-05-08 | `src/components/results/TableView.tsx:377-388` | Closure now reads through `rowsRef` (mutable) and `useMemo([])` keeps stable identity for the lifetime of the component. Streaming appends no longer invalidate react-window's row-position cache. Preserves the F5/F6 win. |
+| P-NEW-2 | Datalist option flooding for graph results | P2 | 32 | **Closed** 2026-05-08 (cross-closed via Q-NEW-3) | `src/components/results/GraphView.tsx:402-417,421-436` | Capped at `ID_PICKER_OPTION_CAP = 1000` per picker. Lookup Maps remain uncapped — typing an id beyond the cap still resolves. |
+| P-NEW-3 | i18n init is synchronous on the critical path | P1 | 48 | Open | `src/services/i18n/config.ts:25-50`, `src/App.tsx:20` | Code-split `services/i18n` behind `React.lazy` + Suspense, OR move the bundle to a dynamic `import()` deferred until first `t()` use. Pairs with F10 (Monaco/Cytoscape eager imports). |
+| P-NEW-4 | ThemeProvider re-renders entire styled-components tree on system-theme flip | P2 | 32 | Open | `src/theme/ThemeContext.tsx:60-93` | Split the context: keep a small `ThemePreferenceContext` (`{variant, setVariant, resolved}`) and pass `theme` to `ScThemeProvider` directly. Most consumers only need the preference, so a flip wouldn't trigger a styled-components reflow. |
+| P-NEW-5 | GraphView duplicates `extractElements` work | P2 | 24 | Open | `src/components/results/GraphView.tsx:222-225,282` | Pass the memoized `elements` array into the build effect via a `useRef` rather than re-walking `respRef.current` inside the closure. |
+| P-NEW-6 | Logo SVGs not code-split | P3 | 12 | Open | `src/components/ui/Logo.tsx:4-5` | Either inline the active variant (small enough at 10 KB each) or `React.lazy` per variant; today both load eagerly. |
+| P-NEW-7 | Electron `geode://` asset handler has no in-memory cache | P3 | 12 | Open | `electron/main.ts:113-118` | Add an LRU cache keyed on resolved file path (hash to avoid mtime-poisoning races) for the static SPA assets; index.html hot path can also stay in memory after first read. |
+
 ## Hot-path grades (from Phase 3)
 
 | Hot path | Grade | Dominant cost | Action items |
