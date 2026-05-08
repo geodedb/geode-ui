@@ -42,11 +42,44 @@ const Wrap = styled.div`
     grid-template-columns: 1fr;
   }
 `
+// Holds the Cytoscape canvas plus any absolutely-positioned overlays
+// (empty-graph state, build-error banner). Position-relative so the
+// overlay can stack on top of the canvas without entering Cytoscape's
+// internal DOM tree.
+const CanvasArea = styled.div`
+  position: relative;
+`
 const Canvas = styled.div<{ $height: number }>`
   height: ${({ $height }) => $height}px;
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
   background: ${({ theme }) => theme.bg.graphCanvas};
+`
+const Overlay = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: ${({ theme }) => theme.spacing.md};
+  pointer-events: none;
+  color: ${({ theme }) => theme.text.muted};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  font-style: italic;
+  text-align: center;
+`
+const ErrorBanner = styled.div`
+  position: absolute;
+  inset: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.sm}
+    auto;
+  background: ${({ theme }) => theme.bg.surface};
+  border: 1px solid ${({ theme }) => theme.colors.danger};
+  border-left-width: 3px;
+  color: ${({ theme }) => theme.text.danger};
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  box-shadow: ${({ theme }) => theme.shadows.sm};
 `
 const Side = styled.aside<{ $height: number }>`
   height: ${({ $height }) => $height}px;
@@ -71,35 +104,47 @@ const Side = styled.aside<{ $height: number }>`
   }
 `
 const ControlsBlock = styled.section`
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+  padding-bottom: ${({ theme }) => theme.spacing.sm};
+  border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
+
   h5 {
-    margin: 0 0 6px 0;
-    font-size: 12px;
+    margin: 0 0 ${({ theme }) => theme.spacing.xs};
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    opacity: 0.7;
+    color: ${({ theme }) => theme.text.secondary};
   }
   .row {
     display: grid;
     grid-template-columns: 1fr auto;
-    gap: 6px;
+    gap: ${({ theme }) => theme.spacing.xs};
     align-items: center;
-    margin-bottom: 4px;
-    font-size: 12px;
+    margin-bottom: ${({ theme }) => theme.spacing.xxs};
+    font-size: ${({ theme }) => theme.font.sizes.xs};
   }
-  select {
-    font-size: 12px;
-    padding: 2px 4px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 2px;
+  select,
+  input[list] {
+    font-family: inherit;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    padding: 2px 6px;
+    background: ${({ theme }) => theme.bg.surface};
+    color: ${({ theme }) => theme.text.primary};
+    border: 1px solid ${({ theme }) => theme.border.default};
+    border-radius: ${({ theme }) => theme.radii.sm};
+    min-width: 0;
+  }
+  select:focus-visible,
+  input[list]:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+    border-color: ${({ theme }) => theme.border.focus};
   }
   .empty {
-    font-size: 12px;
-    opacity: 0.6;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    color: ${({ theme }) => theme.text.muted};
   }
 `
 
@@ -140,6 +185,10 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const [selected, setSelected] = useState<Selected | null>(null)
+  // GAP-04: errors thrown by extractElements / cytoscape() during the
+  // build pass. Surfaced as a banner over the canvas instead of an
+  // unhandled console rejection.
+  const [error, setError] = useState<string | null>(null)
   const [nodeLabelPrefs, setNodeLabelPrefs] = useState<Record<string, string>>(
     {}
   )
@@ -162,7 +211,11 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const edgePrefsRef = useRef(edgeLabelPrefs)
   edgePrefsRef.current = edgeLabelPrefs
 
-  const sig = respSignature(resp)
+  // GAP-01 / GAP-07: rebuild key combines row_count with the query
+  // text. Two queries that happen to return the same row count would
+  // previously fail to trigger the rebuild and leave a stale graph
+  // on the canvas.
+  const sig = `${respSignature(resp)}|${query ?? ''}`
 
   // Compute available options from the current resp (cheap; same data
   // extractElements would walk).
@@ -173,12 +226,50 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const nodeOptions = useMemo(() => labelOptions(elements), [elements])
   const edgeOptions = useMemo(() => typeOptions(elements), [elements])
 
+  // Per-element id index for the keyboard pickers (GAP-03). Both
+  // arrays are derived from the memoized `elements` so they're cheap
+  // to recompute on resp change.
+  const { nodeIds, edgeIds, nodeDataById, edgeDataById } = useMemo(() => {
+    const nIds: string[] = []
+    const eIds: string[] = []
+    const nMap = new Map<string, Record<string, unknown>>()
+    const eMap = new Map<string, Record<string, unknown>>()
+    elements.forEach((el) => {
+      const data = el.data as Record<string, unknown> | undefined
+      if (!data) return
+      const id = data.id != null ? String(data.id) : ''
+      if (!id) return
+      // Cytoscape v3 marks edges by the presence of `source` + `target`
+      // on the data bag.
+      const isEdge = data.source !== undefined && data.target !== undefined
+      if (isEdge) {
+        eIds.push(id)
+        eMap.set(id, data)
+      } else {
+        nIds.push(id)
+        nMap.set(id, data)
+      }
+    })
+    return {
+      nodeIds: nIds,
+      edgeIds: eIds,
+      nodeDataById: nMap,
+      edgeDataById: eMap,
+    }
+  }, [elements])
+
   useEffect(() => {
     if (!ref.current) return undefined
     let canceled = false
 
     const build = (): void => {
       if (canceled || !ref.current) return
+      // GAP-02 / GAP-06: drop the previous selection so the inspector
+      // doesn't keep showing data from a graph that was just torn
+      // down. Reset before any throw so the side panel never shows
+      // stale state.
+      setSelected(null)
+      setError(null)
       // Tear down a previous core if any. We accept this cost because
       // the rebuild is gated by row_count + debounce (PERF-F9), so a
       // streaming run produces exactly one teardown+rebuild instead of
@@ -187,28 +278,40 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         cyRef.current.destroy()
         cyRef.current = null
       }
-      const els = extractElements(respRef.current, queryRef.current)
-      const cy = cytoscape({
-        container: ref.current,
-        elements: els,
-        style: cytoscapeStyle,
-        layout: { name: 'cose', animate: false, padding: 24 },
-        wheelSensitivity: 0.2,
-      })
-      cy.on('tap', 'node', (ev) =>
-        setSelected({ kind: 'node', data: ev.target.data() })
-      )
-      cy.on('tap', 'edge', (ev) =>
-        setSelected({ kind: 'edge', data: ev.target.data() })
-      )
-      cy.on('tap', (ev) => {
-        if (ev.target === cy) setSelected(null)
-      })
-      cyRef.current = cy
-      // Apply current label preferences to this fresh core. Subsequent
-      // pref changes are handled by the dedicated effect below without
-      // re-running the layout.
-      applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
+      try {
+        const els = extractElements(respRef.current, queryRef.current)
+        // GAP-05: when the response has no graph elements (e.g. a
+        // scalar projection like RETURN p.name), skip the cytoscape
+        // mount entirely. The render pass shows an empty-state
+        // overlay over the bare Canvas.
+        if (els.length === 0) return
+        const cy = cytoscape({
+          container: ref.current,
+          elements: els,
+          style: cytoscapeStyle,
+          layout: { name: 'cose', animate: false, padding: 24 },
+          wheelSensitivity: 0.2,
+        })
+        cy.on('tap', 'node', (ev) =>
+          setSelected({ kind: 'node', data: ev.target.data() })
+        )
+        cy.on('tap', 'edge', (ev) =>
+          setSelected({ kind: 'edge', data: ev.target.data() })
+        )
+        cy.on('tap', (ev) => {
+          if (ev.target === cy) setSelected(null)
+        })
+        cyRef.current = cy
+        // Apply current label preferences to this fresh core. Subsequent
+        // pref changes are handled by the dedicated effect below without
+        // re-running the layout.
+        applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
+      } catch (e: unknown) {
+        // GAP-04: surface the failure as a visible banner instead of
+        // an uncaught console rejection. The build is best-effort —
+        // the rest of the page (sidebar, picker) still works.
+        setError(e instanceof Error ? e.message : String(e))
+      }
     }
 
     const timer = setTimeout(build, REBUILD_DEBOUNCE_MS)
@@ -240,15 +343,92 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
     setEdgeLabelPrefs((prev) => ({ ...prev, [type]: key }))
   }
 
+  // GAP-03: keyboard-only operators can't tap on the canvas. The id
+  // pickers below let them select a node or edge via the Display
+  // panel; this handler resolves the typed/picked id back to the
+  // element's data and updates the inspector. We also call cy.$id
+  // when the core is mounted so the canvas highlights the selection.
+  const onPickNodeId = (rawId: string): void => {
+    const id = rawId.trim()
+    if (!id) return
+    const data = nodeDataById.get(id)
+    if (!data) return
+    setSelected({ kind: 'node', data })
+    cyRef.current?.$id(id).select()
+  }
+  const onPickEdgeId = (rawId: string): void => {
+    const id = rawId.trim()
+    if (!id) return
+    const data = edgeDataById.get(id)
+    if (!data) return
+    setSelected({ kind: 'edge', data })
+    cyRef.current?.$id(id).select()
+  }
+
+  const empty = elements.length === 0 && !error
+
   return (
     <Wrap>
-      <Canvas
-        ref={ref}
-        $height={height}
-        role="img"
-        aria-label={t('graph.canvasAria')}
-      />
+      <CanvasArea>
+        <Canvas
+          ref={ref}
+          $height={height}
+          role="img"
+          aria-label={t('graph.canvasAria')}
+        />
+        {empty && (
+          <Overlay data-testid="graph-empty-state">{t('graph.empty')}</Overlay>
+        )}
+        {error && (
+          <ErrorBanner role="alert">
+            {t('graph.errorBanner', { message: error })}
+          </ErrorBanner>
+        )}
+      </CanvasArea>
       <Side $height={height}>
+        {(nodeIds.length > 0 || edgeIds.length > 0) && (
+          <ControlsBlock data-testid="graph-selection-controls">
+            <h5>{t('graph.selectionHeading')}</h5>
+            {nodeIds.length > 0 && (
+              <div className="row">
+                <span>{t('graph.selectNodeById')}</span>
+                <input
+                  list="graph-node-ids"
+                  data-testid="graph-node-id-picker"
+                  aria-label={t('graph.selectNodeById')}
+                  placeholder={t('graph.nodeIdPlaceholder')}
+                  onChange={(e) => onPickNodeId(e.target.value)}
+                />
+                <datalist id="graph-node-ids">
+                  {nodeIds.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+            )}
+            {edgeIds.length > 0 && (
+              <div className="row">
+                <span>{t('graph.selectEdgeById')}</span>
+                <input
+                  list="graph-edge-ids"
+                  data-testid="graph-edge-id-picker"
+                  aria-label={t('graph.selectEdgeById')}
+                  placeholder={t('graph.edgeIdPlaceholder')}
+                  onChange={(e) => onPickEdgeId(e.target.value)}
+                />
+                <datalist id="graph-edge-ids">
+                  {edgeIds.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+            )}
+          </ControlsBlock>
+        )}
         <ControlsBlock data-testid="graph-display-controls">
           <h5>{t('graph.displayHeading')}</h5>
           {nodeOptions.size === 0 ? (

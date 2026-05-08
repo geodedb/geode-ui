@@ -86,6 +86,13 @@ export const en = {
     selectedNode: 'Node {{id}}',
     selectedEdge: 'Edge {{id}}',
     inspectHint: 'Click a node or edge to inspect properties.',
+    selectionHeading: 'Selection',
+    selectNodeById: 'Select node by id',
+    selectEdgeById: 'Select edge by id',
+    nodeIdPlaceholder: 'node id…',
+    edgeIdPlaceholder: 'edge id…',
+    empty: 'No nodes or edges to display for this query.',
+    errorBanner: 'Failed to render graph: {{message}}',
   },
 
   schema: {
