@@ -59,12 +59,12 @@ geode-ui is an **admin-facing** SPA + thin reverse-proxy/auth-fronting server fo
 | 9 | N4 | Low | **24** | No server-side password policy | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `internal/server/handlers_auth.go:99-103` | Min 12 chars; HIBP k-anon (optional) |
 | 10 | N10 | Low | **24** | User-enumeration timing channel on /auth/login | [#76](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/76) | `internal/server/handlers_auth.go:131-148` | Constant-time auth-failure path; unify 401 response |
 | 11 | F8 | Medium | **16** | dompurify@3.2.7 transitive (8 advisories) | [#68](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/68) | `pnpm-lock.yaml` | Bump monaco-editor or pnpm.overrides |
-| 12 | F5 | Low | **16** | Deprecate ?access_token= query fallback | [#71](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/71) | `internal/server/auth.go:42-52` | Emit Deprecation header; remove next minor |
+| 12 | F5 | Low | **16** | Deprecate ?access_token= query fallback | [#71](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/71) | `internal/server/auth.go:88` | **Closed** 2026-05-08 — `WithAccessTokenDeprecation` middleware emits `Deprecation: true`, `Sunset: <AccessTokenSunsetDate>`, and a `Link; rel="deprecation"` header on every response that carried `?access_token=`. Sunset 2026-07-01. |
 | 13 | N5 | Low | **16** | httpx CORS supports wildcard origin | [#74](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/74) | `gen/pkg/httpx/server.go:117-141` | Reject `*` when CORSEnabled in prod |
-| 14 | F1 | Low | **8** | /mcp mounted but mcpx.SetAuthVerifier never called (fail-closed) | [#69](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/69) | `cmd/server/main.go:140-141`, `gen/pkg/mcpx/engine.go:171-176` | Call SetAuthVerifier or unmount /mcp |
-| 15 | F3 | Low | **8** | JWT verify has no clock leeway | [#70](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/70) | `internal/jwt/jwt.go:82-94` | `jwt.WithLeeway(60*time.Second)` |
-| 16 | F12 | Low | **8** | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin | [#73](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/73) | `pnpm-lock.yaml` | Bump or replace plugin |
-| 17 | N8 | Low | **8** | Missing public/.well-known/security.txt | [#75](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/75) | `public/.well-known/` (new) | Add per RFC 9116; verify SECURITY.md links to it |
+| 14 | F1 | Low | **8** | /mcp mounted but mcpx.SetAuthVerifier never called (fail-closed) | [#69](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/69) | `cmd/server/main.go:165` | **Closed** 2026-05-08 — `mcpx.SetAuthVerifier(srv.AuthJWT)` wired so /mcp authorizes via the same HS256 verifier that gates the REST API. |
+| 15 | F3 | Low | **8** | JWT verify has no clock leeway | [#70](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/70) | `internal/jwt/jwt.go:82-94` | **Closed** 2026-05-08 — `jjwt.WithLeeway(60 * time.Second)` passed to `ParseWithClaims`. Tests pin the upper bound: an exp 2 minutes in the past still rejects. |
+| 16 | F12 | Low | **8** | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin | [#73](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/73) | `package-lock.json` | Bump or replace plugin |
+| 17 | N8 | Low | **8** | Missing public/.well-known/security.txt | [#75](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/75) | `public/.well-known/security.txt` | **Closed** 2026-05-08 — file added per RFC 9116 (Contact, Expires 2027-05-08, Encryption, Acknowledgments, Canonical, Policy). Webpack CopyPlugin emits it under the SPA's `/.well-known/security.txt`. |
 | 18 | F11 | Low | **4** | gosec G115 in genapi-emitted gqlx/subscription.go | [#77](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/77) | `gen/pkg/gqlx/subscription.go:394` | Fix in genapi at `~/src/devnw/apps/genapi`; regenerate |
 
 **Confidential issues** (Critical/High): F2 (#58), F4 (#60), F7 (#62) — created with `--confidential` because they describe an exploit chain or a credential-storage flaw with a concrete exfil path. **All three closed in the 2026-05-07 closure run.**
@@ -83,6 +83,30 @@ Genapi follow-ups filed in the upstream project:
 
 - `genapi#214` -- move CSP/COOP/Permissions-Policy headers into `httpx.WrapHandler`.
 - `genapi#215` -- add per-IP global rate limit + per-route per-IP option in httpx.
+
+### Closure run 2026-05-08
+
+Four Low-severity hardening items closed in a single pass:
+
+- **F1 (#69)** — `mcpx.SetAuthVerifier(srv.AuthJWT)` wired in
+  `cmd/server/main.go:165`. The MCP route now authorizes through the
+  same HS256 verifier as the REST API instead of fail-closing on every
+  call.
+- **F3 (#70)** — `jjwt.WithLeeway(60 * time.Second)` added to
+  `Issuer.Parse`. Tests pin the lower bound (a token whose iat is 30 s
+  in the future parses cleanly) and the upper bound (a token whose exp
+  is 2 minutes in the past is rejected).
+- **F5 (#71)** — `WithAccessTokenDeprecation` middleware in
+  `internal/server/security_headers.go` emits `Deprecation: true`,
+  `Sunset: <AccessTokenSunsetDate>` (2026-07-01), and a
+  `Link; rel="deprecation"` header on any response whose request
+  carried `?access_token=` on the URL. Wrapped into the global
+  pipeline in `cmd/server/main.go` alongside `WithPermissionsPolicy`.
+- **N8 (#75)** — `public/.well-known/security.txt` per RFC 9116
+  (Contact, Expires 2027-05-08, Encryption, Acknowledgments,
+  Canonical, Policy). The webpack `CopyPlugin` copies it into
+  `internal/ui/dist/.well-known/security.txt` so the embedded UI
+  handler serves it as text/plain at `/.well-known/security.txt`.
 
 ## Threat-Model Verdict
 

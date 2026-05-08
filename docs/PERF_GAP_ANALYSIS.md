@@ -45,6 +45,13 @@ Five P0/P1 perf issues closed in this run:
 - **F1 (#18)** -- result_codec single-pass. Closed via `7ac1a43` -- graph-summary scan folded into the existing row scan; eliminates the second pass.
 - **F2 (#21)** -- ws_query batch frames. Closed via `278452a` -- per-row Marshal replaced with `sync.Pool`-backed batch frames; one frame per N rows.
 
+### Closure run 2026-05-08
+
+- **F15 (#59)** -- already-closed via Q2's `2b28b85` (cross-closed).
+  `useApiResource` + the AuditLogPage's visibility-gated poll skips
+  refetches while `document.visibilityState === 'hidden'` and resumes
+  on the `visibilitychange` listener. Marked closed in this round.
+
 ## Hot-path grades (from Phase 3)
 
 | Hot path | Grade | Dominant cost | Action items |
@@ -71,7 +78,7 @@ Five P0/P1 perf issues closed in this run:
 | 9 | F10 | Monaco + Cytoscape eagerly imported, no code-splitting | P2 medium | **48** (3×4×4) | [#54](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/54) | `src/index.tsx`, `src/App.tsx` | — | Open |
 | 10 | F13 | No gzip, no pprof, no sync.Pool for jsontext | P3 low | **36** (3×3×4) | [#57](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/57) | `cmd/server/main.go:140-180` | — | Open |
 | 11 | F8 | SchemaExplorer: 4-fan-out per switch, no abort/cache | P3 low | **32** (2×4×4) | [#52](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/52) | `src/components/SchemaExplorer.tsx:125-147` | — | Open |
-| 12 | F15 | AuditLogPage: 5s setInterval, no visibility gate | P3 low | **24** (2×3×4) | [#59](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/59) | `src/components/ops/AuditLogPage.tsx:174` | — | Open |
+| 12 | F15 | AuditLogPage: 5s setInterval, no visibility gate | P3 low | **24** (2×3×4) | [#59](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/59) | `src/components/ops/AuditLogPage.tsx` | — | **Closed** 2026-05-07 (cross-closed via Q2 / `2b28b85`) — poll skips while `document.visibilityState === 'hidden'` and resumes on the visibilitychange listener. |
 | 13 | F18 | Driver re-parses queries (suspected); no stmt cache | P3 low | **24** (2×3×4) | [#61](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/61) | `internal/conn/pool.go` | — | Open |
 
 ## Findings by area

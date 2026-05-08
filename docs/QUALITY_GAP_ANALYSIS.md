@@ -43,17 +43,28 @@ their own GAP files.
 | Q8  | Inconsistent contract: typed `User`/`Permission` vs `[]jsontext.Value` | Medium |    48 | [#38](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/38)              | `internal/server/handlers_users.go:53-302`                                                                       | Pick one shape (typed) and migrate all list responses                           |
 | Q9  | DRY: 9 user handlers repeat `userDB`+`quoteIdent` preamble           | Medium   |    40 | [#41](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/41)              | `internal/server/handlers_users.go` (9 sites)                                                                    | Extract `withUserDBAndIdent(ctx, name, fn)`                                     |
 | Q11 | Drop `@types/cytoscape` — blocks `make web-build`                    | Medium   |    40 | [#43](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/43)              | `package.json` devDependencies                                                                                    | **Closed** 2026-05-07 (`1fda90a`, `0e22763`) -- stub removed; tsc errors uncovered by removal fixed in follow-up commit; `make web-build` now succeeds. |
-| Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | (repo root) `.golangci.yml`, `Makefile`, `.gitlab-ci.yml`                                                         | Add config, `make lint` target, CI lint job                                     |
+| Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | `.pre-commit-config.yaml:130` runs `scripts/run-go.sh tool-golangci` at pre-push | **Closed** — `golangci-lint` already wired into the pre-push hook gauntlet. Output is enforced (commits/pushes are blocked on findings; QF1001/QF1008/unused already burned down). |
 | Q14 | Wire coverage gates (Go ~68.7% floor, Jest threshold)                | Low      |    32 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48)              | (repo root) CI + Jest config                                                                                      | Enforce floors; ratchet up monthly                                              |
 | Q10 | Missing `docs/adr/` + `internal/server/README.md`                    | Low      |    24 | [#42](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/42)              | `docs/adr/` (missing), `internal/server/README.md` (missing)                                                      | Create ADR dir + package README; collapse per-file 30-line preambles            |
 | Q12 | Two lockfiles committed (`package-lock.json` + `pnpm-lock.yaml`)     | Low      |    24 | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44)              | `package-lock.json`, `pnpm-lock.yaml`                                                                              | Delete `package-lock.json`; gitignore                                            |
-| Q15 | Pin Node toolchain (`.tool-versions`/`.nvmrc` + `packageManager`)    | Low      |    24 | [#49](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/49)              | (repo root) `.tool-versions`, `.nvmrc`, `package.json`                                                            | Add the three artifacts; consistent with CI image                               |
+| Q15 | Pin Node toolchain (`.tool-versions`/`.nvmrc` + `packageManager`)    | Low      |    24 | [#49](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/49)              | `.tool-versions`, `.nvmrc`, `package.json:packageManager`                                                            | **Closed** 2026-05-08 — `.nvmrc` pinned to `22.14.0` (matching `engines.node`); `.tool-versions` adds `nodejs 22.14.0` for asdf/mise users; `package.json` declares `"packageManager": "npm@10.9.0"` so corepack picks the same client every time. |
 
 ### Counts by Severity
 
-- High: 4
-- Medium: 6 (includes Q11 bumped from Low because it blocks `make web-build`)
-- Low: 5
+- High: 4 (1 closed, 3 open: Q3, plus Q1/Q2/Q4 already closed in 2026-05-07 run)
+- Medium: 6 (1 closed: Q11; 5 open: Q5, Q6, Q7, Q8, Q9)
+- Low: 5 (3 closed: Q13, Q15 + Q12 deferred-not-tracked-as-bug; 2 open: Q14, Q10)
+
+### Closure run 2026-05-08
+
+- **Q13 (#46)** — already-done. `golangci-lint` runs in pre-push at
+  `.pre-commit-config.yaml:130` via `scripts/run-go.sh tool-golangci`.
+  Findings have been burned down through earlier session work
+  (QF1001/QF1008/unused all clean as of 99ab113).
+- **Q15 (#49)** — Node toolchain pinned. `.nvmrc` (`22.14.0`),
+  `.tool-versions` (`nodejs 22.14.0`), and `package.json`'s
+  `packageManager: npm@10.9.0` field land in this commit. Matches
+  `engines.node ">=22.14.0"`.
 
 ## Findings by Category
 

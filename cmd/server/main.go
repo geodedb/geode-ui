@@ -17,6 +17,7 @@ import (
 	genapi "geodedb.com/geode-ui/gen/api"
 	genmcp "geodedb.com/geode-ui/gen/mcp"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
+	"geodedb.com/geode-ui/gen/pkg/mcpx"
 	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/jwt"
@@ -156,6 +157,13 @@ func main() {
 	// straight to GraphServer.handleQuery so HTTP and MCP callers see
 	// identical query semantics, validation, and timeout handling.
 	genmcp.Register(server.NewMCPServer(srv))
+	// SEC-F1 (#69): wire the same JWT verifier the API surface uses so
+	// /mcp authorizes requests instead of fail-closing on every call.
+	// Without this the route returned 401 for every request because
+	// authVerifier defaulted to nil, leaving the MCP envelope
+	// unreachable to legitimate clients. AuthJWT enforces the same
+	// HS256 lockdown + role context that the REST handlers see.
+	mcpx.SetAuthVerifier(srv.AuthJWT)
 	mux.HandleFunc("/mcp", genmcp.HandleMCPHTTP)
 
 	uiHandler, err := ui.Handler()
@@ -194,8 +202,13 @@ func main() {
 	csrfWrapped := server.CSRFMiddleware(limited)
 	// Permissions-Policy is harmless and short enough to apply to every
 	// response; wrap the entire pipeline so SPA, API, WS upgrade, MCP
-	// endpoints all carry the directive.
-	handler := server.WithPermissionsPolicy(httpx.WrapHandler(hcfg, csrfWrapped))
+	// endpoints all carry the directive. SEC-F5 (#71) deprecation
+	// headers ride on the same wrap chain so any ?access_token=
+	// request — header-, cookie-, or query-authed — gets the Sunset
+	// signal in its response.
+	handler := server.WithPermissionsPolicy(
+		server.WithAccessTokenDeprecation(httpx.WrapHandler(hcfg, csrfWrapped)),
+	)
 
 	httpSrv := &http.Server{
 		Addr:              listen,

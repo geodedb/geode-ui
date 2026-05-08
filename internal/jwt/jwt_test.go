@@ -196,3 +196,66 @@ func TestParse_RejectsGarbage(t *testing.T) {
 		t.Fatal("expected error for empty token")
 	}
 }
+
+// TestParse_TolersClockSkew pins the SEC-F3 (#70) leeway: a token whose
+// iat sits a few seconds in the future (e.g. issuing host's clock is
+// ahead of the verifier's) must still parse cleanly. Without leeway,
+// jwt/v5 rejects iat-in-the-future as "token used before issued".
+func TestParse_TolersClockSkew(t *testing.T) {
+	iss, err := NewIssuer(newSecret(t), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mint a token whose iat is 30 s in the future — well inside the
+	// 60 s leeway clockLeeway constant.
+	now := time.Now()
+	future := now.Add(30 * time.Second)
+	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, Claims{
+		Subject: "alice",
+		Profile: "default",
+		Roles:   []string{"reader"},
+		RegisteredClaims: jjwt.RegisteredClaims{
+			IssuedAt:  jjwt.NewNumericDate(future),
+			NotBefore: jjwt.NewNumericDate(future),
+			ExpiresAt: jjwt.NewNumericDate(future.Add(time.Hour)),
+			Subject:   "alice",
+		},
+	})
+	signed, err := tok.SignedString(iss.secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iss.Parse(signed); err != nil {
+		t.Fatalf("expected leeway to tolerate +30s skew, got: %v", err)
+	}
+}
+
+// TestParse_RejectsExpiredBeyondLeeway pins the upper bound: a token
+// whose exp is more than the leeway window in the past must still be
+// rejected. Closes the "leeway accidentally widens replay window"
+// concern.
+func TestParse_RejectsExpiredBeyondLeeway(t *testing.T) {
+	iss, err := NewIssuer(newSecret(t), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	pastIat := now.Add(-2 * time.Hour)
+	pastExp := now.Add(-2 * time.Minute) // far past clockLeeway = 60s
+	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, Claims{
+		Subject: "alice",
+		Profile: "default",
+		RegisteredClaims: jjwt.RegisteredClaims{
+			IssuedAt:  jjwt.NewNumericDate(pastIat),
+			ExpiresAt: jjwt.NewNumericDate(pastExp),
+			Subject:   "alice",
+		},
+	})
+	signed, err := tok.SignedString(iss.secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iss.Parse(signed); err == nil {
+		t.Fatal("expected expired-beyond-leeway token to be rejected")
+	}
+}

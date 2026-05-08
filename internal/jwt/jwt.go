@@ -75,6 +75,16 @@ func (i *Issuer) Issue(sub, profile string, roles []string) (string, time.Time, 
 	return signed, exp, err
 }
 
+// clockLeeway tolerates small skew between the issuing host and the
+// verifying host. Closes SEC-F3 (#70): without leeway, a request that
+// arrives ~tens of seconds after issuance could fail iat / nbf checks
+// when the two hosts' wall clocks drift, even though the token is
+// otherwise valid. 60 s mirrors the default in OIDC libraries (e.g.
+// node-oidc-provider, Spring Authorization Server) and is small
+// enough that a stolen-but-expired token can't be replayed for a
+// meaningful window.
+const clockLeeway = 60 * time.Second
+
 // Parse verifies the signature and standard claims of token, returning
 // the decoded *Claims on success. The keyfunc rejects any algorithm
 // other than HS256 — without this guard a token signed with the "none"
@@ -86,7 +96,7 @@ func (i *Issuer) Parse(token string) (*Claims, error) {
 			return nil, errors.New("jwt: unexpected alg")
 		}
 		return i.secret, nil
-	})
+	}, jjwt.WithLeeway(clockLeeway))
 	if err != nil {
 		return nil, err
 	}

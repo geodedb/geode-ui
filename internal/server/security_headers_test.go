@@ -103,6 +103,49 @@ func TestCSPNotAppliedToJSONResponses(t *testing.T) {
 	}
 }
 
+// TestAccessTokenDeprecation asserts the SEC-F5 (#71) wrapper emits
+// Deprecation/Sunset/Link headers when (and only when) ?access_token=
+// is present on the request URL.
+func TestAccessTokenDeprecation(t *testing.T) {
+	t.Parallel()
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := WithAccessTokenDeprecation(inner)
+
+	t.Run("emits headers when query token is present", func(t *testing.T) {
+		t.Parallel()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(
+			http.MethodGet, "/api/v1/whoami?access_token=t", nil,
+		)
+		h.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Deprecation"); got != "true" {
+			t.Errorf("Deprecation=%q want %q", got, "true")
+		}
+		if got := rec.Header().Get("Sunset"); got != AccessTokenSunsetDate {
+			t.Errorf("Sunset=%q want %q", got, AccessTokenSunsetDate)
+		}
+		if got := rec.Header().Get("Link"); !strings.Contains(got, `rel="deprecation"`) {
+			t.Errorf("Link header missing deprecation link: %q", got)
+		}
+	})
+
+	t.Run("no headers when no query token", func(t *testing.T) {
+		t.Parallel()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/whoami", nil)
+		req.Header.Set("Authorization", "Bearer abc")
+		h.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Deprecation"); got != "" {
+			t.Errorf("Deprecation header unexpectedly set: %q", got)
+		}
+		if got := rec.Header().Get("Sunset"); got != "" {
+			t.Errorf("Sunset header unexpectedly set: %q", got)
+		}
+	})
+}
+
 // TestSPAImplicitHTML asserts that when the inner handler does not set a
 // Content-Type (the typical embed.FS FileServer path serving index.html),
 // the wrapper detects HTML by sniffing the body and applies CSP+COOP.

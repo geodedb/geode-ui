@@ -33,11 +33,12 @@ import (
 // → GetUsername/PatchUsername/DeleteUsername).
 //
 // Every required_roles=["admin"] route is gated by JWT-claim role
-// enforcement in the generated wrapper before reaching the handler. The
-// JWT verifier itself is still stubbed (B9 will land it). Until then the
-// admin gate effectively rejects every request with 401 (no Bearer token)
-// — the handlers below are exercised only via the unit-test path that
-// calls them directly.
+// enforcement in the generated wrapper before reaching the handler.
+// The JWT verifier is implemented at internal/server/auth.go:40
+// (`AuthJWT`) and exercised across protected handlers in
+// internal/server/auth_test.go (cookie + bearer + query-string
+// fallback paths). The header-mediated re-parse in the genapi
+// wrapper enforces required_roles before this file's handlers run.
 //
 // GQL admin syntax: Geode 0.3.8 only supports `ALTER USER <name> SET
 // PASSWORD '<pw>'` over the wire (verified with a live server during B4).

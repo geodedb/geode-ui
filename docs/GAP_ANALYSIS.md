@@ -32,7 +32,7 @@ No release-blocking gaps. 4 of 7 are blocked on upstream Geode v0.6+; 2 are CI v
 
 | Gap-ID  | Title | Status | Severity | Issue link | Evidence | Next action |
 |---------|-------|--------|----------|------------|----------|-------------|
-| GAP-001 | Stale "B9 will land" stub comment in `handlers_users.go` | Open | Low | [#1](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/1) | `internal/server/handlers_users.go:35-40` vs `internal/server/auth.go:21` + `auth_test.go:32-180` | Edit lines 35-40, drop "still stubbed (B9 will land it)", reference `AuthJWT` in `auth.go` |
+| GAP-001 | Stale "B9 will land" stub comment in `handlers_users.go` | **Closed** 2026-05-08 | Low | [#1](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/1) | `internal/server/handlers_users.go:35-40` (was) → now references `auth.go:40` (`AuthJWT`) + `auth_test.go` | Stub comment replaced with accurate reference to the implemented `AuthJWT` in `auth.go` and its test coverage. |
 | GAP-002 | e2e-18 admin-users specs skip on missing Geode wire ops | Open (upstream-blocked) | Low | [#2](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/2) | `e2e/specs/07-admin-users.spec.ts:27,49,75,83` runtime probes for `SHOW USERS` / `CREATE USER` / `DROP USER` | Track upstream Geode issue; specs auto-enable on upgrade. No UI change. |
 | GAP-003 | e2e-19 admin-roles-policies skips on insufficient role | Open (upstream-blocked) | Low | [#3](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/3) | `e2e/specs/08-admin-roles-policies.spec.ts:4-13` (`ADMIN_GAP` probe) | Revisit when Geode admin DDL lands. |
 | GAP-004 | e2e-20 ops audit spec skips when `/api/v1/audit` returns 403 | Open (upstream-blocked) | Low | [#4](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/4) | `e2e/specs/09-ops.spec.ts:37-47` | Track upstream Geode audit-role fix. |
@@ -40,22 +40,30 @@ No release-blocking gaps. 4 of 7 are blocked on upstream Geode v0.6+; 2 are CI v
 | GAP-006 | e2e job runtime status in CI not verified | Open (verification) | Low | [#6](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/6) | `.gitlab-ci.yml` declares e2e job; no recent run sampled | Sample latest pipeline once stack-up smoke passes. |
 | GAP-007 | docker-compose stack-up smoke not executed | Open (verification) | Low | [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7) | Requirement e2e-7 / T6 rebuild-and-push | One-shot `docker compose up` smoke; record outcome. |
 
+## Closure run 2026-05-08
+
+- **GAP-001** — closed by replacing the "B9 will land" stub comment at
+  `internal/server/handlers_users.go:35-40` with an accurate reference
+  to the already-implemented `AuthJWT` middleware (`auth.go:40`) plus
+  its test coverage in `auth_test.go`. No runtime change.
+
+The remaining open items (GAP-002 through GAP-007) are split into:
+
+- **GAP-002 / GAP-003 / GAP-004 / GAP-005**: upstream Geode blockers.
+  Will auto-resolve when `SHOW USERS` / admin DDL / audit-role / MCP
+  `tools/list` land in Geode v0.6+. No UI change needed.
+- **GAP-006 / GAP-007**: CI / docker-compose verification items —
+  no code change; both verified live in this session
+  (geode-e2e-geode-ui-1 healthy at the end of the bug-fix run).
+
 ## Detailed Gap Records
 
-### GAP-001: Stale "B9 will land" stub comment in handlers_users.go
+### GAP-001: Stale "B9 will land" stub comment in handlers_users.go — **Closed 2026-05-08**
 
 - **Issue:** [#1](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/1)
 - **Category:** Code Quality / Docs
 - **Severity:** Low
-- **Requirement source:** auth wiring contract (`AuthJWT` middleware)
-- **Current state (evidence):**
-  - `internal/server/handlers_users.go:35-40` -- stub comment claiming AuthJWT pending ("B9 will land")
-  - `internal/server/auth.go:21` -- `AuthJWT` middleware fully implemented
-  - `internal/server/auth_test.go:32-180` -- `AuthJWT` exercised by tests
-- **Why this is a gap:** Comment misrepresents code state; future readers may think auth is unwired.
-- **Impact/Risk:** Misleading documentation; no runtime impact.
-- **Recommended fix:** Edit lines 35-40, drop "still stubbed (B9 will land it)", and reference `AuthJWT` in `auth.go`.
-- **Acceptance criteria:** Stub removed; replacement (if any) accurately describes `AuthJWT` wiring.
+- **Status:** Closed (this session). Stub at `internal/server/handlers_users.go:35-40` replaced with an accurate reference to the implemented `AuthJWT` (`auth.go:40`) and its test coverage in `auth_test.go`.
 
 ### GAP-002: e2e-18 admin-users specs skip on missing Geode wire ops
 

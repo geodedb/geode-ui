@@ -83,6 +83,39 @@ func WithPermissionsPolicy(next http.Handler) http.Handler {
 	})
 }
 
+// AccessTokenSunsetDate is the date after which `?access_token=` query
+// fallback is removed. Surfaced as the Sunset response header per
+// RFC 8594 so API consumers can plan migration. Closes SEC-F5 (#71).
+//
+// The fallback exists because browsers cannot set Authorization headers
+// on the WebSocket upgrade request — the canonical replacement is the
+// `geode-ui-auth` cookie (Secure, HttpOnly, SameSite=Lax) plus the
+// `X-CSRF-Token` double-submit pattern wired in SEC-F7 (#62). When this
+// date passes, the extractToken() fallback at internal/server/auth.go:88
+// should be deleted.
+const AccessTokenSunsetDate = "Wed, 01 Jul 2026 00:00:00 GMT"
+
+// WithAccessTokenDeprecation wraps next so any request that arrived with
+// `?access_token=` on the URL gets a Deprecation: true + Sunset: <date>
+// response header. Browsers, intermediaries, and API clients log these
+// as advisory; the auth path still works until AccessTokenSunsetDate.
+//
+// The check runs unconditionally on the request URL (not the auth
+// context) so the deprecation signal is emitted even when the token
+// was rejected — that's intentional, because the goal is to nudge the
+// caller off the query-string surface regardless of the response code.
+func WithAccessTokenDeprecation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL != nil && r.URL.Query().Get("access_token") != "" {
+			w.Header().Set("Deprecation", "true")
+			w.Header().Set("Sunset", AccessTokenSunsetDate)
+			w.Header().Set("Link",
+				`<https://geodedb.com/docs/auth/cookie-mode>; rel="deprecation"`)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // WithSPASecurityHeaders wraps next (the SPA file-server handler) and
 // emits CSP + COOP for HTML responses. JSON / asset responses pass
 // through untouched. The wrapper buffers the response status line and

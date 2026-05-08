@@ -49,6 +49,21 @@ const plugins = [
         ),
         noErrorOnMissing: true,
       },
+      {
+        // RFC 9116 security disclosure file. The Go server's SPA
+        // fallback must skip /.well-known/* so this is served as
+        // text/plain, not rewritten to index.html.
+        from: path.resolve(__dirname, 'public', '.well-known', 'security.txt'),
+        to: path.resolve(
+          __dirname,
+          'internal',
+          'ui',
+          'dist',
+          '.well-known',
+          'security.txt'
+        ),
+        noErrorOnMissing: true,
+      },
     ],
   }),
 ]
