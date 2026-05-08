@@ -93,6 +93,20 @@ export const en = {
     edgeIdPlaceholder: 'edge id…',
     empty: 'No nodes or edges to display for this query.',
     errorBanner: 'Failed to render graph: {{message}}',
+    layoutLabel: 'Layout',
+    layout: {
+      cose: 'Force (cose)',
+      breadthfirst: 'Breadth-first',
+      circle: 'Circle',
+      concentric: 'Concentric',
+      grid: 'Grid',
+    },
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    fit: 'Fit',
+    resetView: 'Reset',
+    stats: '{{nodes}} nodes · {{edges}} edges',
+    visibilityHeading: 'Visibility',
   },
 
   schema: {

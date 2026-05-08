@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
-import styled from 'styled-components'
-import { cytoscapeStyle } from './cytoscapeStyle'
+import styled, { useTheme } from 'styled-components'
+import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
 import {
   EDGE_TYPE_DEFAULT,
   NODE_LABEL_DEFAULT,
@@ -15,6 +15,48 @@ import {
 } from '../../lib/graphResult'
 
 type Selected = { kind: 'node' | 'edge'; data: Record<string, unknown> }
+
+// Layouts shipped with cytoscape core (no extra plugin needed). cose
+// is the only force-directed option available without a plugin and is
+// the right default for unknown topologies; the others are useful for
+// known shapes (chains, clusters, time-ordered scans).
+type LayoutName = 'cose' | 'breadthfirst' | 'circle' | 'concentric' | 'grid'
+
+const LAYOUTS: readonly LayoutName[] = [
+  'cose',
+  'breadthfirst',
+  'circle',
+  'concentric',
+  'grid',
+]
+
+const DEFAULT_LAYOUT: LayoutName = 'cose'
+
+// Static dispatch — keeps the validate-translations script happy by
+// using literal graph.layout.* keys instead of a template-literal
+// lookup the AST-free script can't trace.
+function layoutLabel(name: LayoutName, t: (key: string) => string): string {
+  switch (name) {
+    case 'cose':
+      return t('graph.layout.cose')
+    case 'breadthfirst':
+      return t('graph.layout.breadthfirst')
+    case 'circle':
+      return t('graph.layout.circle')
+    case 'concentric':
+      return t('graph.layout.concentric')
+    case 'grid':
+      return t('graph.layout.grid')
+    default:
+      return name
+  }
+}
+
+// Above this node count the cose force-directed layout becomes
+// noticeably sluggish (O(N²) repulsion sums). Fall back to grid as a
+// safer auto default; users can still pick cose explicitly via the
+// dropdown.
+const COSE_NODE_LIMIT = 400
 
 // Props.resp is a QueryRespLike from the row stream, which under streaming
 // is a freshly minted object every row. Building a Cytoscape Core +
@@ -58,6 +100,74 @@ const Wrap = styled.div`
 // internal DOM tree.
 const CanvasArea = styled.div`
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+`
+const Toolbar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.bg.surface};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  color: ${({ theme }) => theme.text.secondary};
+
+  .group {
+    display: flex;
+    align-items: center;
+    gap: ${({ theme }) => theme.spacing.xxs};
+  }
+
+  .label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.muted};
+  }
+
+  select,
+  button {
+    font-family: inherit;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    color: ${({ theme }) => theme.text.primary};
+    background: ${({ theme }) => theme.bg.canvas};
+    border: 1px solid ${({ theme }) => theme.border.default};
+    border-radius: ${({ theme }) => theme.radii.sm};
+    padding: 2px 8px;
+    line-height: 1.6;
+    cursor: pointer;
+  }
+
+  button {
+    min-width: 28px;
+  }
+
+  button:hover:not(:disabled) {
+    border-color: ${({ theme }) => theme.border.strong};
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  select:focus-visible,
+  button:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+    border-color: ${({ theme }) => theme.border.focus};
+  }
+
+  .stats {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    color: ${({ theme }) => theme.text.muted};
+  }
 `
 const Canvas = styled.div<{ $height: number }>`
   height: ${({ $height }) => $height}px;
@@ -156,6 +266,27 @@ const ControlsBlock = styled.section`
     font-size: ${({ theme }) => theme.font.sizes.xs};
     color: ${({ theme }) => theme.text.muted};
   }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: ${({ theme }) => theme.spacing.xs};
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    margin-bottom: ${({ theme }) => theme.spacing.xxs};
+  }
+  .swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: ${({ theme }) => theme.radii.sm};
+    flex-shrink: 0;
+    border: 1px solid ${({ theme }) => theme.border.subtle};
+  }
+  .toggle-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 `
 
 function respSignature(resp: QueryRespLike & { row_count?: number }): number {
@@ -190,8 +321,30 @@ function applyLabels(
   })
 }
 
+// Node-label palette — duplicated lookup of cytoscapeStyle's hash so
+// the visibility-toggle row in the sidebar can show the matching
+// swatch without going through Cytoscape.
+function nodeLabelOf(data: Record<string, unknown>): string {
+  // The graph data carries a top-level `label` (one or many) on each
+  // node; we use the first as the bucketing key for visibility.
+  const labelField = data.label
+  if (typeof labelField === 'string' && labelField) return labelField
+  if (Array.isArray(labelField) && labelField.length > 0) {
+    const first = labelField[0]
+    if (typeof first === 'string') return first
+  }
+  // Some shapes carry `labels` (plural) instead.
+  const labels = data.labels
+  if (Array.isArray(labels) && labels.length > 0) {
+    const first = labels[0]
+    if (typeof first === 'string') return first
+  }
+  return ''
+}
+
 export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const { t } = useTranslation()
+  const theme = useTheme()
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const [selected, setSelected] = useState<Selected | null>(null)
@@ -205,6 +358,17 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const [edgeLabelPrefs, setEdgeLabelPrefs] = useState<Record<string, string>>(
     {}
   )
+  const [layout, setLayout] = useState<LayoutName>(DEFAULT_LAYOUT)
+  // Set of node-label buckets (e.g. 'Movie', 'Person') the user has
+  // hidden. Toggled by the visibility checkboxes in the sidebar.
+  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set())
+  // Live counts surfaced in the toolbar. Reflect what's actually in
+  // the Cytoscape core (post-build, post-filter), not the raw resp,
+  // so users see the effect of layout/filter changes.
+  const [counts, setCounts] = useState<{ nodes: number; edges: number }>({
+    nodes: 0,
+    edges: 0,
+  })
 
   // Track the resp + query by reference so the debounced rebuild
   // always reads the latest snapshot when it fires (without
@@ -226,6 +390,8 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   nodePrefsRef.current = nodeLabelPrefs
   const edgePrefsRef = useRef(edgeLabelPrefs)
   edgePrefsRef.current = edgeLabelPrefs
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
 
   // GAP-01 / GAP-07: rebuild key combines row_count with the query
   // text. Two queries that happen to return the same row count would
@@ -247,34 +413,103 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   // Per-element id index for the keyboard pickers (GAP-03). Both
   // arrays are derived from the memoized `elements` so they're cheap
   // to recompute on resp change.
-  const { nodeIds, edgeIds, nodeDataById, edgeDataById } = useMemo(() => {
-    const nIds: string[] = []
-    const eIds: string[] = []
-    const nMap = new Map<string, Record<string, unknown>>()
-    const eMap = new Map<string, Record<string, unknown>>()
-    elements.forEach((el) => {
-      const data = el.data as Record<string, unknown> | undefined
-      if (!data) return
-      const id = data.id != null ? String(data.id) : ''
-      if (!id) return
-      // Cytoscape v3 marks edges by the presence of `source` + `target`
-      // on the data bag.
-      const isEdge = data.source !== undefined && data.target !== undefined
-      if (isEdge) {
-        eIds.push(id)
-        eMap.set(id, data)
-      } else {
-        nIds.push(id)
-        nMap.set(id, data)
+  const { nodeIds, edgeIds, nodeDataById, edgeDataById, nodeLabelBuckets } =
+    useMemo(() => {
+      const nIds: string[] = []
+      const eIds: string[] = []
+      const nMap = new Map<string, Record<string, unknown>>()
+      const eMap = new Map<string, Record<string, unknown>>()
+      const buckets = new Map<string, number>()
+      elements.forEach((el) => {
+        const data = el.data as Record<string, unknown> | undefined
+        if (!data) return
+        const id = data.id != null ? String(data.id) : ''
+        if (!id) return
+        // Cytoscape v3 marks edges by the presence of `source` + `target`
+        // on the data bag.
+        const isEdge = data.source !== undefined && data.target !== undefined
+        if (isEdge) {
+          eIds.push(id)
+          eMap.set(id, data)
+        } else {
+          nIds.push(id)
+          nMap.set(id, data)
+          const bucket = nodeLabelOf(data)
+          buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1)
+        }
+      })
+      return {
+        nodeIds: nIds,
+        edgeIds: eIds,
+        nodeDataById: nMap,
+        edgeDataById: eMap,
+        nodeLabelBuckets: buckets,
       }
-    })
-    return {
-      nodeIds: nIds,
-      edgeIds: eIds,
-      nodeDataById: nMap,
-      edgeDataById: eMap,
+    }, [elements])
+
+  // Auto-pick a saner default layout when the response is large enough
+  // that cose would freeze the tab. Only fires once per response —
+  // the user's manual layout choice is preserved across non-resize
+  // re-renders.
+  const lastSigRef = useRef<string>('')
+  useEffect(() => {
+    if (lastSigRef.current === sig) return
+    lastSigRef.current = sig
+    if (
+      layoutRef.current === DEFAULT_LAYOUT &&
+      elementsRef.current.length > COSE_NODE_LIMIT
+    ) {
+      setLayout('grid')
     }
-  }, [elements])
+  }, [sig])
+
+  // Apply visibility filter — doesn't rebuild the core. Toggling
+  // `.gv-hidden` is cheap because Cytoscape special-cases display:none
+  // to skip layout/render passes for those elements.
+  const applyVisibility = useCallback((cy: Core, hidden: Set<string>): void => {
+    cy.batch(() => {
+      cy.nodes().forEach((n) => {
+        const data = n.data() as Record<string, unknown>
+        const bucket = nodeLabelOf(data)
+        if (hidden.has(bucket)) {
+          n.addClass('gv-hidden')
+        } else {
+          n.removeClass('gv-hidden')
+        }
+      })
+      // Edges adjacent to hidden nodes: hide them as well so the
+      // canvas isn't littered with arrows pointing into nothing.
+      cy.edges().forEach((e) => {
+        const src = e.source()
+        const tgt = e.target()
+        if (src.hasClass('gv-hidden') || tgt.hasClass('gv-hidden')) {
+          e.addClass('gv-hidden')
+        } else {
+          e.removeClass('gv-hidden')
+        }
+      })
+    })
+  }, [])
+
+  // Apply 1-hop neighborhood emphasis around the selected element.
+  // No-ops the .gv-faded / .gv-emphasized classes when nothing is
+  // selected so the canvas reads at full saturation by default.
+  const applyEmphasis = useCallback((cy: Core, sel: Selected | null): void => {
+    cy.batch(() => {
+      cy.elements().removeClass('gv-faded').removeClass('gv-emphasized')
+      if (!sel) return
+      const id = String(sel.data.id ?? '')
+      if (!id) return
+      const target = cy.$id(id)
+      if (target.empty()) return
+      const neighborhood =
+        sel.kind === 'node'
+          ? target.closedNeighborhood()
+          : target.union(target.connectedNodes())
+      cy.elements().difference(neighborhood).addClass('gv-faded')
+      neighborhood.addClass('gv-emphasized')
+    })
+  }, [])
 
   useEffect(() => {
     if (!ref.current) return undefined
@@ -306,20 +541,25 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         // scalar projection like RETURN p.name), skip the cytoscape
         // mount entirely. The render pass shows an empty-state
         // overlay over the bare Canvas.
-        if (els.length === 0) return
+        if (els.length === 0) {
+          setCounts({ nodes: 0, edges: 0 })
+          return
+        }
         const cy = cytoscape({
           container: ref.current,
           elements: els,
-          style: cytoscapeStyle,
-          layout: { name: 'cose', animate: false, padding: 24 },
+          style: createCytoscapeStyle(theme),
+          layout: { name: layoutRef.current, animate: false, padding: 24 },
           wheelSensitivity: 0.2,
         })
-        cy.on('tap', 'node', (ev) =>
-          setSelected({ kind: 'node', data: ev.target.data() })
-        )
-        cy.on('tap', 'edge', (ev) =>
-          setSelected({ kind: 'edge', data: ev.target.data() })
-        )
+        cy.on('tap', 'node', (ev) => {
+          const data = ev.target.data() as Record<string, unknown>
+          setSelected({ kind: 'node', data })
+        })
+        cy.on('tap', 'edge', (ev) => {
+          const data = ev.target.data() as Record<string, unknown>
+          setSelected({ kind: 'edge', data })
+        })
         cy.on('tap', (ev) => {
           if (ev.target === cy) setSelected(null)
         })
@@ -328,6 +568,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         // pref changes are handled by the dedicated effect below without
         // re-running the layout.
         applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
+        setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
       } catch (e: unknown) {
         // GAP-04: surface the failure as a visible banner instead of
         // an uncaught console rejection. The build is best-effort —
@@ -346,6 +587,8 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         cyRef.current = null
       }
     }
+    // theme is intentionally NOT a dep — theme flips swap the stylesheet
+    // via the dedicated effect below without rebuilding the core.
   }, [sig])
 
   // Re-apply labels when preferences change. This does NOT rebuild
@@ -357,6 +600,39 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
     if (!cy) return
     applyLabels(cy, nodeLabelPrefs, edgeLabelPrefs)
   }, [nodeLabelPrefs, edgeLabelPrefs])
+
+  // Live theme swap: rebuild the stylesheet when light↔dark flips.
+  // No layout rerun — Cytoscape recomputes node fills, label colors,
+  // and edge styles from the new tokens against existing positions.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.style(createCytoscapeStyle(theme)).update()
+  }, [theme])
+
+  // Re-run the layout when the user picks a different one. We do NOT
+  // tear down the core; .layout().run() re-positions in place.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.layout({ name: layout, animate: false, padding: 24 }).run()
+    cy.fit(undefined, 24)
+  }, [layout])
+
+  // Visibility filter changes — re-run the apply pass against the
+  // current core. Cheap; just toggles a class.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    applyVisibility(cy, hiddenLabels)
+  }, [hiddenLabels, applyVisibility])
+
+  // Selected element changes — drive the emphasis (1-hop) styling.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    applyEmphasis(cy, selected)
+  }, [selected, applyEmphasis])
 
   const setNodePref = (label: string, key: string): void => {
     setNodeLabelPrefs((prev) => ({ ...prev, [label]: key }))
@@ -387,27 +663,172 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
     cyRef.current?.$id(id).select()
   }
 
+  const toggleLabelVisibility = (label: string): void => {
+    setHiddenLabels((prev) => {
+      const next = new Set(prev)
+      if (next.has(label)) {
+        next.delete(label)
+      } else {
+        next.add(label)
+      }
+      return next
+    })
+  }
+
+  const onZoomIn = (): void => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.zoom({
+      level: cy.zoom() * 1.25,
+      renderedPosition: {
+        x: cy.width() / 2,
+        y: cy.height() / 2,
+      },
+    })
+  }
+  const onZoomOut = (): void => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.zoom({
+      level: cy.zoom() / 1.25,
+      renderedPosition: {
+        x: cy.width() / 2,
+        y: cy.height() / 2,
+      },
+    })
+  }
+  const onFit = (): void => {
+    cyRef.current?.fit(undefined, 24)
+  }
+  const onResetView = (): void => {
+    const cy = cyRef.current
+    if (!cy) return
+    setSelected(null)
+    setHiddenLabels(new Set())
+    cy.layout({ name: layout, animate: false, padding: 24 }).run()
+    cy.fit(undefined, 24)
+  }
+
   const empty = elements.length === 0 && !error
+  // Reuse the same hash + palette the canvas uses so the swatches in
+  // the visibility row are exact-pixel matches to the node fills.
+  const swatchFor = (label: string): string =>
+    labelToColor(label, theme.variant)
 
   return (
     <Wrap>
       <CanvasArea>
-        <Canvas
-          ref={ref}
-          $height={height}
-          role="img"
-          aria-label={t('graph.canvasAria')}
-        />
-        {empty && (
-          <Overlay data-testid="graph-empty-state">{t('graph.empty')}</Overlay>
-        )}
-        {error && (
-          <ErrorBanner role="alert">
-            {t('graph.errorBanner', { message: error })}
-          </ErrorBanner>
-        )}
+        <Toolbar data-testid="graph-toolbar" role="toolbar">
+          <div className="group">
+            <span className="label">{t('graph.layoutLabel')}</span>
+            <select
+              data-testid="graph-layout-picker"
+              aria-label={t('graph.layoutLabel')}
+              value={layout}
+              onChange={(e) => setLayout(e.target.value as LayoutName)}
+            >
+              {LAYOUTS.map((name) => (
+                <option key={name} value={name}>
+                  {layoutLabel(name, t)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="group">
+            <button
+              type="button"
+              data-testid="graph-zoom-in"
+              aria-label={t('graph.zoomIn')}
+              title={t('graph.zoomIn')}
+              onClick={onZoomIn}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              data-testid="graph-zoom-out"
+              aria-label={t('graph.zoomOut')}
+              title={t('graph.zoomOut')}
+              onClick={onZoomOut}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              data-testid="graph-fit"
+              aria-label={t('graph.fit')}
+              title={t('graph.fit')}
+              onClick={onFit}
+            >
+              {t('graph.fit')}
+            </button>
+            <button
+              type="button"
+              data-testid="graph-reset-view"
+              aria-label={t('graph.resetView')}
+              title={t('graph.resetView')}
+              onClick={onResetView}
+            >
+              {t('graph.resetView')}
+            </button>
+          </div>
+          <span className="stats" aria-live="polite">
+            {t('graph.stats', { nodes: counts.nodes, edges: counts.edges })}
+          </span>
+        </Toolbar>
+        <div style={{ position: 'relative' }}>
+          <Canvas
+            ref={ref}
+            $height={height}
+            role="img"
+            aria-label={t('graph.canvasAria')}
+          />
+          {empty && (
+            <Overlay data-testid="graph-empty-state">
+              {t('graph.empty')}
+            </Overlay>
+          )}
+          {error && (
+            <ErrorBanner role="alert">
+              {t('graph.errorBanner', { message: error })}
+            </ErrorBanner>
+          )}
+        </div>
       </CanvasArea>
       <Side $height={height}>
+        {nodeLabelBuckets.size > 1 && (
+          <ControlsBlock data-testid="graph-visibility-controls">
+            <h5>{t('graph.visibilityHeading')}</h5>
+            {Array.from(nodeLabelBuckets.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([label, count]) => {
+                const id = `gv-vis-${label || 'unlabeled'}`
+                return (
+                  <label
+                    key={label || 'unlabeled'}
+                    className="toggle-row"
+                    htmlFor={id}
+                  >
+                    <input
+                      id={id}
+                      type="checkbox"
+                      checked={!hiddenLabels.has(label)}
+                      onChange={() => toggleLabelVisibility(label)}
+                    />
+                    <span
+                      className="swatch"
+                      style={{ background: swatchFor(label) }}
+                      aria-hidden="true"
+                    />
+                    <span className="toggle-label">
+                      {label || `(${t('graph.unlabeledNode')})`}
+                    </span>
+                    <span className="empty">{count}</span>
+                  </label>
+                )
+              })}
+          </ControlsBlock>
+        )}
         {(nodeIds.length > 0 || edgeIds.length > 0) && (
           <ControlsBlock data-testid="graph-selection-controls">
             <h5>{t('graph.selectionHeading')}</h5>

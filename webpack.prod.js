@@ -39,7 +39,9 @@ module.exports = merge(common, {
       // (the workers are independently loaded; counting them against
       // the entrypoint budget double-counts the cost).
       if (/\.map$/.test(assetFilename)) return false
-      if (/\.(woff2?|ttf|eot|otf|png|jpg|jpeg|gif|svg|ico)$/.test(assetFilename))
+      if (
+        /\.(woff2?|ttf|eot|otf|png|jpg|jpeg|gif|svg|ico)$/.test(assetFilename)
+      )
         return false
       if (/worker\.js$/.test(assetFilename)) return false
       return true

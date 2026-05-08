@@ -79,12 +79,10 @@ test('clear() empties everything', () => {
 })
 
 test('rejects non-positive sizing', () => {
-  expect(
-    () => new AssetCache({ capacity: 0, maxBytes: 64 })
-  ).toThrow(/capacity/)
-  expect(
-    () => new AssetCache({ capacity: 4, maxBytes: 0 })
-  ).toThrow(/maxBytes/)
+  expect(() => new AssetCache({ capacity: 0, maxBytes: 64 })).toThrow(
+    /capacity/
+  )
+  expect(() => new AssetCache({ capacity: 4, maxBytes: 0 })).toThrow(/maxBytes/)
 })
 
 test('defaultCacheOptions returns sensible defaults and respects env', () => {

@@ -102,9 +102,7 @@ export class AssetCache {
 // stay well under the Electron main-process memory budget. Tunable
 // via env vars if a large release ever needs more headroom.
 export function defaultCacheOptions(): AssetCacheOptions {
-  const capacity = Number(
-    process.env.GEODE_ELECTRON_CACHE_CAPACITY ?? 64
-  )
+  const capacity = Number(process.env.GEODE_ELECTRON_CACHE_CAPACITY ?? 64)
   const maxBytes = Number(
     process.env.GEODE_ELECTRON_CACHE_MAX_BYTES ?? 32 * 1024 * 1024
   )
