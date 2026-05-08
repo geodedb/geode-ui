@@ -15,9 +15,8 @@ import (
 // scanQueryResult walks the result set exactly once (no double-pass for
 // the graph-summary extraction — PERF-F1 / issue #18).
 type fakeRowScanner struct {
-	cols  []string
-	types []string // mirrors len(cols); empty string -> "STRING"
-	rows  [][]any  // each entry is one row (one element per column)
+	cols []string
+	rows [][]any // each entry is one row (one element per column)
 
 	idx       int
 	scanCount int

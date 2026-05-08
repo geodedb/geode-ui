@@ -164,10 +164,13 @@ func TestGraphs_HidesSystemGraphs(t *testing.T) {
 }
 
 func TestLabels_StringList(t *testing.T) {
+	// Handler runs `MATCH (n) RETURN DISTINCT labels(n) AS l` and feeds
+	// each row through asStringList, which accepts JSON-encoded LIST<STRING>
+	// cells (the shape the geode driver delivers in v0.5.11).
 	d := &fakeDriver{rows: map[string]fakeResult{
-		"CALL db.labels()": {
-			cols: []string{"label"},
-			rows: [][]driver.Value{{"User"}, {"Role"}},
+		"RETURN DISTINCT labels(n)": {
+			cols: []string{"l"},
+			rows: [][]driver.Value{{`["User"]`}, {`["Role"]`}},
 		},
 	}}
 	s := newStubServer(t, "fake_labels", d)
@@ -178,15 +181,18 @@ func TestLabels_StringList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Labels: %v", err)
 	}
-	if got, want := resp.Labels, []string{"User", "Role"}; !equalStrings(got, want) {
+	// Labels() sorts its output so callers get a stable ordering.
+	if got, want := resp.Labels, []string{"Role", "User"}; !equalStrings(got, want) {
 		t.Fatalf("Labels=%v want %v", got, want)
 	}
 }
 
 func TestEdgeTypes_StringList(t *testing.T) {
+	// Handler runs `MATCH ()-[r]->() RETURN DISTINCT type(r) AS t ORDER BY t`
+	// — the graph-scoped replacement for CALL db.relationshipTypes().
 	d := &fakeDriver{rows: map[string]fakeResult{
-		"CALL db.relationshipTypes()": {
-			cols: []string{"relationshipType"},
+		"RETURN DISTINCT type(r)": {
+			cols: []string{"t"},
 			rows: [][]driver.Value{{"HAS_ROLE"}, {"OWNS"}},
 		},
 	}}

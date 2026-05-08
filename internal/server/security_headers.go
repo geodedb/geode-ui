@@ -162,7 +162,7 @@ func (s *spaHeaderWriter) injectIfHTML(body []byte) {
 	if !isHTMLContentType(ct) {
 		return
 	}
-	h := s.ResponseWriter.Header()
+	h := s.Header()
 	if h.Get("Content-Security-Policy") == "" {
 		h.Set("Content-Security-Policy", CSPDirective)
 	}

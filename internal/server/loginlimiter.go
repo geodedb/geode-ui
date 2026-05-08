@@ -223,7 +223,7 @@ func (l *LoginLimiter) NoteSuccess(profile, username string) {
 // inner response calls NoteFail.
 func WrapLoginLimit(l *LoginLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !(r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login") {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/login" {
 			next.ServeHTTP(w, r)
 			return
 		}
