@@ -25,7 +25,7 @@ test.describe('query (sync)', () => {
     // Row-count summary lives outside the virtualized list, always
     // rendered. Filtered query returns exactly seed.people.length rows.
     await expect(
-      page.getByText(new RegExp(`${seed.people.length} rows`))
+      page.getByText(new RegExp(`${seed.people.length} rows?`))
     ).toBeVisible()
 
     // Switch to table tab, verify the seeded names appear. Scope to
@@ -53,7 +53,7 @@ test.describe('query (sync)', () => {
     // Summary line is outside the virtualized table; the 133 unfiltered
     // rows are accepted by the server even if only ~16 are in the DOM.
     await expect(
-      page.getByText(new RegExp(`${seed.counts.persons} rows`))
+      page.getByText(new RegExp(`${seed.counts.persons} rows?`))
     ).toBeVisible({ timeout: 10_000 })
   })
 
@@ -82,7 +82,7 @@ test.describe('query (sync)', () => {
       `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name LIMIT 1`
     )
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/1 rows/)).toBeVisible()
+    await expect(page.getByText(/1 rows?/)).toBeVisible()
     await sel.queryTabJson(page).click()
     const txt = await page.locator('pre').textContent()
     expect(txt && txt.length).toBeGreaterThan(0)

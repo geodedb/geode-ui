@@ -17,20 +17,20 @@ test.describe('query page survives many consecutive runs', () => {
     const queries: Array<{ stmt: string; expect: RegExp }> = [
       {
         stmt: `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name LIMIT 1`,
-        expect: /1 rows/,
+        expect: /1 rows?/,
       },
       {
         stmt: `USE GRAPH ${seed.graph}; MATCH (m:Movie) RETURN m.title LIMIT 2`,
-        expect: /2 rows/,
+        expect: /2 rows?/,
       },
-      { stmt: 'RETURN 42 AS answer', expect: /1 rows/ },
+      { stmt: 'RETURN 42 AS answer', expect: /1 rows?/ },
       {
         stmt: `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n LIMIT 3`,
-        expect: /3 rows/,
+        expect: /3 rows?/,
       },
       {
         stmt: `USE GRAPH ${seed.graph}; MATCH (n:Movie) RETURN count(n) AS movies`,
-        expect: /1 rows/,
+        expect: /1 rows?/,
       },
     ]
 
@@ -62,7 +62,7 @@ test.describe('query page survives many consecutive runs', () => {
       `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n.name LIMIT 1`
     )
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/1 rows/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/1 rows?/)).toBeVisible({ timeout: 10_000 })
 
     // Stream run #2 with a different row count.
     await sel.queryStreamToggle(page).check()
@@ -72,7 +72,7 @@ test.describe('query page survives many consecutive runs', () => {
       `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n LIMIT 4`
     )
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/4 rows/)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/4 rows?/)).toBeVisible({ timeout: 15_000 })
 
     // Sync run #3 — the previous stream's rows must NOT leak.
     await sel.queryStreamToggle(page).uncheck()
@@ -80,6 +80,6 @@ test.describe('query page survives many consecutive runs', () => {
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type('RETURN 1 AS one')
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/1 rows/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/1 rows?/)).toBeVisible({ timeout: 10_000 })
   })
 })

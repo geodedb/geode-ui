@@ -18,7 +18,10 @@
 //      multiple expanded columns.
 //
 // The spec is tagged @responsive so the mobile-chrome / tablet-chrome
-// projects in playwright.config.ts pick it up.
+// projects in playwright.config.ts pick it up. We also explicitly
+// resize inside each test so the same spec runs deterministically on
+// the chromium project (which has no project-level grep filter and
+// would otherwise inherit Desktop Chrome's 1280 viewport).
 
 import { test, expect } from '../fixtures'
 import { sel } from '../helpers/selectors'
@@ -26,10 +29,17 @@ import { seed } from '../helpers/gqlData'
 
 const LONG_PROP_QUERY = `USE GRAPH ${seed.graph}; MATCH (n:Movie) WHERE n.tagline IS NOT NULL RETURN n LIMIT 5`
 
+// Force the viewport to a known size so the test outcome doesn't
+// depend on which playwright project runs it.
+const MOBILE_VIEWPORT = { width: 375, height: 812 }
+const TABLET_VIEWPORT = { width: 810, height: 1080 }
+const DESKTOP_VIEWPORT = { width: 1280, height: 800 }
+
 test.describe('@responsive responsive layout', () => {
   test('@mobile data table rows expand to fit wrapped content on mobile', async ({
     authedPage: page,
   }) => {
+    await page.setViewportSize(MOBILE_VIEWPORT)
     await page.goto('/')
     await expect(sel.queryRunBtn(page)).toBeVisible()
 
@@ -39,7 +49,7 @@ test.describe('@responsive responsive layout', () => {
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(LONG_PROP_QUERY)
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/\d+ rows/)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/\d+ rows?/)).toBeVisible({ timeout: 15_000 })
 
     await sel.queryTabTable(page).click()
     const tableView = page.getByTestId('table-view')
@@ -67,6 +77,7 @@ test.describe('@responsive responsive layout', () => {
   test('@mobile mobile shell collapses desktop nav into the hamburger drawer', async ({
     authedPage: page,
   }) => {
+    await page.setViewportSize(MOBILE_VIEWPORT)
     await page.goto('/')
 
     // Hamburger visible.
@@ -81,7 +92,9 @@ test.describe('@responsive responsive layout', () => {
     // Page does not horizontally scroll; the header has overflow-x: clip
     // and the body padding clamps to the spacing.md token.
     const docOverflow = await page.evaluate(
-      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth
     )
     expect(docOverflow).toBeLessThanOrEqual(1)
 
@@ -93,11 +106,14 @@ test.describe('@responsive responsive layout', () => {
   test('desktop shell shows full nav and hides the hamburger', async ({
     authedPage: page,
   }) => {
+    // Mobile / tablet projects inject a small viewport at context
+    // creation time; we can't widen back up to desktop dimensions
+    // without remounting the SPA, so skip those projects.
     test.skip(
       test.info().project.name !== 'chromium',
       'desktop layout is only meaningful on the chromium project'
     )
-    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.setViewportSize(DESKTOP_VIEWPORT)
     await page.goto('/')
 
     await expect(sel.navQuery(page)).toBeVisible()
@@ -115,6 +131,7 @@ test.describe('@responsive responsive layout', () => {
   test('@tablet data-table cell text is fully visible (no overflow:hidden clipping)', async ({
     authedPage: page,
   }) => {
+    await page.setViewportSize(TABLET_VIEWPORT)
     await page.goto('/')
     await expect(sel.queryRunBtn(page)).toBeVisible()
 
@@ -122,7 +139,7 @@ test.describe('@responsive responsive layout', () => {
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(LONG_PROP_QUERY)
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/\d+ rows/)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/\d+ rows?/)).toBeVisible({ timeout: 15_000 })
     await sel.queryTabTable(page).click()
 
     // Cells must not have computed `overflow: hidden` — that's the

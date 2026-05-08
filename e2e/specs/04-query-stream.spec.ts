@@ -27,7 +27,7 @@ test.describe('query (stream)', () => {
 
     // The summary frame is sent at the end; wait for it.
     await expect(
-      page.getByText(new RegExp(`${seed.people.length} rows`))
+      page.getByText(new RegExp(`${seed.people.length} rows?`))
     ).toBeVisible({ timeout: 15_000 })
 
     await sel.queryTabTable(page).click()

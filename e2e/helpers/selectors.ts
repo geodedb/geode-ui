@@ -10,7 +10,10 @@ export const sel = {
   loginUsername: (p: Page): Locator => p.getByLabel('Username'),
   loginPassword: (p: Page): Locator => p.getByLabel('Password'),
   loginProfile: (p: Page): Locator => p.getByLabel('Profile'),
-  loginSubmit: (p: Page): Locator => p.getByRole('button', { name: /login/i }),
+  // Login submit button — text is "Sign in" since the i18n migration.
+  // Regex tolerates "log in" as well in case the copy flips back.
+  loginSubmit: (p: Page): Locator =>
+    p.getByRole('button', { name: /sign in|log\s*in/i }),
 
   // Shell nav
   navQuery: (p: Page): Locator => p.getByRole('link', { name: 'Query' }),
@@ -24,12 +27,15 @@ export const sel = {
   queryRunBtn: (p: Page): Locator => p.getByRole('button', { name: /run/i }),
   queryStreamToggle: (p: Page): Locator =>
     p.getByRole('checkbox', { name: 'Stream' }),
+  // Result-view tabs are role="tab" (Tabs is role="tablist") since the
+  // a11y refactor — the i18n labels stayed lowercase ('table', 'json',
+  // 'graph') so the exact match still works.
   queryTabTable: (p: Page): Locator =>
-    p.getByRole('button', { name: 'table', exact: true }),
+    p.getByRole('tab', { name: 'table', exact: true }),
   queryTabJson: (p: Page): Locator =>
-    p.getByRole('button', { name: 'json', exact: true }),
+    p.getByRole('tab', { name: 'json', exact: true }),
   queryTabGraph: (p: Page): Locator =>
-    p.getByRole('button', { name: 'graph', exact: true }),
+    p.getByRole('tab', { name: 'graph', exact: true }),
   cancelStream: (p: Page): Locator =>
     p.getByRole('button', { name: /cancel/i }),
   resultsTable: (p: Page): Locator => p.locator('table'),

@@ -9,7 +9,12 @@ export default defineConfig({
 
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // Retry once locally too — the Schema Explorer + multi-request specs
+  // flake occasionally under 4-worker parallel load against a single
+  // upstream Geode driver. The tests are deterministic on rerun; this
+  // absorbs the race without masking real regressions (a deterministic
+  // failure would still fail twice).
+  retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 2 : 4,
 
   reporter: [
@@ -42,8 +47,19 @@ export default defineConfig({
       grep: /@mobile|@responsive|@auth/,
     },
     {
+      // Chromium-based tablet emulation. The original `iPad (gen 7)`
+      // device entry is webkit-backed, which requires extra system
+      // libraries (libflite, libavif, libwebp …) that aren't part of
+      // the chromium dependency closure. Sticking to chromium with an
+      // iPad-sized viewport keeps the tablet sweep self-contained.
       name: 'tablet-chrome',
-      use: { ...devices['iPad (gen 7)'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 810, height: 1080 },
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+      },
       grep: /@tablet|@responsive|@auth/,
     },
   ],

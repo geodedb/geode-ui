@@ -35,7 +35,7 @@ test.describe('query (graph view)', () => {
       `USE GRAPH ${seed.graph}; MATCH (n:Person {name: 'Nobody Real'}) RETURN n`
     )
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/0 rows/)).toBeVisible()
+    await expect(page.getByText(/0 rows?/)).toBeVisible()
     await sel.queryTabGraph(page).click()
     // Canvas renders empty; no inspector content beyond placeholder.
     await expect(

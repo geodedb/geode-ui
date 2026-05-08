@@ -19,7 +19,7 @@ test.describe('table column projection', () => {
     await sel.queryRunBtn(page).click()
 
     // Wait for the row-count summary so we know the run finished.
-    await expect(page.getByText(/1 rows/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/1 rows?/)).toBeVisible({ timeout: 10_000 })
 
     // Default tab is table; assert the projected headers exist.
     await sel.queryTabTable(page).click()
@@ -45,7 +45,7 @@ test.describe('table column projection', () => {
       `USE GRAPH ${seed.graph}; MATCH (n:Person) RETURN n LIMIT 1`
     )
     await sel.queryRunBtn(page).click()
-    await expect(page.getByText(/\d+ rows/)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByText(/\d+ rows?/)).toBeVisible({ timeout: 10_000 })
 
     // Toggle Expand off.
     await page.getByRole('checkbox', { name: /Expand graph cells/i }).uncheck()

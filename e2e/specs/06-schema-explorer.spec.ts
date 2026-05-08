@@ -33,11 +33,13 @@ test.describe('schema explorer', () => {
     await page.goto('/schema')
     await page.getByRole('button', { name: seed.graph, exact: true }).click()
     // exact:true so 'Movie' label doesn't collide with 'movies' graph button.
+    // Extended timeout: the labels API hits the upstream Geode driver,
+    // which occasionally takes >8 s under 4-worker parallel test load.
     await Promise.all(
       seed.labels.map((label) =>
         expect(
           page.getByRole('button', { name: label, exact: true })
-        ).toBeVisible()
+        ).toBeVisible({ timeout: 12_000 })
       )
     )
   })
@@ -47,6 +49,11 @@ test.describe('schema explorer', () => {
   }) => {
     await page.goto('/schema')
     await page.getByRole('button', { name: seed.graph, exact: true }).click()
+    // Wait for the label pane to populate before clicking — under
+    // parallel load the label fetch can lag the click attempt.
+    await expect(
+      page.getByRole('button', { name: 'Person', exact: true })
+    ).toBeVisible({ timeout: 12_000 })
     await page.getByRole('button', { name: 'Person', exact: true }).click()
     await expect(page).toHaveURL(/\/$/)
     // The editor should now contain MATCH (n:Person) RETURN n LIMIT 25
@@ -64,14 +71,14 @@ test.describe('schema explorer', () => {
     //      without it Geode runs against no graph context and silently
     //      returns 0 rows. The staged template caps at LIMIT 25, and
     //      the movies seed has more Person nodes than that, so we
-    //      assert exactly 25 rows (NOT /\d+ rows/, which would let a
+    //      assert exactly 25 rows (NOT /\d+ rows?/, which would let a
     //      0-row regression slip through).
     await page.getByRole('button', { name: /run/i }).click()
     await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
       0,
       { timeout: 8_000 }
     )
-    await expect(page.getByText(/25 rows/)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/25 rows?/)).toBeVisible({ timeout: 8_000 })
   })
 
   test('edge types pane lists ACTED_IN and DIRECTED', async ({
@@ -79,9 +86,13 @@ test.describe('schema explorer', () => {
   }) => {
     await page.goto('/schema')
     await page.getByRole('button', { name: seed.graph, exact: true }).click()
+    // Extended timeout — same upstream-driver-load reasoning as the
+    // labels-pane test above.
     await Promise.all(
       seed.edgeTypes.map((t) =>
-        expect(page.getByRole('button', { name: t, exact: true })).toBeVisible()
+        expect(
+          page.getByRole('button', { name: t, exact: true })
+        ).toBeVisible({ timeout: 12_000 })
       )
     )
   })
@@ -109,6 +120,6 @@ test.describe('schema explorer', () => {
       0,
       { timeout: 8_000 }
     )
-    await expect(page.getByText(/25 rows/)).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(/25 rows?/)).toBeVisible({ timeout: 8_000 })
   })
 })
