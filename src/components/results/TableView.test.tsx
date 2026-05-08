@@ -323,6 +323,53 @@ test('TableView grows row height for long wrapped content (regression)', () => {
 //   • Cells DO NOT have `overflow: hidden` anymore; rows grow to fit.
 //   • The body-virtualizer height is no longer the legacy fixed 480 px
 //     constant — it derives from the viewport.
+// Regression: when columns total wider than the viewport, the header
+// must scroll horizontally with the body. Previously the List's outer
+// container had its own `overflow: auto`, so horizontal scroll fired
+// INSIDE the body while the header (a sibling of List inside the
+// ScrollArea) stayed put — header columns ended up misaligned with
+// body columns. The fix is to give the List's outer style
+// `overflowX: 'visible'` so horizontal overflow propagates to the
+// shared ScrollArea, which scrolls header + body together.
+test('TableView body does not own horizontal scroll (header + body share ScrollArea)', () => {
+  const { container, getByTestId } = render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        expand={false}
+        resp={{
+          columns: Array.from({ length: 10 }, (_, i) => ({
+            name: `col_${i}`,
+            type: 'STRING',
+          })),
+          rows: [Array.from({ length: 10 }, (_, i) => `v${i}`)],
+        }}
+      />
+    </ThemeProvider>
+  )
+
+  // Header AND body are inside the same ScrollArea.
+  const scrollArea = getByTestId('table-scroll-area')
+  const header = container.querySelector('table')
+  const body = container.querySelector('[data-row-index="0"]')
+  expect(header).not.toBeNull()
+  expect(body).not.toBeNull()
+  expect(scrollArea.contains(header as Node)).toBe(true)
+  expect(scrollArea.contains(body as Node)).toBe(true)
+
+  // The List's immediate child of ScrollArea (i.e. react-window's
+  // outer scroll container) must explicitly opt out of horizontal
+  // overflow. react-window v2 defaults to `overflow: auto` on its
+  // outer; without `overflowX: visible` the body owns its own
+  // horizontal scrollbar and the header above stays put while the
+  // user pans the columns. Traverse up from the row until we find
+  // the child of ScrollArea — that's the List's outer.
+  let listOuter: HTMLElement = body!.parentElement as HTMLElement
+  while (listOuter.parentElement && listOuter.parentElement !== scrollArea) {
+    listOuter = listOuter.parentElement as HTMLElement
+  }
+  expect(listOuter.style.overflowX).toBe('visible')
+})
+
 test('TableView exposes a scrollable area instead of clipping wide rows', () => {
   const { container, getByTestId } = render(
     <ThemeProvider theme={theme}>

@@ -573,7 +573,24 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
           rowHeight={rowHeight}
           rowProps={rowProps}
           defaultHeight={bodyHeight}
-          style={{ height: bodyHeight }}
+          // overflowX: 'visible' delegates horizontal scroll to the
+          // shared ScrollArea above, so the column headers and the
+          // virtualized body always pan together. Without it,
+          // react-window's default `overflow: auto` gives the body
+          // its own horizontal scrollbar — header stays put while
+          // the body slides, and columns visibly misalign with their
+          // headers. Vertical scroll stays inside the List (that's
+          // why we don't blanket `overflow: visible`).
+          style={{
+            height: bodyHeight,
+            overflowX: 'visible',
+            // The List's default `max-width: 100%` clips the inner
+            // content to the parent's clientWidth, which would
+            // hide the very horizontal overflow we just freed.
+            // Lift it so the body matches the header's intrinsic
+            // min-width (driven by minGridWidthPx on RowOuter).
+            maxWidth: 'none',
+          }}
         />
       </ScrollArea>
     </Wrap>
