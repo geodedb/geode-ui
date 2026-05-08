@@ -62,6 +62,14 @@ def gql_str(value: object) -> str:
 
 
 def gql_props(props: dict[str, object]) -> str:
+    """Render a Python dict as a Geode property literal.
+
+    Skips dict / list values — Geode v0.5.11 has no native struct or
+    array property type, and `str()` on a dict produces a Python repr
+    (`{'name': 'kevc', 'url': '...'}`) that ends up stored verbatim
+    as a string. Callers must flatten complex values to scalars
+    upstream (e.g. extract source.name as a `source` property).
+    """
     parts = []
     for k in sorted(props):
         v = props[k]
@@ -71,6 +79,14 @@ def gql_props(props: dict[str, object]) -> str:
             parts.append(f"{k}: {str(v).lower()}")
         elif isinstance(v, (int, float)):
             parts.append(f"{k}: {v}")
+        elif isinstance(v, (dict, list, tuple)):
+            # Refuse to Python-repr complex values into the seed.
+            # Caller is expected to have flattened these.
+            print(
+                f"warn: skipping non-scalar prop {k!r}={type(v).__name__}",
+                file=sys.stderr,
+            )
+            continue
         else:
             parts.append(f"{k}: {gql_str(v)}")
     return "{" + ", ".join(parts) + "}"
@@ -165,12 +181,19 @@ def main() -> int:
                     }
 
     for cve in cve_records:
+        # source is a {name, url} dict in the source jsonl; flatten to
+        # two scalar properties so the table/graph views can show
+        # them directly without Python-repr leaking into the DB.
+        source = cve.get("source") or {}
+        if not isinstance(source, dict):
+            source = {}
         props = {
             "id": cve.get("id"),
             "title": cve.get("title"),
             "severity": cve.get("severity"),
             "issued_at": cve.get("issued_at"),
-            "source": cve.get("source"),
+            "source": source.get("name"),
+            "source_url": source.get("url"),
         }
         lines.append(f"USE GRAPH vulndb; CREATE (:CVE {gql_props(props)});")
     lines.append("")
