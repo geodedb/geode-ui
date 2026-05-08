@@ -126,6 +126,52 @@ pnpm add -D electron@^32 electron-builder@^25 @types/node
 
 After that, all four `pnpm electron:*` scripts in `package.json` work.
 
+## Content-Security-Policy under the `geode://` origin
+
+Closes GAP-010.
+
+The SPA's CSP is emitted on HTML responses by
+`internal/server/security_headers.go:51` and reads:
+
+```text
+default-src 'self';
+script-src  'self' 'wasm-unsafe-eval';
+style-src   'self' 'unsafe-inline';
+worker-src  'self' blob:;
+connect-src 'self' wss:;
+img-src     'self' data:;
+font-src    'self' data:;
+frame-ancestors 'none';
+base-uri 'none';
+form-action 'self';
+object-src 'none'
+```
+
+Under Electron, the SPA loads from `geode://app/index.html`. Chromium
+resolves `'self'` to the **origin of the document** — `geode://app` —
+not to a synthesised "Electron" pseudo-origin. Each directive
+behaves as follows:
+
+| Directive | Behaviour at `geode://app` |
+|---|---|
+| `script-src 'self'` | All bundle JS comes from `geode://app/*.js`; same-origin → allowed. |
+| `script-src 'wasm-unsafe-eval'` | Required by Monaco's tokenizer; tied to the Chromium feature, not the origin. Works under Electron unchanged. |
+| `style-src 'self'` | The minified CSS chunks load from `geode://app/*.css`; same-origin → allowed. |
+| `style-src 'unsafe-inline'` | styled-components injects inline `<style>` per render; orthogonal to origin. |
+| `worker-src 'self' blob:` | Monaco's worker bootstraps from a `blob:` URL on first edit; allowed. |
+| `connect-src 'self' wss:` | The `/ws/query` upgrade goes to a backend server, not back to `geode://`. **In packaged builds the renderer must be configured to target the operator-supplied API origin**, otherwise `'self'` (which is `geode://app`) blocks the WS handshake. |
+| `img-src 'self' data:` | Icons, logos, favicons all live under `geode://app/`. |
+| `font-src 'self' data:` | Six brand woff2 files are served from `geode://app/<hash>.woff2` via `webpack`'s asset/resource loader. No CDN; Electron's offline-first posture is preserved. |
+| `frame-ancestors 'none'` | Chromium honors this even under custom protocols. The packaged window is the only legitimate frame container. |
+
+**Net:** the existing CSP works unchanged under `geode://`, except for
+the `connect-src` boundary — that's an operator-configuration concern
+(the API URL must be set at build/runtime), not a CSP wording problem.
+The tightening opportunity in the desktop build is `script-src` —
+Monaco doesn't need `'wasm-unsafe-eval'` once the bundled tokenizer is
+swapped for a JS-only path. Tracked separately as a release-engineering
+follow-up.
+
 ## Security baseline
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.

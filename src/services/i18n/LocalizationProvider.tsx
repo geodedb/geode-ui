@@ -41,14 +41,29 @@ function isSupported(
   return !!code && code in SUPPORTED_LANGUAGES
 }
 
+// Q-NEW-7: surface localStorage failures in development so a sandboxed
+// Electron context (or a partitioned browser-storage edge case)
+// doesn't silently degrade language detection. Production builds skip
+// the warning to avoid noise in the user's console.
+function warnStorageFailure(scope: string, err: unknown): void {
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `i18n: localStorage ${scope} failed; falling back to system detection`,
+      err
+    )
+  }
+}
+
 function detectInitial(): { language: SupportedLanguage; isSystem: boolean } {
   if (typeof window === 'undefined') return { language: 'en', isSystem: true }
   let stored: string | null = null
   try {
     stored = window.localStorage.getItem(I18N_STORAGE_KEY)
-  } catch {
+  } catch (err) {
     // SecurityError under sandboxed Electron — fall through to
     // navigator-based detection.
+    warnStorageFailure('read', err)
   }
   if (isSupported(stored)) return { language: stored, isSystem: false }
   const navLang = window.navigator.language?.split('-')[0]
@@ -125,8 +140,8 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({
       // Reset to system detection.
       try {
         window.localStorage.removeItem(I18N_STORAGE_KEY)
-      } catch {
-        /* ignore — state still updates locally */
+      } catch (err) {
+        warnStorageFailure('remove', err)
       }
       const detected = detectInitial()
       setLanguageState(detected.language)
@@ -136,8 +151,8 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!isSupported(next)) return
     try {
       window.localStorage.setItem(I18N_STORAGE_KEY, next)
-    } catch {
-      /* ignore */
+    } catch (err) {
+      warnStorageFailure('write', err)
     }
     setLanguageState(next)
     setIsSystem(false)

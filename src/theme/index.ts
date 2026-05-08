@@ -14,7 +14,11 @@ export {
 } from './tokens'
 export { lightTheme } from './light'
 export { darkTheme } from './dark'
-export { ThemeProvider, useThemePreference } from './ThemeContext'
+export {
+  ThemeProvider,
+  useThemePreference,
+  useThemeActions,
+} from './ThemeContext'
 export { above, below, between, bp } from './breakpoints'
 export type { Breakpoint, ResponsiveCss } from './breakpoints'
 

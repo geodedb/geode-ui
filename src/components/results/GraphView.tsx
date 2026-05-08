@@ -213,6 +213,12 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   respRef.current = resp
   const queryRef = useRef(query)
   queryRef.current = query
+  // P-NEW-5: hold the same `elements` snapshot the option / id maps
+  // are built from so the build effect doesn't re-walk extractElements
+  // a second time. The rebuild trigger (sig) gates on (row_count|query),
+  // so when the build callback fires the latest memoized `elements`
+  // is the one to render.
+  const elementsRef = useRef<ElementDefinition[]>([])
 
   // Track the latest preference maps so the build effect picks them
   // up without rebuilding when only the preference changes.
@@ -228,11 +234,13 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const sig = `${respSignature(resp)}|${query ?? ''}`
 
   // Compute available options from the current resp (cheap; same data
-  // extractElements would walk).
+  // extractElements would walk). The build effect reads through
+  // elementsRef so the per-rebuild teardown doesn't repeat the work.
   const elements = useMemo<ElementDefinition[]>(
     () => extractElements(resp, query),
     [resp, query]
   )
+  elementsRef.current = elements
   const nodeOptions = useMemo(() => labelOptions(elements), [elements])
   const edgeOptions = useMemo(() => typeOptions(elements), [elements])
 
@@ -289,7 +297,11 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         cyRef.current = null
       }
       try {
-        const els = extractElements(respRef.current, queryRef.current)
+        // P-NEW-5: reuse the memoized snapshot from `elements` instead
+        // of re-walking the full resp here. extractElements on a 5k-
+        // element resp is non-trivial; we already paid the cost in
+        // the useMemo that drives `nodeOptions` / `edgeOptions`.
+        const els = elementsRef.current
         // GAP-05: when the response has no graph elements (e.g. a
         // scalar projection like RETURN p.name), skip the cytoscape
         // mount entirely. The render pass shows an empty-state

@@ -15,6 +15,13 @@ import {
   isAllowedExternal,
   resolveProtocolAsset,
 } from './lib/safety'
+import { AssetCache, defaultCacheOptions } from './lib/cache'
+
+// P-NEW-7: keep recently-served SPA assets in memory so a hard reload
+// or a tight burst of subresource requests don't all hit the disk.
+// Sized to comfortably hold the whole geode-ui dist (HTML + chunks +
+// fonts + icons + manifest); evicts on LRU + byte-budget pressure.
+const assetCache = new AssetCache(defaultCacheOptions())
 
 // Geode UI — Electron main process.
 //
@@ -117,7 +124,15 @@ function registerProtocol(): void {
       })
     }
     try {
-      const data = await fs.readFile(resolution.filePath)
+      const cached = assetCache.get(resolution.filePath)
+      let data: Uint8Array
+      if (cached) {
+        data = cached
+      } else {
+        const buf = await fs.readFile(resolution.filePath)
+        data = new Uint8Array(buf)
+        assetCache.set(resolution.filePath, data)
+      }
       return new Response(data, {
         status: 200,
         headers: { 'Content-Type': contentTypeFor(resolution.filePath) },

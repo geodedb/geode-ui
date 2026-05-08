@@ -165,7 +165,7 @@ repos:
     entry: node scripts/detect-hardcoded-strings.mjs --strict
     language: system
     pass_filenames: false
-    files: \.tsx$
+    files: \.(ts|tsx)$
     exclude: ^(node_modules/|gen/|electron/)
 
   # Q-NEW-2 / S-NEW-3: ban JSX HTML renderers so the i18n module's

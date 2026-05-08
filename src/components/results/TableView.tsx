@@ -235,13 +235,25 @@ export function formatCell(v: unknown): string {
 // conservative. We'd rather underestimate slightly and let `overflow:
 // hidden` on Cell clip the last line than overestimate and waste vertical
 // space.
+// Q-NEW-4 cap: a node/edge with O(thousands) of properties would force
+// `cellLines` to claim a row of equally many lines, which would then
+// be clamped at ROW_HEIGHT_MAX anyway. Cap the property-line claim at
+// a value that already exceeds ROW_HEIGHT_MAX / ROW_LINE_HEIGHT so the
+// final height never depends on iterating beyond this point.
+const CELL_LINES_PROP_CAP = Math.ceil(ROW_HEIGHT_MAX / ROW_LINE_HEIGHT)
+
 function cellLines(cell: unknown): number {
   if (cell === null || cell === undefined) return 1
   if (typeof cell === 'object' && !Array.isArray(cell)) {
     const o = cell as AnyRecord
     if (isNode(o) || isEdge(o)) {
       const props = o.properties as AnyRecord | undefined
-      const propCount = props ? Object.keys(props).length : 0
+      if (!props) return 1
+      // We only need to know whether propCount exceeds the cap;
+      // counting beyond it is wasted work for an attacker-shaped huge
+      // property bag. Object.keys allocates one array but is bounded
+      // by the cap below.
+      const propCount = Math.min(Object.keys(props).length, CELL_LINES_PROP_CAP)
       return 1 + propCount
     }
   }

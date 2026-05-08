@@ -56,7 +56,10 @@ async function* walk(dir) {
     const full = path.join(dir, e.name)
     if (e.isDirectory()) {
       yield* walk(full)
-    } else if (/\.tsx$/.test(e.name)) {
+    } else if (/\.(ts|tsx)$/.test(e.name) && !/\.d\.ts$/.test(e.name)) {
+      // Q-NEW-6: scan both .ts and .tsx. Hooks, zustand stores, and
+      // utility modules can carry JSX-like attribute literals or
+      // error throws that are still user-facing.
       yield full
     }
   }

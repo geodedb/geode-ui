@@ -7,14 +7,27 @@ import type { Theme, ThemeVariant } from './types'
 
 const STORAGE_KEY = 'geode.ui.theme'
 
-interface ThemePreference {
+interface ThemeState {
   variant: ThemeVariant | 'system'
-  setVariant: (next: ThemeVariant | 'system') => void
   resolved: ThemeVariant
   theme: Theme
 }
 
-const ThemePreferenceContext = React.createContext<ThemePreference | null>(null)
+interface ThemeActions {
+  setVariant: (next: ThemeVariant | 'system') => void
+}
+
+// P-NEW-4: split the preference context into "state" vs "actions".
+// The previous single-context value rebuilt its identity on every
+// flip, forcing every consumer (theme switcher button, Logo, future
+// `useResolvedTheme` callers) to re-render. The actions context's
+// value is a single useMemo over a stable setter — so a component
+// that only needs to *trigger* a flip (e.g. a settings switch) never
+// re-renders when the theme actually flips. Components that need the
+// current state (Logo, etc.) read the state context and accept the
+// re-render.
+const ThemeStateContext = React.createContext<ThemeState | null>(null)
+const ThemeActionsContext = React.createContext<ThemeActions | null>(null)
 
 function readStored(): ThemeVariant | 'system' {
   if (typeof window === 'undefined') return 'system'
@@ -65,6 +78,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => mql.removeEventListener('change', onChange)
   }, [])
 
+  // Setter is wrapped once and stays referentially stable for the
+  // lifetime of the provider — that's what lets the actions context
+  // skip re-renders entirely when the theme flips.
   const setVariant = React.useCallback((next: ThemeVariant | 'system') => {
     persist(next)
     setVariantState(next)
@@ -87,22 +103,44 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     document.documentElement.setAttribute('data-theme', resolved)
   }, [resolved])
 
-  const value = React.useMemo<ThemePreference>(
-    () => ({ variant, setVariant, resolved, theme }),
-    [variant, setVariant, resolved, theme]
+  const stateValue = React.useMemo<ThemeState>(
+    () => ({ variant, resolved, theme }),
+    [variant, resolved, theme]
+  )
+  const actionsValue = React.useMemo<ThemeActions>(
+    () => ({ setVariant }),
+    [setVariant]
   )
 
   return (
-    <ThemePreferenceContext.Provider value={value}>
-      <ScThemeProvider theme={theme}>{children}</ScThemeProvider>
-    </ThemePreferenceContext.Provider>
+    <ThemeActionsContext.Provider value={actionsValue}>
+      <ThemeStateContext.Provider value={stateValue}>
+        <ScThemeProvider theme={theme}>{children}</ScThemeProvider>
+      </ThemeStateContext.Provider>
+    </ThemeActionsContext.Provider>
   )
 }
 
-export function useThemePreference(): ThemePreference {
-  const ctx = React.useContext(ThemePreferenceContext)
-  if (!ctx) {
+// useThemePreference returns the same shape as before so existing
+// call sites (Logo, etc.) keep working. New code that only needs the
+// setter should use useThemeActions() directly to skip re-renders on
+// theme flips.
+export function useThemePreference(): ThemeState & ThemeActions {
+  const state = React.useContext(ThemeStateContext)
+  const actions = React.useContext(ThemeActionsContext)
+  if (!state || !actions) {
     throw new Error('useThemePreference must be used inside <ThemeProvider>')
+  }
+  return { ...state, ...actions }
+}
+
+// useThemeActions returns just the setter — its identity is stable
+// across theme flips, so a button that only needs to trigger a flip
+// doesn't re-render when the flip occurs.
+export function useThemeActions(): ThemeActions {
+  const ctx = React.useContext(ThemeActionsContext)
+  if (!ctx) {
+    throw new Error('useThemeActions must be used inside <ThemeProvider>')
   }
   return ctx
 }
