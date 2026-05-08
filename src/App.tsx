@@ -1,6 +1,6 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ThemeProvider, createGlobalStyle } from 'styled-components'
+import { createGlobalStyle } from 'styled-components'
 import { AuthProvider } from './auth/AuthProvider'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { Shell } from './components/layout/Shell'
@@ -17,24 +17,7 @@ import { BackupPage } from './components/ops/BackupPage'
 import { RestorePage } from './components/ops/RestorePage'
 import { MigrationsPage } from './components/ops/MigrationsPage'
 import { AuditLogPage } from './components/ops/AuditLogPage'
-
-const theme = {
-  colors: {
-    primary: '#1a56db',
-    background: '#0f172a',
-    surface: '#1e293b',
-    text: '#e2e8f0',
-    textSecondary: '#94a3b8',
-    border: '#334155',
-  },
-  spacing: {
-    xs: '4px',
-    sm: '8px',
-    md: '16px',
-    lg: '24px',
-    xl: '32px',
-  },
-}
+import { ThemeProvider } from './theme'
 
 const GlobalStyle = createGlobalStyle`
   *, *::before, *::after {
@@ -43,14 +26,50 @@ const GlobalStyle = createGlobalStyle`
     padding: 0;
   }
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-      'Helvetica Neue', Arial, sans-serif;
-    background-color: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    line-height: 1.6;
+  html, body {
+    font-family: ${({ theme }) => theme.font.family.body};
+    font-size: ${({ theme }) => theme.font.sizes.md};
+    line-height: ${({ theme }) => theme.font.lineHeights.normal};
+    background-color: ${({ theme }) => theme.bg.canvas};
+    color: ${({ theme }) => theme.text.primary};
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    color-scheme: ${({ theme }) => theme.variant};
+  }
+
+  body {
+    transition: background-color ${({ theme }) => theme.transitions.normal}
+        ${({ theme }) => theme.transitions.easing},
+      color ${({ theme }) => theme.transitions.normal}
+        ${({ theme }) => theme.transitions.easing};
+  }
+
+  /* Brand-aligned focus ring. Mirrors geodedb.com _design-system.scss:377. */
+  *:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.border.focus};
+    outline-offset: 2px;
+    border-radius: ${({ theme }) => theme.radii.sm};
+  }
+
+  /* Honor user motion preferences — disables long transitions and
+     animations for visitors who set prefers-reduced-motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    line-height: ${({ theme }) => theme.font.lineHeights.tight};
+  }
+
+  code, pre, kbd, samp {
+    font-family: ${({ theme }) => theme.font.family.mono};
   }
 `
 
@@ -61,7 +80,7 @@ const ProtectedShell: React.FC = () => (
 )
 
 const App: React.FC = () => (
-  <ThemeProvider theme={theme}>
+  <ThemeProvider>
     <GlobalStyle />
     <AuthProvider>
       <BrowserRouter>

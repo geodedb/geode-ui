@@ -22,23 +22,7 @@ jest.mock('../../lib/queryStore', () => ({
 
 import { LabelList } from './LabelList'
 
-const theme = {
-  colors: {
-    background: '#000',
-    surface: '#111',
-    text: '#fff',
-    textSecondary: '#888',
-    border: '#333',
-    primary: '#48b',
-  },
-  spacing: {
-    xs: '4px',
-    sm: '8px',
-    md: '16px',
-    lg: '24px',
-    xl: '32px',
-  },
-}
+import { testTheme as theme } from '../../test-utils/theme'
 
 beforeEach(() => {
   setStaged.mockClear()

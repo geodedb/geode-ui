@@ -1,6 +1,7 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './monaco-bootstrap'
+import './assets/fonts/fonts.css'
 import App from './App'
 
 const container = document.getElementById('root')
