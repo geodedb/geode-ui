@@ -104,7 +104,8 @@ function registerProtocol(): void {
   // sandbox.
   protocol.handle(PROTOCOL_NAME, async (request) => {
     const url = new URL(request.url)
-    const requested = decodeURIComponent(url.pathname.replace(/^\//, '')) || 'index.html'
+    const requested =
+      decodeURIComponent(url.pathname.replace(/^\//, '')) || 'index.html'
     const resolved = path.normalize(path.join(DIST_DIR, requested))
     if (!resolved.startsWith(DIST_DIR + path.sep) && resolved !== DIST_DIR) {
       return new Response('forbidden', { status: 403 })
@@ -295,13 +296,13 @@ ipcMain.handle('geode:open-external', async (_evt, url: string) => {
   return true
 })
 ipcMain.handle('geode:get-system-theme', () =>
-  nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+  nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
 )
 nativeTheme.on('updated', () => {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(
       'geode:system-theme-changed',
-      nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+      nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
     )
   }
 })
