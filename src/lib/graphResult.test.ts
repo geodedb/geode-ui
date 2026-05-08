@@ -208,6 +208,126 @@ test('resolveEdgeLabel uses chosen property when set, falls back to type', () =>
   expect(resolveEdgeLabel(data, { ACTED_IN: 'missing' })).toBe('ACTED_IN')
 })
 
+test('synthesises full graph from MATCH pattern when only scalars are returned', () => {
+  // Reproduces the user-reported case:
+  //   MATCH (p:Person)-[r:ACTED_IN]->(m:Movie)
+  //   RETURN p.name, r.roles, m.title
+  // Geode emits empty graph_summary because no NODE/EDGE columns
+  // were projected. With the query string available, extractElements
+  // must rebuild the (Person)-[ACTED_IN]->(Movie) shape from each row.
+  const query =
+    'USE GRAPH movies; MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r.roles, m.title LIMIT 3'
+  const resp = {
+    columns: [
+      { name: 'name', type: 'STRING' },
+      { name: 'roles', type: 'STRING' },
+      { name: 'title', type: 'STRING' },
+    ],
+    rows: [
+      ['Keanu Reeves', 'Neo', 'The Matrix'],
+      ['Keanu Reeves', 'Neo', 'The Matrix Reloaded'],
+      ['Carrie-Anne Moss', 'Trinity', 'The Matrix'],
+    ],
+    graph_summary: { nodes: [], edges: [] },
+  }
+  const els = extractElements(resp as any, query)
+  const personNodes = els.filter(
+    (e) =>
+      e.group === 'nodes' &&
+      Array.isArray((e.data as any).labels) &&
+      (e.data as any).labels[0] === 'Person'
+  )
+  const movieNodes = els.filter(
+    (e) =>
+      e.group === 'nodes' &&
+      Array.isArray((e.data as any).labels) &&
+      (e.data as any).labels[0] === 'Movie'
+  )
+  const edgeEls = els.filter((e) => e.group === 'edges')
+
+  // Two distinct Persons (Keanu, Carrie-Anne) — the duplicate row
+  // pointing to a second movie does NOT produce a second Person.
+  expect(personNodes.length).toBe(2)
+  expect(personNodes.map((n) => (n.data as any).label).sort()).toEqual([
+    'Carrie-Anne Moss',
+    'Keanu Reeves',
+  ])
+
+  // Two distinct Movies.
+  expect(movieNodes.length).toBe(2)
+  expect(movieNodes.map((n) => (n.data as any).label).sort()).toEqual([
+    'The Matrix',
+    'The Matrix Reloaded',
+  ])
+
+  // Three edges (one per row), each with type ACTED_IN and the
+  // user-projected role as the default label.
+  expect(edgeEls.length).toBe(3)
+  edgeEls.forEach((e) => {
+    expect((e.data as any).type).toBe('ACTED_IN')
+  })
+  // Edge label defaults to the single projected property value.
+  expect(edgeEls.map((e) => (e.data as any).label).sort()).toEqual([
+    'Neo',
+    'Neo',
+    'Trinity',
+  ])
+
+  // Source/target ordering matches the MATCH pattern direction
+  // (Person -> Movie).
+  edgeEls.forEach((e) => {
+    expect(String((e.data as any).source)).toMatch(/^p:/)
+    expect(String((e.data as any).target)).toMatch(/^m:/)
+  })
+})
+
+test('synthesised path falls back to graph_summary when both available', () => {
+  // If the response already contains graph_summary entries, do NOT
+  // synthesise — the real summary wins.
+  const query =
+    'MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m LIMIT 1'
+  const resp = {
+    columns: [
+      { name: 'name', type: 'STRING' },
+      { name: 'r', type: 'EDGE' },
+      { name: 'm', type: 'NODE' },
+    ],
+    rows: [
+      [
+        'Keanu Reeves',
+        {
+          id: 1,
+          start_node: 100,
+          end_node: 7,
+          type: 'ACTED_IN',
+          properties: {},
+        },
+        { id: 7, labels: ['Movie'], properties: { title: 'The Matrix' } },
+      ],
+    ],
+    graph_summary: {
+      nodes: [
+        { id: 7, labels: ['Movie'], properties: { title: 'The Matrix' } },
+      ],
+      edges: [
+        {
+          id: 1,
+          start_node: 100,
+          end_node: 7,
+          type: 'ACTED_IN',
+          properties: {},
+        },
+      ],
+    },
+  }
+  const els = extractElements(resp as any, query)
+  // Real Movie node id=7 + placeholder for id=100 + 1 real edge.
+  expect(els.filter((e) => e.group === 'nodes').length).toBe(2)
+  expect(els.filter((e) => e.group === 'edges').length).toBe(1)
+  // No synthesised:true elements when graph_summary carried the data.
+  expect(els.some((e) => (e.data as any).synthesised === true)).toBe(false)
+})
+
 test('falls back to placeholder #id when no scalar column is available', () => {
   // Edge endpoint isn't in graph_summary.nodes AND no scalar column
   // exists in the row to label it with. Must still emit a stub so

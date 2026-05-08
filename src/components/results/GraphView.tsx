@@ -21,7 +21,14 @@ type Selected = { kind: 'node' | 'edge'; data: Record<string, unknown> }
 // for an N-row stream). The component intentionally debounces the
 // (re)build so streaming converges to a single mount once the row count
 // settles. See PERF-F9 / issue #53.
-type Props = { resp: QueryRespLike & { row_count?: number }; height?: number }
+type Props = {
+  resp: QueryRespLike & { row_count?: number }
+  // Original query text. Used to recover variable bindings and
+  // synthesise nodes/edges when the response is scalar-only (no
+  // NODE/EDGE columns ⇒ empty graph_summary).
+  query?: string
+  height?: number
+}
 
 const REBUILD_DEBOUNCE_MS = 250
 
@@ -112,7 +119,7 @@ function applyLabels(
   })
 }
 
-export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
+export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const [selected, setSelected] = useState<Selected | null>(null)
@@ -123,11 +130,13 @@ export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
     {}
   )
 
-  // Track the resp by reference so the debounced rebuild always reads
-  // the latest snapshot when it fires (without re-creating the timer
-  // every render).
+  // Track the resp + query by reference so the debounced rebuild
+  // always reads the latest snapshot when it fires (without
+  // re-creating the timer every render).
   const respRef = useRef(resp)
   respRef.current = resp
+  const queryRef = useRef(query)
+  queryRef.current = query
 
   // Track the latest preference maps so the build effect picks them
   // up without rebuilding when only the preference changes.
@@ -141,8 +150,8 @@ export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
   // Compute available options from the current resp (cheap; same data
   // extractElements would walk).
   const elements = useMemo<ElementDefinition[]>(
-    () => extractElements(resp),
-    [resp]
+    () => extractElements(resp, query),
+    [resp, query]
   )
   const nodeOptions = useMemo(() => labelOptions(elements), [elements])
   const edgeOptions = useMemo(() => typeOptions(elements), [elements])
@@ -161,7 +170,7 @@ export const GraphView: React.FC<Props> = ({ resp, height = 480 }) => {
         cyRef.current.destroy()
         cyRef.current = null
       }
-      const els = extractElements(respRef.current)
+      const els = extractElements(respRef.current, queryRef.current)
       const cy = cytoscape({
         container: ref.current,
         elements: els,

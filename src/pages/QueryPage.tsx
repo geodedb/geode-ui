@@ -227,7 +227,7 @@ export const QueryPage: React.FC = () => {
           </Tabs>
           {tab === 'table' && <TableView resp={activeResp} expand={expand} />}
           {tab === 'json' && <JsonView data={activeResp} />}
-          {tab === 'graph' && <GraphView resp={activeResp} />}
+          {tab === 'graph' && <GraphView resp={activeResp} query={stmt} />}
         </>
       )}
     </div>

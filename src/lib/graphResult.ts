@@ -1,4 +1,10 @@
 import type { ElementDefinition } from 'cytoscape'
+import {
+  EdgeBinding,
+  NodeBinding,
+  ParsedMatch,
+  parseMatchAndReturn,
+} from './matchPattern'
 
 export type GqlNode = {
   id: number
@@ -98,7 +104,15 @@ function scalarLabel(
 //     We correlate each row's edge endpoints with that row's scalar
 //     columns and use the first sensible scalar (preferring a column
 //     literally named "name") as the placeholder node's display label.
-export function extractElements(resp: QueryRespLike): ElementDefinition[] {
+//  4. Fully synthetic nodes + edges from a scalar-only RETURN
+//     (e.g. `RETURN p.name, r.roles, m.title`) when a `query` arg
+//     is supplied. The query's MATCH pattern provides labels +
+//     edge types + endpoints; columns are mapped to (var, field)
+//     by parsing the RETURN expression list.
+export function extractElements(
+  resp: QueryRespLike,
+  query?: string
+): ElementDefinition[] {
   const els: ElementDefinition[] = []
   const summary = resp.graph_summary
   if (!isGraphSummary(summary)) return els
@@ -205,7 +219,189 @@ export function extractElements(resp: QueryRespLike): ElementDefinition[] {
       })
     })
   }
+
+  // Synthesise from the MATCH pattern when:
+  //   (a) the caller passed a query string, AND
+  //   (b) graph_summary is empty (or doesn't carry edges) AND
+  //   (c) at least one returned column is a `var.field` reference
+  //       to a node/edge variable defined in the MATCH.
+  // This covers the all-scalars case the user reported, where Geode
+  // emits no graph_summary entries because nothing of NODE/EDGE
+  // type was projected.
+  const haveReal =
+    (Array.isArray(nodes) && nodes.length > 0) ||
+    (Array.isArray(edges) && edges.length > 0)
+  if (!haveReal && query && Array.isArray(rows) && rows.length > 0) {
+    pushSynthesised(els, parseMatchAndReturn(query), rows)
+  }
   return els
+}
+
+function pushSynthesised(
+  out: ElementDefinition[],
+  parsed: ParsedMatch,
+  rows: unknown[][]
+): void {
+  if (parsed.nodes.size === 0 && parsed.edges.length === 0) return
+  // Build a column-index → (var, field) map from the RETURN list.
+  // Geode auto-aliases `p.name` to a column named `name`, so the
+  // RETURN expression order is the only reliable mapping.
+  type ColBind = { varName: string; field: string }
+  const colBindings: (ColBind | null)[] = parsed.returnColumns.map((rc) => {
+    if (rc.varName && rc.field) return { varName: rc.varName, field: rc.field }
+    return null
+  })
+
+  // For each row, gather per-variable {field: value}.
+  // Dedup across rows: a Person `p` whose name is "Keanu Reeves"
+  // appears once even when ten ACTED_IN edges originate from it.
+  // We key the synthetic node id by (varName, identityProp:value).
+  //   - identityProp prefers a field literally named `id`, then the
+  //     first field projected for that variable, alphabetically by
+  //     field name, so the key is stable across columns ordered
+  //     differently.
+  type SyntheticNode = {
+    nodeId: string
+    binding: NodeBinding
+    props: Record<string, unknown>
+    label: string
+  }
+  const synthNodes = new Map<string, SyntheticNode>()
+  // Track per-row var → nodeId so edges reference the right side.
+  const rowVarToNodeId: Map<string, string>[] = []
+  rows.forEach((row) => {
+    const varProps = new Map<string, Record<string, unknown>>()
+    row.forEach((value, idx) => {
+      const cb = colBindings[idx]
+      if (!cb) return
+      let entry = varProps.get(cb.varName)
+      if (!entry) {
+        entry = {}
+        varProps.set(cb.varName, entry)
+      }
+      entry[cb.field] = value
+    })
+    const thisRow = new Map<string, string>()
+    parsed.nodes.forEach((binding, varName) => {
+      const props = varProps.get(varName)
+      if (!props) return
+      const identity = identityValue(props)
+      if (identity === null) return
+      const nodeId = `${varName}:${identity}`
+      thisRow.set(varName, nodeId)
+      const existing = synthNodes.get(nodeId)
+      if (existing) {
+        // Merge props from this row (later rows fill in missing
+        // fields, never overwrite values already known — keeps the
+        // graph stable across row order).
+        Object.entries(props).forEach(([k, v]) => {
+          if (existing.props[k] === undefined) existing.props[k] = v
+        })
+      } else {
+        const labelChoice = chooseLabelText(binding, props)
+        synthNodes.set(nodeId, {
+          nodeId,
+          binding,
+          props: { ...props },
+          label: labelChoice,
+        })
+      }
+    })
+    rowVarToNodeId.push(thisRow)
+  })
+
+  synthNodes.forEach((sn) => {
+    const labels = sn.binding.label ? [sn.binding.label] : []
+    out.push({
+      group: 'nodes',
+      data: {
+        id: sn.nodeId,
+        label: sn.label,
+        labels,
+        props: sn.props,
+        synthesised: true,
+      },
+    })
+  })
+
+  // Edges: one per (row, edgeBinding). Synthetic, so we mint ids
+  // from row index + binding name to keep them unique.
+  rows.forEach((row, rowIdx) => {
+    const thisRow = rowVarToNodeId[rowIdx]
+    if (!thisRow) return
+    const varProps = new Map<string, Record<string, unknown>>()
+    row.forEach((value, idx) => {
+      const cb = colBindings[idx]
+      if (!cb) return
+      let entry = varProps.get(cb.varName)
+      if (!entry) {
+        entry = {}
+        varProps.set(cb.varName, entry)
+      }
+      entry[cb.field] = value
+    })
+    parsed.edges.forEach((eb, eIdx) => {
+      const fromId = thisRow.get(eb.fromVar)
+      const toId = thisRow.get(eb.toVar)
+      if (!fromId || !toId) return
+      const props = (eb.varName && varProps.get(eb.varName)) || {}
+      const labelText = chooseEdgeLabel(eb, props)
+      out.push({
+        group: 'edges',
+        data: {
+          id: `synth-r${rowIdx}-${eIdx}`,
+          source: fromId,
+          target: toId,
+          type: eb.type ?? 'REL',
+          label: labelText,
+          props,
+          synthesised: true,
+        },
+      })
+    })
+  })
+}
+
+function identityValue(props: Record<string, unknown>): string | null {
+  const keys = Object.keys(props).sort()
+  if (keys.length === 0) return null
+  const idKey = keys.find((k) => /^id$/i.test(k)) ?? keys[0]
+  if (idKey === undefined) return null
+  const v = props[idKey]
+  if (v === null || v === undefined) return null
+  return String(v)
+}
+
+function chooseLabelText(
+  binding: NodeBinding,
+  props: Record<string, unknown>
+): string {
+  const named = props.name ?? props.title ?? props.id
+  if (named !== undefined && named !== null && named !== '') {
+    return String(named)
+  }
+  const keys = Object.keys(props).sort()
+  const found = keys
+    .map((k) => props[k])
+    .find((v) => v !== undefined && v !== null && v !== '')
+  if (found !== undefined) return String(found)
+  return binding.label || binding.varName
+}
+
+function chooseEdgeLabel(
+  binding: EdgeBinding,
+  props: Record<string, unknown>
+): string {
+  // For synthesised edges the user has often projected exactly one
+  // edge property (e.g. `r.roles`). Show it as the default — it
+  // matches what they typed in RETURN. The Display-panel selector
+  // can override later via resolveEdgeLabel.
+  const keys = Object.keys(props)
+  if (keys.length === 1) {
+    const v = props[keys[0]!]
+    if (v !== undefined && v !== null && v !== '') return String(v)
+  }
+  return binding.type ?? 'REL'
 }
 
 // ----- per-label / per-type display-property selection -----
