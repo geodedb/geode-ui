@@ -54,6 +54,7 @@ export interface Theme {
     inverse: string
     link: string
     onPrimary: string
+    onDanger: string
     danger: string
     success: string
   }
@@ -63,6 +64,13 @@ export interface Theme {
     subtle: string
     inverse: string
     overlay: string
+    /**
+     * Cytoscape graph canvas — distinct from `bg.canvas` because the
+     * graph rendering needs a near-black background in dark mode for
+     * contrast with edge labels, but a pure-white background in light
+     * mode to keep node fills crisp.
+     */
+    graphCanvas: string
   }
 
   border: {

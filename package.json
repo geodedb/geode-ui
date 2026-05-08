@@ -15,6 +15,8 @@
     "test:watch": "jest --config jest.config.cjs --watch",
     "lint": "eslint src/ --ext .ts,.tsx --max-warnings=0",
     "lint:fix": "eslint src/ --ext .ts,.tsx --fix",
+    "lint:hardcoded-styles": "node scripts/check-hardcoded-styles.mjs",
+    "lint:contrast": "node scripts/check-contrast.mjs",
     "prettier:check": "prettier --check 'src/**/*.{ts,tsx,json,css}'",
     "prettier:fix": "prettier --write 'src/**/*.{ts,tsx,json,css}'",
     "clean": "rm -rf dist build coverage",

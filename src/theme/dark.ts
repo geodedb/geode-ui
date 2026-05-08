@@ -52,6 +52,7 @@ export const darkTheme: Theme = {
     inverse: '#2a1f3a',
     link: primaryScale[300],
     onPrimary: '#1c0f2e',
+    onDanger: '#ffffff',
     danger: '#fca5a5',
     success: '#6ee7b7',
   },
@@ -62,6 +63,7 @@ export const darkTheme: Theme = {
     subtle: '#241634',
     inverse: '#f7f2ff',
     overlay: 'rgba(0, 0, 0, 0.55)',
+    graphCanvas: '#13091e',
   },
 
   border: {

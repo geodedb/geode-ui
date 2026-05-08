@@ -49,6 +49,7 @@ export const lightTheme: Theme = {
     inverse: '#ffffff',
     link: primaryScale[700],
     onPrimary: '#ffffff',
+    onDanger: '#ffffff',
     danger: '#b91c1c',
     success: '#047857',
   },
@@ -59,6 +60,7 @@ export const lightTheme: Theme = {
     subtle: '#f3ecff',
     inverse: '#1c0f2e',
     overlay: 'rgba(26, 15, 46, 0.45)',
+    graphCanvas: '#ffffff',
   },
 
   border: {

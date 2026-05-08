@@ -41,19 +41,11 @@ const Wrap = styled.div`
     grid-template-columns: 1fr;
   }
 `
-function canvasBg({ theme }: { theme: import('../../theme').Theme }): string {
-  // The Cytoscape canvas is its own surface — too dark in our brand
-  // dark mode (#1c0f2e) would lose contrast with edge labels, and a
-  // pure-white background in dark mode would strobe. Pick a deep-ink
-  // canvas in dark and pure white in light.
-  return theme.variant === 'dark' ? '#13091e' : '#ffffff'
-}
-
 const Canvas = styled.div<{ $height: number }>`
   height: ${({ $height }) => $height}px;
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
-  background: ${canvasBg};
+  background: ${({ theme }) => theme.bg.graphCanvas};
 `
 const Side = styled.aside<{ $height: number }>`
   height: ${({ $height }) => $height}px;
@@ -248,7 +240,12 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
 
   return (
     <Wrap>
-      <Canvas ref={ref} $height={height} />
+      <Canvas
+        ref={ref}
+        $height={height}
+        role="img"
+        aria-label="Cytoscape graph rendering. Use the Display panel to choose which property labels each node and edge."
+      />
       <Side $height={height}>
         <ControlsBlock data-testid="graph-display-controls">
           <h5>Display</h5>

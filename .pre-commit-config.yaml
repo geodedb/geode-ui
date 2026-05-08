@@ -125,6 +125,24 @@ repos:
     files: \.(ts|tsx|json|css)$
     exclude: ^(node_modules/|gen/|package-lock\.json)
 
+  # Theme enforcement — lightweight scans that fail loudly if a hex
+  # literal or rgb()/hsl() call shows up outside src/theme/, or if any
+  # text/bg pair in the theme drops below WCAG AA contrast.
+  - id: lint-hardcoded-styles
+    name: lint:hardcoded-styles
+    entry: node scripts/check-hardcoded-styles.mjs
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx|css)$
+    exclude: ^(node_modules/|gen/)
+
+  - id: lint-contrast
+    name: lint:contrast
+    entry: node scripts/check-contrast.mjs
+    language: system
+    pass_filenames: false
+    files: ^(src/theme/|scripts/check-contrast\.mjs)
+
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint
     name: golangci-lint
@@ -192,6 +210,8 @@ ci:
   - go-vet
   - eslint
   - prettier-check
+  - lint-hardcoded-styles
+  - lint-contrast
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck

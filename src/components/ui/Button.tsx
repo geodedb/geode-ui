@@ -77,7 +77,7 @@ const variantStyles = {
   `,
   danger: css`
     background: ${({ theme }) => theme.colors.danger};
-    color: #fff;
+    color: ${({ theme }) => theme.text.onDanger};
     border: 1px solid ${({ theme }) => theme.colors.danger};
 
     &:hover:not(:disabled) {
