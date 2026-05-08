@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { useAuth } from '../auth/AuthProvider'
-import { Button, Field, Input } from '../components/ui'
+import { Button, Field, Input, Logo } from '../components/ui'
 
 const Form = styled.form`
   max-width: 380px;
@@ -26,6 +27,12 @@ const Title = styled.h1`
   margin: 0 0 ${({ theme }) => theme.spacing.sm};
 `
 
+const LogoSlot = styled.div`
+  display: flex;
+  justify-content: center;
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+`
+
 const ErrText = styled.p`
   color: ${({ theme }) => theme.text.danger};
   font-size: ${({ theme }) => theme.font.sizes.sm};
@@ -33,6 +40,7 @@ const ErrText = styled.p`
 
 export const LoginPage: React.FC = () => {
   const { signIn } = useAuth()
+  const { t } = useTranslation()
   const nav = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -48,7 +56,7 @@ export const LoginPage: React.FC = () => {
       await signIn(username, password, profile)
       nav('/', { replace: true })
     } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : 'login failed')
+      setErr(e2 instanceof Error ? e2.message : t('auth.loginFailed'))
     } finally {
       setBusy(false)
     }
@@ -56,15 +64,18 @@ export const LoginPage: React.FC = () => {
 
   return (
     <Form onSubmit={submit}>
-      <Title>Sign in</Title>
-      <Field label="Profile" htmlFor="login-profile">
+      <LogoSlot>
+        <Logo height={36} variant="on-light" />
+      </LogoSlot>
+      <Title>{t('auth.signIn')}</Title>
+      <Field label={t('auth.profile')} htmlFor="login-profile">
         <Input
           id="login-profile"
           value={profile}
           onChange={(e) => setProfile(e.target.value)}
         />
       </Field>
-      <Field label="Username" htmlFor="login-username" required>
+      <Field label={t('auth.username')} htmlFor="login-username" required>
         <Input
           id="login-username"
           value={username}
@@ -73,7 +84,7 @@ export const LoginPage: React.FC = () => {
           required
         />
       </Field>
-      <Field label="Password" htmlFor="login-password" required>
+      <Field label={t('auth.password')} htmlFor="login-password" required>
         <Input
           id="login-password"
           type="password"
@@ -84,7 +95,7 @@ export const LoginPage: React.FC = () => {
         />
       </Field>
       <Button type="submit" loading={busy} fullWidth>
-        Sign in
+        {t('auth.signInButton')}
       </Button>
       {err && <ErrText role="alert">{err}</ErrText>}
     </Form>

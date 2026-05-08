@@ -143,6 +143,32 @@ repos:
     pass_filenames: false
     files: ^(src/theme/|scripts/check-contrast\.mjs)
 
+  # i18n enforcement.
+  #   verify-translations: every `t('foo')` referenced in source must
+  #     resolve in every required locale (default: en). Orphan keys
+  #     in the locale are tolerated up to --max-warnings-total to ease
+  #     adoption.
+  #   detect-hardcoded-strings: surfaces JSX label / placeholder /
+  #     aria-label literals that should funnel through `t()`. Runs in
+  #     warn mode (exit 0) until the codebase is fully migrated; flip
+  #     to --strict in a follow-up commit.
+  - id: verify-translations
+    name: verify:translations
+    entry: npm run verify:translations --silent
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx)$
+    exclude: ^(node_modules/|gen/|electron/)
+
+  - id: detect-hardcoded-strings
+    name: detect:hardcoded-strings
+    entry: node scripts/detect-hardcoded-strings.mjs
+    language: system
+    pass_filenames: false
+    files: \.tsx$
+    exclude: ^(node_modules/|gen/|electron/)
+    verbose: true
+
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint
     name: golangci-lint
@@ -212,6 +238,8 @@ ci:
   - prettier-check
   - lint-hardcoded-styles
   - lint-contrast
+  - verify-translations
+  - detect-hardcoded-strings
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck

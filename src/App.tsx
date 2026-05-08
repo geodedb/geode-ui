@@ -17,6 +17,7 @@ import { BackupPage } from './components/ops/BackupPage'
 import { RestorePage } from './components/ops/RestorePage'
 import { MigrationsPage } from './components/ops/MigrationsPage'
 import { AuditLogPage } from './components/ops/AuditLogPage'
+import { LocalizationProvider } from './services/i18n'
 import { ThemeProvider } from './theme'
 
 const GlobalStyle = createGlobalStyle`
@@ -80,34 +81,37 @@ const ProtectedShell: React.FC = () => (
 )
 
 const App: React.FC = () => (
-  <ThemeProvider>
-    <GlobalStyle />
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<ProtectedShell />}>
-            <Route index element={<QueryPage />} />
-            <Route path="schema" element={<SchemaPage />} />
-            <Route path="admin" element={<AdminPage />}>
-              <Route index element={<Navigate to="users" replace />} />
-              <Route path="users" element={<UsersPage />} />
-              <Route path="roles" element={<RolesPage />} />
-              <Route path="policies" element={<PoliciesPage />} />
-              <Route path="grants" element={<GrantsPanel />} />
+  <LocalizationProvider>
+    <ThemeProvider>
+      <GlobalStyle />
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<ProtectedShell />}>
+              <Route index element={<QueryPage />} />
+              <Route path="schema" element={<SchemaPage />} />
+              <Route path="admin" element={<AdminPage />}>
+                <Route index element={<Navigate to="users" replace />} />
+                <Route path="users" element={<UsersPage />} />
+                <Route path="roles" element={<RolesPage />} />
+                <Route path="policies" element={<PoliciesPage />} />
+                <Route path="grants" element={<GrantsPanel />} />
+              </Route>
+              <Route path="ops" element={<OpsPage />}>
+                <Route index element={<Navigate to="backups" replace />} />
+                <Route path="backups" element={<BackupPage />} />
+                <Route path="restore" element={<RestorePage />} />
+                <Route path="migrations" element={<MigrationsPage />} />
+                <Route path="audit" element={<AuditLogPage />} />
+              </Route>
             </Route>
-            <Route path="ops" element={<OpsPage />}>
-              <Route index element={<Navigate to="backups" replace />} />
-              <Route path="backups" element={<BackupPage />} />
-              <Route path="restore" element={<RestorePage />} />
-              <Route path="migrations" element={<MigrationsPage />} />
-              <Route path="audit" element={<AuditLogPage />} />
-            </Route>
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
-  </ThemeProvider>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
+  </LocalizationProvider>
 )
 
 export default App
+export { App }

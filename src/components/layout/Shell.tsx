@@ -1,10 +1,11 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { useAuth } from '../../auth/AuthProvider'
 import { above, below } from '../../theme'
-import { Button, Spacer } from '../ui'
+import { Button, Logo, Spacer } from '../ui'
 import { ConnectionPicker } from './ConnectionPicker'
 
 const SkipLink = styled.a`
@@ -43,12 +44,16 @@ const Top = styled.nav`
   `}
 `
 
-const Brand = styled.span`
-  font-family: ${({ theme }) => theme.font.family.display};
-  font-weight: ${({ theme }) => theme.font.weights.bold};
-  color: ${({ theme }) => theme.colors.primary};
-  letter-spacing: -0.01em;
-  font-size: ${({ theme }) => theme.font.sizes.lg};
+const BrandLink = styled(Link)`
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  border-radius: ${({ theme }) => theme.radii.md};
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
 `
 
 const Body = styled.main`
@@ -155,6 +160,7 @@ const Burger: React.FC<{ open: boolean }> = ({ open }) => (
 
 export const Shell: React.FC = () => {
   const { signOut } = useAuth()
+  const { t } = useTranslation()
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const location = useLocation()
 
@@ -176,23 +182,25 @@ export const Shell: React.FC = () => {
   }
   return (
     <>
-      <SkipLink href="#main-content">Skip to main content</SkipLink>
-      <Top aria-label="Primary">
-        <Brand>Geode</Brand>
+      <SkipLink href="#main-content">{t('common.skipToMain')}</SkipLink>
+      <Top aria-label={t('nav.primary')}>
+        <BrandLink to="/" aria-label={t('brand.home')}>
+          <Logo height={28} />
+        </BrandLink>
         <ConnectionPicker />
         <DesktopNav>
-          <NavLink to="/">Query</NavLink>
-          <NavLink to="/schema">Schema</NavLink>
-          <NavLink to="/admin">Admin</NavLink>
-          <NavLink to="/ops">Ops</NavLink>
+          <NavLink to="/">{t('nav.query')}</NavLink>
+          <NavLink to="/schema">{t('nav.schema')}</NavLink>
+          <NavLink to="/admin">{t('nav.admin')}</NavLink>
+          <NavLink to="/ops">{t('nav.ops')}</NavLink>
           <Spacer />
           <Button variant="ghost" size="sm" onClick={onLogout}>
-            Logout
+            {t('nav.logout')}
           </Button>
         </DesktopNav>
         <MobileToggle
           type="button"
-          aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
+          aria-label={drawerOpen ? t('common.closeMenu') : t('common.openMenu')}
           aria-expanded={drawerOpen}
           aria-controls="primary-drawer"
           onClick={() => setDrawerOpen((v) => !v)}
@@ -203,14 +211,14 @@ export const Shell: React.FC = () => {
       <Drawer
         id="primary-drawer"
         $open={drawerOpen}
-        aria-label="Primary mobile"
+        aria-label={t('nav.primaryMobile')}
       >
-        <NavLink to="/">Query</NavLink>
-        <NavLink to="/schema">Schema</NavLink>
-        <NavLink to="/admin">Admin</NavLink>
-        <NavLink to="/ops">Ops</NavLink>
+        <NavLink to="/">{t('nav.query')}</NavLink>
+        <NavLink to="/schema">{t('nav.schema')}</NavLink>
+        <NavLink to="/admin">{t('nav.admin')}</NavLink>
+        <NavLink to="/ops">{t('nav.ops')}</NavLink>
         <Button variant="ghost" size="md" fullWidth onClick={onLogout}>
-          Logout
+          {t('nav.logout')}
         </Button>
       </Drawer>
       <Body id="main-content">

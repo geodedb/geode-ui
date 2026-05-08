@@ -3,6 +3,7 @@ const HtmlWebpackPlugin = require('html-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
 const MonacoWebpackPlugin = require('monaco-editor-webpack-plugin')
+const CopyPlugin = require('copy-webpack-plugin')
 
 const devMode = process.env.NODE_ENV !== 'production'
 
@@ -24,6 +25,25 @@ const plugins = [
   new MonacoWebpackPlugin({
     languages: ['json'],
     filename: devMode ? '[name].worker.js' : '[name].[contenthash].worker.js',
+  }),
+  // Copies the brand favicon family + PWA manifest under the SPA's
+  // public path. The base /favicon.ico is already injected by
+  // HtmlWebpackPlugin (above); this widens the set so high-DPI Apple
+  // Touch icons, Android Chrome PWA icons, and the manifest itself
+  // are reachable from index.html's <link> tags.
+  new CopyPlugin({
+    patterns: [
+      {
+        from: path.resolve(__dirname, 'public', 'icons'),
+        to: path.resolve(__dirname, 'internal', 'ui', 'dist', 'icons'),
+        noErrorOnMissing: true,
+      },
+      {
+        from: path.resolve(__dirname, 'public', 'site.webmanifest'),
+        to: path.resolve(__dirname, 'internal', 'ui', 'dist', 'site.webmanifest'),
+        noErrorOnMissing: true,
+      },
+    ],
   }),
 ]
 
