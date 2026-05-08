@@ -1,53 +1,34 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
+
 import { useAuth } from '../auth/AuthProvider'
+import { Button, Field, Input } from '../components/ui'
 
 const Form = styled.form`
-  max-width: 320px;
+  max-width: 380px;
   margin: 60px auto;
-  padding: 24px;
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 8px;
+  padding: ${({ theme }) => theme.spacing.lg};
+  background: ${({ theme }) => theme.bg.surface};
+  border: 1px solid ${({ theme }) => theme.border.default};
+  border-radius: ${({ theme }) => theme.radii.xl};
+  box-shadow: ${({ theme }) => theme.shadows.md};
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
 `
 
 const Title = styled.h1`
-  color: ${({ theme }) => theme.colors.text};
-`
-
-const Field = styled.label`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  & input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-  }
-`
-
-const Button = styled.button`
-  padding: 8px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-size: ${({ theme }) => theme.font.sizes.xxl};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  color: ${({ theme }) => theme.text.primary};
+  margin: 0 0 ${({ theme }) => theme.spacing.sm};
 `
 
 const ErrText = styled.p`
-  color: #ef4444;
+  color: ${({ theme }) => theme.text.danger};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 export const LoginPage: React.FC = () => {
@@ -66,8 +47,8 @@ export const LoginPage: React.FC = () => {
     try {
       await signIn(username, password, profile)
       nav('/', { replace: true })
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'login failed')
+    } catch (e2: unknown) {
+      setErr(e2 instanceof Error ? e2.message : 'login failed')
     } finally {
       setBusy(false)
     }
@@ -76,31 +57,36 @@ export const LoginPage: React.FC = () => {
   return (
     <Form onSubmit={submit}>
       <Title>Sign in</Title>
-      <Field>
-        Profile
-        <input value={profile} onChange={(e) => setProfile(e.target.value)} />
+      <Field label="Profile" htmlFor="login-profile">
+        <Input
+          id="login-profile"
+          value={profile}
+          onChange={(e) => setProfile(e.target.value)}
+        />
       </Field>
-      <Field>
-        Username
-        <input
+      <Field label="Username" htmlFor="login-username" required>
+        <Input
+          id="login-username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
           required
         />
       </Field>
-      <Field>
-        Password
-        <input
+      <Field label="Password" htmlFor="login-password" required>
+        <Input
+          id="login-password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
           required
         />
       </Field>
-      <Button disabled={busy} type="submit">
-        {busy ? '...' : 'Login'}
+      <Button type="submit" loading={busy} fullWidth>
+        Sign in
       </Button>
-      {err && <ErrText>{err}</ErrText>}
+      {err && <ErrText role="alert">{err}</ErrText>}
     </Form>
   )
 }

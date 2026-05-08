@@ -1,10 +1,13 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react'
 import styled from 'styled-components'
+
 import type { QueryResp } from '@api'
 import { GqlEditor } from '../components/editor/GqlEditor'
 import { TableView } from '../components/results/TableView'
 import { JsonView } from '../components/results/JsonView'
 import { GraphView } from '../components/results/GraphView'
+import { Button } from '../components/ui'
+import type { Theme } from '../theme'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryStore } from '../lib/queryStore'
@@ -14,50 +17,73 @@ import {
   streamReducer,
 } from './queryStreamReducer'
 
+interface TabProps {
+  theme: Theme
+  $active: boolean
+}
+
+function tabBg({ $active, theme }: TabProps): string {
+  return $active ? theme.bg.subtle : 'transparent'
+}
+
+function tabColor({ $active, theme }: TabProps): string {
+  return $active ? theme.text.primary : theme.text.secondary
+}
+
+function tabBorder({ $active, theme }: TabProps): string {
+  return $active ? theme.border.default : 'transparent'
+}
+
 type Tab = 'table' | 'json' | 'graph'
 
 const Bar = styled.div`
-  margin-top: 8px;
+  margin-top: ${({ theme }) => theme.spacing.sm};
   display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
-  color: ${({ theme }) => theme.colors.textSecondary};
+  flex-wrap: wrap;
+  color: ${({ theme }) => theme.text.secondary};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
-const RunBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
+
+// Tab buttons drive content swap inside the QueryPage results panel.
+// We keep them as a styled element (not the shared Button primitive)
+// because role=tab + aria-selected differs from role=button — the WAI
+// tab pattern is its own a11y contract.
+const TabBtn = styled.button<{ $active: boolean }>`
+  padding: 6px 14px;
+  background: ${tabBg};
+  color: ${tabColor};
+  border: 1px solid ${tabBorder};
+  border-radius: ${({ theme }) => theme.radii.md};
   cursor: pointer;
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
+  font-family: inherit;
+  font-weight: ${({ theme }) => theme.font.weights.medium};
+  text-transform: capitalize;
+  min-height: 32px;
+
+  &:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+    color: ${({ theme }) => theme.text.primary};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
   }
 `
-function tabBtnBg(props: {
-  $active: boolean
-  theme: { colors: { surface: string } }
-}): string {
-  return props.$active ? props.theme.colors.surface : 'transparent'
-}
 
-const TabBtn = styled.button<{ $active: boolean }>`
-  padding: 4px 10px;
-  background: ${tabBtnBg};
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-`
 const Err = styled.span`
-  color: #ef4444;
+  color: ${({ theme }) => theme.text.danger};
 `
+
 const Tabs = styled.div`
   display: flex;
-  gap: 8px;
-  margin: 16px 0 8px;
+  gap: ${({ theme }) => theme.spacing.xs};
+  margin: ${({ theme }) => theme.spacing.md} 0
+    ${({ theme }) => theme.spacing.sm};
 `
+
 const ToggleLabel = styled.label`
   display: inline-flex;
   align-items: center;
@@ -180,13 +206,13 @@ export const QueryPage: React.FC = () => {
     <div>
       <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
       <Bar>
-        <RunBtn onClick={run} disabled={busy}>
-          {busy ? 'Running…' : 'Run (⌘+Enter)'}
-        </RunBtn>
+        <Button onClick={run} loading={busy}>
+          Run (⌘+Enter)
+        </Button>
         {streamMode && busy && (
-          <RunBtn onClick={cancel} disabled={!busy}>
+          <Button variant="secondary" onClick={cancel}>
             Cancel
-          </RunBtn>
+          </Button>
         )}
         <ToggleLabel>
           <input
@@ -218,16 +244,30 @@ export const QueryPage: React.FC = () => {
       </Bar>
       {activeResp && (
         <>
-          <Tabs role="tablist">
+          <Tabs role="tablist" aria-label="Result view">
             {(['table', 'json', 'graph'] as const).map((t) => (
-              <TabBtn key={t} $active={tab === t} onClick={() => setTab(t)}>
+              <TabBtn
+                key={t}
+                role="tab"
+                aria-selected={tab === t}
+                aria-controls={`result-panel-${t}`}
+                tabIndex={tab === t ? 0 : -1}
+                $active={tab === t}
+                onClick={() => setTab(t)}
+              >
                 {t}
               </TabBtn>
             ))}
           </Tabs>
-          {tab === 'table' && <TableView resp={activeResp} expand={expand} />}
-          {tab === 'json' && <JsonView data={activeResp} />}
-          {tab === 'graph' && <GraphView resp={activeResp} query={stmt} />}
+          <div
+            id={`result-panel-${tab}`}
+            role="tabpanel"
+            aria-labelledby={`result-panel-${tab}`}
+          >
+            {tab === 'table' && <TableView resp={activeResp} expand={expand} />}
+            {tab === 'json' && <JsonView data={activeResp} />}
+            {tab === 'graph' && <GraphView resp={activeResp} query={stmt} />}
+          </div>
         </>
       )}
     </div>

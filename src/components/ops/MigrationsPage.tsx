@@ -1,9 +1,21 @@
 import React, { useRef, useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { auth } from '../../api/auth'
 import { getCsrfToken } from '../../api/csrf'
 import { useApiResource } from '../../hooks/useApiResource'
+import {
+  Button,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+  Textarea,
+} from '../ui'
 
 // MigrationsPage drives the /ops/migrations tab. Geode B8 endpoints:
 //
@@ -21,130 +33,53 @@ type Migration = {
   description?: string
 }
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 24px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
+    margin: 0;
   }
 `
 
 const Section = styled.section`
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: ${({ theme }) => theme.spacing.sm};
 
   h3 {
-    font-size: 0.95rem;
-    color: ${({ theme }) => theme.colors.textSecondary};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.md};
+    color: ${({ theme }) => theme.text.secondary};
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     margin: 0;
   }
-
-  input,
-  textarea {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const OkBanner = styled.p`
-  color: #10b981;
-  margin-top: 8px;
-`
-
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const OkBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.success};
+  color: ${({ theme }) => theme.text.success};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 type MigrationsView = {
@@ -184,7 +119,7 @@ export const MigrationsPage: React.FC = () => {
     try {
       const r = await client.postMigrationsRun({})
       const n = (r.applied ?? []).length
-      setOkMsg('Applied ' + n + ' migration(s).')
+      setOkMsg(`Applied ${n} migration(s).`)
       refetch()
     } catch (e: unknown) {
       setActionErr(e instanceof Error ? e.message : String(e))
@@ -204,73 +139,94 @@ export const MigrationsPage: React.FC = () => {
   }
 
   return (
-    <Wrap>
+    <Stack $gap="lg">
       <ToolBar>
         <h2>Migrations</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New migration</NewBtn>
-        <NewBtn onClick={onRunPending} disabled={busy || pending.length === 0}>
-          {busy ? '...' : 'Run pending (' + pending.length + ')'}
-        </NewBtn>
+        <Button onClick={() => setShowCreate(true)}>+ New migration</Button>
+        <Button
+          variant="secondary"
+          onClick={onRunPending}
+          loading={busy}
+          disabled={pending.length === 0}
+        >
+          Run pending ({pending.length})
+        </Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      {okMsg && <OkBanner>{okMsg}</OkBanner>}
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      {okMsg && <OkBanner role="status">{okMsg}</OkBanner>}
       <Section>
         <h3>Pending ({pending.length})</h3>
-        <Table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pending.length === 0 ? (
+        <TableScroll>
+          <DataTable>
+            <thead>
               <tr>
-                <Empty colSpan={2}>No pending migrations.</Empty>
+                <th>Name</th>
+                <th>Actions</th>
               </tr>
-            ) : (
-              pending.map((name) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>
-                    <RowBtn onClick={() => onSign(name)}>Sign</RowBtn>
-                  </td>
+            </thead>
+            <tbody>
+              {pending.length === 0 ? (
+                <tr>
+                  <EmptyCell colSpan={2}>No pending migrations.</EmptyCell>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </Table>
+              ) : (
+                pending.map((name) => (
+                  <tr key={name}>
+                    <td>{name}</td>
+                    <td>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onSign(name)}
+                      >
+                        Sign
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </DataTable>
+        </TableScroll>
       </Section>
       <Section>
         <h3>Applied ({applied.length})</h3>
-        <Table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Applied at</th>
-              <th>Signed by</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {applied.length === 0 ? (
+        <TableScroll>
+          <DataTable>
+            <thead>
               <tr>
-                <Empty colSpan={4}>No applied migrations.</Empty>
+                <th>Name</th>
+                <th>Applied at</th>
+                <th>Signed by</th>
+                <th>Actions</th>
               </tr>
-            ) : (
-              applied.map((m) => (
-                <tr key={m.name}>
-                  <td>{m.name}</td>
-                  <td>{m.applied_at ?? ''}</td>
-                  <td>{m.signed_by ?? ''}</td>
-                  <td>
-                    <RowBtn onClick={() => onSign(m.name)}>Sign</RowBtn>
-                  </td>
+            </thead>
+            <tbody>
+              {applied.length === 0 ? (
+                <tr>
+                  <EmptyCell colSpan={4}>No applied migrations.</EmptyCell>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </Table>
+              ) : (
+                applied.map((m) => (
+                  <tr key={m.name}>
+                    <td>{m.name}</td>
+                    <td>{m.applied_at ?? ''}</td>
+                    <td>{m.signed_by ?? ''}</td>
+                    <td>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onSign(m.name)}
+                      >
+                        Sign
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </DataTable>
+        </TableScroll>
       </Section>
       {showCreate && (
         <CreateMigrationModal
@@ -280,7 +236,7 @@ export const MigrationsPage: React.FC = () => {
           }}
         />
       )}
-    </Wrap>
+    </Stack>
   )
 }
 
@@ -319,7 +275,7 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
       const tok = auth.getToken() ?? ''
       const csrf = getCsrfToken()
       const headers: Record<string, string> = {}
-      if (tok) headers.Authorization = 'Bearer ' + tok
+      if (tok) headers.Authorization = `Bearer ${tok}`
       if (csrf) headers['X-CSRF-Token'] = csrf
       const res = await fetch('/api/v1/migrations/upload', {
         method: 'POST',
@@ -333,7 +289,7 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
           error?: string
         }
         throw new Error(
-          j.error_description || j.error || 'upload failed (' + res.status + ')'
+          j.error_description || j.error || `upload failed (${res.status})`
         )
       }
       const j = (await res.json()) as { file: string }
@@ -365,57 +321,67 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
     }
   }
 
+  let createLabel = 'Create'
+  if (uploading) createLabel = 'Uploading…'
+
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button
+        form="create-migration-form"
+        type="submit"
+        loading={busy}
+        disabled={uploading}
+      >
+        {createLabel}
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New migration</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+    <Modal open onClose={onClose} title="New migration" footer={modalFooter}>
+      <form
+        id="create-migration-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field
+          label="Migration file (.gql / .sql)"
+          htmlFor="migration-upload-input"
         >
-          <label
-            htmlFor="migration-upload-input"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              fontSize: '0.85rem',
-            }}
-          >
-            Upload migration file (.gql / .sql)
-            <input
-              id="migration-upload-input"
-              ref={fileInputRef}
-              type="file"
-              onChange={onUpload}
-              disabled={uploading || busy}
-            />
-          </label>
-          {uploadedFile && (
-            <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-              Staged: {uploadedFile}
-            </span>
-          )}
           <input
-            placeholder="name"
+            id="migration-upload-input"
+            ref={fileInputRef}
+            type="file"
+            onChange={onUpload}
+            disabled={uploading || busy}
+          />
+        </Field>
+        {uploadedFile && (
+          <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
+            Staged: {uploadedFile}
+          </span>
+        )}
+        <Field label="Name" htmlFor="cm-name" required>
+          <Input
+            id="cm-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
-          <textarea
-            placeholder="description"
+        </Field>
+        <Field label="Description" htmlFor="cm-description">
+          <Textarea
+            id="cm-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
           />
-          <NewBtn type="submit" disabled={busy || uploading}>
-            {busy && '...'}
-            {!busy && uploading && 'uploading...'}
-            {!busy && !uploading && 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

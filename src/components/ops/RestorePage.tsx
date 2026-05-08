@@ -1,9 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { auth } from '../../api/auth'
 import { getCsrfToken } from '../../api/csrf'
+import type { Theme } from '../../theme'
+import { Button, Field, Input, Stack } from '../ui'
+
+interface ToneArgs {
+  theme: Theme
+  $tone: 'ok' | 'err'
+}
+
+function bannerBorder({ $tone, theme }: ToneArgs): string {
+  return $tone === 'err' ? theme.colors.danger : theme.colors.success
+}
+
+function bannerColor({ $tone, theme }: ToneArgs): string {
+  return $tone === 'err' ? theme.text.danger : theme.text.success
+}
 
 // RestorePage drives the /ops/restore tab. Backed by Geode B7:
 //
@@ -12,53 +28,28 @@ import { getCsrfToken } from '../../api/csrf'
 // The page accepts a `file` value via router location state when a
 // user clicks "Restore" on a row in BackupPage; otherwise users type
 // the filename in by hand.
-const Wrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 480px;
-`
-
 const Heading = styled.h2`
-  font-size: 1.1rem;
-  color: ${({ theme }) => theme.colors.text};
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-size: ${({ theme }) => theme.font.sizes.xl};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  color: ${({ theme }) => theme.text.primary};
+  margin: 0;
 `
 
-const Field = styled.label`
+const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${bannerBorder};
+  color: ${bannerColor};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+`
+
+const FormWrap = styled.form`
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 0.85rem;
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-  }
-`
-
-const Btn = styled.button`
-  padding: 8px 16px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  align-self: flex-start;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Banner = styled.p<{ $tone: 'ok' | 'err' }>`
-  color: ${({ $tone }) => ($tone === 'err' ? '#ef4444' : '#10b981')};
-  margin-top: 8px;
+  gap: ${({ theme }) => theme.spacing.md};
+  max-width: 480px;
 `
 
 export const RestorePage: React.FC = () => {
@@ -118,7 +109,7 @@ export const RestorePage: React.FC = () => {
       const tok = auth.getToken() ?? ''
       const csrf = getCsrfToken()
       const headers: Record<string, string> = {}
-      if (tok) headers.Authorization = 'Bearer ' + tok
+      if (tok) headers.Authorization = `Bearer ${tok}`
       if (csrf) headers['X-CSRF-Token'] = csrf
       const res = await fetch('/api/v1/backups/upload', {
         method: 'POST',
@@ -132,18 +123,12 @@ export const RestorePage: React.FC = () => {
           error?: string
         }
         throw new Error(
-          j.error_description || j.error || 'upload failed (' + res.status + ')'
+          j.error_description || j.error || `upload failed (${res.status})`
         )
       }
       const j = (await res.json()) as { file: string; size_bytes: number }
       setFile(j.file)
-      setOkMsg(
-        'Uploaded ' +
-          j.file +
-          ' (' +
-          j.size_bytes +
-          ' bytes). Ready to restore.'
-      )
+      setOkMsg(`Uploaded ${j.file} (${j.size_bytes} bytes). Ready to restore.`)
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
     } finally {
@@ -152,47 +137,57 @@ export const RestorePage: React.FC = () => {
     }
   }
 
+  let restoreLabel = 'Restore'
+  if (uploading) restoreLabel = 'Uploading…'
+
   return (
-    <Wrap>
+    <Stack $gap="md">
       <Heading>Restore</Heading>
-      <form
-        onSubmit={submit}
-        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-      >
-        <Field>
-          Upload backup file
+      <FormWrap onSubmit={submit}>
+        <Field label="Upload backup file" htmlFor="rp-upload">
           <input
+            id="rp-upload"
             ref={fileInputRef}
             type="file"
             onChange={onUpload}
             disabled={uploading || busy}
           />
         </Field>
-        <Field>
-          File
-          <input
+        <Field label="File" htmlFor="rp-file" required>
+          <Input
+            id="rp-file"
             placeholder="backup file name"
             value={file}
             onChange={(e) => setFile(e.target.value)}
             required
           />
         </Field>
-        <Field>
-          Target time (optional, RFC3339)
-          <input
+        <Field
+          label="Target time"
+          htmlFor="rp-target-time"
+          hint="Optional point-in-time recovery cutoff (RFC3339)."
+        >
+          <Input
+            id="rp-target-time"
             placeholder="2025-01-01T00:00:00Z"
             value={targetTime}
             onChange={(e) => setTargetTime(e.target.value)}
           />
         </Field>
-        <Btn type="submit" disabled={busy || uploading}>
-          {busy && '...'}
-          {!busy && uploading && 'uploading...'}
-          {!busy && !uploading && 'Restore'}
-        </Btn>
-      </form>
-      {err && <Banner $tone="err">{err}</Banner>}
-      {okMsg && <Banner $tone="ok">{okMsg}</Banner>}
-    </Wrap>
+        <Button type="submit" loading={busy} disabled={uploading}>
+          {restoreLabel}
+        </Button>
+      </FormWrap>
+      {err && (
+        <Banner $tone="err" role="alert">
+          {err}
+        </Banner>
+      )}
+      {okMsg && (
+        <Banner $tone="ok" role="status">
+          {okMsg}
+        </Banner>
+      )}
+    </Stack>
   )
 }

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
+import { DataTable, EmptyCell, Field, Input, Stack, TableScroll } from '../ui'
 
 // AuditLogPage drives the /ops/audit tab. The Geode B11 endpoint backs
 // the table:
@@ -29,77 +31,35 @@ type Filters = {
   user: string
 }
 
-const Wrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const FilterBar = styled.div`
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-`
-
-const Field = styled.label`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 0.85rem;
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-    min-width: 180px;
-  }
-`
-
 const Heading = styled.h2`
-  font-size: 1.1rem;
-  color: ${({ theme }) => theme.colors.text};
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-size: ${({ theme }) => theme.font.sizes.xl};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  color: ${({ theme }) => theme.text.primary};
+  margin: 0;
 `
 
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    vertical-align: top;
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
+const FilterBar = styled.form`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: ${({ theme }) => theme.spacing.md};
+  align-items: end;
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
-`
-
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 const Snippet = styled.code`
   display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8rem;
-  color: ${({ theme }) => theme.colors.textSecondary};
+  font-family: ${({ theme }) => theme.font.family.mono};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  color: ${({ theme }) => theme.text.muted};
   white-space: pre-wrap;
   word-break: break-all;
   max-width: 480px;
@@ -226,63 +186,65 @@ export const AuditLogPage: React.FC = () => {
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <Heading>Audit log ({entries.length})</Heading>
       <FilterBar>
-        <Field>
-          Since
-          <input
+        <Field label="Since" htmlFor="al-since">
+          <Input
+            id="al-since"
             placeholder="2025-01-01T00:00:00Z"
             value={filters.since}
             onChange={onSinceChange}
           />
         </Field>
-        <Field>
-          Event
-          <input
+        <Field label="Event" htmlFor="al-event">
+          <Input
+            id="al-event"
             placeholder="event name"
             value={filters.event}
             onChange={onEventChange}
           />
         </Field>
-        <Field>
-          User
-          <input
+        <Field label="User" htmlFor="al-user">
+          <Input
+            id="al-user"
             placeholder="username"
             value={filters.user}
             onChange={onUserChange}
           />
         </Field>
       </FilterBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>User</th>
-            <th>Event</th>
-            <th>Fields</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={4}>No audit entries.</Empty>
+              <th>Timestamp</th>
+              <th>User</th>
+              <th>Event</th>
+              <th>Fields</th>
             </tr>
-          ) : (
-            rows.map((r) => (
-              <tr key={r.key}>
-                <td>{r.ts}</td>
-                <td>{r.user}</td>
-                <td>{r.event}</td>
-                <td>
-                  <Snippet>{r.snippet}</Snippet>
-                </td>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={4}>No audit entries.</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
-    </Wrap>
+            ) : (
+              rows.map((r) => (
+                <tr key={r.key}>
+                  <td>{r.ts}</td>
+                  <td>{r.user}</td>
+                  <td>{r.event}</td>
+                  <td>
+                    <Snippet>{r.snippet}</Snippet>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
+    </Stack>
   )
 }

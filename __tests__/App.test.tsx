@@ -9,6 +9,8 @@ describe('App', () => {
 
   test('redirects unauthenticated users to login', () => {
     render(<App />)
-    expect(screen.getByText(/Sign in/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { level: 1, name: /Sign in/i })
+    ).toBeInTheDocument()
   })
 })

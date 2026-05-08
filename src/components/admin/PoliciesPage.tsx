@@ -1,7 +1,20 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
+import {
+  Button,
+  ConfirmModal,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+  Textarea,
+} from '../ui'
 
 // PoliciesPage drives the /admin/policies tab (Geode B6 endpoints):
 //
@@ -18,124 +31,41 @@ type Policy = {
   resource?: string
 }
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
     margin: 0;
   }
-
-  input,
-  textarea {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
-`
-
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 const Code = styled.code`
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85em;
+  font-family: ${({ theme }) => theme.font.family.mono};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 export const PoliciesPage: React.FC = () => {
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const {
     data,
@@ -152,55 +82,66 @@ export const PoliciesPage: React.FC = () => {
   const policies = data ?? []
   const err = actionErr ?? loadErr
 
-  const onDelete = async (name: string): Promise<void> => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm('Delete policy ' + name + '?')) return
+  const onDelete = async (): Promise<void> => {
+    if (!confirmDelete) return
+    setDeleting(true)
     try {
-      await client.deleteName({ name })
+      await client.deleteName({ name: confirmDelete })
       setActionErr(null)
+      setConfirmDelete(null)
       refetch()
     } catch (e: unknown) {
       setActionErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleting(false)
     }
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <ToolBar>
         <h2>Policies ({policies.length})</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New policy</NewBtn>
+        <Button onClick={() => setShowCreate(true)}>+ New policy</Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Resource</th>
-            <th>Expression</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {policies.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={4}>No policies.</Empty>
+              <th>Name</th>
+              <th>Resource</th>
+              <th>Expression</th>
+              <th>Actions</th>
             </tr>
-          ) : (
-            policies.map((p) => (
-              <tr key={p.name}>
-                <td>{p.name}</td>
-                <td>{p.resource ?? ''}</td>
-                <td>
-                  <Code>{p.expression ?? ''}</Code>
-                </td>
-                <td>
-                  <RowBtn onClick={() => onDelete(p.name)}>Delete</RowBtn>
-                </td>
+          </thead>
+          <tbody>
+            {policies.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={4}>No policies.</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+            ) : (
+              policies.map((p) => (
+                <tr key={p.name}>
+                  <td>{p.name}</td>
+                  <td>{p.resource ?? ''}</td>
+                  <td>
+                    <Code>{p.expression ?? ''}</Code>
+                  </td>
+                  <td>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDelete(p.name)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
       {showCreate && (
         <CreatePolicyModal
           onClose={() => {
@@ -209,7 +150,17 @@ export const PoliciesPage: React.FC = () => {
           }}
         />
       )}
-    </Wrap>
+      <ConfirmModal
+        open={confirmDelete !== null}
+        title={`Delete policy "${confirmDelete}"?`}
+        body="This action cannot be undone."
+        destructive
+        loading={deleting}
+        confirmLabel="Delete"
+        onConfirm={onDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+    </Stack>
   )
 }
 
@@ -234,38 +185,55 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
   }
 
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button form="create-policy-form" type="submit" loading={busy}>
+        Create
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New policy</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-        >
-          <input
-            placeholder="name"
+    <Modal open onClose={onClose} title="New policy" footer={modalFooter}>
+      <form
+        id="create-policy-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field label="Name" htmlFor="cp-name" required>
+          <Input
+            id="cp-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+            autoFocus
           />
-          <input
-            placeholder="resource (e.g. graph:default)"
+        </Field>
+        <Field
+          label="Resource"
+          htmlFor="cp-resource"
+          hint="The graph or namespace this policy guards (e.g. graph:default)."
+        >
+          <Input
+            id="cp-resource"
             value={resource}
             onChange={(e) => setResource(e.target.value)}
           />
-          <textarea
-            placeholder="expression"
+        </Field>
+        <Field label="Expression" htmlFor="cp-expression" required>
+          <Textarea
+            id="cp-expression"
             value={expression}
             onChange={(e) => setExpression(e.target.value)}
             rows={3}
             required
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

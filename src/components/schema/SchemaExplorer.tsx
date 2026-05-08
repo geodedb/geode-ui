@@ -1,8 +1,24 @@
 import React, { useEffect, useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
+import type { Theme } from '../../theme'
+import { below } from '../../theme'
 import { LabelList } from './LabelList'
 import { EdgeTypeList } from './EdgeTypeList'
+
+interface ActiveProps {
+  theme: Theme
+  $active: boolean
+}
+
+function graphBtnBg({ $active, theme }: ActiveProps): string {
+  return $active ? theme.bg.subtle : 'transparent'
+}
+
+function graphBtnBorder({ $active, theme }: ActiveProps): string {
+  return $active ? theme.border.default : theme.border.subtle
+}
 
 // SchemaExplorer is the three-column panel:
 //
@@ -18,29 +34,40 @@ import { EdgeTypeList } from './EdgeTypeList'
 // strong typing for at the UI layer.
 const Layout = styled.div`
   display: grid;
-  grid-template-columns: 200px 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: 220px 1fr 1fr;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: start;
+
+  ${below('lg')`
+    grid-template-columns: 1fr 1fr;
+  `}
+
+  ${below('md')`
+    grid-template-columns: 1fr;
+  `}
 `
 
-const Pane = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 6px;
-  padding: 12px;
-  color: ${({ theme }) => theme.colors.text};
+const Pane = styled.section`
+  background: ${({ theme }) => theme.bg.surface};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.lg};
+  padding: ${({ theme }) => theme.spacing.md};
+  color: ${({ theme }) => theme.text.primary};
 
   h3 {
-    margin-bottom: 8px;
-    font-size: 1rem;
+    margin: 0 0 ${({ theme }) => theme.spacing.sm};
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.lg};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
   }
 
   h4 {
-    margin: 12px 0 6px;
-    font-size: 0.85rem;
+    margin: ${({ theme }) => theme.spacing.md} 0
+      ${({ theme }) => theme.spacing.xs};
+    font-size: ${({ theme }) => theme.font.sizes.sm};
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: ${({ theme }) => theme.colors.textSecondary};
+    letter-spacing: 0.04em;
+    color: ${({ theme }) => theme.text.secondary};
   }
 `
 
@@ -48,45 +75,53 @@ const GraphList = styled.ul`
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: 0;
+  margin: 0;
 `
-
-function graphBtnBg(props: {
-  $active: boolean
-  theme: { colors: { background: string } }
-}): string {
-  return props.$active ? props.theme.colors.background : 'transparent'
-}
 
 const GraphBtn = styled.button<{ $active: boolean }>`
   text-align: left;
-  padding: 6px 10px;
+  padding: 8px 12px;
   width: 100%;
+  min-height: 36px;
   background: ${graphBtnBg};
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
+  color: ${({ theme }) => theme.text.primary};
+  border: 1px solid ${graphBtnBorder};
+  border-radius: ${({ theme }) => theme.radii.md};
   cursor: pointer;
+  font-family: inherit;
+  font-size: ${({ theme }) => theme.font.sizes.md};
+
+  &:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
 `
 
 const Pre = styled.pre`
-  background: ${({ theme }) => theme.colors.background};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  padding: 8px;
-  font-size: 0.8rem;
+  background: ${({ theme }) => theme.bg.canvas};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
+  padding: ${({ theme }) => theme.spacing.sm};
+  font-family: ${({ theme }) => theme.font.family.mono};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
   overflow: auto;
   max-height: 200px;
-  color: ${({ theme }) => theme.colors.text};
+  color: ${({ theme }) => theme.text.primary};
 `
 
 const Empty = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
+  color: ${({ theme }) => theme.text.muted};
   font-style: italic;
 `
 
 const ErrText = styled.p`
-  color: #ef4444;
+  color: ${({ theme }) => theme.text.danger};
 `
 
 export const SchemaExplorer: React.FC = () => {

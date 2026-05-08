@@ -1,7 +1,19 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
+import {
+  Button,
+  ConfirmModal,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+} from '../ui'
 
 // UsersPage drives the /admin/users tab. The Geode B4 endpoints back
 // every action:
@@ -24,117 +36,41 @@ type User = {
   mfa_enrolled?: boolean
 }
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
     margin: 0;
   }
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const RowActions = styled.div`
+  display: inline-flex;
+  gap: ${({ theme }) => theme.spacing.xs};
 `
 
 export const UsersPage: React.FC = () => {
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // useApiResource owns the AbortController + mounted/aborted guards.
   // The fetcher receives a signal which is forwarded to the typed
@@ -157,17 +93,18 @@ export const UsersPage: React.FC = () => {
   const users = data ?? []
   const err = actionErr ?? loadErr
 
-  const onDelete = async (username: string): Promise<void> => {
-    // window.confirm is intentional -- this is an admin destructive
-    // action and a confirmation prompt is the lowest-friction guard.
-    // eslint-disable-next-line no-alert
-    if (!window.confirm('Delete user ' + username + '?')) return
+  const onDelete = async (): Promise<void> => {
+    if (!confirmDelete) return
+    setDeleting(true)
     try {
-      await client.deleteUsername({ username })
+      await client.deleteUsername({ username: confirmDelete })
       setActionErr(null)
+      setConfirmDelete(null)
       refetch()
     } catch (e: unknown) {
       setActionErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -192,49 +129,69 @@ export const UsersPage: React.FC = () => {
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <ToolBar>
         <h2>Users ({users.length})</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New user</NewBtn>
+        <Button onClick={() => setShowCreate(true)}>+ New user</Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Username</th>
-            <th>Email</th>
-            <th>Roles</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={5}>No users.</Empty>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Roles</th>
+              <th>Status</th>
+              <th>Actions</th>
             </tr>
-          ) : (
-            users.map((u) => (
-              <tr key={u.username}>
-                <td>{u.username}</td>
-                <td>{u.email}</td>
-                <td>{(u.roles ?? []).join(', ')}</td>
-                <td>{u.disabled ? 'disabled' : 'active'}</td>
-                <td>
-                  {u.disabled ? (
-                    <RowBtn onClick={() => onEnable(u.username)}>Enable</RowBtn>
-                  ) : (
-                    <RowBtn onClick={() => onDisable(u.username)}>
-                      Disable
-                    </RowBtn>
-                  )}
-                  <RowBtn onClick={() => onDelete(u.username)}>Delete</RowBtn>
-                </td>
+          </thead>
+          <tbody>
+            {users.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={5}>No users.</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+            ) : (
+              users.map((u) => (
+                <tr key={u.username}>
+                  <td>{u.username}</td>
+                  <td>{u.email}</td>
+                  <td>{(u.roles ?? []).join(', ')}</td>
+                  <td>{u.disabled ? 'disabled' : 'active'}</td>
+                  <td>
+                    <RowActions>
+                      {u.disabled ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEnable(u.username)}
+                        >
+                          Enable
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onDisable(u.username)}
+                        >
+                          Disable
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setConfirmDelete(u.username)}
+                      >
+                        Delete
+                      </Button>
+                    </RowActions>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
       {showCreate && (
         <CreateUserModal
           onClose={() => {
@@ -243,7 +200,17 @@ export const UsersPage: React.FC = () => {
           }}
         />
       )}
-    </Wrap>
+      <ConfirmModal
+        open={confirmDelete !== null}
+        title={`Delete user "${confirmDelete}"?`}
+        body="This action cannot be undone."
+        destructive
+        loading={deleting}
+        confirmLabel="Delete"
+        onConfirm={onDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+    </Stack>
   )
 }
 
@@ -268,38 +235,57 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
   }
 
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button form="create-user-form" type="submit" loading={busy}>
+        Create
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New user</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-        >
-          <input
-            placeholder="username"
+    <Modal open onClose={onClose} title="New user" footer={modalFooter}>
+      <form
+        id="create-user-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field label="Username" htmlFor="cu-username" required>
+          <Input
+            id="cu-username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
+            autoFocus
           />
-          <input
-            placeholder="email"
+        </Field>
+        <Field label="Email" htmlFor="cu-email" required>
+          <Input
+            id="cu-email"
+            type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <input
-            placeholder="password"
+        </Field>
+        <Field
+          label="Password"
+          htmlFor="cu-password"
+          hint="The user can change this on first login."
+        >
+          <Input
+            id="cu-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

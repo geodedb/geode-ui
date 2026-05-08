@@ -1,6 +1,22 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
+import type { Theme } from '../../theme'
+import { Button, Field, Inline, Input, Select, Stack } from '../ui'
+
+interface ToneArgs {
+  theme: Theme
+  $tone: 'ok' | 'err'
+}
+
+function bannerBorder({ $tone, theme }: ToneArgs): string {
+  return $tone === 'err' ? theme.colors.danger : theme.colors.success
+}
+
+function bannerColor({ $tone, theme }: ToneArgs): string {
+  return $tone === 'err' ? theme.text.danger : theme.text.success
+}
 
 // GrantsPanel drives the /admin/grants tab. The Geode B6 endpoints back
 // every action:
@@ -10,60 +26,28 @@ import { client } from '../../api/client'
 //
 // There is no SHOW-GRANTS endpoint in the API spec, so this panel is a
 // pure form -- it emits new grants but does not list existing ones.
-const Wrap = styled.div`
+const Heading = styled.h2`
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-size: ${({ theme }) => theme.font.sizes.xl};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  color: ${({ theme }) => theme.text.primary};
+  margin: 0;
+`
+
+const FormWrap = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: ${({ theme }) => theme.spacing.md};
   max-width: 480px;
 `
 
-const Heading = styled.h2`
-  font-size: 1.1rem;
-  color: ${({ theme }) => theme.colors.text};
-`
-
-const Field = styled.label`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 0.85rem;
-
-  input,
-  select {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-  }
-`
-
-const Row = styled.div`
-  display: flex;
-  gap: 12px;
-`
-
-const Btn = styled.button<{ $tone?: 'apply' | 'revoke' }>`
-  padding: 8px 16px;
-  background: ${({ $tone, theme }) => {
-    return $tone === 'revoke' ? '#7f1d1d' : theme.colors.primary
-  }};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Banner = styled.p<{ $tone: 'ok' | 'err' }>`
-  color: ${({ $tone }) => ($tone === 'err' ? '#ef4444' : '#10b981')};
-  margin-top: 8px;
+const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${bannerBorder};
+  color: ${bannerColor};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 export const GrantsPanel: React.FC = () => {
@@ -101,54 +85,75 @@ export const GrantsPanel: React.FC = () => {
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <Heading>Grants</Heading>
-      <Field>
-        Permission
-        <input
-          placeholder="e.g. read, write, admin"
-          value={permission}
-          onChange={(e) => setPermission(e.target.value)}
+      <FormWrap>
+        <Field
+          label="Permission"
+          htmlFor="gp-permission"
           required
-        />
-      </Field>
-      <Field>
-        Resource
-        <input
-          placeholder="e.g. graph:default"
-          value={resource}
-          onChange={(e) => setResource(e.target.value)}
-        />
-      </Field>
-      <Field>
-        Grantee
-        <input
-          placeholder="username or role name"
-          value={grantee}
-          onChange={(e) => setGrantee(e.target.value)}
-          required
-        />
-      </Field>
-      <Field>
-        Grantee kind
-        <select
-          value={granteeKind}
-          onChange={(e) => setGranteeKind(e.target.value as 'user' | 'role')}
+          hint="The action being granted (e.g. read, write, admin)."
         >
-          <option value="user">user</option>
-          <option value="role">role</option>
-        </select>
-      </Field>
-      <Row>
-        <Btn $tone="apply" disabled={busy} onClick={() => send('apply')}>
-          {busy ? '...' : 'Apply'}
-        </Btn>
-        <Btn $tone="revoke" disabled={busy} onClick={() => send('revoke')}>
-          {busy ? '...' : 'Revoke'}
-        </Btn>
-      </Row>
-      {err && <Banner $tone="err">{err}</Banner>}
-      {okMsg && <Banner $tone="ok">{okMsg}</Banner>}
-    </Wrap>
+          <Input
+            id="gp-permission"
+            value={permission}
+            onChange={(e) => setPermission(e.target.value)}
+            required
+          />
+        </Field>
+        <Field
+          label="Resource"
+          htmlFor="gp-resource"
+          hint="The resource the grant applies to (e.g. graph:default)."
+        >
+          <Input
+            id="gp-resource"
+            value={resource}
+            onChange={(e) => setResource(e.target.value)}
+          />
+        </Field>
+        <Field label="Grantee" htmlFor="gp-grantee" required>
+          <Input
+            id="gp-grantee"
+            placeholder="username or role name"
+            value={grantee}
+            onChange={(e) => setGrantee(e.target.value)}
+            required
+          />
+        </Field>
+        <Field label="Grantee kind" htmlFor="gp-grantee-kind">
+          <Select
+            id="gp-grantee-kind"
+            value={granteeKind}
+            onChange={(e) => setGranteeKind(e.target.value as 'user' | 'role')}
+          >
+            <option value="user">user</option>
+            <option value="role">role</option>
+          </Select>
+        </Field>
+        <Inline $gap="sm">
+          <Button onClick={() => send('apply')} loading={busy}>
+            Apply
+          </Button>
+          <Button
+            variant="danger"
+            onClick={() => send('revoke')}
+            loading={busy}
+          >
+            Revoke
+          </Button>
+        </Inline>
+      </FormWrap>
+      {err && (
+        <Banner $tone="err" role="alert">
+          {err}
+        </Banner>
+      )}
+      {okMsg && (
+        <Banner $tone="ok" role="status">
+          {okMsg}
+        </Banner>
+      )}
+    </Stack>
   )
 }

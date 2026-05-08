@@ -1,7 +1,19 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
+import {
+  Button,
+  ConfirmModal,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+} from '../ui'
 
 // RolesPage drives the /admin/roles tab (Geode B5 endpoints):
 //
@@ -19,117 +31,36 @@ type Role = {
   permissions?: string[]
 }
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
     margin: 0;
   }
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
-`
-
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 export const RolesPage: React.FC = () => {
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const {
     data,
@@ -146,53 +77,64 @@ export const RolesPage: React.FC = () => {
   const roles = data ?? []
   const err = actionErr ?? loadErr
 
-  const onDelete = async (role: string): Promise<void> => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm('Delete role ' + role + '?')) return
+  const onDelete = async (): Promise<void> => {
+    if (!confirmDelete) return
+    setDeleting(true)
     try {
-      await client.deleteRole({ role })
+      await client.deleteRole({ role: confirmDelete })
       setActionErr(null)
+      setConfirmDelete(null)
       refetch()
     } catch (e: unknown) {
       setActionErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleting(false)
     }
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <ToolBar>
         <h2>Roles ({roles.length})</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New role</NewBtn>
+        <Button onClick={() => setShowCreate(true)}>+ New role</Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Permissions</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {roles.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={4}>No roles.</Empty>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Permissions</th>
+              <th>Actions</th>
             </tr>
-          ) : (
-            roles.map((r) => (
-              <tr key={r.name}>
-                <td>{r.name}</td>
-                <td>{r.description ?? ''}</td>
-                <td>{(r.permissions ?? []).join(', ')}</td>
-                <td>
-                  <RowBtn onClick={() => onDelete(r.name)}>Delete</RowBtn>
-                </td>
+          </thead>
+          <tbody>
+            {roles.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={4}>No roles.</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+            ) : (
+              roles.map((r) => (
+                <tr key={r.name}>
+                  <td>{r.name}</td>
+                  <td>{r.description ?? ''}</td>
+                  <td>{(r.permissions ?? []).join(', ')}</td>
+                  <td>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDelete(r.name)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
       {showCreate && (
         <CreateRoleModal
           onClose={() => {
@@ -201,7 +143,17 @@ export const RolesPage: React.FC = () => {
           }}
         />
       )}
-    </Wrap>
+      <ConfirmModal
+        open={confirmDelete !== null}
+        title={`Delete role "${confirmDelete}"?`}
+        body="This action cannot be undone."
+        destructive
+        loading={deleting}
+        confirmLabel="Delete"
+        onConfirm={onDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+    </Stack>
   )
 }
 
@@ -232,36 +184,53 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
   }
 
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button form="create-role-form" type="submit" loading={busy}>
+        Create
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New role</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-        >
-          <input
-            placeholder="name"
+    <Modal open onClose={onClose} title="New role" footer={modalFooter}>
+      <form
+        id="create-role-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field label="Name" htmlFor="cr-name" required>
+          <Input
+            id="cr-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+            autoFocus
           />
-          <input
-            placeholder="description"
+        </Field>
+        <Field label="Description" htmlFor="cr-description">
+          <Input
+            id="cr-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-          <input
-            placeholder="permissions (comma-separated)"
+        </Field>
+        <Field
+          label="Permissions"
+          htmlFor="cr-permissions"
+          hint="Comma-separated identifiers (e.g. read,write,admin)."
+        >
+          <Input
+            id="cr-permissions"
             value={permissions}
             onChange={(e) => setPermissions(e.target.value)}
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

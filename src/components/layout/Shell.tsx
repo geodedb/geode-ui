@@ -1,43 +1,66 @@
 import React from 'react'
 import { Link, Outlet } from 'react-router-dom'
 import styled from 'styled-components'
+
 import { useAuth } from '../../auth/AuthProvider'
+import { Button, Spacer } from '../ui'
 import { ConnectionPicker } from './ConnectionPicker'
 
-const Top = styled.nav`
-  display: flex;
-  gap: 16px;
-  padding: 12px 20px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  background: ${({ theme }) => theme.colors.surface};
-  align-items: center;
-`
+const SkipLink = styled.a`
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: ${({ theme }) => theme.colors.primary};
+  color: ${({ theme }) => theme.text.onPrimary};
+  padding: 8px 12px;
+  border-radius: ${({ theme }) => theme.radii.md};
+  z-index: ${({ theme }) => theme.zIndex.sticky};
 
-const Brand = styled.span`
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.text};
-`
-
-const Body = styled.div`
-  padding: 20px;
-`
-
-const NavLink = styled(Link)`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  text-decoration: none;
-  &:hover {
-    color: ${({ theme }) => theme.colors.text};
+  &:focus,
+  &:focus-visible {
+    left: 12px;
+    top: 12px;
   }
 `
 
-const LogoutBtn = styled.button`
-  margin-left: auto;
-  background: transparent;
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  color: ${({ theme }) => theme.colors.text};
-  padding: 4px 12px;
-  border-radius: 4px;
-  cursor: pointer;
+const Top = styled.nav`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.lg};
+  border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
+  background: ${({ theme }) => theme.bg.surface};
+  align-items: center;
+  flex-wrap: wrap;
+`
+
+const Brand = styled.span`
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-weight: ${({ theme }) => theme.font.weights.bold};
+  color: ${({ theme }) => theme.colors.primary};
+  letter-spacing: -0.01em;
+  font-size: ${({ theme }) => theme.font.sizes.lg};
+`
+
+const Body = styled.main`
+  padding: ${({ theme }) => theme.spacing.lg};
+`
+
+const NavLink = styled(Link)`
+  color: ${({ theme }) => theme.text.secondary};
+  text-decoration: none;
+  font-weight: ${({ theme }) => theme.font.weights.medium};
+  padding: 6px 10px;
+  border-radius: ${({ theme }) => theme.radii.md};
+
+  &:hover {
+    color: ${({ theme }) => theme.text.primary};
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
 `
 
 export const Shell: React.FC = () => {
@@ -54,16 +77,20 @@ export const Shell: React.FC = () => {
   }
   return (
     <>
-      <Top>
+      <SkipLink href="#main-content">Skip to main content</SkipLink>
+      <Top aria-label="Primary">
         <Brand>Geode</Brand>
         <ConnectionPicker />
         <NavLink to="/">Query</NavLink>
         <NavLink to="/schema">Schema</NavLink>
         <NavLink to="/admin">Admin</NavLink>
         <NavLink to="/ops">Ops</NavLink>
-        <LogoutBtn onClick={onLogout}>Logout</LogoutBtn>
+        <Spacer />
+        <Button variant="ghost" size="sm" onClick={onLogout}>
+          Logout
+        </Button>
       </Top>
-      <Body>
+      <Body id="main-content">
         <Outlet />
       </Body>
     </>

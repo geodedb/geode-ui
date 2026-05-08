@@ -13,24 +13,36 @@ const List = styled.ul`
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: 0;
+  margin: 0;
 `
 
 const Btn = styled.button`
   text-align: left;
-  padding: 6px 10px;
-  background: ${({ theme }) => theme.colors.surface};
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
+  padding: 8px 12px;
+  min-height: 36px;
+  background: ${({ theme }) => theme.bg.surface};
+  color: ${({ theme }) => theme.text.primary};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
   cursor: pointer;
+  font-family: inherit;
+  font-size: ${({ theme }) => theme.font.sizes.md};
+
   &:hover {
-    background: ${({ theme }) => theme.colors.background};
+    background: ${({ theme }) => theme.bg.subtle};
+    border-color: ${({ theme }) => theme.border.default};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
   }
 `
 
 const Empty = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
+  color: ${({ theme }) => theme.text.muted};
   font-style: italic;
 `
 
