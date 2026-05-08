@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { List, RowComponentProps } from 'react-window'
 import { projectColumns } from './projectColumns'
@@ -29,22 +29,60 @@ import { projectColumns } from './projectColumns'
 // fits the wrapped content of each row instead of clipping every row
 // to a single line. The estimate is heuristic: we don't measure the
 // DOM, we approximate "how many wrapped lines does this content take?"
-// from the cell's text length and the column count. Underestimates
-// clip the last line cleanly (overflow: hidden on Cell); the cap stops
-// a 10 KB string from blowing the virtualizer up.
+// from the cell's text length and the column count.
+//
+// The chars-per-column factor is now WIDTH-AWARE: a `ResizeObserver`
+// on the outer wrap feeds the live column-pixel-width into the
+// computation so a 375 px viewport gets a smaller chars-per-column
+// budget (and therefore taller rows) than a 1400 px viewport. The cap
+// (ROW_HEIGHT_MAX) stops a 10 KB string from blowing the virtualizer
+// up.
 const ROW_HEIGHT_MIN = 36
-const ROW_HEIGHT_MAX = 240
+const ROW_HEIGHT_MAX = 360
 const ROW_LINE_HEIGHT = 22 // 14 px font * ~1.5 line-height + safety
-const APPROX_CHARS_PER_COLUMN = 18 // ~120 px column / ~7 px avg char width
-const VIRTUAL_BODY_HEIGHT = 480
+const APPROX_CHARS_PER_COLUMN = 18 // legacy fallback when width is unknown
+// Minimum legible column width (px). Below this we trigger horizontal
+// scroll instead of crushing columns into a single character of width.
+const MIN_COLUMN_PX = 140
+// Approximate average glyph width at the body font / 14 px size.
+const APPROX_CHAR_PX = 7
+// Cell horizontal padding (px) — 10 left + 10 right (see `Cell` below).
+const CELL_PADDING_PX = 20
 
+// Minimum + maximum body height. Replaces the previous fixed 480 px so
+// the virtualizer scales with viewport.
+const VIRTUAL_BODY_MIN = 240
+const VIRTUAL_BODY_MAX = 720
+const VIRTUAL_BODY_DEFAULT = 480
+
+// Outer wrap. `overflow: hidden` on the outermost element clipped the
+// body when columns were wider than the viewport — silently dropping
+// data with no scrollbar. We now keep the border-radius via
+// `overflow: clip` (a render-only clip; doesn't establish a scroll
+// container) and let the inner ScrollArea provide horizontal scroll
+// when the grid is wider than the viewport.
 const Wrap = styled.div`
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
-  overflow: hidden;
+  overflow: clip;
+  background: ${({ theme }) => theme.bg.surface};
 `
-const HeaderTable = styled.table`
+// ScrollArea is the horizontal scroll container. The header AND the
+// virtualized body sit inside it so they scroll together — otherwise
+// a horizontally-scrolled body would slip out from under its sticky
+// header. `min-width` on its children forces the grid to be at least
+// MIN_COLUMN_PX × column-count wide; below that the user gets a
+// scrollbar instead of unreadable columns.
+const ScrollArea = styled.div`
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  /* Don't let the scrollbar steal vertical space from the body. */
+  scrollbar-gutter: stable;
+`
+const HeaderTable = styled.table<{ $minWidthPx: number }>`
   width: 100%;
+  min-width: ${({ $minWidthPx }) => $minWidthPx}px;
   border-collapse: collapse;
   color: ${({ theme }) => theme.text.primary};
   table-layout: fixed;
@@ -58,11 +96,20 @@ const Th = styled.th`
   font-size: ${({ theme }) => theme.font.sizes.sm};
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: top;
+  /* Don't collapse small uppercase header labels into illegible
+     half-letters when the column gets narrow — wrap onto multiple
+     lines instead. */
 `
-const RowOuter = styled.div`
+const RowOuter = styled.div<{ $columnCount: number; $minWidthPx: number }>`
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(120px, 1fr);
+  grid-template-columns: repeat(
+    ${({ $columnCount }) => $columnCount},
+    minmax(${MIN_COLUMN_PX}px, 1fr)
+  );
+  min-width: ${({ $minWidthPx }) => $minWidthPx}px;
   border-top: 1px solid ${({ theme }) => theme.border.subtle};
   color: ${({ theme }) => theme.text.primary};
 
@@ -75,12 +122,12 @@ const Cell = styled.div`
   vertical-align: top;
   white-space: pre-wrap;
   word-break: break-word;
-  overflow: hidden;
+  /* No overflow: hidden — rows now grow to fit content via
+     estimateRowHeight, so clipping the cell would silently truncate
+     wrapped data. Cell content longer than ROW_HEIGHT_MAX is bounded
+     by react-window's row-height cap on the outer row, not by hiding
+     overflow on the cell. */
   min-width: 0;
-  /* No text-overflow: ellipsis — multi-line ellipsis is non-standard
-     and conflicts with the per-row height estimate; rows now grow to
-     fit content via estimateRowHeight, and content that exceeds
-     ROW_HEIGHT_MAX is clipped without ellipsis dots (rare). */
 `
 
 const NodeChip = styled.span`
@@ -242,7 +289,7 @@ export function formatCell(v: unknown): string {
 // final height never depends on iterating beyond this point.
 const CELL_LINES_PROP_CAP = Math.ceil(ROW_HEIGHT_MAX / ROW_LINE_HEIGHT)
 
-function cellLines(cell: unknown): number {
+function cellLines(cell: unknown, charsPerColumn: number): number {
   if (cell === null || cell === undefined) return 1
   if (typeof cell === 'object' && !Array.isArray(cell)) {
     const o = cell as AnyRecord
@@ -260,8 +307,20 @@ function cellLines(cell: unknown): number {
   const text = formatCell(cell)
   if (text.length === 0) return 1
   const explicit = text.split('\n').length
-  const wrapped = Math.ceil(text.length / APPROX_CHARS_PER_COLUMN)
+  const wrapped = Math.ceil(text.length / Math.max(1, charsPerColumn))
   return Math.max(1, Math.max(explicit, wrapped))
+}
+
+// charsPerColumn — chars that fit in one wrapped line of a single
+// column at the given pixel width. Falls back to APPROX_CHARS_PER_COLUMN
+// when width information is unavailable (server-render, jsdom, or the
+// caller from a unit test that's only feeding rows).
+function charsPerColumnFor(columnPx: number): number {
+  if (!Number.isFinite(columnPx) || columnPx <= 0) {
+    return APPROX_CHARS_PER_COLUMN
+  }
+  const usable = Math.max(1, columnPx - CELL_PADDING_PX)
+  return Math.max(6, Math.floor(usable / APPROX_CHAR_PX))
 }
 
 // estimateRowHeight is the per-row sizing function fed to react-window's
@@ -270,9 +329,17 @@ function cellLines(cell: unknown): number {
 // of empty/short cells stays compact; capped at ROW_HEIGHT_MAX so a
 // 10 KB JSON cell doesn't blow up the virtualizer. Exported for unit
 // tests.
-export function estimateRowHeight(row: unknown[]): number {
+//
+// `charsPerColumn` is optional; when omitted we use the legacy width-
+// blind constant so unit tests written before the responsive change
+// still pass. The component always passes the live, ResizeObserver-
+// derived value so the on-screen heights track the real wrap.
+export function estimateRowHeight(
+  row: unknown[],
+  charsPerColumn: number = APPROX_CHARS_PER_COLUMN
+): number {
   const maxLines = row.reduce<number>(
-    (acc, cell) => Math.max(acc, cellLines(cell)),
+    (acc, cell) => Math.max(acc, cellLines(cell, charsPerColumn)),
     1
   )
   // Single-line rows stay at the historical 36 px baseline so the
@@ -340,6 +407,7 @@ CellView.displayName = 'CellView'
 type RowProps = {
   rows: unknown[][]
   columnCount: number
+  minWidthPx: number
 }
 
 // VirtualRow renders one row inside the windowed list. react-window
@@ -352,16 +420,16 @@ const VirtualRow = ({
   style,
   rows,
   columnCount,
+  minWidthPx,
 }: RowComponentProps<RowProps>) => {
   const row = rows[index] || []
   return (
     <RowOuter
       role="row"
       data-row-index={index}
-      style={{
-        ...style,
-        gridAutoColumns: `repeat(${columnCount}, 1fr)`,
-      }}
+      $columnCount={columnCount}
+      $minWidthPx={minWidthPx}
+      style={style}
     >
       {row.map((cell, j) => (
         // eslint-disable-next-line react/no-array-index-key
@@ -378,24 +446,98 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
     () => (expand ? projectColumns(resp) : resp),
     [resp, expand]
   )
-  const rowProps = useMemo<RowProps>(
-    () => ({ rows: view.rows, columnCount: view.columns.length }),
-    [view.rows, view.columns]
+  const columnCount = Math.max(1, view.columns.length)
+  // The grid's pixel-minimum is the per-column floor (MIN_COLUMN_PX)
+  // times the column count. Whenever the available container width is
+  // less than this, ScrollArea provides horizontal scroll instead of
+  // crushing columns into illegible thumb-widths.
+  const minGridWidthPx = MIN_COLUMN_PX * columnCount
+
+  // Live container width (px). Drives the chars-per-column estimate
+  // for `estimateRowHeight` and the virtualizer body height. Falls
+  // back to undefined (legacy heuristic) before the first measurement
+  // and in jsdom-only test runs that don't exercise ResizeObserver.
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const [containerWidth, setContainerWidth] = useState<number | undefined>(
+    undefined
   )
+  const [bodyHeight, setBodyHeight] = useState<number>(VIRTUAL_BODY_DEFAULT)
+
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return undefined
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const w = entry.contentRect.width
+      if (Number.isFinite(w) && w > 0) setContainerWidth(w)
+    })
+    ro.observe(el)
+    // Capture an initial measurement immediately so the first paint
+    // doesn't fall back to APPROX_CHARS_PER_COLUMN for one frame.
+    const initialW = el.getBoundingClientRect().width
+    if (Number.isFinite(initialW) && initialW > 0) setContainerWidth(initialW)
+    return () => ro.disconnect()
+  }, [])
+
+  // Body height tracks the viewport: tall enough to be useful but
+  // capped so the data-table doesn't push the rest of the page off
+  // the fold. Uses min(60vh, VIRTUAL_BODY_MAX) clamped from below by
+  // VIRTUAL_BODY_MIN so phones still see at least 240 px of body.
+  useEffect(() => {
+    const compute = (): number => {
+      const vh =
+        typeof window === 'undefined'
+          ? VIRTUAL_BODY_DEFAULT
+          : Math.round(window.innerHeight * 0.6)
+      return Math.min(VIRTUAL_BODY_MAX, Math.max(VIRTUAL_BODY_MIN, vh))
+    }
+    setBodyHeight(compute())
+    if (typeof window === 'undefined') return undefined
+    const onResize = (): void => setBodyHeight(compute())
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Convert the live container width into a per-column character
+  // budget. Below the grid's min-width the ScrollArea is scrolling, so
+  // each column gets at least MIN_COLUMN_PX worth of chars; above it,
+  // the columns share the available space evenly.
+  const charsPerColumn = useMemo(() => {
+    const effectiveWidth = Math.max(
+      minGridWidthPx,
+      containerWidth ?? minGridWidthPx
+    )
+    return charsPerColumnFor(effectiveWidth / columnCount)
+  }, [containerWidth, columnCount, minGridWidthPx])
+
+  const rowProps = useMemo<RowProps>(
+    () => ({
+      rows: view.rows,
+      columnCount,
+      minWidthPx: minGridWidthPx,
+    }),
+    [view.rows, columnCount, minGridWidthPx]
+  )
+
   // P-NEW-1: hold a single stable closure identity for the lifetime of
   // the component. A naive useMemo([view.rows]) keeps the closure
   // identity bound to the rows array, but the queryStreamReducer mints
   // a fresh `rows` array on every appended frame — so under streaming
   // the closure rebuilds per batch and react-window invalidates its
   // row-position cache, regressing the F5/F6 win documented in
-  // PERF_GAP_ANALYSIS.md (#26). Read the latest rows through a ref
-  // instead so the closure identity is stable across renders.
+  // PERF_GAP_ANALYSIS.md (#26). Read the latest rows + the live
+  // chars-per-column through refs so the closure identity is stable
+  // across renders.
   const rowsRef = useRef(view.rows)
   rowsRef.current = view.rows
+  const cpcRef = useRef(charsPerColumn)
+  cpcRef.current = charsPerColumn
   const rowHeight = useMemo(
     () =>
       (index: number): number =>
-        estimateRowHeight(rowsRef.current[index] ?? []),
+        estimateRowHeight(rowsRef.current[index] ?? [], cpcRef.current),
     []
   )
 
@@ -405,28 +547,35 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
   // as role="grid" with explicit row/columnheader/cell roles so screen
   // readers (and Playwright's getByRole) see a single coherent table.
   return (
-    <Wrap role="grid" aria-rowcount={view.rows.length}>
-      <HeaderTable role="presentation">
-        <thead>
-          <tr role="row">
-            {view.columns.map((c, i) => (
-              // eslint-disable-next-line react/no-array-index-key
-              <Th key={`${columnName(c, i)}_${i}`} role="columnheader">
-                {columnName(c, i)}{' '}
-                <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
-              </Th>
-            ))}
-          </tr>
-        </thead>
-      </HeaderTable>
-      <List
-        rowComponent={VirtualRow}
-        rowCount={view.rows.length}
-        rowHeight={rowHeight}
-        rowProps={rowProps}
-        defaultHeight={VIRTUAL_BODY_HEIGHT}
-        style={{ height: VIRTUAL_BODY_HEIGHT }}
-      />
+    <Wrap
+      ref={wrapRef}
+      role="grid"
+      aria-rowcount={view.rows.length}
+      data-testid="table-view"
+    >
+      <ScrollArea data-testid="table-scroll-area">
+        <HeaderTable $minWidthPx={minGridWidthPx} role="presentation">
+          <thead>
+            <tr role="row">
+              {view.columns.map((c, i) => (
+                // eslint-disable-next-line react/no-array-index-key
+                <Th key={`${columnName(c, i)}_${i}`} role="columnheader">
+                  {columnName(c, i)}{' '}
+                  <small style={{ opacity: 0.6 }}>{columnType(c)}</small>
+                </Th>
+              ))}
+            </tr>
+          </thead>
+        </HeaderTable>
+        <List
+          rowComponent={VirtualRow}
+          rowCount={view.rows.length}
+          rowHeight={rowHeight}
+          rowProps={rowProps}
+          defaultHeight={bodyHeight}
+          style={{ height: bodyHeight }}
+        />
+      </ScrollArea>
     </Wrap>
   )
 }

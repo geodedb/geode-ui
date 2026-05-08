@@ -16,6 +16,10 @@ import { auth } from '../../api/auth'
 // for the server to honor the change. A future task may add a
 // /api/v1/auth/switch-profile endpoint that re-issues a JWT with the
 // new claim so this picker can take effect without a password prompt.
+// `min-width: 0` + `max-width` lets the picker shrink under header
+// pressure (long brand text, narrow viewport) instead of forcing the
+// whole row past the viewport edge. `text-overflow: ellipsis` on the
+// rendered option ellipsises a 64-char profile name to fit.
 const Select = styled.select`
   padding: 4px 8px;
   background: ${({ theme }) => theme.colors.background};
@@ -23,6 +27,12 @@ const Select = styled.select`
   border: 1px solid ${({ theme }) => theme.colors.border};
   border-radius: 4px;
   font-size: 0.9em;
+  min-width: 0;
+  max-width: 240px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  flex-shrink: 1;
 `
 
 interface ProfileEntry {

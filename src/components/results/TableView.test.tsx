@@ -263,13 +263,32 @@ describe('estimateRowHeight (regression for clipped wrapped content)', () => {
   })
 
   test('caps row height so virtualization stays bounded', () => {
+    // Cap raised from 240 → 360 so wrapped content is actually
+    // readable (Cell no longer hides overflow). Still bounded so a
+    // 10 KB JSON cell can't blow the virtualizer up.
     const huge = 'a'.repeat(10000)
-    expect(estimateRowHeight([huge])).toBeLessThanOrEqual(240)
+    expect(estimateRowHeight([huge])).toBeLessThanOrEqual(360)
   })
 
   test('handles null / undefined cells without throwing', () => {
     expect(() => estimateRowHeight([null, undefined, ''])).not.toThrow()
     expect(estimateRowHeight([null, undefined, ''])).toBe(36)
+  })
+
+  // Width-aware regression: the same cell content should produce a
+  // taller row on a narrow column than on a wide one, because narrow
+  // columns wrap into more visual lines. The `charsPerColumn` arg lets
+  // the component feed the live container measurement in.
+  test('narrower columns produce taller rows for the same content', () => {
+    const text = 'a'.repeat(100)
+    const wide = estimateRowHeight([text], 50) // ~2 wrapped lines
+    const narrow = estimateRowHeight([text], 10) // ~10 wrapped lines
+    expect(narrow).toBeGreaterThan(wide)
+  })
+
+  test('width-aware mode still respects ROW_HEIGHT_MIN floor', () => {
+    expect(estimateRowHeight(['hi'], 12)).toBe(36)
+    expect(estimateRowHeight(['hi'], 200)).toBe(36)
   })
 })
 
@@ -294,6 +313,42 @@ test('TableView grows row height for long wrapped content (regression)', () => {
   expect(row).not.toBeNull()
   const h = parseInt(row.style.height || '0', 10)
   expect(h).toBeGreaterThan(36)
+})
+
+// Regression for the responsive-wrapping bug. Three asserts:
+//   • The outer wrap exposes a horizontal-scroll inner area
+//     (`data-testid="table-scroll-area"`) instead of swallowing
+//     overflow with overflow:hidden — silent data loss when columns
+//     exceed viewport.
+//   • Cells DO NOT have `overflow: hidden` anymore; rows grow to fit.
+//   • The body-virtualizer height is no longer the legacy fixed 480 px
+//     constant — it derives from the viewport.
+test('TableView exposes a scrollable area instead of clipping wide rows', () => {
+  const { container, getByTestId } = render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        expand={false}
+        resp={{
+          columns: [
+            { name: 'a', type: 'STRING' },
+            { name: 'b', type: 'STRING' },
+            { name: 'c', type: 'STRING' },
+            { name: 'd', type: 'STRING' },
+            { name: 'e', type: 'STRING' },
+            { name: 'f', type: 'STRING' },
+          ],
+          rows: [['1', '2', '3', '4', '5', '6']],
+        }}
+      />
+    </ThemeProvider>
+  )
+  // Scroll area exists.
+  const scrollArea = getByTestId('table-scroll-area')
+  expect(scrollArea).toBeInTheDocument()
+  // Cell does not have overflow: hidden — content can grow vertically.
+  const cell = container.querySelector('[role="cell"]') as HTMLElement
+  expect(cell).not.toBeNull()
+  expect(getComputedStyle(cell).overflow).not.toBe('hidden')
 })
 
 test('TableView with expand=false renders node as a structured chip cell', () => {

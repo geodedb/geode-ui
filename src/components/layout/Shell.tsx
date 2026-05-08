@@ -28,6 +28,15 @@ const SkipLink = styled.a`
 /* eslint-disable indent -- Prettier wraps interpolations inside the
  * below() helper and lands at 6 spaces; eslint expects 2. The wrapped
  * form is Prettier-canonical, so we defer to Prettier on this file. */
+//
+// Top is the app shell header. Two responsiveness rules apply:
+//   1) Never wrap. A wrapping header is the symptom-hide for
+//      "content does not fit"; instead we collapse the desktop nav
+//      into a drawer at the lg breakpoint (≤ 991 px) so brand +
+//      ConnectionPicker + hamburger always fit on one line.
+//   2) `overflow-x: clip` ensures a ConnectionPicker with a
+//      pathologically long profile name cannot push the body
+//      sideways or trigger a horizontal page scrollbar.
 const Top = styled.nav`
   display: flex;
   gap: ${({ theme }) => theme.spacing.md};
@@ -35,9 +44,11 @@ const Top = styled.nav`
   border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
   background: ${({ theme }) => theme.bg.surface};
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: clip;
+  min-width: 0;
 
-  ${below('md')`
+  ${below('lg')`
     padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) =>
       theme.spacing.md};
     gap: ${({ theme }) => theme.spacing.sm};
@@ -49,6 +60,8 @@ const BrandLink = styled(Link)`
   align-items: center;
   text-decoration: none;
   border-radius: ${({ theme }) => theme.radii.md};
+  flex-shrink: 0;
+  min-width: 0;
 
   &:focus-visible {
     outline: none;
@@ -82,10 +95,27 @@ const NavLink = styled(Link)`
   }
 `
 
+// DesktopNav owns the desktop nav links + Spacer + logout button.
+// Previously this used `display: contents` which removes the wrapper
+// from the box tree — the children participated in `Top`'s flex line
+// directly. That fought with `flex-wrap: wrap` to produce a header
+// that wrapped to two lines mid-md viewports (logout dropping below
+// the brand). With `display: flex` the desktop nav is its own flex
+// child that can shrink coherently and own its trailing Spacer.
+//
+// Collapse threshold raised from md (768 px) to lg (992 px) — at
+// md you have brand + ConnectionPicker + 4 nav links + Spacer +
+// logout in ~720 px after padding, which only fits if every label
+// is short. Falling back to the drawer at lg leaves room for
+// long connection names without clipping.
 const DesktopNav = styled.div`
-  display: contents;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.md};
+  min-width: 0;
 
-  ${below('md')`
+  ${below('lg')`
     display: none;
   `}
 `
@@ -102,13 +132,14 @@ const MobileToggle = styled.button`
   color: ${({ theme }) => theme.text.primary};
   cursor: pointer;
   margin-left: auto;
+  flex-shrink: 0;
 
   &:focus-visible {
     outline: none;
     box-shadow: ${({ theme }) => theme.shadows.focus};
   }
 
-  ${below('md')`
+  ${below('lg')`
     display: inline-flex;
   `}
 
@@ -129,7 +160,7 @@ const Drawer = styled.div<{ $open: boolean }>`
   border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
   padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
 
-  ${above('md')`
+  ${above('lg')`
     display: none;
   `}
 
