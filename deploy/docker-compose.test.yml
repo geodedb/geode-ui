@@ -103,6 +103,7 @@ services:
     - geode-data:/shared-data:ro
     - ./geode/seed-bootstrap.sh:/seed/seed-bootstrap.sh:ro
     - ./geode/init.gql:/seed/init.gql:ro
+    - ./geode/vulndb.gql:/seed/vulndb.gql:ro
     restart: no
 
   geode-ui:

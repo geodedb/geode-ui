@@ -87,6 +87,7 @@ GEODE_ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD:-Geode E2E Bootstrap Password 2024}
 E2E_USER="${E2E_USER:-e2e_admin}"
 E2E_PASSWORD="${E2E_PASSWORD:-E2E Admin User Password 2024}"
 GEODE_INIT_GQL="${GEODE_INIT_GQL:-/seed/init.gql}"
+GEODE_VULNDB_GQL="${GEODE_VULNDB_GQL:-/seed/vulndb.gql}"
 GEODE_WAIT_SECS="${GEODE_WAIT_SECS:-60}"
 
 log() { printf '[seed] %s\n' "$*"; }
@@ -232,67 +233,66 @@ ensure_e2e_user() {
     fi
 }
 
-# Helper: does the 'movies' graph already exist? Uses SHOW GRAPHS so
-# we don't accidentally create an empty graph via `USE GRAPH movies`
-# (which auto-creates on this Geode build, breaking subsequent
-# `CREATE GRAPH movies` in the seed file with status_class=42P07).
-movies_graph_exists() {
-    local out
+# Helper: does $graph exist? Uses SHOW GRAPHS so we don't accidentally
+# create an empty graph via `USE GRAPH <name>` (which auto-creates on
+# this Geode build, breaking subsequent `CREATE GRAPH` in the seed file
+# with status_class=42P07).
+graph_exists() {
+    local graph="$1" out
     out=$(echo "SHOW GRAPHS" | query_admin - 2>/dev/null || true)
-    printf '%s' "$out" | grep -q '"name":"movies"'
+    printf '%s' "$out" | grep -q "\"name\":\"${graph}\""
 }
 
-# Helper: returns count(n) for graph movies. ONLY safe to call after
-# we've confirmed the graph exists (or after a seed has run).
-count_movies_nodes() {
-    echo "USE GRAPH movies; MATCH (n) RETURN count(n) AS c" \
+# Helper: returns count(n) for the named graph. ONLY safe to call
+# after we've confirmed the graph exists (or after a seed has run).
+count_nodes() {
+    local graph="$1"
+    echo "USE GRAPH ${graph}; MATCH (n) RETURN count(n) AS c" \
         | query_admin - 2>/dev/null || true
 }
 
-# Step 4: populate the movies graph.
+# Idempotently seed a graph from a multi-statement GQL file.
 #
-# Idempotency strategy: if the graph already has 9 nodes, do nothing.
-# Otherwise, DROP the graph (if it exists) and replay init.gql.
 # `geode query -f` halts on the first statement-level error, so we
-# must not let `CREATE GRAPH movies` collide with an existing graph.
-seed_movies() {
-    if [[ ! -f "${GEODE_INIT_GQL}" ]]; then
-        err "init.gql not found at ${GEODE_INIT_GQL}"
+# must not let `CREATE GRAPH <name>` collide with an existing graph.
+# If the graph already has the expected node count, skip; otherwise
+# DROP and replay.
+seed_graph() {
+    local graph="$1" gql_path="$2" expected_count="$3"
+    if [[ ! -f "$gql_path" ]]; then
+        err "${graph} seed not found at ${gql_path}"
         return 1
     fi
 
-    if movies_graph_exists; then
-        if count_movies_nodes | grep -q '"c":171'; then
-            log "movies graph already populated (171 nodes); skipping seed"
+    if graph_exists "$graph"; then
+        if count_nodes "$graph" | grep -q "\"c\":${expected_count}"; then
+            log "${graph} graph already populated (${expected_count} nodes); skipping seed"
             return 0
         fi
-        log "movies graph exists but is incomplete; dropping for clean reseed"
-        echo "DROP GRAPH movies" | query_admin - >/dev/null 2>&1 || true
+        log "${graph} graph exists but is incomplete; dropping for clean reseed"
+        echo "DROP GRAPH ${graph}" | query_admin - >/dev/null 2>&1 || true
     fi
 
-    log "populating movies graph from ${GEODE_INIT_GQL}"
-    # init.gql is multi-statement; --file feeds it through the query
-    # client which handles statement splitting. We don't trust the
-    # client's exit code (it returns nonzero on the trailing empty
-    # result of some DDL statements); we verify by node count below.
-    query_admin -f "${GEODE_INIT_GQL}" >/dev/null 2>&1 || true
+    log "populating ${graph} graph from ${gql_path}"
+    # We don't trust the client's exit code (it returns nonzero on the
+    # trailing empty result of some DDL statements); verify by node
+    # count below.
+    query_admin -f "$gql_path" >/dev/null 2>&1 || true
 }
 
-# Step 5: verify the seed produced exactly the expected node count.
-# 171 = 38 Movie + 133 Person nodes from the Neo4j Movies dataset.
-# Counts pinned in deploy/geode/seed/SOURCES.md and e2e/helpers/gqlData.ts.
-verify_seed() {
-    if ! movies_graph_exists; then
-        err "verification failed: graph 'movies' does not exist"
+verify_graph() {
+    local graph="$1" expected_count="$2"
+    if ! graph_exists "$graph"; then
+        err "verification failed: graph '${graph}' does not exist"
         return 1
     fi
     local out
-    out=$(count_movies_nodes)
-    if printf '%s' "$out" | grep -q '"c":171'; then
-        log "verified: 171 nodes in graph 'movies'"
+    out=$(count_nodes "$graph")
+    if printf '%s' "$out" | grep -q "\"c\":${expected_count}"; then
+        log "verified: ${expected_count} nodes in graph '${graph}'"
         return 0
     fi
-    err "expected 171 nodes, got: $out"
+    err "expected ${expected_count} nodes in '${graph}', got: $out"
     return 1
 }
 
@@ -300,8 +300,21 @@ main() {
     wait_for_wire
     ensure_admin_password
     ensure_e2e_user
-    seed_movies
-    verify_seed
+    # 171 = 38 Movie + 133 Person from the Neo4j Movies dataset.
+    seed_graph movies "${GEODE_INIT_GQL}" 171
+    verify_graph movies 171
+    # vulndb is a richer secondary fixture: ~969 CWE + KEV CVEs +
+    # affected Package nodes. Treat any partial-load as non-fatal so
+    # the geode-ui stack still comes up (the movies graph is what
+    # gates the e2e suite); log the discrepancy for diagnostics.
+    if [[ -f "${GEODE_VULNDB_GQL}" ]]; then
+        seed_graph vulndb "${GEODE_VULNDB_GQL}" 1369 || \
+            log "vulndb seed reported a non-zero status (continuing)"
+        verify_graph vulndb 1369 || \
+            log "vulndb seed is partial; check convert-vulndb.py output for parse-rejected rows"
+    else
+        log "vulndb seed not present at ${GEODE_VULNDB_GQL}; skipping"
+    fi
     log "bootstrap complete"
 }
 
