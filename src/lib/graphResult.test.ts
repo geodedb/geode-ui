@@ -1,4 +1,12 @@
-import { extractElements } from './graphResult'
+import {
+  EDGE_TYPE_DEFAULT,
+  NODE_LABEL_DEFAULT,
+  extractElements,
+  labelOptions,
+  resolveEdgeLabel,
+  resolveNodeLabel,
+  typeOptions,
+} from './graphResult'
 
 test('flattens nodes + edges from a query result', () => {
   const resp = {
@@ -97,6 +105,107 @@ test('synthesises placeholder nodes for projected scalars', () => {
   expect((edge.data as any).target).toBe(String(movieId))
   // Edge label exposed for cytoscape rendering.
   expect((edge.data as any).label).toBe('ACTED_IN')
+})
+
+test('labelOptions surfaces property keys per node label', () => {
+  const els = extractElements({
+    columns: [{ name: 'm', type: 'NODE' }],
+    rows: [],
+    graph_summary: {
+      nodes: [
+        {
+          id: 1,
+          labels: ['Movie'],
+          properties: { title: 'X', released: 2000, tagline: 'Y' },
+        },
+        { id: 2, labels: ['Movie'], properties: { title: 'Z' } },
+        { id: 3, labels: ['Person'], properties: { name: 'A', born: 1970 } },
+      ],
+      edges: [],
+    },
+  } as any)
+  const opts = labelOptions(els)
+  expect(opts.get('Movie')?.[0]).toBe(NODE_LABEL_DEFAULT)
+  expect(opts.get('Movie')?.slice(1)).toEqual(['released', 'tagline', 'title'])
+  expect(opts.get('Person')?.[0]).toBe(NODE_LABEL_DEFAULT)
+  expect(opts.get('Person')?.slice(1)).toEqual(['born', 'name'])
+})
+
+test('typeOptions surfaces property keys per edge type', () => {
+  const els = extractElements({
+    columns: [{ name: 'r', type: 'EDGE' }],
+    rows: [],
+    graph_summary: {
+      nodes: [],
+      edges: [
+        {
+          id: 1,
+          start_node: 1,
+          end_node: 2,
+          type: 'ACTED_IN',
+          properties: { roles: 'Neo' },
+        },
+        {
+          id: 2,
+          start_node: 3,
+          end_node: 4,
+          type: 'ACTED_IN',
+          properties: { roles: 'Trinity', credit: 'lead' },
+        },
+        {
+          id: 3,
+          start_node: 5,
+          end_node: 6,
+          type: 'DIRECTED',
+          properties: {},
+        },
+      ],
+    },
+  } as any)
+  const opts = typeOptions(els)
+  expect(opts.get('ACTED_IN')?.[0]).toBe(EDGE_TYPE_DEFAULT)
+  expect(opts.get('ACTED_IN')?.slice(1)).toEqual(['credit', 'roles'])
+  expect(opts.get('DIRECTED')).toEqual([EDGE_TYPE_DEFAULT])
+})
+
+test('resolveNodeLabel uses chosen property when set, falls back to label', () => {
+  const data = {
+    id: '1',
+    labels: ['Movie'],
+    label: 'Movie',
+    props: { title: 'The Matrix', released: 1999 },
+  }
+  expect(resolveNodeLabel(data, {})).toBe('Movie')
+  expect(resolveNodeLabel(data, { Movie: 'title' })).toBe('The Matrix')
+  expect(resolveNodeLabel(data, { Movie: 'released' })).toBe('1999')
+  // Missing property falls back to data.label.
+  expect(resolveNodeLabel(data, { Movie: 'nope' })).toBe('Movie')
+})
+
+test('resolveNodeLabel preserves placeholder labels when no pref', () => {
+  // Synthesised placeholder: empty labels array, label = scalar from row.
+  const placeholder = {
+    id: '999',
+    labels: [],
+    label: 'Keanu Reeves',
+    props: {},
+    placeholder: true,
+  }
+  expect(resolveNodeLabel(placeholder, {})).toBe('Keanu Reeves')
+  // No labels means no key in the prefs map, so prefs are ignored.
+  expect(resolveNodeLabel(placeholder, { Movie: 'title' })).toBe('Keanu Reeves')
+})
+
+test('resolveEdgeLabel uses chosen property when set, falls back to type', () => {
+  const data = {
+    id: 'e1',
+    type: 'ACTED_IN',
+    label: 'ACTED_IN',
+    props: { roles: 'Neo' },
+  }
+  expect(resolveEdgeLabel(data, {})).toBe('ACTED_IN')
+  expect(resolveEdgeLabel(data, { ACTED_IN: 'roles' })).toBe('Neo')
+  expect(resolveEdgeLabel(data, { ACTED_IN: 'missing' })).toBe('ACTED_IN')
 })
 
 test('falls back to placeholder #id when no scalar column is available', () => {

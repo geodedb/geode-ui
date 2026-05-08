@@ -22,6 +22,8 @@ jest.mock('cytoscape', () => {
       batch: (fn: () => void) => fn(),
       elements: () => ({ remove: jest.fn() }),
       layout: () => ({ run: jest.fn() }),
+      nodes: () => ({ forEach: jest.fn() }),
+      edges: () => ({ forEach: jest.fn() }),
     }
   }
   return { __esModule: true, default: factory }
