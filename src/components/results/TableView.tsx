@@ -24,7 +24,18 @@ import { projectColumns } from './projectColumns'
 // doesn't render <tr> directly. Existing assertions that look up
 // cells by visible text still pass.
 
-const VIRTUAL_ROW_HEIGHT = 36
+// Per-row sizing tunables. `react-window` v2 accepts `rowHeight` as a
+// function `(index, props) => number` so we can compute a height that
+// fits the wrapped content of each row instead of clipping every row
+// to a single line. The estimate is heuristic: we don't measure the
+// DOM, we approximate "how many wrapped lines does this content take?"
+// from the cell's text length and the column count. Underestimates
+// clip the last line cleanly (overflow: hidden on Cell); the cap stops
+// a 10 KB string from blowing the virtualizer up.
+const ROW_HEIGHT_MIN = 36
+const ROW_HEIGHT_MAX = 240
+const ROW_LINE_HEIGHT = 22 // 14 px font * ~1.5 line-height + safety
+const APPROX_CHARS_PER_COLUMN = 18 // ~120 px column / ~7 px avg char width
 const VIRTUAL_BODY_HEIGHT = 480
 
 const Wrap = styled.div`
@@ -65,8 +76,11 @@ const Cell = styled.div`
   white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0;
+  /* No text-overflow: ellipsis — multi-line ellipsis is non-standard
+     and conflicts with the per-row height estimate; rows now grow to
+     fit content via estimateRowHeight, and content that exceeds
+     ROW_HEIGHT_MAX is clipped without ellipsis dots (rare). */
 `
 
 const NodeChip = styled.span`
@@ -212,6 +226,50 @@ export function formatCell(v: unknown): string {
   return String(v)
 }
 
+// cellLines estimates how many wrapped lines a single cell occupies.
+//   • null / undefined / '' → 1 line
+//   • node / edge          → 1 chip line + one line per property
+//   • everything else      → max of explicit \n-count and ceil(len/cpc)
+//
+// The character-width heuristic (APPROX_CHARS_PER_COLUMN) is intentionally
+// conservative. We'd rather underestimate slightly and let `overflow:
+// hidden` on Cell clip the last line than overestimate and waste vertical
+// space.
+function cellLines(cell: unknown): number {
+  if (cell === null || cell === undefined) return 1
+  if (typeof cell === 'object' && !Array.isArray(cell)) {
+    const o = cell as AnyRecord
+    if (isNode(o) || isEdge(o)) {
+      const props = o.properties as AnyRecord | undefined
+      const propCount = props ? Object.keys(props).length : 0
+      return 1 + propCount
+    }
+  }
+  const text = formatCell(cell)
+  if (text.length === 0) return 1
+  const explicit = text.split('\n').length
+  const wrapped = Math.ceil(text.length / APPROX_CHARS_PER_COLUMN)
+  return Math.max(1, Math.max(explicit, wrapped))
+}
+
+// estimateRowHeight is the per-row sizing function fed to react-window's
+// <List rowHeight={(i) => …}>. It picks the tallest cell in the row and
+// turns its line count into pixels. Floored at ROW_HEIGHT_MIN so a row
+// of empty/short cells stays compact; capped at ROW_HEIGHT_MAX so a
+// 10 KB JSON cell doesn't blow up the virtualizer. Exported for unit
+// tests.
+export function estimateRowHeight(row: unknown[]): number {
+  const maxLines = row.reduce<number>(
+    (acc, cell) => Math.max(acc, cellLines(cell)),
+    1
+  )
+  // Single-line rows stay at the historical 36 px baseline so the
+  // existing virtualization snapshot tests / smoke perf hold steady.
+  // Each extra line contributes one ROW_LINE_HEIGHT.
+  const h = ROW_HEIGHT_MIN + (maxLines - 1) * ROW_LINE_HEIGHT
+  return Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, h))
+}
+
 // CellView renders a single cell. For node and edge values it produces
 // a structured display — a label/type chip plus a two-column property
 // list — so a row with many properties stays readable instead of
@@ -312,6 +370,16 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
     () => ({ rows: view.rows, columnCount: view.columns.length }),
     [view.rows, view.columns]
   )
+  // Memoize the height function so react-window doesn't see a fresh
+  // identity on every render (which would invalidate its row-position
+  // cache and force a full re-layout). The closure depends only on
+  // `view.rows`, so a streaming row append is the only retrigger.
+  const rowHeight = useMemo(
+    () =>
+      (index: number): number =>
+        estimateRowHeight(view.rows[index] ?? []),
+    [view.rows]
+  )
 
   // Explicit ARIA roles: react-window renders the body as div-based
   // CSS grid (not a <tbody>), which severs the implicit columnheader
@@ -336,7 +404,7 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
       <List
         rowComponent={VirtualRow}
         rowCount={view.rows.length}
-        rowHeight={VIRTUAL_ROW_HEIGHT}
+        rowHeight={rowHeight}
         rowProps={rowProps}
         defaultHeight={VIRTUAL_BODY_HEIGHT}
         style={{ height: VIRTUAL_BODY_HEIGHT }}

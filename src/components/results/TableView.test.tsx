@@ -2,7 +2,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
-import { TableView, formatCell } from './TableView'
+import { TableView, estimateRowHeight, formatCell } from './TableView'
 
 import { testTheme as theme } from '../../test-utils/theme'
 
@@ -209,6 +209,91 @@ test('TableView virtualizes large row sets (DOM contains << total rows)', () => 
   // we expect substantially fewer, certainly < 100.
   expect(rowEls.length).toBeGreaterThan(0)
   expect(rowEls.length).toBeLessThan(100)
+})
+
+// Regression for the "long content wraps but row stays at 36 px so the
+// data is unreadable" complaint. TableView used to pass a fixed
+// VIRTUAL_ROW_HEIGHT to react-window's <List rowHeight={36}>; cells had
+// `white-space: pre-wrap` plus `overflow: hidden`, so any wrapped lines
+// were clipped. estimateRowHeight is the per-row computation that
+// drives the new dynamic-height path.
+describe('estimateRowHeight (regression for clipped wrapped content)', () => {
+  test('short single-line cell stays at the minimum height', () => {
+    expect(estimateRowHeight(['hi'])).toBe(36)
+    expect(estimateRowHeight(['x', 'y', 'z'])).toBe(36)
+  })
+
+  test('long string content grows the row past 36 px', () => {
+    const long = 'a'.repeat(120) // ~7 wrapped lines at ~18 chars/col
+    const h = estimateRowHeight([long])
+    expect(h).toBeGreaterThan(36)
+  })
+
+  test('row height grows with the row that has the most wrap', () => {
+    const short = estimateRowHeight(['hello', 'world', 'baz'])
+    const longInOneCell = estimateRowHeight(['hello', 'world', 'a'.repeat(120)])
+    expect(longInOneCell).toBeGreaterThan(short)
+  })
+
+  test('explicit \\n line breaks count as wrapped lines', () => {
+    const single = estimateRowHeight(['one'])
+    const multi = estimateRowHeight(['one\ntwo\nthree\nfour\nfive'])
+    expect(multi).toBeGreaterThan(single)
+  })
+
+  test('node cells grow proportional to property count', () => {
+    const small = {
+      id: 1,
+      labels: ['Person'],
+      properties: { name: 'Alice' },
+    }
+    const big = {
+      id: 2,
+      labels: ['User'],
+      properties: {
+        username: 'alice',
+        email: 'alice@example.com',
+        created_at: '2025-01-01',
+        last_login: '2026-05-08',
+        roles: ['admin', 'editor'],
+        is_default_user: true,
+      },
+    }
+    expect(estimateRowHeight([big])).toBeGreaterThan(estimateRowHeight([small]))
+  })
+
+  test('caps row height so virtualization stays bounded', () => {
+    const huge = 'a'.repeat(10000)
+    expect(estimateRowHeight([huge])).toBeLessThanOrEqual(240)
+  })
+
+  test('handles null / undefined cells without throwing', () => {
+    expect(() => estimateRowHeight([null, undefined, ''])).not.toThrow()
+    expect(estimateRowHeight([null, undefined, ''])).toBe(36)
+  })
+})
+
+test('TableView grows row height for long wrapped content (regression)', () => {
+  // Renders a row with content that wraps many lines and asserts the
+  // react-window-applied inline `style.height` exceeds the 36 px
+  // single-line baseline. This catches a regression where the List was
+  // configured with a fixed rowHeight again.
+  const long = 'lorem ipsum '.repeat(40) // ~480 chars → many wrapped lines
+  const { container } = render(
+    <ThemeProvider theme={theme}>
+      <TableView
+        expand={false}
+        resp={{
+          columns: [{ name: 'msg', type: 'STRING' }],
+          rows: [[long]],
+        }}
+      />
+    </ThemeProvider>
+  )
+  const row = container.querySelector('[data-row-index="0"]') as HTMLElement
+  expect(row).not.toBeNull()
+  const h = parseInt(row.style.height || '0', 10)
+  expect(h).toBeGreaterThan(36)
 })
 
 test('TableView with expand=false renders node as a structured chip cell', () => {
