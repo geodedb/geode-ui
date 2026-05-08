@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -51,6 +52,7 @@ const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
 `
 
 export const GrantsPanel: React.FC = () => {
+  const { t } = useTranslation()
   const [permission, setPermission] = useState('')
   const [resource, setResource] = useState('')
   const [grantee, setGrantee] = useState('')
@@ -72,10 +74,10 @@ export const GrantsPanel: React.FC = () => {
       }
       if (mode === 'apply') {
         await client.grants(req)
-        setOkMsg('Grant applied.')
+        setOkMsg(t('grants.applied'))
       } else {
         await client.revoke(req)
-        setOkMsg('Grant revoked.')
+        setOkMsg(t('grants.revoked'))
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -86,13 +88,13 @@ export const GrantsPanel: React.FC = () => {
 
   return (
     <Stack $gap="md">
-      <Heading>Grants</Heading>
+      <Heading>{t('grants.title')}</Heading>
       <FormWrap>
         <Field
-          label="Permission"
+          label={t('grants.fieldPermission')}
           htmlFor="gp-permission"
           required
-          hint="The action being granted (e.g. read, write, admin)."
+          hint={t('grants.permissionHint')}
         >
           <Input
             id="gp-permission"
@@ -102,9 +104,9 @@ export const GrantsPanel: React.FC = () => {
           />
         </Field>
         <Field
-          label="Resource"
+          label={t('grants.fieldResource')}
           htmlFor="gp-resource"
-          hint="The resource the grant applies to (e.g. graph:default)."
+          hint={t('grants.resourceHint')}
         >
           <Input
             id="gp-resource"
@@ -112,35 +114,35 @@ export const GrantsPanel: React.FC = () => {
             onChange={(e) => setResource(e.target.value)}
           />
         </Field>
-        <Field label="Grantee" htmlFor="gp-grantee" required>
+        <Field label={t('grants.fieldGrantee')} htmlFor="gp-grantee" required>
           <Input
             id="gp-grantee"
-            placeholder="username or role name"
+            placeholder={t('grants.granteePlaceholder')}
             value={grantee}
             onChange={(e) => setGrantee(e.target.value)}
             required
           />
         </Field>
-        <Field label="Grantee kind" htmlFor="gp-grantee-kind">
+        <Field label={t('grants.fieldGranteeKind')} htmlFor="gp-grantee-kind">
           <Select
             id="gp-grantee-kind"
             value={granteeKind}
             onChange={(e) => setGranteeKind(e.target.value as 'user' | 'role')}
           >
-            <option value="user">user</option>
-            <option value="role">role</option>
+            <option value="user">{t('grants.granteeKindUser')}</option>
+            <option value="role">{t('grants.granteeKindRole')}</option>
           </Select>
         </Field>
         <Inline $gap="sm">
           <Button onClick={() => send('apply')} loading={busy}>
-            Apply
+            {t('common.apply')}
           </Button>
           <Button
             variant="danger"
             onClick={() => send('revoke')}
             loading={busy}
           >
-            Revoke
+            {t('common.revoke')}
           </Button>
         </Inline>
       </FormWrap>

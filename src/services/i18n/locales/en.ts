@@ -14,42 +14,32 @@
 
 export const en = {
   common: {
-    save: 'Save',
     cancel: 'Cancel',
     delete: 'Delete',
     confirm: 'Confirm',
     create: 'Create',
     apply: 'Apply',
     revoke: 'Revoke',
-    edit: 'Edit',
     enable: 'Enable',
     disable: 'Disable',
     sign: 'Sign',
     download: 'Download',
     restore: 'Restore',
-    new: 'New',
-    loading: 'Loading…',
-    running: 'Running…',
     uploading: 'Uploading…',
     error: 'Error',
     actions: 'Actions',
-    optional: 'optional',
-    required: 'required',
     closeDialog: 'Close dialog',
     cannotBeUndone: 'This action cannot be undone.',
     skipToMain: 'Skip to main content',
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
     notYetWired: 'not yet wired',
-    nothing: 'No items.',
     rowCount_one: '{{count}} row',
     rowCount_other: '{{count}} rows',
     elapsed: '{{ms}} ms',
   },
 
   brand: {
-    name: 'Geode',
-    tagline: 'Enterprise Graph Database for the Post-Quantum Era',
     home: 'Geode home',
   },
 
@@ -91,6 +81,11 @@ export const en = {
     nodeFieldLabel: 'Display field for {{label}} nodes',
     edgeFieldLabel: 'Display field for {{type}} edges',
     unlabeledNode: 'unlabeled',
+    optionLabelName: 'label name',
+    optionType: 'type',
+    selectedNode: 'Node {{id}}',
+    selectedEdge: 'Edge {{id}}',
+    inspectHint: 'Click a node or edge to inspect properties.',
   },
 
   schema: {
@@ -240,18 +235,14 @@ export const en = {
     empty: 'No audit entries.',
   },
 
-  settings: {
-    language: 'Language',
-    theme: 'Theme',
-    themeAuto: 'System',
-    themeLight: 'Light',
-    themeDark: 'Dark',
-  },
-
   errors: {
     uploadFailed: 'upload failed ({{status}})',
     queryFailed: 'query failed',
-    serverPoolNotConfigured: 'server: pool not configured',
+    failedLoadProfiles: 'failed to load profiles',
+  },
+
+  connection: {
+    profile: 'Connection profile',
   },
 } as const
 

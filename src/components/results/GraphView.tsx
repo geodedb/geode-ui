@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
 import styled from 'styled-components'
 import { cytoscapeStyle } from './cytoscapeStyle'
@@ -135,6 +136,7 @@ function applyLabels(
 }
 
 export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
+  const { t } = useTranslation()
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
   const [selected, setSelected] = useState<Selected | null>(null)
@@ -209,11 +211,11 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
       applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
     }
 
-    const t = setTimeout(build, REBUILD_DEBOUNCE_MS)
+    const timer = setTimeout(build, REBUILD_DEBOUNCE_MS)
 
     return () => {
       canceled = true
-      clearTimeout(t)
+      clearTimeout(timer)
       if (cyRef.current) {
         cyRef.current.destroy()
         cyRef.current = null
@@ -244,25 +246,29 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         ref={ref}
         $height={height}
         role="img"
-        aria-label="Cytoscape graph rendering. Use the Display panel to choose which property labels each node and edge."
+        aria-label={t('graph.canvasAria')}
       />
       <Side $height={height}>
         <ControlsBlock data-testid="graph-display-controls">
-          <h5>Display</h5>
+          <h5>{t('graph.displayHeading')}</h5>
           {nodeOptions.size === 0 ? (
-            <p className="empty">No nodes to configure.</p>
+            <p className="empty">{t('graph.noNodesToConfigure')}</p>
           ) : (
             Array.from(nodeOptions.entries()).map(([label, opts]) => (
               <div className="row" key={`n-${label}`}>
-                <span>{label || '(unlabeled)'}</span>
+                <span>{label || `(${t('graph.unlabeledNode')})`}</span>
                 <select
-                  aria-label={`Display field for ${label || 'unlabeled'} nodes`}
+                  aria-label={t('graph.nodeFieldLabel', {
+                    label: label || t('graph.unlabeledNode'),
+                  })}
                   value={nodeLabelPrefs[label] ?? NODE_LABEL_DEFAULT}
                   onChange={(e) => setNodePref(label, e.target.value)}
                 >
                   {opts.map((opt) => (
                     <option key={opt} value={opt}>
-                      {opt === NODE_LABEL_DEFAULT ? '(label name)' : opt}
+                      {opt === NODE_LABEL_DEFAULT
+                        ? `(${t('graph.optionLabelName')})`
+                        : opt}
                     </option>
                   ))}
                 </select>
@@ -274,13 +280,15 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
               <div className="row" key={`e-${type}`}>
                 <span>{type}</span>
                 <select
-                  aria-label={`Display field for ${type} edges`}
+                  aria-label={t('graph.edgeFieldLabel', { type })}
                   value={edgeLabelPrefs[type] ?? EDGE_TYPE_DEFAULT}
                   onChange={(e) => setEdgePref(type, e.target.value)}
                 >
                   {opts.map((opt) => (
                     <option key={opt} value={opt}>
-                      {opt === EDGE_TYPE_DEFAULT ? '(type)' : opt}
+                      {opt === EDGE_TYPE_DEFAULT
+                        ? `(${t('graph.optionType')})`
+                        : opt}
                     </option>
                   ))}
                 </select>
@@ -291,15 +299,13 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
           <>
             <h4>
               {selected.kind === 'node'
-                ? `Node ${String(selected.data.id)}`
-                : `Edge ${String(selected.data.id)}`}
+                ? t('graph.selectedNode', { id: String(selected.data.id) })
+                : t('graph.selectedEdge', { id: String(selected.data.id) })}
             </h4>
             <pre>{JSON.stringify(selected.data, null, 2)}</pre>
           </>
         ) : (
-          <p style={{ opacity: 0.6 }}>
-            Click a node or edge to inspect properties.
-          </p>
+          <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
         )}
       </Side>
     </Wrap>

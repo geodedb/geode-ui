@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -101,6 +102,7 @@ const fieldsSnippet = (e: AuditEntry): string => {
 }
 
 export const AuditLogPage: React.FC = () => {
+  const { t } = useTranslation()
   const [filters, setFilters] = useState<Filters>({
     since: '',
     event: '',
@@ -187,28 +189,28 @@ export const AuditLogPage: React.FC = () => {
 
   return (
     <Stack $gap="md">
-      <Heading>Audit log ({entries.length})</Heading>
+      <Heading>{t('audit.title', { count: entries.length })}</Heading>
       <FilterBar>
-        <Field label="Since" htmlFor="al-since">
+        <Field label={t('audit.fieldSince')} htmlFor="al-since">
           <Input
             id="al-since"
-            placeholder="2025-01-01T00:00:00Z"
+            placeholder={t('audit.sincePlaceholder')}
             value={filters.since}
             onChange={onSinceChange}
           />
         </Field>
-        <Field label="Event" htmlFor="al-event">
+        <Field label={t('audit.fieldEvent')} htmlFor="al-event">
           <Input
             id="al-event"
-            placeholder="event name"
+            placeholder={t('audit.eventPlaceholder')}
             value={filters.event}
             onChange={onEventChange}
           />
         </Field>
-        <Field label="User" htmlFor="al-user">
+        <Field label={t('audit.fieldUser')} htmlFor="al-user">
           <Input
             id="al-user"
-            placeholder="username"
+            placeholder={t('audit.userPlaceholder')}
             value={filters.user}
             onChange={onUserChange}
           />
@@ -219,16 +221,16 @@ export const AuditLogPage: React.FC = () => {
         <DataTable>
           <thead>
             <tr>
-              <th>Timestamp</th>
-              <th>User</th>
-              <th>Event</th>
-              <th>Fields</th>
+              <th>{t('audit.columnTimestamp')}</th>
+              <th>{t('audit.columnUser')}</th>
+              <th>{t('audit.columnEvent')}</th>
+              <th>{t('audit.columnFields')}</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <EmptyCell colSpan={4}>No audit entries.</EmptyCell>
+                <EmptyCell colSpan={4}>{t('audit.empty')}</EmptyCell>
               </tr>
             ) : (
               rows.map((r) => (

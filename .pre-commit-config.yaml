@@ -162,12 +162,11 @@ repos:
 
   - id: detect-hardcoded-strings
     name: detect:hardcoded-strings
-    entry: node scripts/detect-hardcoded-strings.mjs
+    entry: node scripts/detect-hardcoded-strings.mjs --strict
     language: system
     pass_filenames: false
     files: \.tsx$
     exclude: ^(node_modules/|gen/|electron/)
-    verbose: true
 
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { useNavigate } from 'react-router-dom'
 import { client } from '../../api/client'
@@ -52,6 +53,7 @@ const Empty = styled.p`
 `
 
 export const LabelList: React.FC<{ graph: string }> = ({ graph }) => {
+  const { t } = useTranslation()
   const [labels, setLabels] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
   const setStaged = useQueryStore((s) => s.setStaged)
@@ -81,7 +83,7 @@ export const LabelList: React.FC<{ graph: string }> = ({ graph }) => {
   }, [graph])
 
   if (loaded && labels.length === 0) {
-    return <Empty>No labels.</Empty>
+    return <Empty>{t('schema.noLabels')}</Empty>
   }
 
   return (

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -67,6 +68,7 @@ const RowActions = styled.div`
 `
 
 export const UsersPage: React.FC = () => {
+  const { t } = useTranslation()
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -131,25 +133,27 @@ export const UsersPage: React.FC = () => {
   return (
     <Stack $gap="md">
       <ToolBar>
-        <h2>Users ({users.length})</h2>
-        <Button onClick={() => setShowCreate(true)}>+ New user</Button>
+        <h2>{t('users.title', { count: users.length })}</h2>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('users.newButton')}
+        </Button>
       </ToolBar>
       {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       <TableScroll>
         <DataTable>
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Roles</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{t('users.columnUsername')}</th>
+              <th>{t('users.columnEmail')}</th>
+              <th>{t('users.columnRoles')}</th>
+              <th>{t('users.columnStatus')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 ? (
               <tr>
-                <EmptyCell colSpan={5}>No users.</EmptyCell>
+                <EmptyCell colSpan={5}>{t('users.empty')}</EmptyCell>
               </tr>
             ) : (
               users.map((u) => (
@@ -157,7 +161,11 @@ export const UsersPage: React.FC = () => {
                   <td>{u.username}</td>
                   <td>{u.email}</td>
                   <td>{(u.roles ?? []).join(', ')}</td>
-                  <td>{u.disabled ? 'disabled' : 'active'}</td>
+                  <td>
+                    {u.disabled
+                      ? t('users.statusDisabled')
+                      : t('users.statusActive')}
+                  </td>
                   <td>
                     <RowActions>
                       {u.disabled ? (
@@ -166,7 +174,7 @@ export const UsersPage: React.FC = () => {
                           size="sm"
                           onClick={() => onEnable(u.username)}
                         >
-                          Enable
+                          {t('common.enable')}
                         </Button>
                       ) : (
                         <Button
@@ -174,7 +182,7 @@ export const UsersPage: React.FC = () => {
                           size="sm"
                           onClick={() => onDisable(u.username)}
                         >
-                          Disable
+                          {t('common.disable')}
                         </Button>
                       )}
                       <Button
@@ -182,7 +190,7 @@ export const UsersPage: React.FC = () => {
                         size="sm"
                         onClick={() => setConfirmDelete(u.username)}
                       >
-                        Delete
+                        {t('common.delete')}
                       </Button>
                     </RowActions>
                   </td>
@@ -202,11 +210,11 @@ export const UsersPage: React.FC = () => {
       )}
       <ConfirmModal
         open={confirmDelete !== null}
-        title={`Delete user "${confirmDelete}"?`}
-        body="This action cannot be undone."
+        title={t('users.deleteTitle', { name: confirmDelete ?? '' })}
+        body={t('common.cannotBeUndone')}
         destructive
         loading={deleting}
-        confirmLabel="Delete"
+        confirmLabel={t('users.deleteConfirm')}
         onConfirm={onDelete}
         onClose={() => setConfirmDelete(null)}
       />
@@ -215,6 +223,7 @@ export const UsersPage: React.FC = () => {
 }
 
 const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -238,22 +247,27 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const modalFooter = (
     <>
       <Button variant="ghost" onClick={onClose} disabled={busy}>
-        Cancel
+        {t('common.cancel')}
       </Button>
       <Button form="create-user-form" type="submit" loading={busy}>
-        Create
+        {t('common.create')}
       </Button>
     </>
   )
 
   return (
-    <Modal open onClose={onClose} title="New user" footer={modalFooter}>
+    <Modal
+      open
+      onClose={onClose}
+      title={t('users.createTitle')}
+      footer={modalFooter}
+    >
       <form
         id="create-user-form"
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
-        <Field label="Username" htmlFor="cu-username" required>
+        <Field label={t('users.fieldUsername')} htmlFor="cu-username" required>
           <Input
             id="cu-username"
             value={username}
@@ -262,7 +276,7 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             autoFocus
           />
         </Field>
-        <Field label="Email" htmlFor="cu-email" required>
+        <Field label={t('users.fieldEmail')} htmlFor="cu-email" required>
           <Input
             id="cu-email"
             type="email"
@@ -272,9 +286,9 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           />
         </Field>
         <Field
-          label="Password"
+          label={t('users.fieldPassword')}
           htmlFor="cu-password"
-          hint="The user can change this on first login."
+          hint={t('users.passwordHint')}
         >
           <Input
             id="cu-password"

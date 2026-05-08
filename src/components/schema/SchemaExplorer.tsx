@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -125,6 +126,7 @@ const ErrText = styled.p`
 `
 
 export const SchemaExplorer: React.FC = () => {
+  const { t } = useTranslation()
   const [graphs, setGraphs] = useState<string[]>([])
   const [active, setActive] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
@@ -184,9 +186,9 @@ export const SchemaExplorer: React.FC = () => {
   return (
     <Layout>
       <Pane>
-        <h3>Graphs</h3>
+        <h3>{t('schema.graphsTitle')}</h3>
         {err && <ErrText>{err}</ErrText>}
-        {graphs.length === 0 && !err && <Empty>No graphs.</Empty>}
+        {graphs.length === 0 && !err && <Empty>{t('schema.noGraphs')}</Empty>}
         <GraphList>
           {graphs.map((g) => (
             <li key={g}>
@@ -198,29 +200,41 @@ export const SchemaExplorer: React.FC = () => {
         </GraphList>
       </Pane>
       <Pane>
-        <h3>{active ? 'Labels (' + active + ')' : 'Labels'}</h3>
-        {active ? <LabelList graph={active} /> : <Empty>Select a graph.</Empty>}
+        <h3>
+          {active
+            ? t('schema.labelsTitleScoped', { graph: active })
+            : t('schema.labelsTitle')}
+        </h3>
+        {active ? (
+          <LabelList graph={active} />
+        ) : (
+          <Empty>{t('schema.selectGraph')}</Empty>
+        )}
       </Pane>
       <Pane>
-        <h3>{active ? 'Edge types (' + active + ')' : 'Edge types'}</h3>
+        <h3>
+          {active
+            ? t('schema.edgeTypesTitleScoped', { graph: active })
+            : t('schema.edgeTypesTitle')}
+        </h3>
         {active ? (
           <EdgeTypeList graph={active} />
         ) : (
-          <Empty>Select a graph.</Empty>
+          <Empty>{t('schema.selectGraph')}</Empty>
         )}
         {active && (
           <>
-            <h4>Indexes</h4>
+            <h4>{t('schema.indexes')}</h4>
             {indexes.length > 0 ? (
               <Pre>{JSON.stringify(indexes, null, 2)}</Pre>
             ) : (
-              <Empty>No indexes.</Empty>
+              <Empty>{t('schema.noIndexes')}</Empty>
             )}
-            <h4>Constraints</h4>
+            <h4>{t('schema.constraints')}</h4>
             {constraints.length > 0 ? (
               <Pre>{JSON.stringify(constraints, null, 2)}</Pre>
             ) : (
-              <Empty>No constraints.</Empty>
+              <Empty>{t('schema.noConstraints')}</Empty>
             )}
           </>
         )}

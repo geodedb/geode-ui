@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
@@ -53,6 +54,7 @@ const FormWrap = styled.form`
 `
 
 export const RestorePage: React.FC = () => {
+  const { t } = useTranslation()
   const location = useLocation()
   const [file, setFile] = useState('')
   const [targetTime, setTargetTime] = useState('')
@@ -78,7 +80,7 @@ export const RestorePage: React.FC = () => {
     setOkMsg(null)
     try {
       await client.restore({ file, target_time: targetTime })
-      setOkMsg('Restore started.')
+      setOkMsg(t('restore.started'))
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
     } finally {
@@ -123,12 +125,14 @@ export const RestorePage: React.FC = () => {
           error?: string
         }
         throw new Error(
-          j.error_description || j.error || `upload failed (${res.status})`
+          j.error_description ||
+            j.error ||
+            t('errors.uploadFailed', { status: res.status })
         )
       }
       const j = (await res.json()) as { file: string; size_bytes: number }
       setFile(j.file)
-      setOkMsg(`Uploaded ${j.file} (${j.size_bytes} bytes). Ready to restore.`)
+      setOkMsg(t('restore.uploaded', { name: j.file, size: j.size_bytes }))
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
     } finally {
@@ -137,14 +141,14 @@ export const RestorePage: React.FC = () => {
     }
   }
 
-  let restoreLabel = 'Restore'
-  if (uploading) restoreLabel = 'Uploading…'
+  let restoreLabel = t('common.restore')
+  if (uploading) restoreLabel = t('common.uploading')
 
   return (
     <Stack $gap="md">
-      <Heading>Restore</Heading>
+      <Heading>{t('restore.title')}</Heading>
       <FormWrap onSubmit={submit}>
-        <Field label="Upload backup file" htmlFor="rp-upload">
+        <Field label={t('restore.fieldUpload')} htmlFor="rp-upload">
           <input
             id="rp-upload"
             ref={fileInputRef}
@@ -153,19 +157,19 @@ export const RestorePage: React.FC = () => {
             disabled={uploading || busy}
           />
         </Field>
-        <Field label="File" htmlFor="rp-file" required>
+        <Field label={t('restore.fieldFile')} htmlFor="rp-file" required>
           <Input
             id="rp-file"
-            placeholder="backup file name"
+            placeholder={t('restore.filePlaceholder')}
             value={file}
             onChange={(e) => setFile(e.target.value)}
             required
           />
         </Field>
         <Field
-          label="Target time"
+          label={t('restore.fieldTargetTime')}
           htmlFor="rp-target-time"
-          hint="Optional point-in-time recovery cutoff (RFC3339)."
+          hint={t('restore.targetTimeHint')}
         >
           <Input
             id="rp-target-time"

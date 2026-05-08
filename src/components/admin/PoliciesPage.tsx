@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -62,6 +63,7 @@ const Code = styled.code`
 `
 
 export const PoliciesPage: React.FC = () => {
+  const { t } = useTranslation()
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -100,24 +102,26 @@ export const PoliciesPage: React.FC = () => {
   return (
     <Stack $gap="md">
       <ToolBar>
-        <h2>Policies ({policies.length})</h2>
-        <Button onClick={() => setShowCreate(true)}>+ New policy</Button>
+        <h2>{t('policies.title', { count: policies.length })}</h2>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('policies.newButton')}
+        </Button>
       </ToolBar>
       {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       <TableScroll>
         <DataTable>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Resource</th>
-              <th>Expression</th>
-              <th>Actions</th>
+              <th>{t('policies.columnName')}</th>
+              <th>{t('policies.columnResource')}</th>
+              <th>{t('policies.columnExpression')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {policies.length === 0 ? (
               <tr>
-                <EmptyCell colSpan={4}>No policies.</EmptyCell>
+                <EmptyCell colSpan={4}>{t('policies.empty')}</EmptyCell>
               </tr>
             ) : (
               policies.map((p) => (
@@ -133,7 +137,7 @@ export const PoliciesPage: React.FC = () => {
                       size="sm"
                       onClick={() => setConfirmDelete(p.name)}
                     >
-                      Delete
+                      {t('common.delete')}
                     </Button>
                   </td>
                 </tr>
@@ -152,11 +156,11 @@ export const PoliciesPage: React.FC = () => {
       )}
       <ConfirmModal
         open={confirmDelete !== null}
-        title={`Delete policy "${confirmDelete}"?`}
-        body="This action cannot be undone."
+        title={t('policies.deleteTitle', { name: confirmDelete ?? '' })}
+        body={t('common.cannotBeUndone')}
         destructive
         loading={deleting}
-        confirmLabel="Delete"
+        confirmLabel={t('policies.deleteConfirm')}
         onConfirm={onDelete}
         onClose={() => setConfirmDelete(null)}
       />
@@ -165,6 +169,7 @@ export const PoliciesPage: React.FC = () => {
 }
 
 const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [resource, setResource] = useState('')
   const [expression, setExpression] = useState('')
@@ -188,22 +193,27 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const modalFooter = (
     <>
       <Button variant="ghost" onClick={onClose} disabled={busy}>
-        Cancel
+        {t('common.cancel')}
       </Button>
       <Button form="create-policy-form" type="submit" loading={busy}>
-        Create
+        {t('common.create')}
       </Button>
     </>
   )
 
   return (
-    <Modal open onClose={onClose} title="New policy" footer={modalFooter}>
+    <Modal
+      open
+      onClose={onClose}
+      title={t('policies.createTitle')}
+      footer={modalFooter}
+    >
       <form
         id="create-policy-form"
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
-        <Field label="Name" htmlFor="cp-name" required>
+        <Field label={t('policies.fieldName')} htmlFor="cp-name" required>
           <Input
             id="cp-name"
             value={name}
@@ -213,9 +223,9 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           />
         </Field>
         <Field
-          label="Resource"
+          label={t('policies.fieldResource')}
           htmlFor="cp-resource"
-          hint="The graph or namespace this policy guards (e.g. graph:default)."
+          hint={t('policies.resourceHint')}
         >
           <Input
             id="cp-resource"
@@ -223,7 +233,11 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             onChange={(e) => setResource(e.target.value)}
           />
         </Field>
-        <Field label="Expression" htmlFor="cp-expression" required>
+        <Field
+          label={t('policies.fieldExpression')}
+          htmlFor="cp-expression"
+          required
+        >
           <Textarea
             id="cp-expression"
             value={expression}

@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { createPortal } from 'react-dom'
 
@@ -143,6 +144,7 @@ export const Modal: React.FC<ModalProps> = ({
   initialFocusRef,
   children,
 }) => {
+  const { t } = useTranslation()
   const dialogRef = React.useRef<HTMLDivElement>(null)
   const lastFocusedRef = React.useRef<HTMLElement | null>(null)
 
@@ -212,7 +214,11 @@ export const Modal: React.FC<ModalProps> = ({
             <h2 id="modal-title">{title}</h2>
             {description && <p id="modal-desc">{description}</p>}
           </TitleBlock>
-          <CloseBtn type="button" aria-label="Close dialog" onClick={onClose}>
+          <CloseBtn
+            type="button"
+            aria-label={t('common.closeDialog')}
+            onClick={onClose}
+          >
             ×
           </CloseBtn>
         </Header>
@@ -242,24 +248,25 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   open,
   title,
   body,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel,
+  cancelLabel,
   destructive,
   loading,
   onConfirm,
   onClose,
 }) => {
+  const { t } = useTranslation()
   const footer = (
     <>
       <Button variant="ghost" onClick={onClose} disabled={loading}>
-        {cancelLabel}
+        {cancelLabel ?? t('common.cancel')}
       </Button>
       <Button
         variant={destructive ? 'danger' : 'primary'}
         onClick={onConfirm}
         loading={loading}
       >
-        {confirmLabel}
+        {confirmLabel ?? t('common.confirm')}
       </Button>
     </>
   )

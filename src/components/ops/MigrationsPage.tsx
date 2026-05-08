@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -88,6 +89,7 @@ type MigrationsView = {
 }
 
 export const MigrationsPage: React.FC = () => {
+  const { t } = useTranslation()
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -119,7 +121,7 @@ export const MigrationsPage: React.FC = () => {
     try {
       const r = await client.postMigrationsRun({})
       const n = (r.applied ?? []).length
-      setOkMsg(`Applied ${n} migration(s).`)
+      setOkMsg(t('migrations.appliedToast', { count: n }))
       refetch()
     } catch (e: unknown) {
       setActionErr(e instanceof Error ? e.message : String(e))
@@ -141,33 +143,37 @@ export const MigrationsPage: React.FC = () => {
   return (
     <Stack $gap="lg">
       <ToolBar>
-        <h2>Migrations</h2>
-        <Button onClick={() => setShowCreate(true)}>+ New migration</Button>
+        <h2>{t('migrations.title')}</h2>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('migrations.newButton')}
+        </Button>
         <Button
           variant="secondary"
           onClick={onRunPending}
           loading={busy}
           disabled={pending.length === 0}
         >
-          Run pending ({pending.length})
+          {t('migrations.runPending', { count: pending.length })}
         </Button>
       </ToolBar>
       {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       {okMsg && <OkBanner role="status">{okMsg}</OkBanner>}
       <Section>
-        <h3>Pending ({pending.length})</h3>
+        <h3>{t('migrations.pendingHeading', { count: pending.length })}</h3>
         <TableScroll>
           <DataTable>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Actions</th>
+                <th>{t('migrations.columnName')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {pending.length === 0 ? (
                 <tr>
-                  <EmptyCell colSpan={2}>No pending migrations.</EmptyCell>
+                  <EmptyCell colSpan={2}>
+                    {t('migrations.emptyPending')}
+                  </EmptyCell>
                 </tr>
               ) : (
                 pending.map((name) => (
@@ -179,7 +185,7 @@ export const MigrationsPage: React.FC = () => {
                         size="sm"
                         onClick={() => onSign(name)}
                       >
-                        Sign
+                        {t('common.sign')}
                       </Button>
                     </td>
                   </tr>
@@ -190,21 +196,23 @@ export const MigrationsPage: React.FC = () => {
         </TableScroll>
       </Section>
       <Section>
-        <h3>Applied ({applied.length})</h3>
+        <h3>{t('migrations.appliedHeading', { count: applied.length })}</h3>
         <TableScroll>
           <DataTable>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Applied at</th>
-                <th>Signed by</th>
-                <th>Actions</th>
+                <th>{t('migrations.columnName')}</th>
+                <th>{t('migrations.columnAppliedAt')}</th>
+                <th>{t('migrations.columnSignedBy')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody>
               {applied.length === 0 ? (
                 <tr>
-                  <EmptyCell colSpan={4}>No applied migrations.</EmptyCell>
+                  <EmptyCell colSpan={4}>
+                    {t('migrations.emptyApplied')}
+                  </EmptyCell>
                 </tr>
               ) : (
                 applied.map((m) => (
@@ -218,7 +226,7 @@ export const MigrationsPage: React.FC = () => {
                         size="sm"
                         onClick={() => onSign(m.name)}
                       >
-                        Sign
+                        {t('common.sign')}
                       </Button>
                     </td>
                   </tr>
@@ -243,6 +251,7 @@ export const MigrationsPage: React.FC = () => {
 const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
   onClose,
 }) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [uploadedFile, setUploadedFile] = useState<string | null>(null)
@@ -289,7 +298,9 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
           error?: string
         }
         throw new Error(
-          j.error_description || j.error || `upload failed (${res.status})`
+          j.error_description ||
+            j.error ||
+            t('errors.uploadFailed', { status: res.status })
         )
       }
       const j = (await res.json()) as { file: string }
@@ -321,8 +332,8 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
     }
   }
 
-  let createLabel = 'Create'
-  if (uploading) createLabel = 'Uploading…'
+  let createLabel = t('common.create')
+  if (uploading) createLabel = t('common.uploading')
 
   const modalFooter = (
     <>
@@ -341,14 +352,19 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
   )
 
   return (
-    <Modal open onClose={onClose} title="New migration" footer={modalFooter}>
+    <Modal
+      open
+      onClose={onClose}
+      title={t('migrations.createTitle')}
+      footer={modalFooter}
+    >
       <form
         id="create-migration-form"
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
         <Field
-          label="Migration file (.gql / .sql)"
+          label={t('migrations.uploadLabel')}
           htmlFor="migration-upload-input"
         >
           <input
@@ -361,10 +377,10 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
         </Field>
         {uploadedFile && (
           <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
-            Staged: {uploadedFile}
+            {t('migrations.staged', { name: uploadedFile })}
           </span>
         )}
-        <Field label="Name" htmlFor="cm-name" required>
+        <Field label={t('migrations.fieldName')} htmlFor="cm-name" required>
           <Input
             id="cm-name"
             value={name}
@@ -372,7 +388,10 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
             required
           />
         </Field>
-        <Field label="Description" htmlFor="cm-description">
+        <Field
+          label={t('migrations.fieldDescription')}
+          htmlFor="cm-description"
+        >
           <Textarea
             id="cm-description"
             value={description}

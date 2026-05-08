@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { useNavigate } from 'react-router-dom'
 import { client } from '../../api/client'
@@ -47,6 +48,7 @@ const Empty = styled.p`
 `
 
 export const EdgeTypeList: React.FC<{ graph: string }> = ({ graph }) => {
+  const { t } = useTranslation()
   const [types, setTypes] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
   const setStaged = useQueryStore((s) => s.setStaged)
@@ -72,7 +74,7 @@ export const EdgeTypeList: React.FC<{ graph: string }> = ({ graph }) => {
   }, [graph])
 
   if (loaded && types.length === 0) {
-    return <Empty>No edge types.</Empty>
+    return <Empty>{t('schema.noEdgeTypes')}</Empty>
   }
 
   return (

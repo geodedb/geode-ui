@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
@@ -75,6 +76,7 @@ const fmtBytes = (n?: number): string => {
 }
 
 export const BackupPage: React.FC = () => {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -120,27 +122,29 @@ export const BackupPage: React.FC = () => {
   return (
     <Stack $gap="md">
       <ToolBar>
-        <h2>Backups ({backups.length})</h2>
-        <Button onClick={() => setShowCreate(true)}>+ New backup</Button>
+        <h2>{t('backups.title', { count: backups.length })}</h2>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('backups.newButton')}
+        </Button>
       </ToolBar>
       {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       <TableScroll>
         <DataTable>
           <thead>
             <tr>
-              <th>File</th>
-              <th>Size</th>
-              <th>Created</th>
-              <th>Graphs</th>
-              <th>Nodes</th>
-              <th>Edges</th>
-              <th>Actions</th>
+              <th>{t('backups.columnFile')}</th>
+              <th>{t('backups.columnSize')}</th>
+              <th>{t('backups.columnCreated')}</th>
+              <th>{t('backups.columnGraphs')}</th>
+              <th>{t('backups.columnNodes')}</th>
+              <th>{t('backups.columnEdges')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {backups.length === 0 ? (
               <tr>
-                <EmptyCell colSpan={7}>No backups.</EmptyCell>
+                <EmptyCell colSpan={7}>{t('backups.empty')}</EmptyCell>
               </tr>
             ) : (
               backups.map((b) => (
@@ -157,23 +161,23 @@ export const BackupPage: React.FC = () => {
                         variant="ghost"
                         size="sm"
                         disabled
-                        title="not yet wired"
+                        title={t('common.notYetWired')}
                       >
-                        Download
+                        {t('common.download')}
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => onRestore(b.file)}
                       >
-                        Restore
+                        {t('common.restore')}
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => setConfirmDelete(b.file)}
                       >
-                        Delete
+                        {t('common.delete')}
                       </Button>
                     </RowActions>
                   </td>
@@ -193,11 +197,11 @@ export const BackupPage: React.FC = () => {
       )}
       <ConfirmModal
         open={confirmDelete !== null}
-        title={`Delete backup "${confirmDelete}"?`}
-        body="The file will be removed from disk."
+        title={t('backups.deleteTitle', { name: confirmDelete ?? '' })}
+        body={t('backups.deleteBody')}
         destructive
         loading={deleting}
-        confirmLabel="Delete"
+        confirmLabel={t('common.delete')}
         onConfirm={onDelete}
         onClose={() => setConfirmDelete(null)}
       />
@@ -206,6 +210,7 @@ export const BackupPage: React.FC = () => {
 }
 
 const CreateBackupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
   const [graph, setGraph] = useState('')
   const [output, setOutput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -231,25 +236,30 @@ const CreateBackupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const modalFooter = (
     <>
       <Button variant="ghost" onClick={onClose} disabled={busy}>
-        Cancel
+        {t('common.cancel')}
       </Button>
       <Button form="create-backup-form" type="submit" loading={busy}>
-        Create
+        {t('common.create')}
       </Button>
     </>
   )
 
   return (
-    <Modal open onClose={onClose} title="New backup" footer={modalFooter}>
+    <Modal
+      open
+      onClose={onClose}
+      title={t('backups.createTitle')}
+      footer={modalFooter}
+    >
       <form
         id="create-backup-form"
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
         <Field
-          label="Graph"
+          label={t('backups.fieldGraph')}
           htmlFor="cb-graph"
-          hint="Optional — backs up all graphs when blank."
+          hint={t('backups.graphHint')}
         >
           <Input
             id="cb-graph"
@@ -259,9 +269,9 @@ const CreateBackupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           />
         </Field>
         <Field
-          label="Output path"
+          label={t('backups.fieldOutput')}
           htmlFor="cb-output"
-          hint="Optional — defaults to the configured backup directory."
+          hint={t('backups.outputHint')}
         >
           <Input
             id="cb-output"

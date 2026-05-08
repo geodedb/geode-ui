@@ -40,7 +40,13 @@ const plugins = [
       },
       {
         from: path.resolve(__dirname, 'public', 'site.webmanifest'),
-        to: path.resolve(__dirname, 'internal', 'ui', 'dist', 'site.webmanifest'),
+        to: path.resolve(
+          __dirname,
+          'internal',
+          'ui',
+          'dist',
+          'site.webmanifest'
+        ),
         noErrorOnMissing: true,
       },
     ],

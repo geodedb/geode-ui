@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -57,6 +58,7 @@ const ErrorBanner = styled.div`
 `
 
 export const RolesPage: React.FC = () => {
+  const { t } = useTranslation()
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -95,24 +97,26 @@ export const RolesPage: React.FC = () => {
   return (
     <Stack $gap="md">
       <ToolBar>
-        <h2>Roles ({roles.length})</h2>
-        <Button onClick={() => setShowCreate(true)}>+ New role</Button>
+        <h2>{t('roles.title', { count: roles.length })}</h2>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('roles.newButton')}
+        </Button>
       </ToolBar>
       {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       <TableScroll>
         <DataTable>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Description</th>
-              <th>Permissions</th>
-              <th>Actions</th>
+              <th>{t('roles.columnName')}</th>
+              <th>{t('roles.columnDescription')}</th>
+              <th>{t('roles.columnPermissions')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {roles.length === 0 ? (
               <tr>
-                <EmptyCell colSpan={4}>No roles.</EmptyCell>
+                <EmptyCell colSpan={4}>{t('roles.empty')}</EmptyCell>
               </tr>
             ) : (
               roles.map((r) => (
@@ -126,7 +130,7 @@ export const RolesPage: React.FC = () => {
                       size="sm"
                       onClick={() => setConfirmDelete(r.name)}
                     >
-                      Delete
+                      {t('common.delete')}
                     </Button>
                   </td>
                 </tr>
@@ -145,11 +149,11 @@ export const RolesPage: React.FC = () => {
       )}
       <ConfirmModal
         open={confirmDelete !== null}
-        title={`Delete role "${confirmDelete}"?`}
-        body="This action cannot be undone."
+        title={t('roles.deleteTitle', { name: confirmDelete ?? '' })}
+        body={t('common.cannotBeUndone')}
         destructive
         loading={deleting}
-        confirmLabel="Delete"
+        confirmLabel={t('roles.deleteConfirm')}
         onConfirm={onDelete}
         onClose={() => setConfirmDelete(null)}
       />
@@ -158,6 +162,7 @@ export const RolesPage: React.FC = () => {
 }
 
 const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [permissions, setPermissions] = useState('')
@@ -187,22 +192,27 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const modalFooter = (
     <>
       <Button variant="ghost" onClick={onClose} disabled={busy}>
-        Cancel
+        {t('common.cancel')}
       </Button>
       <Button form="create-role-form" type="submit" loading={busy}>
-        Create
+        {t('common.create')}
       </Button>
     </>
   )
 
   return (
-    <Modal open onClose={onClose} title="New role" footer={modalFooter}>
+    <Modal
+      open
+      onClose={onClose}
+      title={t('roles.createTitle')}
+      footer={modalFooter}
+    >
       <form
         id="create-role-form"
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
-        <Field label="Name" htmlFor="cr-name" required>
+        <Field label={t('roles.fieldName')} htmlFor="cr-name" required>
           <Input
             id="cr-name"
             value={name}
@@ -211,7 +221,7 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             autoFocus
           />
         </Field>
-        <Field label="Description" htmlFor="cr-description">
+        <Field label={t('roles.fieldDescription')} htmlFor="cr-description">
           <Input
             id="cr-description"
             value={description}
@@ -219,9 +229,9 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           />
         </Field>
         <Field
-          label="Permissions"
+          label={t('roles.fieldPermissions')}
           htmlFor="cr-permissions"
-          hint="Comma-separated identifiers (e.g. read,write,admin)."
+          hint={t('roles.permissionsHint')}
         >
           <Input
             id="cr-permissions"

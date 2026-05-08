@@ -1,4 +1,5 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
@@ -102,6 +103,7 @@ function streamStateToResp(s: StreamState): QueryResp {
 }
 
 export const QueryPage: React.FC = () => {
+  const { t } = useTranslation()
   const [stmt, setStmt] = useState('MATCH (n) RETURN n LIMIT 25')
   const [resp, setResp] = useState<QueryResp | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -158,7 +160,7 @@ export const QueryPage: React.FC = () => {
       })
       setResp(r)
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'query failed')
+      setErr(e instanceof Error ? e.message : t('errors.queryFailed'))
     } finally {
       setBusy(false)
     }
@@ -207,11 +209,11 @@ export const QueryPage: React.FC = () => {
       <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
       <Bar>
         <Button onClick={run} loading={busy}>
-          Run (⌘+Enter)
+          {t('query.runHotkey')}
         </Button>
         {streamMode && busy && (
           <Button variant="secondary" onClick={cancel}>
-            Cancel
+            {t('query.cancel')}
           </Button>
         )}
         <ToggleLabel>
@@ -225,7 +227,7 @@ export const QueryPage: React.FC = () => {
               setErr(null)
             }}
           />
-          Stream
+          {t('query.streamMode')}
         </ToggleLabel>
         <ToggleLabel>
           <input
@@ -233,29 +235,36 @@ export const QueryPage: React.FC = () => {
             checked={expand}
             onChange={(e) => setExpand(e.target.checked)}
           />
-          Expand graph cells
+          {t('query.expandGraphCells')}
         </ToggleLabel>
         {activeResp && (
           <span>
-            {activeResp.row_count} rows · {activeResp.elapsed_ms} ms
+            {t('common.rowCount', { count: activeResp.row_count ?? 0 })} ·{' '}
+            {t('common.elapsed', { ms: activeResp.elapsed_ms })}
           </span>
         )}
         {activeErr && <Err>{activeErr}</Err>}
       </Bar>
       {activeResp && (
         <>
-          <Tabs role="tablist" aria-label="Result view">
-            {(['table', 'json', 'graph'] as const).map((t) => (
+          <Tabs role="tablist" aria-label={t('query.resultViewLabel')}>
+            {(
+              [
+                ['table', t('query.tabTable')],
+                ['json', t('query.tabJson')],
+                ['graph', t('query.tabGraph')],
+              ] as const
+            ).map(([kind, label]) => (
               <TabBtn
-                key={t}
+                key={kind}
                 role="tab"
-                aria-selected={tab === t}
-                aria-controls={`result-panel-${t}`}
-                tabIndex={tab === t ? 0 : -1}
-                $active={tab === t}
-                onClick={() => setTab(t)}
+                aria-selected={tab === kind}
+                aria-controls={`result-panel-${kind}`}
+                tabIndex={tab === kind ? 0 : -1}
+                $active={tab === kind}
+                onClick={() => setTab(kind)}
               >
-                {t}
+                {label}
               </TabBtn>
             ))}
           </Tabs>

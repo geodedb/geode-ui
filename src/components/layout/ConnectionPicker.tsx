@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
 import { auth } from '../../api/auth'
 
@@ -28,6 +30,7 @@ interface ProfileEntry {
 }
 
 export const ConnectionPicker: React.FC = () => {
+  const { t } = useTranslation()
   const [names, setNames] = useState<string[]>([auth.getProfile()])
   const [active, setActive] = useState<string>(auth.getProfile())
   const [err, setErr] = useState<string | null>(null)
@@ -59,7 +62,9 @@ export const ConnectionPicker: React.FC = () => {
         }
       } catch (e: unknown) {
         if (!cancelled) {
-          setErr(e instanceof Error ? e.message : 'failed to load profiles')
+          setErr(
+            e instanceof Error ? e.message : t('errors.failedLoadProfiles')
+          )
         }
       }
     }
@@ -82,8 +87,8 @@ export const ConnectionPicker: React.FC = () => {
     <Select
       value={active}
       onChange={onChange}
-      title={err ? `error: ${err}` : 'connection profile'}
-      aria-label="Connection profile"
+      title={err ? `${t('common.error')}: ${err}` : t('connection.profile')}
+      aria-label={t('connection.profile')}
     >
       {names.map((n) => (
         <option key={n} value={n}>
