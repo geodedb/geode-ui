@@ -8,6 +8,24 @@
 - **Component patterns / theming / responsiveness:** `~/src/devnw/react/components` (`@devnw/components`)
 - **Brand colors / typography / visual identity:** `../geodedb.com` (Hugo "ultra" theme)
 
+## Status — 2026-05-08
+
+All five phases of the remediation roadmap below have shipped. The
+top ten findings now read:
+
+| Phase | Status | Commit |
+|-------|--------|--------|
+| 1 — Theme foundation (light + dark, brand fonts) | ✅ shipped | `f83dd8c` |
+| 2 — UI primitives (Button/Input/Field/DataTable/Modal/Stack) | ✅ shipped | `30f34de` + `5874d46` |
+| 3 — Responsiveness (Shell drawer, GraphView stack, mobile/tablet projects) | ✅ shipped | `acf1a95` |
+| 4 — A11y polish + theme enforcement scripts | ✅ shipped | `99468b1` |
+| 5 — Electron desktop packaging | ✅ shipped | `0dc9199` |
+
+Verification: 102/102 jest tests, tsc clean, eslint + prettier clean,
+production webpack build emits all six brand woff2 assets,
+`pnpm lint:hardcoded-styles` returns zero hits, `pnpm lint:contrast`
+shows all 14 theme pairs ≥ WCAG AA in both modes.
+
 > **TL;DR.** The UI is built on a clean styled-components v6 foundation, but it is **not aligned with either baseline**. Three structural problems dominate: (a) the palette is unrelated to the geodedb.com brand — primary `#1a56db` blue vs. brand `#601ca0` purple; (b) the app contains **zero `@media` queries** and is unusable below ~800 px viewport; (c) styling is duplicated per-page rather than centralized into shared primitives — 19 separate `styled.button` definitions, six `styled.table` re-implementations, ~69 production-code hex literals outside the theme. Light mode does not exist.
 
 ---
