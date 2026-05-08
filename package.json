@@ -24,7 +24,11 @@
     "e2e:headed": "playwright test --config=e2e/playwright.config.ts --headed",
     "e2e:debug": "PWDEBUG=1 playwright test --config=e2e/playwright.config.ts",
     "e2e:report": "playwright show-report e2e/playwright-report",
-    "e2e:smoke": "playwright test --config=e2e/playwright.config.ts e2e/specs/01-auth.spec.ts"
+    "e2e:smoke": "playwright test --config=e2e/playwright.config.ts e2e/specs/01-auth.spec.ts",
+    "electron:tsc": "tsc --project electron/tsconfig.json",
+    "electron:build": "pnpm run build && pnpm run electron:tsc && cp -r internal/ui/dist internal/ui/electron-dist/dist",
+    "electron:dev": "pnpm run electron:build && electron internal/ui/electron-dist/main.js",
+    "electron:package": "electron-builder --config electron-builder.yml"
   },
   "engines": {
     "node": ">=22.14.0"

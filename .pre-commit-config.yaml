@@ -115,7 +115,7 @@ repos:
     entry: npx --no-install eslint --max-warnings=0
     language: system
     files: \.(ts|tsx)$
-    exclude: ^(node_modules/|gen/)
+    exclude: ^(node_modules/|gen/|electron/|internal/ui/electron-dist/)
 
   - id: prettier-check
     name: prettier:check
@@ -123,7 +123,7 @@ repos:
     language: system
     pass_filenames: false
     files: \.(ts|tsx|json|css)$
-    exclude: ^(node_modules/|gen/|package-lock\.json)
+    exclude: ^(node_modules/|gen/|electron/|package-lock\.json)
 
   # Theme enforcement — lightweight scans that fail loudly if a hex
   # literal or rgb()/hsl() call shows up outside src/theme/, or if any

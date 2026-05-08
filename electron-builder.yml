@@ -1,0 +1,57 @@
+# electron-builder config — drives `pnpm electron:package`.
+#
+# The packaged app bundles the compiled main process (electron-dist/main.js
+# + preload.js) plus the SPA build (internal/ui/dist) under app:// custom
+# protocol. We deliberately keep this minimal — the CI publish step
+# ships .dmg / .AppImage / .exe and they all use the same config.
+
+appId: com.geodedb.ui
+productName: Geode
+copyright: Copyright (c) Geode Database. All rights reserved.
+
+directories:
+  output: release/${platform}
+  buildResources: build
+
+files:
+- internal/ui/electron-dist/**/*
+- internal/ui/dist/**/*
+- package.json
+
+# Asar packs everything into a single archive. Uncomment to enable
+# (off by default so debugging packaged builds is easier).
+# asar: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+  - target: dmg
+    arch: [universal]
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # Provide an icon at build/icon.icns before publishing — placeholder
+  # falls back to electron's default during local builds.
+  # icon: build/icon.icns
+
+linux:
+  target:
+  - target: AppImage
+    arch: [x64]
+  - target: deb
+    arch: [x64]
+  category: Development
+  # icon: build/icon.png
+
+win:
+  target:
+  - target: nsis
+    arch: [x64]
+  # icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+publish:
+  provider: generic
+  url: https://geodedb.com/releases/ui/
