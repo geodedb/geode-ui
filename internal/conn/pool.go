@@ -15,8 +15,7 @@ import (
 // driverName is the database/sql driver name registered by the
 // geodedb.com/geode package's init() function. See
 // geode-client-go/driver.go: sql.Register("geode", &Driver{}).
-// Declared as a var so tests can substitute a stub driver.
-var driverName = "geode"
+const driverName = "geode"
 
 // Default pool settings. Sized for the documented operational target of
 // 2000 rps sustained with a 400 rps burst (PERF-F11 / issue #55). The
@@ -91,6 +90,7 @@ func WithConnMaxIdleTime(d time.Duration) PoolOption {
 type Pool struct {
 	cfg      *PoolConfig
 	profiles map[string]Profile
+	dbOpener func(driver, dsn string) (*sql.DB, error)
 
 	mu  sync.Mutex
 	dbs map[string]*sql.DB
@@ -132,6 +132,7 @@ func NewPool(profiles []Profile, opts ...PoolOption) (*Pool, error) {
 		cfg:      cfg,
 		profiles: m,
 		dbs:      make(map[string]*sql.DB, len(m)),
+		dbOpener: sql.Open,
 	}, nil
 }
 
@@ -177,7 +178,7 @@ func (p *Pool) DB(name string) (*sql.DB, error) {
 		return db, nil
 	}
 
-	db, err := sql.Open(driverName, prof.DSN)
+	db, err := p.dbOpener(driverName, prof.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("conn: sql.Open profile %q: %w", name, err)
 	}

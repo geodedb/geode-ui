@@ -21,7 +21,13 @@ func (c *stubConn) Begin() (driver.Tx, error)            { return nil, io.ErrUne
 
 func init() {
 	sql.Register("stub", &stubDriver{})
-	driverName = "stub"
+}
+
+// stubOpener is an sql.Open-compatible function that always uses the "stub"
+// driver, regardless of the driver name passed. Assign to p.dbOpener in tests
+// that need to call Pool.DB() without a live Geode server.
+func stubOpener(_, dsn string) (*sql.DB, error) {
+	return sql.Open("stub", dsn)
 }
 
 func TestPool_Lookup(t *testing.T) {
@@ -120,6 +126,7 @@ func TestPool_DB_AppliesDefaultLimits(t *testing.T) {
 		t.Fatalf("NewPool: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
+	p.dbOpener = stubOpener
 
 	db, err := p.DB("local")
 	if err != nil {
@@ -165,6 +172,7 @@ func TestPool_DB_LazyAndCached(t *testing.T) {
 		t.Fatalf("NewPool: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
+	p.dbOpener = stubOpener
 
 	db1, err := p.DB("local")
 	if err != nil {
@@ -194,6 +202,7 @@ func TestPool_Close_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
+	p.dbOpener = stubOpener
 
 	// Force a *sql.DB to exist so Close has something to do.
 	if _, err := p.DB("local"); err != nil {
@@ -221,6 +230,7 @@ func TestPoolReloadKeepsExistingDBs(t *testing.T) {
 		t.Fatalf("NewPool: %v", err)
 	}
 	defer func() { _ = p.Close() }()
+	p.dbOpener = stubOpener
 
 	dbA, err := p.DB("a")
 	if err != nil {
