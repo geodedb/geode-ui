@@ -265,6 +265,10 @@ export const en = {
 
   connection: {
     profile: 'Connection profile',
+    noActive: 'No active connection',
+    connect: 'Connect',
+    disconnect: 'Disconnect',
+    addAnother: 'Add another connection',
   },
 } as const
 
