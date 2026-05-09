@@ -14,6 +14,7 @@ import { RolesPage } from './components/admin/RolesPage'
 import { PoliciesPage } from './components/admin/PoliciesPage'
 import { GrantsPanel } from './components/admin/GrantsPanel'
 import { OpsPage } from './pages/OpsPage'
+import { ProfilesPage } from './pages/ProfilesPage'
 import { BackupPage } from './components/ops/BackupPage'
 import { RestorePage } from './components/ops/RestorePage'
 import { MigrationsPage } from './components/ops/MigrationsPage'
@@ -107,6 +108,7 @@ const App: React.FC = () => (
                   <Route path="migrations" element={<MigrationsPage />} />
                   <Route path="audit" element={<AuditLogPage />} />
                 </Route>
+                <Route path="profiles" element={<ProfilesPage />} />
               </Route>
             </Routes>
           </BrowserRouter>

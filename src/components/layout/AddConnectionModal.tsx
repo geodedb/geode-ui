@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '../../auth/AuthProvider'
 import { fetchPublicProfiles, PublicProfile } from '../../api/auth'
+import { listProfiles, ProfileView } from '../../api/profiles'
 import { Button, Field, Input, Modal } from '../ui'
 
 export interface Props {
@@ -19,6 +20,7 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   const [password, setPassword] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [authedProfiles, setAuthedProfiles] = useState<ProfileView[]>([])
 
   useEffect(() => {
     if (!open) return undefined
@@ -35,6 +37,26 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
       cancelled = true
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return undefined
+    let cancelled = false
+    listProfiles()
+      .then((list) => {
+        if (!cancelled) setAuthedProfiles(list)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
+  useEffect(() => {
+    const found = authedProfiles.find((p) => p.name === profile)
+    if (found?.savedUsername) {
+      setUsername(found.savedUsername)
+    }
+  }, [profile, authedProfiles])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()

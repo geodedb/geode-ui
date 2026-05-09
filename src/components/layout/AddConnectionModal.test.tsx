@@ -28,6 +28,11 @@ jest.mock('../../api/auth', () => ({
   ]),
 }))
 
+jest.mock('../../api/profiles', () => ({
+  ...jest.requireActual('../../api/profiles'),
+  listProfiles: jest.fn().mockResolvedValue([]),
+}))
+
 const renderModal = (open: boolean, onClose: () => void) =>
   render(
     <I18nextProvider i18n={i18n}>

@@ -49,6 +49,7 @@ export const en = {
     schema: 'Schema',
     admin: 'Admin',
     ops: 'Ops',
+    profiles: 'Profiles',
     logout: 'Logout',
   },
 
