@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import styled from 'styled-components'
@@ -6,7 +6,8 @@ import styled from 'styled-components'
 import { useAuth } from '../../auth/AuthProvider'
 import { above, below } from '../../theme'
 import { Button, Logo, Spacer } from '../ui'
-import { ConnectionPicker } from './ConnectionPicker'
+import { AddConnectionModal } from './AddConnectionModal'
+import { ConnectionSwitcher } from './ConnectionSwitcher'
 
 const SkipLink = styled.a`
   position: absolute;
@@ -33,8 +34,8 @@ const SkipLink = styled.a`
 //   1) Never wrap. A wrapping header is the symptom-hide for
 //      "content does not fit"; instead we collapse the desktop nav
 //      into a drawer at the lg breakpoint (≤ 991 px) so brand +
-//      ConnectionPicker + hamburger always fit on one line.
-//   2) `overflow-x: clip` ensures a ConnectionPicker with a
+//      ConnectionSwitcher + hamburger always fit on one line.
+//   2) `overflow-x: clip` ensures a ConnectionSwitcher with a
 //      pathologically long profile name cannot push the body
 //      sideways or trigger a horizontal page scrollbar.
 const Top = styled.nav`
@@ -104,7 +105,7 @@ const NavLink = styled(Link)`
 // child that can shrink coherently and own its trailing Spacer.
 //
 // Collapse threshold raised from md (768 px) to lg (992 px) — at
-// md you have brand + ConnectionPicker + 4 nav links + Spacer +
+// md you have brand + ConnectionSwitcher + 4 nav links + Spacer +
 // logout in ~720 px after padding, which only fits if every label
 // is short. Falling back to the drawer at lg leaves room for
 // long connection names without clipping.
@@ -193,6 +194,7 @@ export const Shell: React.FC = () => {
   const { signOut } = useAuth()
   const { t } = useTranslation()
   const [drawerOpen, setDrawerOpen] = React.useState(false)
+  const [addOpen, setAddOpen] = useState(false)
   const location = useLocation()
 
   // Auto-close the drawer on route change so a tap on a nav link
@@ -218,7 +220,7 @@ export const Shell: React.FC = () => {
         <BrandLink to="/" aria-label={t('brand.home')}>
           <Logo height={28} />
         </BrandLink>
-        <ConnectionPicker />
+        <ConnectionSwitcher onAddRequested={() => setAddOpen(true)} />
         <DesktopNav>
           <NavLink to="/">{t('nav.query')}</NavLink>
           <NavLink to="/schema">{t('nav.schema')}</NavLink>
@@ -255,6 +257,7 @@ export const Shell: React.FC = () => {
       <Body id="main-content">
         <Outlet />
       </Body>
+      <AddConnectionModal open={addOpen} onClose={() => setAddOpen(false)} />
     </>
   )
 }

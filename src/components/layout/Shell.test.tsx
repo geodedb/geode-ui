@@ -14,8 +14,13 @@ jest.mock('../../auth/AuthProvider', () => ({
     isAuthenticated: true,
   }),
 }))
-jest.mock('./ConnectionPicker', () => ({
-  ConnectionPicker: () => <div data-testid="connection-picker" />,
+jest.mock('./ConnectionSwitcher', () => ({
+  ConnectionSwitcher: () => <div data-testid="connection-switcher" />,
+}))
+jest.mock('./AddConnectionModal', () => ({
+  AddConnectionModal: ({ open }: { open: boolean }) => {
+    return open ? <div data-testid="add-modal" /> : null
+  },
 }))
 
 const renderShell = () =>

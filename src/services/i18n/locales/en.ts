@@ -26,7 +26,6 @@ export const en = {
     download: 'Download',
     restore: 'Restore',
     uploading: 'Uploading…',
-    error: 'Error',
     actions: 'Actions',
     closeDialog: 'Close dialog',
     cannotBeUndone: 'This action cannot be undone.',
@@ -260,11 +259,9 @@ export const en = {
   errors: {
     uploadFailed: 'upload failed ({{status}})',
     queryFailed: 'query failed',
-    failedLoadProfiles: 'failed to load profiles',
   },
 
   connection: {
-    profile: 'Connection profile',
     noActive: 'No active connection',
     connect: 'Connect',
     disconnect: 'Disconnect',
