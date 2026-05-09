@@ -11,6 +11,7 @@ import {
   createProfile,
   updateProfile,
 } from '../../api/profiles'
+import { isElectron, pickPemFile } from '../../api/electron-bridge'
 
 const Section = styled.section`
   margin-top: ${({ theme }) => theme.spacing.md};
@@ -212,6 +213,19 @@ export const ProfileEditorModal: React.FC<Props> = ({
     }
   }, [mode, profile])
 
+  const browseCAPem = async (): Promise<void> => {
+    const text = await pickPemFile()
+    if (text !== null) setS({ ...s, caPem: text })
+  }
+  const browseClientCertPem = async (): Promise<void> => {
+    const text = await pickPemFile()
+    if (text !== null) setS({ ...s, clientCertPem: text })
+  }
+  const browseClientKeyPem = async (): Promise<void> => {
+    const text = await pickPemFile()
+    if (text !== null) setS({ ...s, clientKeyPem: text })
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
@@ -321,6 +335,18 @@ export const ProfileEditorModal: React.FC<Props> = ({
             label={t('profiles.editor.field.caPem')}
             htmlFor="profile-caPem"
           >
+            {isElectron() ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  browseCAPem().catch(() => undefined)
+                }}
+              >
+                {t('electron.browse')}
+              </Button>
+            ) : null}
             <Textarea
               id="profile-caPem"
               value={s.caPem}
@@ -331,6 +357,18 @@ export const ProfileEditorModal: React.FC<Props> = ({
             label={t('profiles.editor.field.clientCertPem')}
             htmlFor="profile-clientCertPem"
           >
+            {isElectron() ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  browseClientCertPem().catch(() => undefined)
+                }}
+              >
+                {t('electron.browse')}
+              </Button>
+            ) : null}
             <Textarea
               id="profile-clientCertPem"
               value={s.clientCertPem}
@@ -341,6 +379,18 @@ export const ProfileEditorModal: React.FC<Props> = ({
             label={t('profiles.editor.field.clientKeyPem')}
             htmlFor="profile-clientKeyPem"
           >
+            {isElectron() ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  browseClientKeyPem().catch(() => undefined)
+                }}
+              >
+                {t('electron.browse')}
+              </Button>
+            ) : null}
             <Textarea
               id="profile-clientKeyPem"
               value={s.clientKeyPem}

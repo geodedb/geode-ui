@@ -269,6 +269,10 @@ export const en = {
     addAnother: 'Add another connection',
   },
 
+  electron: {
+    browse: 'Browse…',
+  },
+
   profiles: {
     title: 'Profiles',
     description:

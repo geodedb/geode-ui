@@ -13,6 +13,14 @@ jest.mock('../../api/profiles', () => ({
   updateProfile: jest.fn(),
 }))
 
+jest.mock('../../api/electron-bridge', () => ({
+  isElectron: jest.fn().mockReturnValue(true),
+  pickPemFile: jest.fn(),
+}))
+
+const mockPickPemFile = jest.requireMock('../../api/electron-bridge')
+  .pickPemFile as jest.Mock
+
 const mockCreate = jest.requireMock('../../api/profiles')
   .createProfile as jest.Mock
 
@@ -197,4 +205,34 @@ test('edit — isDefault is always included in the PATCH (prevents silent unflag
   })
   const callArg = mockUpdate.mock.calls[0][1]
   expect(callArg.isDefault).toBe(true) // explicitly preserved!
+})
+
+test('create — Browse fills CA textarea with file contents (Electron)', async () => {
+  mockPickPemFile.mockResolvedValueOnce('---PEM---')
+  const onClose = jest.fn()
+  const onSaved = jest.fn()
+  render(
+    <I18nextProvider i18n={i18n}>
+      <ThemeProvider theme={lightTheme}>
+        <ProfileEditorModal
+          mode="create"
+          open
+          onClose={onClose}
+          onSaved={onSaved}
+          isAdmin
+        />
+      </ThemeProvider>
+    </I18nextProvider>
+  )
+  const browseBtns = screen.getAllByRole('button', { name: /browse/i })
+  expect(browseBtns.length).toBeGreaterThanOrEqual(3) // one per TLS field
+  await act(async () => {
+    fireEvent.click(browseBtns[0]!)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  const caTextarea = document.getElementById(
+    'profile-caPem'
+  ) as HTMLTextAreaElement
+  expect(caTextarea.value).toBe('---PEM---')
 })
