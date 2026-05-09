@@ -6,6 +6,7 @@ import {
   shell,
   ipcMain,
   nativeTheme,
+  safeStorage,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
@@ -16,6 +17,7 @@ import {
   resolveProtocolAsset,
 } from './lib/safety'
 import { AssetCache, defaultCacheOptions } from './lib/cache'
+import { createSecureStore, SecureStore } from './lib/secure-store'
 
 // P-NEW-7: keep recently-served SPA assets in memory so a hard reload
 // or a tight burst of subresource requests don't all hit the disk.
@@ -62,6 +64,21 @@ interface WindowState {
 
 function statePath(): string {
   return path.join(app.getPath('userData'), 'window-state.json')
+}
+
+let _store: SecureStore | null = null
+function secureStore(): SecureStore {
+  if (!_store) {
+    _store = createSecureStore({
+      storePath: path.join(app.getPath('userData'), 'secure-store.json'),
+      safeStorage,
+    })
+  }
+  return _store
+}
+
+function pwKey(profileName: string, username: string): string {
+  return `${profileName}\x00${username}`
 }
 
 async function loadWindowState(): Promise<WindowState> {
@@ -293,6 +310,59 @@ async function createWindow(): Promise<void> {
 }
 
 ipcMain.handle('geode:get-version', () => app.getVersion())
+ipcMain.handle('geode:get-stored-connections', async () => {
+  const doc = await secureStore().read()
+  const now = Date.now()
+  return (doc.connections ?? []).filter((c) => c.expiresAt > now)
+})
+
+ipcMain.handle(
+  'geode:store-connections',
+  async (
+    _evt,
+    list: Array<{
+      connectionId: string
+      token: string
+      profileName: string
+      expiresAt: number
+    }>
+  ) => {
+    const doc = await secureStore().read()
+    await secureStore().write({ ...doc, connections: list })
+    return true
+  }
+)
+
+ipcMain.handle(
+  'geode:get-stored-password',
+  async (_evt, profileName: string, username: string) => {
+    const doc = await secureStore().read()
+    return doc.passwords?.[pwKey(profileName, username)] ?? null
+  }
+)
+
+ipcMain.handle(
+  'geode:store-saved-password',
+  async (_evt, profileName: string, username: string, password: string) => {
+    const doc = await secureStore().read()
+    const passwords = { ...(doc.passwords ?? {}) }
+    passwords[pwKey(profileName, username)] = password
+    await secureStore().write({ ...doc, passwords })
+    return true
+  }
+)
+
+ipcMain.handle(
+  'geode:clear-stored-password',
+  async (_evt, profileName: string, username: string) => {
+    const doc = await secureStore().read()
+    if (!doc.passwords) return true
+    const passwords = { ...doc.passwords }
+    delete passwords[pwKey(profileName, username)]
+    await secureStore().write({ ...doc, passwords })
+    return true
+  }
+)
 ipcMain.handle('geode:open-external', async (_evt, url: string) => {
   if (typeof url !== 'string') return false
   // Whitelist to https / mailto only — never let the renderer ask the

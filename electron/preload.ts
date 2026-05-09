@@ -11,12 +11,28 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 type ThemeVariant = 'light' | 'dark'
 
+interface ConnectionRecord {
+  connectionId: string
+  token: string
+  profileName: string
+  expiresAt: number
+}
+
 interface GeodeBridge {
   isElectron: true
   getVersion(): Promise<string>
   openExternal(url: string): Promise<boolean>
   getSystemTheme(): Promise<ThemeVariant>
   onSystemThemeChange(handler: (variant: ThemeVariant) => void): () => void
+  getStoredConnections(): Promise<ConnectionRecord[]>
+  storeConnections(list: ConnectionRecord[]): Promise<boolean>
+  getStoredPassword(profileName: string, username: string): Promise<string | null>
+  storeSavedPassword(
+    profileName: string,
+    username: string,
+    password: string
+  ): Promise<boolean>
+  clearStoredPassword(profileName: string, username: string): Promise<boolean>
 }
 
 const bridge: GeodeBridge = {
@@ -35,6 +51,21 @@ const bridge: GeodeBridge = {
       ipcRenderer.removeListener('geode:system-theme-changed', listener)
     }
   },
+  getStoredConnections: () =>
+    ipcRenderer.invoke('geode:get-stored-connections') as Promise<ConnectionRecord[]>,
+  storeConnections: (list) =>
+    ipcRenderer.invoke('geode:store-connections', list) as Promise<boolean>,
+  getStoredPassword: (profileName, username) =>
+    ipcRenderer.invoke('geode:get-stored-password', profileName, username) as Promise<string | null>,
+  storeSavedPassword: (profileName, username, password) =>
+    ipcRenderer.invoke(
+      'geode:store-saved-password',
+      profileName,
+      username,
+      password
+    ) as Promise<boolean>,
+  clearStoredPassword: (profileName, username) =>
+    ipcRenderer.invoke('geode:clear-stored-password', profileName, username) as Promise<boolean>,
 }
 
 contextBridge.exposeInMainWorld('geode', bridge)
