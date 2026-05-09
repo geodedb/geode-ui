@@ -186,14 +186,26 @@ follow-up.
   whitelists `https:` and `mailto:` — file:// or custom schemes
   cannot be launched.
 
+## Code signing in CI
+
+Signing is wired up in the release pipeline; see
+[deploy/RELEASE.md](../deploy/RELEASE.md) for the full operator setup.
+
+| Platform | Mechanism | CI variables (or the equivalent Vault fields) |
+|---|---|---|
+| Windows `.exe` | ssl.com eSigner cloud HSM via the [`codesign-windows-ssl`](https://gitlab.com/devnw/ci-catalog/-/tree/main/templates/codesign-windows-ssl) ci-catalog component (EV / OV / IV certs supported; EV recommended for SmartScreen reputation) | `ESIGNER_USERNAME`, `ESIGNER_PASSWORD`, `ESIGNER_CREDENTIAL_ID`, `ESIGNER_TOTP_SECRET` |
+| macOS `.dmg` | electron-builder + Apple Developer ID; `mac.hardenedRuntime: true` set in `electron-builder.yml` | `CSC_LINK` (.p12 base64), `CSC_KEY_PASSWORD`. Notarization via `notarytool` requires `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`. |
+| Linux `.AppImage` / `.deb` | unsigned by default — sign the GitLab release tag for provenance, or layer GPG signing via the [`apt-publish`](https://gitlab.com/devnw/ci-catalog/-/tree/main/templates/apt-publish) component | n/a |
+
+Both signing jobs are `allow_failure: true` until the corresponding
+certs are provisioned, so a fork or unconfigured pipeline still ships
+unsigned bits without breaking the release.
+
 ## Out of scope (this commit)
 
 - Auto-updater. `electron-updater` integration would land in a follow-
   up; the `publish.provider: generic` block in `electron-builder.yml`
   positions us for it.
-- Code signing / notarization. The `mac.hardenedRuntime: true` flag is
-  set, but the actual signing certificates live in the release
-  pipeline, not in source.
 - App icons. Placeholders documented in `electron-builder.yml`. Drop a
   512×512 PNG into `build/icon.png` and `electron-builder` will build
   the .icns / .ico variants automatically.

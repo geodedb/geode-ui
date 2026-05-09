@@ -60,13 +60,45 @@ Profiles JSON example:
 
 ## Docker
 
-A multi-stage build (Node web build → Go static binary → minimal Alpine
-runtime) lives in [deploy/Dockerfile](deploy/Dockerfile). An example compose
-file is in [deploy/docker-compose.example.yml](deploy/docker-compose.example.yml).
+For local development, a multi-stage build (Node web build → Go static binary
+→ minimal Alpine runtime) lives in [deploy/Dockerfile](deploy/Dockerfile).
+An example compose file is in
+[deploy/docker-compose.example.yml](deploy/docker-compose.example.yml).
 
 > **Note:** until `geodedb.com/geode` ships to a public Go module proxy, the
-> Docker build context must include a sibling `geode-client-go/` checkout next
-> to `geode-ui/`. See the Dockerfile header comments for details.
+> dev Docker build context must include a sibling `geode-client-go/` checkout
+> next to `geode-ui/`. See the Dockerfile header comments for details.
+
+For released images, GoReleaser produces eight container variants
+(debian + alpine × amd64 + arm64) on every git tag and pushes them to
+both the GitLab Container Registry and `docker.io/geodedb/geode-ui` —
+see [Releasing](#releasing) below.
+
+## Releasing
+
+The release pipeline produces three artifact families on every git tag
+matching `v*`:
+
+| Artifact | Where it lands | Built by |
+|---|---|---|
+| Container images (8 variants) | `registry.gitlab.com/devnw/codepros/geode/geode-ui` + `docker.io/geodedb/geode-ui` | GoReleaser ([`.goreleaser.yaml`](.goreleaser.yaml)) |
+| Linux packages (.deb / .rpm / .apk) | GitLab Release page assets | GoReleaser nFPM |
+| Electron desktop installers (.dmg / .AppImage / .deb / .exe) | GitLab Release page assets | electron-builder |
+
+Snapshot builds (main-branch pushes) push container images to the GitLab
+Container Registry only with `<version>-snapshot-<sha>` tags; nothing is
+published to Docker Hub or as desktop installers off-tag.
+
+Windows installers are signed with an EV Authenticode certificate via
+ssl.com's eSigner cloud HSM (delegated to the
+[`codesign-windows-ssl`](https://gitlab.com/devnw/ci-catalog/-/tree/main/templates/codesign-windows-ssl)
+ci-catalog component); macOS installers are signed via electron-builder
+when an Apple Developer ID cert is provisioned.
+
+See [deploy/RELEASE.md](deploy/RELEASE.md) for the full operator runbook —
+required CI variables (already provisioned at the
+`devnw/codepros/geode` group level for Docker Hub), tag-cut workflow,
+ssl.com EV signing setup, snapshot semantics, and local-test commands.
 
 ## Development
 
@@ -130,6 +162,9 @@ engine gap, not a UI regression.
 
 - [Architecture overview](docs/README.md)
 - [Private registry setup](docs/PRIVATE_REGISTRY.md)
+- [Electron desktop client](docs/ELECTRON.md)
+- [Internationalization (i18n)](docs/I18N.md)
+- [Release engineering](deploy/RELEASE.md) — goreleaser pipeline, EV signing, tag workflow
 
 ## Contributing
 
