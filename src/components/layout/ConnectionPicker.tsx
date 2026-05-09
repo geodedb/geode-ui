@@ -35,10 +35,6 @@ const Select = styled.select`
   flex-shrink: 1;
 `
 
-interface ProfileEntry {
-  name?: unknown
-}
-
 export const ConnectionPicker: React.FC = () => {
   const { t } = useTranslation()
   const [names, setNames] = useState<string[]>([auth.getProfile()])
@@ -52,14 +48,11 @@ export const ConnectionPicker: React.FC = () => {
     let cancelled = false
     const load = async () => {
       try {
-        const r = await client.profiles({})
+        const r = await client.getProfiles({})
         if (cancelled) return
         const fromServer = (r?.profiles ?? [])
-          .map((p: Record<string, unknown>) => {
-            const entry = p as ProfileEntry
-            return typeof entry.name === 'string' ? entry.name : ''
-          })
-          .filter((n: string) => n.length > 0)
+          .map((p) => p.name)
+          .filter((n): n is string => typeof n === 'string' && n.length > 0)
         const first = fromServer[0]
         if (first === undefined) return
         setNames(fromServer)
