@@ -16,6 +16,20 @@ include:
   # Release
   - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.7.1
 
+  # Code signing — Windows Authenticode via ssl.com eSigner.
+  # Pulls credentials from group-level CI variables ESIGNER_*; see
+  # deploy/RELEASE.md for the one-time ssl.com setup.
+  # Bump @~latest to a pinned tag once codesign-windows-ssl ships in
+  # a tagged ci-catalog release.
+  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@~latest
+    inputs:
+      input_glob: 'release/win/*.exe'
+      needs: 'electron:win'
+      tag_only: true
+      job_name: 'codesign:electron-win'
+      stage: release
+      allow_failure: true
+
 variables:
   NODE_VERSION: '22.14.0'
   GO_VERSION: '1.26-alpine'
@@ -583,6 +597,12 @@ release:publish:
       artifacts: true
       optional: true
     - job: electron:win
+      artifacts: true
+      optional: true
+    # The codesign job re-uploads release/win/*.exe with Authenticode
+    # signatures applied in-place. Marked optional so a missing
+    # ssl.com cert (or a tag from a fork) still ships unsigned bits.
+    - job: codesign:electron-win
       artifacts: true
       optional: true
   before_script:

@@ -25,12 +25,43 @@ protected refs (release tags + main).
 | `DOCKERHUB_TOKEN` | Docker Hub access token (NOT the password) | same |
 | `CSC_LINK` | Apple Developer ID `.p12` cert (base64-encoded) | Signed macOS .dmg |
 | `CSC_KEY_PASSWORD` | Password for `CSC_LINK` | same |
-| `WIN_CSC_LINK` | Authenticode cert (base64 .pfx) | Signed Windows .exe |
-| `WIN_CSC_KEY_PASSWORD` | Password for `WIN_CSC_LINK` | same |
+| `ESIGNER_USERNAME` | ssl.com eSigner account email | Signed Windows .exe (EV) |
+| `ESIGNER_PASSWORD` | ssl.com eSigner account password | same |
+| `ESIGNER_CREDENTIAL_ID` | ssl.com EV cert credential ID | same |
+| `ESIGNER_TOTP_SECRET` | base32 TOTP shared secret | same |
 
 The pipeline still runs without the optional code-signing variables; the
 mac/win installers are produced unsigned and operators see the OS warning
 on first launch.
+
+`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` are already set at the
+`devnw/codepros/geode` group level — no per-project action needed.
+
+### Windows EV signing (ssl.com)
+
+Windows installers go through the
+[`codesign-windows-ssl`](https://gitlab.com/devnw/ci-catalog/-/tree/main/templates/codesign-windows-ssl)
+ci-catalog component, which signs `release/win/*.exe` in place using
+ssl.com's eSigner cloud HSM. Setup steps live in that component's
+`README.md` — short version:
+
+1. Buy an EV Code Signing certificate from ssl.com and complete the
+   organization-validation paperwork (~3-5 business days).
+2. Activate eSigner during cert provisioning. ssl.com walks you through
+   account creation (`ESIGNER_USERNAME` + `ESIGNER_PASSWORD`), credential
+   linking (`ESIGNER_CREDENTIAL_ID`), and TOTP setup
+   (`ESIGNER_TOTP_SECRET` is the base32 string from the QR code, NOT a
+   one-time code — ssl.com only shows it once).
+3. Provision the four `ESIGNER_*` variables above. Recommend setting
+   them at the `devnw/codepros/geode` GROUP level so all geode-family
+   repos can sign without duplicating values. Mark all four `Masked`
+   and `Protected`.
+4. Cut a tag — `codesign:electron-win` runs after `electron:win`,
+   re-uploads `release/win/*.exe` with the signature applied, and
+   `release:publish` picks up the signed binaries automatically.
+
+For Apple-side macOS notarization, the existing `CSC_LINK` variables
+feed electron-builder directly (no separate ci-catalog component yet).
 
 ## Cutting a release
 
