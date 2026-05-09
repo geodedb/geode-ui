@@ -99,6 +99,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		"user", req.Username,
 		"profile", profile,
 		"roles", roles,
+		"cid", connID,
 	)
 	expiresIn := int64(exp.Sub(timeNow()).Seconds())
 	if expiresIn < 1 {
