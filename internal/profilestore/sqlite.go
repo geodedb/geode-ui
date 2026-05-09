@@ -216,10 +216,10 @@ func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 }
 
 // mergeProfile applies non-zero fields of patch over cur. The Default
-// flag is treated as set when patch.Default is true; clearing the
-// default requires a separate "set default" semantic that v0 does not
-// expose (the editor in plan D forces exactly one default at a time
-// by clearing the previous default in a single transaction).
+// flag is overwritten verbatim (true OR false) so callers can clear
+// it via PATCH. Callers that want "leave Default alone" must read the
+// current value first and re-send it (the SPA editor binds Default to
+// a checkbox state and always sends the user's intent).
 func mergeProfile(cur, patch conn.Profile) conn.Profile {
 	out := cur
 	if patch.Name != "" {
@@ -234,9 +234,7 @@ func mergeProfile(cur, patch conn.Profile) conn.Profile {
 	if patch.SavedUsername != "" {
 		out.SavedUsername = patch.SavedUsername
 	}
-	if patch.Default {
-		out.Default = true
-	}
+	out.Default = patch.Default
 	if patch.TLS.CAPEM != "" {
 		out.TLS.CAPEM = patch.TLS.CAPEM
 	}

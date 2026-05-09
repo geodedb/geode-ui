@@ -162,3 +162,23 @@ func TestSQLiteDelete(t *testing.T) {
 		t.Errorf("double Delete: want ErrNotFound, got %v", err)
 	}
 }
+
+func TestSQLitePatchClearsDefault(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "p1", DSN: "stub://x", Default: true,
+	})
+	if !saved.Default {
+		t.Fatalf("Put: Default not stored as true: %+v", saved)
+	}
+	updated, err := st.Patch(context.Background(), saved.ID, conn.Profile{
+		Default: false,
+	})
+	if err != nil {
+		t.Fatalf("Patch clearing default: %v", err)
+	}
+	if updated.Default {
+		t.Errorf("Patch with Default=false did not clear: %+v", updated)
+	}
+}
