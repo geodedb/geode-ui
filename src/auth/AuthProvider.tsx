@@ -27,6 +27,7 @@ import {
   logout as apiLogout,
 } from '../api/auth'
 import { clearCsrfToken, refreshCsrfToken } from '../api/csrf'
+import { useConnections, setLatestToken } from '../api/connections'
 
 const AUTH_HINT_KEY = 'geode-ui.session-hint'
 
@@ -63,13 +64,21 @@ const AuthCtx = createContext<AuthState | null>(null)
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
+  const conns = useConnections()
   const [isAuthed, setIsAuthed] = useState<boolean>(readAuthHint())
 
-  const setAuthed = useCallback((authed: boolean) => {
-    writeAuthHint(authed)
-    setIsAuthed(authed)
-    if (!authed) clearCsrfToken()
-  }, [])
+  const setAuthed = useCallback(
+    (authed: boolean) => {
+      writeAuthHint(authed)
+      setIsAuthed(authed)
+      if (!authed) {
+        clearCsrfToken()
+        conns.clear()
+        setLatestToken(null)
+      }
+    },
+    [conns]
+  )
 
   const signIn = useCallback(
     async (
@@ -77,23 +86,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       password: string,
       profile: string
     ): Promise<void> => {
-      await apiLogin(username, password, profile)
+      const result = await apiLogin(username, password, profile)
       // After login the server set the auth cookie. Mint a CSRF token
       // so the first state-changing request has the matching pair.
       await refreshCsrfToken()
+      conns.add({
+        connectionId: result.connection_id,
+        token: result.access_token,
+        profileName: profile,
+        expiresAt: Date.now() + result.expires_in * 1000,
+      })
+      conns.setActive(result.connection_id)
+      setLatestToken(result.access_token)
       writeAuthHint(true)
       setIsAuthed(true)
     },
-    []
+    [conns]
   )
 
   const signOut = useCallback(async (): Promise<void> => {
     await apiLogout()
     authStore.clearToken()
     clearCsrfToken()
+    conns.clear()
+    setLatestToken(null)
     writeAuthHint(false)
     setIsAuthed(false)
-  }, [])
+  }, [conns])
 
   // On mount, if the hint says we're logged in, refresh the CSRF
   // token so subsequent mutations have one. Skip the network call

@@ -2,6 +2,7 @@ import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { createGlobalStyle } from 'styled-components'
 import { AuthProvider } from './auth/AuthProvider'
+import { ConnectionsProvider } from './api/connections'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { Shell } from './components/layout/Shell'
 import { LoginPage } from './pages/LoginPage'
@@ -84,31 +85,33 @@ const App: React.FC = () => (
   <LocalizationProvider>
     <ThemeProvider>
       <GlobalStyle />
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route element={<ProtectedShell />}>
-              <Route index element={<QueryPage />} />
-              <Route path="schema" element={<SchemaPage />} />
-              <Route path="admin" element={<AdminPage />}>
-                <Route index element={<Navigate to="users" replace />} />
-                <Route path="users" element={<UsersPage />} />
-                <Route path="roles" element={<RolesPage />} />
-                <Route path="policies" element={<PoliciesPage />} />
-                <Route path="grants" element={<GrantsPanel />} />
+      <ConnectionsProvider>
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route element={<ProtectedShell />}>
+                <Route index element={<QueryPage />} />
+                <Route path="schema" element={<SchemaPage />} />
+                <Route path="admin" element={<AdminPage />}>
+                  <Route index element={<Navigate to="users" replace />} />
+                  <Route path="users" element={<UsersPage />} />
+                  <Route path="roles" element={<RolesPage />} />
+                  <Route path="policies" element={<PoliciesPage />} />
+                  <Route path="grants" element={<GrantsPanel />} />
+                </Route>
+                <Route path="ops" element={<OpsPage />}>
+                  <Route index element={<Navigate to="backups" replace />} />
+                  <Route path="backups" element={<BackupPage />} />
+                  <Route path="restore" element={<RestorePage />} />
+                  <Route path="migrations" element={<MigrationsPage />} />
+                  <Route path="audit" element={<AuditLogPage />} />
+                </Route>
               </Route>
-              <Route path="ops" element={<OpsPage />}>
-                <Route index element={<Navigate to="backups" replace />} />
-                <Route path="backups" element={<BackupPage />} />
-                <Route path="restore" element={<RestorePage />} />
-                <Route path="migrations" element={<MigrationsPage />} />
-                <Route path="audit" element={<AuditLogPage />} />
-              </Route>
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </ConnectionsProvider>
     </ThemeProvider>
   </LocalizationProvider>
 )
