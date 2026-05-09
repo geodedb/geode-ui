@@ -267,6 +267,28 @@ export const en = {
     disconnect: 'Disconnect',
     addAnother: 'Add another connection',
   },
+
+  profiles: {
+    title: 'Profiles',
+    description:
+      'Manage Geode connection profiles. System profiles are visible to everyone; personal profiles are scoped to you.',
+    scope: {
+      system: 'System',
+      personal: 'Personal',
+    },
+    flag: {
+      default: 'Default',
+    },
+    column: {
+      name: 'Name',
+      scope: 'Scope',
+      description: 'Description',
+      owner: 'Owner',
+    },
+    empty: 'No profiles yet.',
+    loading: 'Loading profiles…',
+    error: 'Could not load profiles.',
+  },
 } as const
 
 export type Translations = typeof en
