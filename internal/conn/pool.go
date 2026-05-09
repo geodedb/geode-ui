@@ -15,7 +15,8 @@ import (
 // driverName is the database/sql driver name registered by the
 // geodedb.com/geode package's init() function. See
 // geode-client-go/driver.go: sql.Register("geode", &Driver{}).
-const driverName = "geode"
+// Declared as a var so tests can substitute a stub driver.
+var driverName = "geode"
 
 // Default pool settings. Sized for the documented operational target of
 // 2000 rps sustained with a 400 rps burst (PERF-F11 / issue #55). The
@@ -181,10 +182,7 @@ func (p *Pool) DB(name string) (*sql.DB, error) {
 		return nil, fmt.Errorf("conn: sql.Open profile %q: %w", name, err)
 	}
 
-	db.SetMaxOpenConns(p.cfg.MaxOpenConns)
-	db.SetMaxIdleConns(p.cfg.MaxIdleConns)
-	db.SetConnMaxLifetime(p.cfg.ConnMaxLifetime)
-	db.SetConnMaxIdleTime(p.cfg.ConnMaxIdleTime)
+	applyOverrides(db, p.cfg, prof.PoolOverrides)
 
 	p.dbs[name] = db
 	return db, nil
@@ -201,6 +199,79 @@ func (p *Pool) Ping(ctx context.Context, name string) error {
 		return fmt.Errorf("conn: ping profile %q: %w", name, err)
 	}
 	return nil
+}
+
+// Reload atomically swaps the registered profile set with the supplied
+// slice. Profiles whose Name AND DSN are unchanged keep their existing
+// *sql.DB handle (and any open connections). Profiles whose DSN has
+// changed are Close()'d so the next DB() call re-opens against the new
+// upstream. Per-profile PoolOverrides on kept handles are re-applied
+// in-place via SetMaxOpenConns and friends.
+//
+// On any validation error the pool is left untouched.
+func (p *Pool) Reload(profiles []Profile) error {
+	if len(profiles) == 0 {
+		return fmt.Errorf("conn: Reload requires at least one profile")
+	}
+	next := make(map[string]Profile, len(profiles))
+	for i, prof := range profiles {
+		if prof.Name == "" {
+			return fmt.Errorf("conn: profile[%d] has empty Name", i)
+		}
+		if prof.DSN == "" {
+			return fmt.Errorf("conn: profile %q has empty DSN", prof.Name)
+		}
+		if _, dup := next[prof.Name]; dup {
+			return fmt.Errorf("conn: duplicate profile name %q", prof.Name)
+		}
+		next[prof.Name] = prof
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.dbs == nil {
+		return fmt.Errorf("conn: pool is closed")
+	}
+
+	for name, db := range p.dbs {
+		nextProf, kept := next[name]
+		if !kept || nextProf.DSN != p.profiles[name].DSN {
+			_ = db.Close()
+			delete(p.dbs, name)
+		}
+	}
+	for name, db := range p.dbs {
+		applyOverrides(db, p.cfg, next[name].PoolOverrides)
+	}
+	p.profiles = next
+	return nil
+}
+
+// applyOverrides resolves the effective pool tuning for a *sql.DB by
+// preferring per-profile PoolOverrides where set, falling back to the
+// pool-wide PoolConfig defaults. Called from both DB() (initial open)
+// and Reload (in-place adjustment).
+func applyOverrides(db *sql.DB, base *PoolConfig, ov PoolOverrides) {
+	open := base.MaxOpenConns
+	if ov.MaxOpenConns != 0 {
+		open = ov.MaxOpenConns
+	}
+	idle := base.MaxIdleConns
+	if ov.MaxIdleConns != 0 {
+		idle = ov.MaxIdleConns
+	}
+	life := base.ConnMaxLifetime
+	if ov.ConnMaxLifetime != 0 {
+		life = ov.ConnMaxLifetime
+	}
+	idleT := base.ConnMaxIdleTime
+	if ov.ConnMaxIdleTime != 0 {
+		idleT = ov.ConnMaxIdleTime
+	}
+	db.SetMaxOpenConns(open)
+	db.SetMaxIdleConns(idle)
+	db.SetConnMaxLifetime(life)
+	db.SetConnMaxIdleTime(idleT)
 }
 
 // Close closes every *sql.DB the pool has opened. Subsequent DB() calls

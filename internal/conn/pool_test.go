@@ -1,10 +1,28 @@
 package conn
 
 import (
+	"database/sql"
+	"database/sql/driver"
+	"io"
 	"reflect"
 	"testing"
 	"time"
 )
+
+// stubDriver is a no-op database/sql driver used by pool tests that need to
+// call Pool.DB() without a live Geode server. It accepts any DSN.
+type stubDriver struct{}
+type stubConn struct{}
+
+func (d *stubDriver) Open(_ string) (driver.Conn, error) { return &stubConn{}, nil }
+func (c *stubConn) Prepare(string) (driver.Stmt, error)  { return nil, io.ErrUnexpectedEOF }
+func (c *stubConn) Close() error                         { return nil }
+func (c *stubConn) Begin() (driver.Tx, error)            { return nil, io.ErrUnexpectedEOF }
+
+func init() {
+	sql.Register("stub", &stubDriver{})
+	driverName = "stub"
+}
 
 func TestPool_Lookup(t *testing.T) {
 	p, err := NewPool([]Profile{
@@ -191,5 +209,50 @@ func TestPool_Close_Idempotent(t *testing.T) {
 
 	if _, err := p.DB("local"); err == nil {
 		t.Fatalf("DB after Close: want error, got nil")
+	}
+}
+
+func TestPoolReloadKeepsExistingDBs(t *testing.T) {
+	p, err := NewPool([]Profile{
+		{Name: "a", DSN: "stub://a"},
+		{Name: "b", DSN: "stub://b"},
+	})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+
+	dbA, err := p.DB("a")
+	if err != nil {
+		t.Fatalf("DB(a): %v", err)
+	}
+
+	if err := p.Reload([]Profile{
+		{Name: "a", DSN: "stub://a"},
+		{Name: "c", DSN: "stub://c"},
+	}); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	dbA2, err := p.DB("a")
+	if err != nil {
+		t.Fatalf("DB(a) after reload: %v", err)
+	}
+	if dbA != dbA2 {
+		t.Errorf("Reload re-opened existing 'a' handle")
+	}
+	if _, err := p.DB("b"); err == nil {
+		t.Errorf("DB(b) after reload: expected unknown-profile error, got nil")
+	}
+	if _, err := p.DB("c"); err != nil {
+		t.Errorf("DB(c) after reload: %v", err)
+	}
+}
+
+func TestPoolReloadRejectsEmpty(t *testing.T) {
+	p, _ := NewPool([]Profile{{Name: "a", DSN: "stub://a"}})
+	defer func() { _ = p.Close() }()
+	if err := p.Reload(nil); err == nil {
+		t.Errorf("Reload(nil): expected error, got nil")
 	}
 }
