@@ -292,6 +292,9 @@ export const en = {
       create: {
         title: 'Create profile',
       },
+      edit: {
+        title: 'Edit profile',
+      },
       field: {
         name: 'Name',
         dsn: 'DSN',

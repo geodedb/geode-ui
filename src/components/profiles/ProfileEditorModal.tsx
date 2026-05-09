@@ -1,13 +1,15 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { Button, Field, Input, Select, Textarea, Modal } from '../ui'
 import {
   CreateProfileInput,
+  UpdateProfileInput,
   ProfileView,
   Scope,
   createProfile,
+  updateProfile,
 } from '../../api/profiles'
 
 const Section = styled.section`
@@ -41,8 +43,7 @@ export interface Props {
   onClose: () => void
   onSaved: () => void
   isAdmin: boolean
-  // eslint-disable-next-line react/no-unused-prop-types
-  profile?: ProfileView // wired in D-Task 5 (edit flow)
+  profile?: ProfileView
 }
 
 interface FormState {
@@ -116,32 +117,111 @@ function buildCreateInput(s: FormState): CreateProfileInput {
   }
 }
 
+function buildUpdateInput(
+  s: FormState,
+  original: ProfileView
+): UpdateProfileInput {
+  const out: UpdateProfileInput = {}
+  if (s.name !== original.name) {
+    out.name = s.name
+  }
+  if (s.dsn !== (original.dsn ?? '')) {
+    out.dsn = s.dsn
+  }
+  if (s.description !== (original.description ?? '')) {
+    out.description = s.description
+  }
+  if (s.savedUsername !== (original.savedUsername ?? '')) {
+    out.savedUsername = s.savedUsername
+  }
+  if (s.isDefault !== original.isDefault) {
+    out.isDefault = s.isDefault
+  }
+
+  const tlsChanged =
+    s.caPem !== (original.tls?.caPem ?? '') ||
+    s.clientCertPem !== (original.tls?.clientCertPem ?? '') ||
+    s.clientKeyPem !== (original.tls?.clientKeyPem ?? '')
+  if (tlsChanged) {
+    out.tls = {
+      caPem: s.caPem || undefined,
+      clientCertPem: s.clientCertPem || undefined,
+      clientKeyPem: s.clientKeyPem || undefined,
+    }
+  }
+
+  const poChanged =
+    s.maxOpenConns !== String(original.poolOverrides?.maxOpenConns ?? '') ||
+    s.maxIdleConns !== String(original.poolOverrides?.maxIdleConns ?? '') ||
+    s.connMaxLifetimeMs !==
+      String(original.poolOverrides?.connMaxLifetimeMs ?? '') ||
+    s.connMaxIdleMs !== String(original.poolOverrides?.connMaxIdleMs ?? '')
+  if (poChanged) {
+    out.poolOverrides = {
+      maxOpenConns: numOrUndef(s.maxOpenConns),
+      maxIdleConns: numOrUndef(s.maxIdleConns),
+      connMaxLifetimeMs: numOrUndef(s.connMaxLifetimeMs),
+      connMaxIdleMs: numOrUndef(s.connMaxIdleMs),
+    }
+  }
+  return out
+}
+
+function fromProfile(p: ProfileView): FormState {
+  return {
+    scope: p.scope,
+    name: p.name,
+    dsn: p.dsn ?? '',
+    description: p.description ?? '',
+    savedUsername: p.savedUsername ?? '',
+    isDefault: p.isDefault,
+    caPem: p.tls?.caPem ?? '',
+    clientCertPem: p.tls?.clientCertPem ?? '',
+    clientKeyPem: p.tls?.clientKeyPem ?? '',
+    maxOpenConns: p.poolOverrides?.maxOpenConns?.toString() ?? '',
+    maxIdleConns: p.poolOverrides?.maxIdleConns?.toString() ?? '',
+    connMaxLifetimeMs: p.poolOverrides?.connMaxLifetimeMs?.toString() ?? '',
+    connMaxIdleMs: p.poolOverrides?.connMaxIdleMs?.toString() ?? '',
+  }
+}
+
 export const ProfileEditorModal: React.FC<Props> = ({
   mode,
   open,
   onClose,
   onSaved,
   isAdmin,
+  profile,
 }) => {
   const { t } = useTranslation()
   const [s, setS] = useState<FormState>(empty)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  if (mode === 'edit') {
-    // Wired in D-Task 5.
-    return null
-  }
+  // Populate the form from the supplied profile on edit-mode mount or
+  // when the profile prop changes (parent may swap which row is being
+  // edited without unmounting the modal).
+  useEffect(() => {
+    if (mode === 'edit' && profile) {
+      setS(fromProfile(profile))
+    } else if (mode === 'create') {
+      setS(empty)
+    }
+  }, [mode, profile])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      await createProfile(buildCreateInput(s))
-      setS(empty)
+      if (mode === 'create') {
+        await createProfile(buildCreateInput(s))
+      } else if (profile) {
+        await updateProfile(profile.id, buildUpdateInput(s, profile))
+      }
       onSaved()
       onClose()
+      if (mode === 'create') setS(empty)
     } catch (e2: unknown) {
       setErr(
         e2 instanceof Error ? e2.message : t('profiles.editor.error.failed')
@@ -151,17 +231,19 @@ export const ProfileEditorModal: React.FC<Props> = ({
     }
   }
 
+  const title =
+    mode === 'edit'
+      ? t('profiles.editor.edit.title')
+      : t('profiles.editor.create.title')
+
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={t('profiles.editor.create.title')}
-    >
+    <Modal open={open} onClose={onClose} title={title}>
       <form onSubmit={submit}>
         <Field label={t('profiles.editor.field.scope')} htmlFor="profile-scope">
           <Select
             id="profile-scope"
             value={s.scope}
+            disabled={mode === 'edit'}
             onChange={(e) => setS({ ...s, scope: e.target.value as Scope })}
           >
             <option value="personal">{t('profiles.scope.personal')}</option>
