@@ -84,9 +84,9 @@ export interface Props {
 
 export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   const { t } = useTranslation()
-  const { connections, activeId, setActive } = useConnections()
+  const { connections, activeId } = useConnections()
   const active = useActiveConnection()
-  const { disconnect } = useAuth()
+  const { disconnect, switchActive } = useAuth()
   const [open, setOpen] = useState(false)
 
   if (connections.size === 0) {
@@ -123,7 +123,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
               aria-label={c.profileName}
               $active={c.connectionId === activeId}
               onClick={() => {
-                setActive(c.connectionId)
+                switchActive(c.connectionId)
                 setOpen(false)
               }}
             >

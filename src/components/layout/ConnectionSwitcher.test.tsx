@@ -5,7 +5,12 @@ import { ThemeProvider } from 'styled-components'
 import { I18nextProvider } from 'react-i18next'
 import i18n from '../../services/i18n/config'
 import { testTheme as lightTheme } from '../../test-utils/theme'
-import { ConnectionsProvider, useConnections } from '../../api/connections'
+import {
+  ConnectionsProvider,
+  useConnections,
+  getLatestToken,
+  setLatestToken,
+} from '../../api/connections'
 import { AuthProvider } from '../../auth/AuthProvider'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 
@@ -20,7 +25,10 @@ const Seed: React.FC<{ count: number }> = ({ count }) => {
         expiresAt: Date.now() + 3_600_000,
       })
     }
-    if (count > 0) setActive('c0')
+    if (count > 0) {
+      setActive('c0')
+      setLatestToken('tok0')
+    }
   }, []) // deps intentionally omitted — seed runs once on mount
   return null
 }
@@ -58,6 +66,20 @@ test('shows all active connections; clicking a row switches active', () => {
   fireEvent.click(screen.getByRole('menuitemradio', { name: /prof1/i }))
   // After the switch, the trigger label reflects the new active profile.
   expect(screen.getByRole('button', { name: /prof1/ })).toBeInTheDocument()
+})
+
+test('clicking a row updates the latch to the new active token', () => {
+  renderWithProviders(
+    <>
+      <Seed count={2} />
+      <ConnectionSwitcher onAddRequested={() => undefined} />
+    </>
+  )
+  // After Seed, active is c0 → latch holds tok0.
+  expect(getLatestToken()).toBe('tok0')
+  fireEvent.click(screen.getByRole('button', { name: /prof0/i }))
+  fireEvent.click(screen.getByRole('menuitemradio', { name: /prof1/i }))
+  expect(getLatestToken()).toBe('tok1')
 })
 
 test('renders an empty state when there are no active connections', () => {

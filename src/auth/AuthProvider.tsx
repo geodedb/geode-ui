@@ -63,6 +63,7 @@ type AuthState = {
     profile: string
   ) => Promise<void>
   disconnect: (connectionId: string) => void
+  switchActive: (connectionId: string) => void
 }
 
 const AuthCtx = createContext<AuthState | null>(null)
@@ -169,6 +170,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     [conns]
   )
 
+  const switchActive = useCallback(
+    (connectionId: string): void => {
+      const target = conns.connections.get(connectionId)
+      if (!target) return
+      conns.setActive(connectionId)
+      setLatestToken(target.token)
+    },
+    [conns]
+  )
+
   // On mount, if the hint says we're logged in, refresh the CSRF
   // token so subsequent mutations have one. Skip the network call
   // when the hint says logged out. We deliberately depend only on
@@ -182,8 +193,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [isAuthed])
 
   const value = useMemo<AuthState>(
-    () => ({ isAuthed, setAuthed, signIn, signOut, connectMore, disconnect }),
-    [isAuthed, setAuthed, signIn, signOut, connectMore, disconnect]
+    () => ({
+      isAuthed,
+      setAuthed,
+      signIn,
+      signOut,
+      connectMore,
+      disconnect,
+      switchActive,
+    }),
+    [
+      isAuthed,
+      setAuthed,
+      signIn,
+      signOut,
+      connectMore,
+      disconnect,
+      switchActive,
+    ]
   )
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }

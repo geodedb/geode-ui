@@ -216,6 +216,110 @@ describe('AuthProvider → ConnectionsContext integration', () => {
     global.fetch = orig
   })
 
+  test('switchActive updates active id AND token latch', async () => {
+    // Sign in twice (signIn then connectMore). The latch starts holding A's
+    // token. Call switchActive(B). The latch must now hold B's token.
+    const responses = [
+      {
+        access_token: 'tok-A',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        connection_id: 'cid-A',
+      },
+      {
+        access_token: 'tok-B',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        connection_id: 'cid-B',
+      },
+    ]
+    let callCount = 0
+    const orig = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/v1/auth/login')) {
+        const body = responses[callCount]
+        callCount += 1
+        return {
+          ok: true,
+          status: 200,
+          json: async () => body,
+        } as unknown as Response
+      }
+      if (url.endsWith('/api/v1/csrf')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: 'csrf-mock' }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    const Inner: React.FC = () => {
+      captured = useAuth()
+      return (
+        <>
+          <button
+            data-testid="signin"
+            onClick={() => {
+              captured!.signIn('alice', 'pw', 'default').catch(() => undefined)
+            }}
+            aria-label="sign in"
+          />
+          <button
+            data-testid="connectmore"
+            onClick={() => {
+              captured!.connectMore('bob', 'pw', 'prod').catch(() => undefined)
+            }}
+            aria-label="connect more"
+          />
+        </>
+      )
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <Inner />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    await act(async () => {
+      screen.getByTestId('signin').click()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      screen.getByTestId('connectmore').click()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getLatestToken()).toBe('tok-A')
+
+    await act(async () => {
+      captured!.switchActive('cid-B')
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getLatestToken()).toBe('tok-B')
+
+    global.fetch = orig
+  })
+
   test('disconnect removes the named connection and promotes the next when active', async () => {
     // Sign in twice (A then connectMore B). Disconnect A. Expect:
     //   - Connection A is gone from the map
