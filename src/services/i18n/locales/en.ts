@@ -322,6 +322,14 @@ export const en = {
         failed: 'Failed to save profile',
       },
     },
+    delete: {
+      title: 'Delete profile',
+      confirm: 'Delete profile "{{name}}"? This cannot be undone.',
+      actions: {
+        delete: 'Delete',
+        cancel: 'Cancel',
+      },
+    },
   },
 } as const
 
