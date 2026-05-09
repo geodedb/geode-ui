@@ -33,6 +33,7 @@ interface GeodeBridge {
     password: string
   ): Promise<boolean>
   clearStoredPassword(profileName: string, username: string): Promise<boolean>
+  pickPemFile(): Promise<string | null>
 }
 
 const bridge: GeodeBridge = {
@@ -66,6 +67,8 @@ const bridge: GeodeBridge = {
     ) as Promise<boolean>,
   clearStoredPassword: (profileName, username) =>
     ipcRenderer.invoke('geode:clear-stored-password', profileName, username) as Promise<boolean>,
+  pickPemFile: () =>
+    ipcRenderer.invoke('geode:pick-pem-file') as Promise<string | null>,
 }
 
 contextBridge.exposeInMainWorld('geode', bridge)

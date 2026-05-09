@@ -7,6 +7,7 @@ import {
   ipcMain,
   nativeTheme,
   safeStorage,
+  dialog,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
@@ -374,6 +375,26 @@ ipcMain.handle('geode:open-external', async (_evt, url: string) => {
 ipcMain.handle('geode:get-system-theme', () =>
   nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
 )
+
+ipcMain.handle('geode:pick-pem-file', async (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  if (!win) return null
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Select a PEM file',
+    properties: ['openFile'],
+    filters: [
+      { name: 'PEM files', extensions: ['pem', 'crt', 'key', 'cert', 'cer'] },
+      { name: 'All files', extensions: ['*'] },
+    ],
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  const filePath = result.filePaths[0]!
+  // Cap at 1 MiB — PEM material is normally < 10 KB; anything larger
+  // is almost certainly not a real cert.
+  const stat = await fs.stat(filePath)
+  if (stat.size > 1024 * 1024) return null
+  return fs.readFile(filePath, 'utf8')
+})
 nativeTheme.on('updated', () => {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(

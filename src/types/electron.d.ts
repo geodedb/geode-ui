@@ -30,6 +30,7 @@ export interface GeodeBridge {
     password: string
   ): Promise<boolean>
   clearStoredPassword(profileName: string, username: string): Promise<boolean>
+  pickPemFile(): Promise<string | null>
 }
 
 declare global {
