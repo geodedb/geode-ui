@@ -50,16 +50,13 @@ test('confirm — calls deleteProfile and onDeleted', async () => {
   renderModal(true, onClose, onDeleted)
   // The target profile name appears in the confirm body.
   await waitFor(() => expect(screen.getByText(/my-dev/)).toBeInTheDocument())
-  // Click the destructive Delete button (NOT the cancel button).
-  const deleteBtn =
-    screen
-      .getAllByRole('button', { name: /^delete$/i })
-      .find(
-        (b) =>
-          !(b as HTMLButtonElement).matches(
-            '[type="button"][aria-label*="ancel"]'
-          )
-      ) || screen.getAllByRole('button', { name: /^delete$/i })[0]
+  // Click the destructive Delete button (NOT the cancel button). The
+  // ConfirmModal renders the destructive action with role=button and the
+  // `name` matches the confirmLabel, so the only Delete-named button in
+  // the dialog is the destructive one.
+  const deleteBtns = screen.getAllByRole('button', { name: /^delete$/i })
+  const deleteBtn = deleteBtns[0]
+  if (!deleteBtn) throw new Error('expected at least one Delete button')
   await act(async () => {
     fireEvent.click(deleteBtn)
     await Promise.resolve()
