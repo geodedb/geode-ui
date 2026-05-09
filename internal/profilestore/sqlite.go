@@ -3,8 +3,10 @@ package profilestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -101,15 +103,66 @@ func scanProfile(scan scanFn) (conn.Profile, error) {
 	return p, nil
 }
 
-// Stubs for Put/Patch/Get/Delete; implemented in subsequent tasks.
 func (s *sqliteStore) Put(ctx context.Context, p conn.Profile) (conn.Profile, error) {
-	return conn.Profile{}, fmt.Errorf("profilestore: Put not implemented")
+	if !p.Scope.Valid() {
+		return conn.Profile{}, fmt.Errorf("%w: scope=%q", ErrInvalid, p.Scope)
+	}
+	if p.Name == "" || p.DSN == "" {
+		return conn.Profile{}, fmt.Errorf("%w: name and dsn are required", ErrInvalid)
+	}
+	if p.ID == "" {
+		p.ID = newID()
+	}
+	now := time.Now().UnixNano()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO profiles
+		  (id, scope, owner_user_id, name, dsn, description, saved_username,
+		   is_default, tls_ca_pem, tls_cert_pem, tls_key_pem,
+		   max_open_conns, max_idle_conns, conn_max_lifetime_ns,
+		   conn_max_idle_ns, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		p.ID, string(p.Scope), p.OwnerUserID, p.Name, p.DSN, p.Description,
+		p.SavedUsername, boolAsInt(p.Default),
+		p.TLS.CAPEM, p.TLS.ClientCertPEM, p.TLS.ClientKeyPEM,
+		p.PoolOverrides.MaxOpenConns, p.PoolOverrides.MaxIdleConns,
+		durationAsNs(p.PoolOverrides.ConnMaxLifetime),
+		durationAsNs(p.PoolOverrides.ConnMaxIdleTime),
+		now, now,
+	)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return conn.Profile{}, fmt.Errorf("%w: scope=%s name=%s",
+				ErrConflict, p.Scope, p.Name)
+		}
+		return conn.Profile{}, fmt.Errorf("profilestore: put: %w", err)
+	}
+	return p, nil
 }
+
+func (s *sqliteStore) Get(ctx context.Context, id string) (conn.Profile, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, scope, owner_user_id, name, dsn, description,
+		       saved_username, is_default, tls_ca_pem, tls_cert_pem,
+		       tls_key_pem, max_open_conns, max_idle_conns,
+		       conn_max_lifetime_ns, conn_max_idle_ns
+		FROM profiles WHERE id = ?`, id)
+	p, err := scanProfile(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return conn.Profile{}, ErrNotFound
+	}
+	if err != nil {
+		return conn.Profile{}, fmt.Errorf("profilestore: get: %w", err)
+	}
+	return p, nil
+}
+
+// Stubs for Patch/Delete; implemented in subsequent tasks.
 func (s *sqliteStore) Patch(ctx context.Context, id string, p conn.Profile) (conn.Profile, error) {
 	return conn.Profile{}, fmt.Errorf("profilestore: Patch not implemented")
-}
-func (s *sqliteStore) Get(ctx context.Context, id string) (conn.Profile, error) {
-	return conn.Profile{}, fmt.Errorf("profilestore: Get not implemented")
 }
 func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 	return fmt.Errorf("profilestore: Delete not implemented")
