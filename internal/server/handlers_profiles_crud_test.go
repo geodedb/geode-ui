@@ -87,7 +87,7 @@ func TestGetProfileid_RedactsForNonOwner(t *testing.T) {
 		Scope: conn.ProfileScopeSystem, Name: "sys", DSN: "quic://secret:1",
 	})
 	r := reqWithActor("GET", "/api/v1/profiles/"+saved.ID, "alice") // no admin
-	r.SetPathValue("profile_id", saved.ID)
+	r.SetPathValue("profileId", saved.ID)
 	got, err := srv.GetProfileid(httptest.NewRecorder(), r, &gentypes.ProfileIDPath{ProfileID: saved.ID})
 	if err != nil {
 		t.Fatalf("GetProfileid: %v", err)
@@ -106,7 +106,7 @@ func TestGetProfileid_PersonalForAnotherUser_NotFound(t *testing.T) {
 		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice", Name: "p1", DSN: "quic://x:1",
 	})
 	r := reqWithActor("GET", "/api/v1/profiles/"+saved.ID, "bob")
-	r.SetPathValue("profile_id", saved.ID)
+	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	_, _ = srv.GetProfileid(w, r, &gentypes.ProfileIDPath{ProfileID: saved.ID})
 	if w.Code != http.StatusNotFound {
@@ -120,7 +120,7 @@ func TestPatchProfileid_NonOwnerReturns404(t *testing.T) {
 		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice", Name: "p1", DSN: "quic://x:1",
 	})
 	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "bob")
-	r.SetPathValue("profile_id", saved.ID)
+	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	_, _ = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "by bob"})
 	if w.Code != http.StatusNotFound {
@@ -134,7 +134,7 @@ func TestDeleteProfileid_AdminCanDeleteSystem(t *testing.T) {
 		Scope: conn.ProfileScopeSystem, Name: "sys", DSN: "quic://x:1",
 	})
 	r := reqWithActor("DELETE", "/api/v1/profiles/"+saved.ID, "ops", "admin")
-	r.SetPathValue("profile_id", saved.ID)
+	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	_, err := srv.DeleteProfileid(w, r, &gentypes.ProfileIDPath{ProfileID: saved.ID})
 	if err != nil {
@@ -153,7 +153,7 @@ func TestDeleteProfileid_NonAdminCannotDeleteSystem(t *testing.T) {
 		Scope: conn.ProfileScopeSystem, Name: "sys", DSN: "quic://x:1",
 	})
 	r := reqWithActor("DELETE", "/api/v1/profiles/"+saved.ID, "alice")
-	r.SetPathValue("profile_id", saved.ID)
+	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	_, _ = srv.DeleteProfileid(w, r, &gentypes.ProfileIDPath{ProfileID: saved.ID})
 	if w.Code != http.StatusNotFound {

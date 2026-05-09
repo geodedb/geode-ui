@@ -129,7 +129,7 @@ func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *
 //
 // IMPORTANT: genapi 0.x emits this method WITHOUT a path-struct
 // parameter (only the request-body type is in the signature). The
-// path id is read off r.PathValue("profile_id"), which Go 1.22+
+// path id is read off r.PathValue("profileId"), which Go 1.22+
 // http.ServeMux populates from the route pattern.
 func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.UpdateProfileReq) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
@@ -139,12 +139,12 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 		})
 		return nil, nil
 	}
-	id := r.PathValue("profile_id")
+	id := r.PathValue("profileId")
 	if id == "" {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadRequest,
 			code:        "missing_id",
-			description: "path parameter profile_id is required",
+			description: "path parameter profileId is required",
 		})
 		return nil, nil
 	}
