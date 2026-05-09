@@ -1,5 +1,5 @@
 // Tests for the cookie-mode auth helper (SEC-F7 / #62 S3c).
-import { auth, login, logout } from './auth'
+import { auth, fetchPublicProfiles, login, logout } from './auth'
 
 const realFetch = global.fetch
 
@@ -144,4 +144,37 @@ test('logout swallows network errors (best effort)', async () => {
     Promise.reject(new Error('net'))
   ) as unknown as typeof fetch
   await expect(logout()).resolves.toBeUndefined()
+})
+
+test('fetchPublicProfiles parses the body', async () => {
+  const orig = global.fetch
+  global.fetch = jest.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      profiles: [{ name: 'prod' }, { name: 'staging', description: 's' }],
+    }),
+  })) as unknown as typeof fetch
+  try {
+    const got = await fetchPublicProfiles()
+    expect(got).toEqual([
+      { name: 'prod' },
+      { name: 'staging', description: 's' },
+    ])
+  } finally {
+    global.fetch = orig
+  }
+})
+
+test('fetchPublicProfiles throws on non-ok status', async () => {
+  const orig = global.fetch
+  global.fetch = jest.fn(async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({}),
+  })) as unknown as typeof fetch
+  try {
+    await expect(fetchPublicProfiles()).rejects.toThrow(/503/)
+  } finally {
+    global.fetch = orig
+  }
 })

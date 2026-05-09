@@ -118,6 +118,31 @@ function readCsrfCookie(): string | null {
   }
 }
 
+export type PublicProfile = {
+  name: string
+  description?: string
+}
+
+// fetchPublicProfiles asks the server for the bootstrap profile list
+// (system-scope only, no auth required). Used by LoginPage to render
+// the profile picker before the user has any active connection.
+//
+// Direct fetch (NOT through `client`) — the generated client's
+// bearer-token guard short-circuits when no token is present, but
+// this endpoint is unauthenticated and we shouldn't drag a fake
+// Authorization header along.
+export async function fetchPublicProfiles(): Promise<PublicProfile[]> {
+  const res = await fetch('/api/v1/profiles/public', {
+    method: 'GET',
+    credentials: 'omit',
+  })
+  if (!res.ok) {
+    throw new Error(`fetchPublicProfiles: ${res.status}`)
+  }
+  const body = (await res.json()) as { profiles?: PublicProfile[] }
+  return body.profiles ?? []
+}
+
 export const auth = {
   // getToken returns the legacy bearer token only when the operator
   // has explicitly enabled the backout flag. In normal cookie-mode
