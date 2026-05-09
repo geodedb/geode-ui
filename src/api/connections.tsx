@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useMemo, useReducer } from 'react'
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+} from 'react'
+import { storeConnections } from './electron-bridge'
 
 // ConnectionState is the per-connection bookkeeping the SPA holds in
 // memory. The token is the JWT minted by /api/v1/auth/login; we
@@ -62,10 +69,35 @@ interface ContextValue {
 
 const Ctx = createContext<ContextValue | null>(null)
 
-export const ConnectionsProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
-  const [state, dispatch] = useReducer(reducer, initialState)
+export const ConnectionsProvider: React.FC<{
+  children: React.ReactNode
+  initialConnections?: ConnectionState[]
+}> = ({ children, initialConnections }) => {
+  const [state, dispatch] = useReducer(reducer, undefined, () => {
+    if (!initialConnections || initialConnections.length === 0) {
+      return initialState
+    }
+    const byId = new Map<string, ConnectionState>(
+      initialConnections.map((c) => [c.connectionId, c])
+    )
+    const first = initialConnections[0]
+    if (first) setLatestToken(first.token)
+    return { byId, activeId: first?.connectionId ?? null }
+  })
+
+  // Persist on every state change. Browser mode (storeConnections is a
+  // noop fallback) is unaffected; Electron mode mirrors the in-memory
+  // map to disk via the safeStorage-backed secure store.
+  useEffect(() => {
+    const list = [...state.byId.values()].map((c) => ({
+      connectionId: c.connectionId,
+      token: c.token,
+      profileName: c.profileName,
+      expiresAt: c.expiresAt,
+    }))
+    storeConnections(list).catch(() => undefined)
+  }, [state.byId])
+
   const value = useMemo<ContextValue>(
     () => ({
       connections: state.byId,
