@@ -408,6 +408,38 @@
       "responseSchema": "ProfileList",
       "auth": "jwt",
       "rateLimit": 50
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/profiles",
+      "requestSchema": "CreateProfileReq",
+      "responseSchema": "Profile",
+      "auth": "jwt",
+      "rateLimit": 20
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/profiles/{id}",
+      "requestSchema": "ProfileIDPath",
+      "responseSchema": "Profile",
+      "auth": "jwt",
+      "rateLimit": 50
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/profiles/{id}",
+      "requestSchema": "UpdateProfileReq",
+      "responseSchema": "Profile",
+      "auth": "jwt",
+      "rateLimit": 20
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/profiles/{id}",
+      "requestSchema": "ProfileIDPath",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20
     }
   ],
   "websocket": [
@@ -878,20 +910,81 @@
         "entries": { "type": "array", "items": { } }
       }
     },
+    "PoolOverrides": {
+      "type": "object",
+      "properties": {
+        "max_open_conns":       { "type": "integer", "minimum": 0 },
+        "max_idle_conns":       { "type": "integer", "minimum": 0 },
+        "conn_max_lifetime_ms": { "type": "integer", "minimum": 0 },
+        "conn_max_idle_ms":     { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "TLSMaterial": {
+      "type": "object",
+      "properties": {
+        "ca_pem":          { "type": "string" },
+        "client_cert_pem": { "type": "string" },
+        "client_key_pem":  { "type": "string" }
+      }
+    },
+
+    "Profile": {
+      "type": "object",
+      "required": ["id", "scope", "name", "dsn"],
+      "properties": {
+        "id":             { "type": "string", "minLength": 1, "maxLength": 64 },
+        "scope":          { "type": "string" },
+        "owner_user_id":  { "type": "string" },
+        "name":           { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "maxLength": 256 },
+        "saved_username": { "type": "string", "maxLength": 128 },
+        "is_default":     { "type": "boolean" },
+        "tls":            { "type": "object" },
+        "pool_overrides": { "type": "object" }
+      }
+    },
+
     "ProfileList": {
       "type": "object",
       "required": ["profiles"],
       "properties": {
-        "profiles": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name":        { "type": "string" },
-              "description": { "type": "string" }
-            }
-          }
-        }
+        "profiles": { "type": "array", "items": { "$ref": "Profile" } }
+      }
+    },
+
+    "ProfileIDPath": {
+      "type": "object",
+      "required": ["id"],
+      "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 64 } }
+    },
+
+    "CreateProfileReq": {
+      "type": "object",
+      "required": ["scope", "name", "dsn"],
+      "properties": {
+        "scope":          { "type": "string" },
+        "name":           { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "maxLength": 256 },
+        "saved_username": { "type": "string", "maxLength": 128 },
+        "is_default":     { "type": "boolean" },
+        "tls":            { "type": "object" },
+        "pool_overrides": { "type": "object" }
+      }
+    },
+
+    "UpdateProfileReq": {
+      "type": "object",
+      "properties": {
+        "name":           { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "maxLength": 256 },
+        "saved_username": { "type": "string", "maxLength": 128 },
+        "is_default":     { "type": "boolean" },
+        "tls":            { "type": "object" },
+        "pool_overrides": { "type": "object" }
       }
     }
   }

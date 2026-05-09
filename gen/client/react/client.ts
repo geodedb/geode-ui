@@ -133,6 +133,16 @@ export interface BackupRef {
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;
 }
+export interface CreateProfileReq {
+  description?: string;
+  dsn: string;
+  is_default?: boolean;
+  name: string;
+  pool_overrides?: Record<string, unknown>;
+  saved_username?: string;
+  scope: string;
+  tls?: Record<string, unknown>;
+}
 export interface EdgeTypeList {
   types: Array<string>;
 }
@@ -216,8 +226,29 @@ export interface PolicyList {
 export interface PolicyParam {
   name: string;
 }
+export interface PoolOverrides {
+  conn_max_idle_ms?: number;
+  conn_max_lifetime_ms?: number;
+  max_idle_conns?: number;
+  max_open_conns?: number;
+}
+export interface Profile {
+  description?: string;
+  dsn: string;
+  id: string;
+  is_default?: boolean;
+  name: string;
+  owner_user_id?: string;
+  pool_overrides?: Record<string, unknown>;
+  saved_username?: string;
+  scope: string;
+  tls?: Record<string, unknown>;
+}
+export interface ProfileIDPath {
+  id: string;
+}
 export interface ProfileList {
-  profiles: Array<Record<string, unknown>>;
+  profiles: Array<Profile>;
 }
 export interface QueryReq {
   graph?: string;
@@ -265,6 +296,11 @@ export interface RoleList {
 export interface RoleParam {
   role: string;
 }
+export interface TLSMaterial {
+  ca_pem?: string;
+  client_cert_pem?: string;
+  client_key_pem?: string;
+}
 export interface TxBeginReq {
   graph?: string;
   read_only?: boolean;
@@ -279,6 +315,15 @@ export interface TxRunReq {
   params?: Record<string, unknown>;
   statement: string;
   txid: string;
+}
+export interface UpdateProfileReq {
+  description?: string;
+  dsn?: string;
+  is_default?: boolean;
+  name?: string;
+  pool_overrides?: Record<string, unknown>;
+  saved_username?: string;
+  tls?: Record<string, unknown>;
 }
 export interface User {
   disabled?: boolean;
@@ -1174,13 +1219,49 @@ export class GenAPIClient {
       ["name"], copyRecord(req),
     );
   }
-  async profiles(req: Empty): Promise<ProfileList> {
+  async getProfiles(req: Empty): Promise<ProfileList> {
     return this.request<ProfileList>(
       "GET",
       "/api/v1/profiles",
       "jwt",
       "query",
       [], copyRecord(req),
+    );
+  }
+  async postProfiles(req: CreateProfileReq): Promise<Profile> {
+    return this.request<Profile>(
+      "POST",
+      "/api/v1/profiles",
+      "jwt",
+      "json",
+      [], copyRecord(req),
+    );
+  }
+  async deleteId(req: ProfileIDPath): Promise<Empty> {
+    return this.request<Empty>(
+      "DELETE",
+      "/api/v1/profiles/{id}",
+      "jwt",
+      "query",
+      ["id"], copyRecord(req),
+    );
+  }
+  async getId(req: ProfileIDPath): Promise<Profile> {
+    return this.request<Profile>(
+      "GET",
+      "/api/v1/profiles/{id}",
+      "jwt",
+      "query",
+      ["id"], copyRecord(req),
+    );
+  }
+  async patchId(req: UpdateProfileReq): Promise<Profile> {
+    return this.request<Profile>(
+      "PATCH",
+      "/api/v1/profiles/{id}",
+      "jwt",
+      "json",
+      ["id"], copyRecord(req),
     );
   }
   async query(req: QueryReq): Promise<QueryResp> {
@@ -1470,8 +1551,20 @@ export function useDeleteName(client: GenAPIClient, req: PolicyParam, deps: Read
 export function useGetName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = []): RequestState<Policy> {
   return usePromise(() => client.getName(req), deps);
 }
-export function useProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<ProfileList> {
-  return usePromise(() => client.profiles(req), deps);
+export function useGetProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<ProfileList> {
+  return usePromise(() => client.getProfiles(req), deps);
+}
+export function usePostProfilesMutation(client: GenAPIClient): MutationState<CreateProfileReq, Profile> {
+  return useMutationState((req) => client.postProfiles(req));
+}
+export function useDeleteId(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
+  return usePromise(() => client.deleteId(req), deps);
+}
+export function useGetId(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Profile> {
+  return usePromise(() => client.getId(req), deps);
+}
+export function usePatchIdMutation(client: GenAPIClient): MutationState<UpdateProfileReq, Profile> {
+  return useMutationState((req) => client.patchId(req));
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));

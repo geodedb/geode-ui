@@ -134,6 +134,29 @@ func (v ConstraintList) Valid() error {
 	return nil
 }
 
+// CreateProfileReq generated from config schema
+type CreateProfileReq struct {
+	Description string `json:"description" genapi:"description"`
+	Dsn string `json:"dsn" genapi:"dsn"`
+	IsDefault bool `json:"is_default" genapi:"is_default"`
+	Name string `json:"name" genapi:"name"`
+	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
+	SavedUsername string `json:"saved_username" genapi:"saved_username"`
+	Scope string `json:"scope" genapi:"scope"`
+	TLS jsontext.Value `json:"tls" genapi:"tls"`
+}
+
+// Valid validates CreateProfileReq fields against schema constraints.
+func (v CreateProfileReq) Valid() error {
+	if len(v.Description) > 256 { return errors.New("description: too long") }
+	if len(v.Dsn) < 1 { return errors.New("dsn: too short") }
+	if len(v.Dsn) > 1024 { return errors.New("dsn: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 64 { return errors.New("name: too long") }
+	if len(v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
+	return nil
+}
+
 // EdgeTypeList generated from config schema
 type EdgeTypeList struct {
 	Types []string `json:"types" genapi:"types"`
@@ -425,9 +448,65 @@ func (v PolicyParam) Valid() error {
 	return nil
 }
 
+// PoolOverrides generated from config schema
+type PoolOverrides struct {
+	ConnMaxIdleMs int64 `json:"conn_max_idle_ms" genapi:"conn_max_idle_ms"`
+	ConnMaxLifetimeMs int64 `json:"conn_max_lifetime_ms" genapi:"conn_max_lifetime_ms"`
+	MaxIdleConns int64 `json:"max_idle_conns" genapi:"max_idle_conns"`
+	MaxOpenConns int64 `json:"max_open_conns" genapi:"max_open_conns"`
+}
+
+// Valid validates PoolOverrides fields against schema constraints.
+func (v PoolOverrides) Valid() error {
+	if v.ConnMaxIdleMs < 0 { return errors.New("conn_max_idle_ms: too small") }
+	if v.ConnMaxLifetimeMs < 0 { return errors.New("conn_max_lifetime_ms: too small") }
+	if v.MaxIdleConns < 0 { return errors.New("max_idle_conns: too small") }
+	if v.MaxOpenConns < 0 { return errors.New("max_open_conns: too small") }
+	return nil
+}
+
+// Profile generated from config schema
+type Profile struct {
+	Description string `json:"description" genapi:"description"`
+	Dsn string `json:"dsn" genapi:"dsn"`
+	ID string `json:"id" genapi:"id"`
+	IsDefault bool `json:"is_default" genapi:"is_default"`
+	Name string `json:"name" genapi:"name"`
+	OwnerUserID string `json:"owner_user_id" genapi:"owner_user_id"`
+	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
+	SavedUsername string `json:"saved_username" genapi:"saved_username"`
+	Scope string `json:"scope" genapi:"scope"`
+	TLS jsontext.Value `json:"tls" genapi:"tls"`
+}
+
+// Valid validates Profile fields against schema constraints.
+func (v Profile) Valid() error {
+	if len(v.Description) > 256 { return errors.New("description: too long") }
+	if len(v.Dsn) < 1 { return errors.New("dsn: too short") }
+	if len(v.Dsn) > 1024 { return errors.New("dsn: too long") }
+	if len(v.ID) < 1 { return errors.New("id: too short") }
+	if len(v.ID) > 64 { return errors.New("id: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 64 { return errors.New("name: too long") }
+	if len(v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
+	return nil
+}
+
+// ProfileIDPath generated from config schema
+type ProfileIDPath struct {
+	ID string `json:"id" genapi:"id"`
+}
+
+// Valid validates ProfileIDPath fields against schema constraints.
+func (v ProfileIDPath) Valid() error {
+	if len(v.ID) < 1 { return errors.New("id: too short") }
+	if len(v.ID) > 64 { return errors.New("id: too long") }
+	return nil
+}
+
 // ProfileList generated from config schema
 type ProfileList struct {
-	Profiles []jsontext.Value `json:"profiles" genapi:"profiles"`
+	Profiles []Profile `json:"profiles" genapi:"profiles"`
 }
 
 // Valid validates ProfileList fields against schema constraints.
@@ -574,6 +653,18 @@ func (v RoleParam) Valid() error {
 	return nil
 }
 
+// TLSMaterial generated from config schema
+type TLSMaterial struct {
+	CaPem string `json:"ca_pem" genapi:"ca_pem"`
+	ClientCertPem string `json:"client_cert_pem" genapi:"client_cert_pem"`
+	ClientKeyPem string `json:"client_key_pem" genapi:"client_key_pem"`
+}
+
+// Valid validates TLSMaterial fields against schema constraints.
+func (v TLSMaterial) Valid() error {
+	return nil
+}
+
 // TxBeginReq generated from config schema
 type TxBeginReq struct {
 	Graph string `json:"graph" genapi:"graph"`
@@ -620,6 +711,28 @@ type TxRunReq struct {
 // Valid validates TxRunReq fields against schema constraints.
 func (v TxRunReq) Valid() error {
 	if len(v.Statement) < 1 { return errors.New("statement: too short") }
+	return nil
+}
+
+// UpdateProfileReq generated from config schema
+type UpdateProfileReq struct {
+	Description string `json:"description" genapi:"description"`
+	Dsn string `json:"dsn" genapi:"dsn"`
+	IsDefault bool `json:"is_default" genapi:"is_default"`
+	Name string `json:"name" genapi:"name"`
+	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
+	SavedUsername string `json:"saved_username" genapi:"saved_username"`
+	TLS jsontext.Value `json:"tls" genapi:"tls"`
+}
+
+// Valid validates UpdateProfileReq fields against schema constraints.
+func (v UpdateProfileReq) Valid() error {
+	if len(v.Description) > 256 { return errors.New("description: too long") }
+	if v.Dsn != "" && len(v.Dsn) < 1 { return errors.New("dsn: too short") }
+	if len(v.Dsn) > 1024 { return errors.New("dsn: too long") }
+	if v.Name != "" && len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 64 { return errors.New("name: too long") }
+	if len(v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
 	return nil
 }
 

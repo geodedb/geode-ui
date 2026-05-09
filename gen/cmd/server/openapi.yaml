@@ -295,6 +295,54 @@ components:
             required:
                 - constraints
             type: object
+        CreateProfileReq:
+            description: Generated schema for CreateProfileReq
+            example:
+                dsn: x
+                name: x
+                scope: x
+            properties:
+                description:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+                dsn:
+                    example: x
+                    maxLength: 1024
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                isDefault:
+                    example: true
+                    type: boolean
+                name:
+                    example: x
+                    maxLength: 64
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                poolOverrides:
+                    example: {}
+                    type: object
+                savedUsername:
+                    example: x
+                    maxLength: 128
+                    pattern: ^.*$
+                    type: string
+                scope:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                tls:
+                    example: {}
+                    type: object
+            required:
+                - scope
+                - name
+                - dsn
+            type: object
         EdgeTypeList:
             description: Generated schema for EdgeTypeList
             example:
@@ -713,16 +761,76 @@ components:
             required:
                 - policies
             type: object
+        Profile:
+            description: Generated schema for Profile
+            example:
+                dsn: x
+                id: x
+                name: x
+                scope: x
+            properties:
+                description:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+                dsn:
+                    example: x
+                    maxLength: 1024
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                id:
+                    example: x
+                    maxLength: 64
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                isDefault:
+                    example: true
+                    type: boolean
+                name:
+                    example: x
+                    maxLength: 64
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                ownerUserId:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                poolOverrides:
+                    example: {}
+                    type: object
+                savedUsername:
+                    example: x
+                    maxLength: 128
+                    pattern: ^.*$
+                    type: string
+                scope:
+                    example: x
+                    maxLength: 2048
+                    pattern: ^.*$
+                    type: string
+                tls:
+                    example: {}
+                    type: object
+            required:
+                - id
+                - scope
+                - name
+                - dsn
+            type: object
         ProfileList:
             description: Generated schema for ProfileList
             example:
-                profiles:
-                    - {}
+                profiles: []
             properties:
                 profiles:
                     example: []
                     items:
-                        type: object
+                        $ref: '#/components/schemas/Profile'
                     maxItems: 100
                     type: array
             required:
@@ -1020,6 +1128,42 @@ components:
             required:
                 - txid
                 - statement
+            type: object
+        UpdateProfileReq:
+            description: Generated schema for UpdateProfileReq
+            example: {}
+            properties:
+                description:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+                dsn:
+                    example: x
+                    maxLength: 1024
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                isDefault:
+                    example: true
+                    type: boolean
+                name:
+                    example: x
+                    maxLength: 64
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                poolOverrides:
+                    example: {}
+                    type: object
+                savedUsername:
+                    example: x
+                    maxLength: 128
+                    pattern: ^.*$
+                    type: string
+                tls:
+                    example: {}
+                    type: object
             type: object
         User:
             description: Generated schema for User
@@ -2251,6 +2395,192 @@ paths:
             summary: GET /api/v1/profiles
             tags:
                 - Profiles
+        post:
+            description: POST /api/v1/profiles operation
+            operationId: postApiV1Profiles
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateProfileReq'
+                description: POST /api/v1/profiles request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Profile'
+                    description: POST /api/v1/profiles success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: POST /api/v1/profiles
+            tags:
+                - Profiles
+    /api/v1/profiles/{id}:
+        delete:
+            description: DELETE /api/v1/profiles/{id} operation
+            operationId: deleteApiV1ProfilesId
+            parameters:
+                - description: DELETE /api/v1/profiles/{id} path parameter id
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Empty'
+                    description: DELETE /api/v1/profiles/{id} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: DELETE /api/v1/profiles/{id}
+            tags:
+                - Id
+        get:
+            description: GET /api/v1/profiles/{id} operation
+            operationId: getApiV1ProfilesId
+            parameters:
+                - description: GET /api/v1/profiles/{id} path parameter id
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Profile'
+                    description: GET /api/v1/profiles/{id} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: GET /api/v1/profiles/{id}
+            tags:
+                - Id
+        patch:
+            description: PATCH /api/v1/profiles/{id} operation
+            operationId: patchApiV1ProfilesId
+            parameters:
+                - description: PATCH /api/v1/profiles/{id} path parameter id
+                  in: path
+                  name: id
+                  required: true
+                  schema:
+                    maxLength: 512
+                    pattern: ^[^/]+$
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateProfileReq'
+                description: PATCH /api/v1/profiles/{id} request body
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Profile'
+                    description: PATCH /api/v1/profiles/{id} success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - bearerAuth: []
+            summary: PATCH /api/v1/profiles/{id}
+            tags:
+                - Id
     /api/v1/query:
         post:
             description: POST /api/v1/query operation
@@ -3393,6 +3723,8 @@ tags:
       name: Graphs
     - description: Operations for Healthz
       name: Healthz
+    - description: Operations for Id
+      name: Id
     - description: Operations for Indexes
       name: Indexes
     - description: Operations for Labels
