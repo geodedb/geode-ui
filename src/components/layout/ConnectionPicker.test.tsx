@@ -10,7 +10,7 @@ import { ThemeProvider } from 'styled-components'
 // async effect settles.
 jest.mock('../../api/client', () => ({
   client: {
-    profiles: jest.fn().mockResolvedValue({
+    getProfiles: jest.fn().mockResolvedValue({
       profiles: [{ name: 'default' }, { name: 'prod' }],
     }),
   },
