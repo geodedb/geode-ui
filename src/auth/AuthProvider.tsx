@@ -57,6 +57,12 @@ type AuthState = {
   setAuthed: (a: boolean) => void
   signIn: (username: string, password: string, profile: string) => Promise<void>
   signOut: () => Promise<void>
+  connectMore: (
+    username: string,
+    password: string,
+    profile: string
+  ) => Promise<void>
+  disconnect: (connectionId: string) => void
 }
 
 const AuthCtx = createContext<AuthState | null>(null)
@@ -114,6 +120,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsAuthed(false)
   }, [conns])
 
+  const connectMore = useCallback(
+    async (
+      username: string,
+      password: string,
+      profile: string
+    ): Promise<void> => {
+      const result = await apiLogin(username, password, profile)
+      conns.add({
+        connectionId: result.connection_id,
+        token: result.access_token,
+        profileName: profile,
+        expiresAt: Date.now() + result.expires_in * 1000,
+      })
+      // Do NOT setActive — keep the existing active connection.
+      // Do NOT setLatestToken — same reason.
+      // Defensive: ensure isAuthed boolean is true.
+      writeAuthHint(true)
+      setIsAuthed(true)
+    },
+    [conns]
+  )
+
+  const disconnect = useCallback(
+    (connectionId: string): void => {
+      const wasActive = conns.activeId === connectionId
+      // Snapshot remaining BEFORE the remove call (Map mutation).
+      const remaining = [...conns.connections.values()].filter(
+        (c) => c.connectionId !== connectionId
+      )
+      conns.remove(connectionId)
+      if (wasActive) {
+        const next = remaining[0]
+        if (next) {
+          conns.setActive(next.connectionId)
+          setLatestToken(next.token)
+        } else {
+          // Last connection just disconnected — clear latch + legacy
+          // cookie + session hint.
+          setLatestToken(null)
+          apiLogout().catch(() => undefined)
+          clearCsrfToken()
+          writeAuthHint(false)
+          setIsAuthed(false)
+        }
+      }
+    },
+    [conns]
+  )
+
   // On mount, if the hint says we're logged in, refresh the CSRF
   // token so subsequent mutations have one. Skip the network call
   // when the hint says logged out. We deliberately depend only on
@@ -127,8 +182,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [isAuthed])
 
   const value = useMemo<AuthState>(
-    () => ({ isAuthed, setAuthed, signIn, signOut }),
-    [isAuthed, setAuthed, signIn, signOut]
+    () => ({ isAuthed, setAuthed, signIn, signOut, connectMore, disconnect }),
+    [isAuthed, setAuthed, signIn, signOut, connectMore, disconnect]
   )
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>
 }
