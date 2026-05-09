@@ -53,6 +53,7 @@ func (s *GraphServer) AuthJWT(r *http.Request) error {
 	ctx = context.WithValue(ctx, userCtxKey, claims.Subject)
 	ctx = context.WithValue(ctx, profileCtxKey, claims.Profile)
 	ctx = context.WithValue(ctx, rolesCtxKey, claims.Roles)
+	ctx = context.WithValue(ctx, cidCtxKey, claims.ConnectionID)
 	src := sourceForRequest(r)
 	ctx = context.WithValue(ctx, authSourceCtxKey, src)
 	*r = *r.WithContext(ctx)

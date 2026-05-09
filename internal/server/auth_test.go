@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
@@ -299,5 +300,23 @@ func TestAuthJWT_EmptyCookieFallsThrough(t *testing.T) {
 	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: ""})
 	if err := srv.AuthJWT(r); err == nil {
 		t.Fatal("expected error for empty cookie + no other auth")
+	}
+}
+
+func TestAuthJWT_PopulatesConnectionID(t *testing.T) {
+	secret := bytes.Repeat([]byte("k"), 32)
+	iss, _ := jwt.NewIssuer(secret, time.Hour)
+	srv := New(Config{JWT: iss})
+
+	tok, _, _ := iss.Issue("alice", "default", []string{"admin"}, "conn-xyz-789")
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	got := connectionIDFromContext(r.Context())
+	if got != "conn-xyz-789" {
+		t.Errorf("connectionIDFromContext = %q, want %q", got, "conn-xyz-789")
 	}
 }
