@@ -14,7 +14,7 @@ import (
 func TestProfiles_ReturnsRegisteredNames(t *testing.T) {
 	srv := New(Config{Profiles: fakeProfileLookup{names: []string{"default", "prod", "stage"}}})
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles", nil)
-	resp, err := srv.Profiles(httptest.NewRecorder(), r, &gentypes.Empty{})
+	resp, err := srv.GetProfiles(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Profiles: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestProfiles_ReturnsRegisteredNames(t *testing.T) {
 func TestProfiles_NoLookupReturnsEmpty(t *testing.T) {
 	srv := New(Config{})
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles", nil)
-	resp, err := srv.Profiles(httptest.NewRecorder(), r, &gentypes.Empty{})
+	resp, err := srv.GetProfiles(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Profiles: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestProfiles_NoLookupReturnsEmpty(t *testing.T) {
 func TestProfiles_EmptyNamesReturnsEmpty(t *testing.T) {
 	srv := New(Config{Profiles: fakeProfileLookup{names: nil}})
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles", nil)
-	resp, err := srv.Profiles(httptest.NewRecorder(), r, &gentypes.Empty{})
+	resp, err := srv.GetProfiles(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Profiles: %v", err)
 	}

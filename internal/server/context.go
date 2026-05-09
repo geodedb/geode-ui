@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -58,4 +59,37 @@ func profileFromContextOrDefault(ctx context.Context) string {
 		return v
 	}
 	return "default"
+}
+
+// actor bundles the authenticated caller's identity and roles as extracted
+// from the JWT by AuthJWT. Subject is the upstream Geode username ("sub"
+// claim); Roles is the list of roles carried in the token.
+type actor struct {
+	Subject string
+	Roles   []string
+}
+
+// actorFromContext reconstructs the actor for the current request using the
+// values placed in ctx by AuthJWT (userCtxKey → Subject, rolesCtxKey →
+// Roles). Returns a zero actor if the middleware has not run.
+func actorFromContext(ctx context.Context) actor {
+	var a actor
+	if v, ok := ctx.Value(userCtxKey).(string); ok {
+		a.Subject = v
+	}
+	if v, ok := ctx.Value(rolesCtxKey).([]string); ok {
+		a.Roles = v
+	}
+	return a
+}
+
+// hasRole reports whether the role list contains the named role,
+// case-insensitively. Empty role list returns false for any name.
+func hasRole(roles []string, name string) bool {
+	for _, r := range roles {
+		if strings.EqualFold(r, name) {
+			return true
+		}
+	}
+	return false
 }

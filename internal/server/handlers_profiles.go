@@ -1,26 +1,174 @@
 package server
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"net/http"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
+	"geodedb.com/geode-ui/internal/conn"
+	"geodedb.com/geode-ui/internal/profilestore"
 )
 
-// Profiles implements GET /api/v1/profiles. It returns the set of named
-// upstream Geode endpoints registered with the server.
+// GetProfiles implements GET /api/v1/profiles. Behaviour:
 //
-// DSN strings are intentionally omitted — the connection-picker UI only
-// needs profile names, and exposing DSNs would leak host/port/credential
-// layout to any authenticated user. Description is reserved for a
-// future per-profile human-readable label and is currently empty.
-func (s *GraphServer) Profiles(_ http.ResponseWriter, _ *http.Request, _ *gentypes.Empty) (*gentypes.ProfileList, error) {
+//   - When Config.Store is set, returns the union of system profiles
+//     plus the caller's personal profiles. Sensitive fields (DSN, TLS,
+//     pool_overrides, saved_username) are zeroed out in the response
+//     unless the caller is admin OR is the owner of the personal
+//     profile.
+//   - When Config.Store is nil, falls back to enumerating profile
+//     names from the *conn.Pool registered as Config.Profiles.
+//     Returned Profile entries carry only Name (legacy contract).
+func (s *GraphServer) GetProfiles(_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.ProfileList, error) {
+	if s.cfg.Store != nil {
+		ctx := r.Context()
+		actr := actorFromContext(ctx)
+		isAdmin := hasRole(actr.Roles, "admin")
+
+		sys, err := s.cfg.Store.List(ctx, profilestore.Filter{Scope: conn.ProfileScopeSystem})
+		if err != nil {
+			return nil, err
+		}
+		personal, err := s.cfg.Store.List(ctx, profilestore.Filter{
+			Scope:       conn.ProfileScopePersonal,
+			OwnerUserID: actr.Subject,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all := append(sys, personal...)
+		out := make([]gentypes.Profile, 0, len(all))
+		for _, p := range all {
+			reveal := isAdmin || p.OwnerUserID == actr.Subject
+			out = append(out, toGenProfile(p, reveal))
+		}
+		return &gentypes.ProfileList{Profiles: out}, nil
+	}
+
+	// Legacy fallback: enumerate from the pool only.
 	if s.cfg.Profiles == nil {
 		return &gentypes.ProfileList{Profiles: nil}, nil
 	}
 	names := s.cfg.Profiles.Names()
 	out := make([]gentypes.Profile, 0, len(names))
 	for _, n := range names {
-		out = append(out, gentypes.Profile{Name: n})
+		out = append(out, gentypes.Profile{
+			ID:    n,
+			Scope: string(conn.ProfileScopeSystem),
+			Name:  n,
+		})
 	}
 	return &gentypes.ProfileList{Profiles: out}, nil
+}
+
+// toGenProfile converts a conn.Profile to its wire shape. When
+// reveal=false (an unauthorised reader of someone else's personal
+// profile, or a non-admin reader of a system profile), DSN, TLS,
+// pool_overrides, and saved_username are zeroed out so non-owners
+// don't see connection secrets.
+//
+// TLS and PoolOverrides are emitted as jsontext.Value because the
+// genapi schema models them as opaque JSON properties (no per-field
+// $ref support yet); we marshal the typed conn.TLSMaterial /
+// conn.PoolOverrides into the matching wire shape here.
+func toGenProfile(p conn.Profile, reveal bool) gentypes.Profile {
+	out := gentypes.Profile{
+		ID:          p.ID,
+		Scope:       string(p.Scope),
+		OwnerUserID: p.OwnerUserID,
+		Name:        p.Name,
+		Description: p.Description,
+		IsDefault:   p.Default,
+	}
+	if reveal {
+		out.Dsn = p.DSN
+		out.SavedUsername = p.SavedUsername
+		if tls, err := marshalTLS(p.TLS); err == nil {
+			out.TLS = tls
+		}
+		if po, err := marshalPoolOverrides(p.PoolOverrides); err == nil {
+			out.PoolOverrides = po
+		}
+	}
+	return out
+}
+
+// marshalTLS encodes a conn.TLSMaterial as a jsontext.Value matching
+// the wire schema { ca_pem, client_cert_pem, client_key_pem }.
+func marshalTLS(t conn.TLSMaterial) (jsontext.Value, error) {
+	wire := struct {
+		CAPEM         string `json:"ca_pem,omitempty"`
+		ClientCertPEM string `json:"client_cert_pem,omitempty"`
+		ClientKeyPEM  string `json:"client_key_pem,omitempty"`
+	}{
+		CAPEM:         t.CAPEM,
+		ClientCertPEM: t.ClientCertPEM,
+		ClientKeyPEM:  t.ClientKeyPEM,
+	}
+	raw, err := json.Marshal(wire)
+	if err != nil {
+		return nil, err
+	}
+	return jsontext.Value(raw), nil
+}
+
+// marshalPoolOverrides encodes a conn.PoolOverrides as a jsontext.Value
+// matching the wire schema. ConnMaxLifetime / ConnMaxIdleTime are
+// converted from time.Duration to milliseconds for the wire.
+func marshalPoolOverrides(o conn.PoolOverrides) (jsontext.Value, error) {
+	wire := struct {
+		MaxOpenConns      int   `json:"max_open_conns,omitempty"`
+		MaxIdleConns      int   `json:"max_idle_conns,omitempty"`
+		ConnMaxLifetimeMs int64 `json:"conn_max_lifetime_ms,omitempty"`
+		ConnMaxIdleMs     int64 `json:"conn_max_idle_ms,omitempty"`
+	}{
+		MaxOpenConns:      o.MaxOpenConns,
+		MaxIdleConns:      o.MaxIdleConns,
+		ConnMaxLifetimeMs: int64(o.ConnMaxLifetime / 1_000_000),
+		ConnMaxIdleMs:     int64(o.ConnMaxIdleTime / 1_000_000),
+	}
+	raw, err := json.Marshal(wire)
+	if err != nil {
+		return nil, err
+	}
+	return jsontext.Value(raw), nil
+}
+
+// storeErrorToHTTP maps profilestore errors to endpointError values.
+// Used by the CRUD handlers in handlers_profiles_crud.go.
+func storeErrorToHTTP(err error) *endpointError {
+	switch {
+	case errors.Is(err, profilestore.ErrNotFound):
+		return &endpointError{
+			status:      http.StatusNotFound,
+			code:        "not_found",
+			description: "profile not found",
+		}
+	case errors.Is(err, profilestore.ErrConflict):
+		return &endpointError{
+			status:      http.StatusConflict,
+			code:        "conflict",
+			description: "profile name already exists in this scope",
+		}
+	case errors.Is(err, profilestore.ErrImmutable):
+		return &endpointError{
+			status:      http.StatusBadRequest,
+			code:        "immutable",
+			description: "scope and owner cannot be changed",
+		}
+	case errors.Is(err, profilestore.ErrInvalid):
+		return &endpointError{
+			status:      http.StatusBadRequest,
+			code:        "invalid",
+			description: err.Error(),
+		}
+	default:
+		return &endpointError{
+			status:      http.StatusInternalServerError,
+			code:        "internal_error",
+			description: err.Error(),
+		}
+	}
 }
