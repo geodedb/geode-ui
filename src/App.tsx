@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { createGlobalStyle } from 'styled-components'
 import { AuthProvider } from './auth/AuthProvider'
 import { ConnectionsProvider } from './api/connections'
+import type { ConnectionState } from './api/connections'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { Shell } from './components/layout/Shell'
 import { LoginPage } from './pages/LoginPage'
@@ -82,11 +83,15 @@ const ProtectedShell: React.FC = () => (
   </ProtectedRoute>
 )
 
-const App: React.FC = () => (
+interface AppProps {
+  initialConnections?: ConnectionState[]
+}
+
+const App: React.FC<AppProps> = ({ initialConnections }) => (
   <LocalizationProvider>
     <ThemeProvider>
       <GlobalStyle />
-      <ConnectionsProvider>
+      <ConnectionsProvider initialConnections={initialConnections}>
         <AuthProvider>
           <BrowserRouter>
             <Routes>
