@@ -491,11 +491,12 @@
     },
     "LoginResp": {
       "type": "object",
-      "required": ["access_token", "token_type", "expires_in"],
+      "required": ["access_token", "token_type", "expires_in", "connection_id"],
       "properties": {
-        "access_token": { "type": "string", "minLength": 1, "maxLength": 8192 },
-        "token_type":   { "type": "string", "enum": ["Bearer"] },
-        "expires_in":   { "type": "integer", "minimum": 1, "maximum": 86400 }
+        "access_token":  { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "token_type":    { "type": "string", "enum": ["Bearer"] },
+        "expires_in":    { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "connection_id": { "type": "string", "minLength": 1, "maxLength": 64 }
       }
     },
     "QueryReq": {

@@ -282,6 +282,7 @@ func (v LoginReq) Valid() error {
 // LoginResp generated from config schema
 type LoginResp struct {
 	AccessToken string `json:"access_token" genapi:"access_token"`
+	ConnectionID string `json:"connection_id" genapi:"connection_id"`
 	ExpiresIn int64 `json:"expires_in" genapi:"expires_in"`
 	TokenType string `json:"token_type" genapi:"token_type"`
 }
@@ -290,6 +291,8 @@ type LoginResp struct {
 func (v LoginResp) Valid() error {
 	if len(v.AccessToken) < 1 { return errors.New("access_token: too short") }
 	if len(v.AccessToken) > 8192 { return errors.New("access_token: too long") }
+	if len(v.ConnectionID) < 1 { return errors.New("connection_id: too short") }
+	if len(v.ConnectionID) > 64 { return errors.New("connection_id: too long") }
 	if v.ExpiresIn < 1 { return errors.New("expires_in: too small") }
 	if v.ExpiresIn > 86400 { return errors.New("expires_in: too large") }
 	{

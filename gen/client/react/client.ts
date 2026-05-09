@@ -177,6 +177,7 @@ export interface LoginReq {
 }
 export interface LoginResp {
   access_token: string;
+  connection_id: string;
   expires_in: number;
   token_type: string;
 }

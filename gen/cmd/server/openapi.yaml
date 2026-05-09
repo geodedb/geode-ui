@@ -518,12 +518,19 @@ components:
             description: Generated schema for LoginResp
             example:
                 accessToken: x
+                connectionId: x
                 expiresIn: 1
                 tokenType: Bearer
             properties:
                 accessToken:
                     example: x
                     maxLength: 8192
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+                connectionId:
+                    example: x
+                    maxLength: 64
                     minLength: 1
                     pattern: ^.*$
                     type: string
@@ -544,6 +551,7 @@ components:
                 - accessToken
                 - tokenType
                 - expiresIn
+                - connectionId
             type: object
         MigrationCreateReq:
             description: Generated schema for MigrationCreateReq
