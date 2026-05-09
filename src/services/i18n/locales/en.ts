@@ -288,6 +288,37 @@ export const en = {
     empty: 'No profiles yet.',
     loading: 'Loading profiles…',
     error: 'Could not load profiles.',
+    editor: {
+      create: {
+        title: 'Create profile',
+      },
+      field: {
+        name: 'Name',
+        dsn: 'DSN',
+        description: 'Description',
+        savedUsername: 'Saved username (optional)',
+        scope: 'Scope',
+        isDefault: 'Default for this scope',
+        caPem: 'CA PEM',
+        clientCertPem: 'Client certificate PEM',
+        clientKeyPem: 'Client key PEM',
+        maxOpenConns: 'Max open connections',
+        maxIdleConns: 'Max idle connections',
+        connMaxLifetimeMs: 'Max connection lifetime (ms)',
+        connMaxIdleMs: 'Max idle time (ms)',
+      },
+      section: {
+        tls: 'TLS material (optional)',
+        pool: 'Pool tuning (optional — leave blank for server defaults)',
+      },
+      actions: {
+        save: 'Save',
+        cancel: 'Cancel',
+      },
+      error: {
+        failed: 'Failed to save profile',
+      },
+    },
   },
 } as const
 
