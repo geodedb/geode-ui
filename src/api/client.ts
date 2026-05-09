@@ -1,6 +1,7 @@
 // eslint-disable-next-line import/no-unresolved
 import { createClient } from '@api'
 import { auth } from './auth'
+import { getLatestToken } from './connections'
 import { getCsrfToken, isCsrfRequired, refreshCsrfToken } from './csrf'
 
 function resolveBaseUrl(): string {
@@ -45,13 +46,20 @@ function makeFetchImpl(): typeof fetch {
     const method = (init?.method ?? 'GET').toUpperCase()
     const needsCsrf = isCsrfRequired(method)
     let headers = new Headers(init?.headers ?? {})
-    // Cookie-mode (default post-S3c): auth.getToken() returns null. The
-    // generated client attached Authorization: Bearer <placeholder>;
-    // strip it so server-side AuthJWT falls through to the cookie. In
-    // legacy backout mode (token is a real JWT) the header stays.
-    if (!auth.getToken()) {
+
+    // Plan B: when an in-memory active connection has a token, attach
+    // it as Bearer. The cookie path still works in parallel; the
+    // server's AuthJWT prefers the header when both are present.
+    const liveToken = getLatestToken()
+    if (liveToken) {
+      headers.set('Authorization', 'Bearer ' + liveToken)
+    } else if (!auth.getToken()) {
+      // Cookie-mode (no in-memory token, no legacy bearer): strip the
+      // generated client's placeholder Authorization so the server
+      // falls through to the cookie.
       headers.delete('Authorization')
     }
+
     if (needsCsrf) {
       const tok = getCsrfToken()
       if (tok) headers.set('X-CSRF-Token', tok)
@@ -63,12 +71,16 @@ function makeFetchImpl(): typeof fetch {
     }
     let res = await native(input, reqInit)
     if (needsCsrf && res.status === 403) {
-      // CSRF token may have expired; refresh once and retry. This is a
-      // recoverable failure mode for long-lived SPA sessions.
+      // CSRF token may have expired; refresh once and retry.
       const fresh = await refreshCsrfToken()
       if (fresh) {
         headers = new Headers(init?.headers ?? {})
-        if (!auth.getToken()) headers.delete('Authorization')
+        const live = getLatestToken()
+        if (live) {
+          headers.set('Authorization', 'Bearer ' + live)
+        } else if (!auth.getToken()) {
+          headers.delete('Authorization')
+        }
         headers.set('X-CSRF-Token', fresh)
         res = await native(input, { ...reqInit, headers })
       }
