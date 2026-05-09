@@ -253,6 +253,52 @@ func TestIssueAndParse_ConnectionID(t *testing.T) {
 	}
 }
 
+// TestParse_LegacyNoCidClaim proves that a token minted by the
+// underlying library WITHOUT any `cid` field at all (not just cid: "")
+// parses cleanly with ConnectionID == "". This pins the backwards-compat
+// guarantee for Plan A tokens that predate the cid claim.
+func TestParse_LegacyNoCidClaim(t *testing.T) {
+	secret := bytes.Repeat([]byte("k"), 32)
+	iss, err := NewIssuer(secret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+
+	// Mint a token without any cid claim — mirrors Plan A's wire shape.
+	type legacyClaims struct {
+		Subject string   `json:"sub"`
+		Profile string   `json:"profile"`
+		Roles   []string `json:"roles"`
+		jjwt.RegisteredClaims
+	}
+	now := time.Now()
+	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, legacyClaims{
+		Subject: "alice",
+		Profile: "default",
+		Roles:   []string{"admin"},
+		RegisteredClaims: jjwt.RegisteredClaims{
+			IssuedAt:  jjwt.NewNumericDate(now),
+			ExpiresAt: jjwt.NewNumericDate(now.Add(time.Hour)),
+			Subject:   "alice",
+		},
+	})
+	signed, err := tok.SignedString(secret)
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	claims, err := iss.Parse(signed)
+	if err != nil {
+		t.Fatalf("Parse legacy token: %v", err)
+	}
+	if claims.ConnectionID != "" {
+		t.Errorf("ConnectionID = %q, want empty (legacy token has no cid)", claims.ConnectionID)
+	}
+	if claims.Subject != "alice" || claims.Profile != "default" {
+		t.Errorf("other claims drifted: %+v", claims)
+	}
+}
+
 // TestParse_RejectsExpiredBeyondLeeway pins the upper bound: a token
 // whose exp is more than the leeway window in the past must still be
 // rejected. Closes the "leeway accidentally widens replay window"
