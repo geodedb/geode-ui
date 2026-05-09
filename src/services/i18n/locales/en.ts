@@ -61,6 +61,7 @@ export const en = {
     username: 'Username',
     password: 'Password',
     loginFailed: 'login failed',
+    savePassword: 'Save password for this profile',
   },
 
   query: {

@@ -28,6 +28,7 @@ import {
 } from '../api/auth'
 import { clearCsrfToken, refreshCsrfToken } from '../api/csrf'
 import { useConnections, setLatestToken } from '../api/connections'
+import { storeSavedPassword } from '../api/electron-bridge'
 
 const AUTH_HINT_KEY = 'geode-ui.session-hint'
 
@@ -55,12 +56,18 @@ type AuthState = {
   // login/logout so the call site doesn't trigger a redundant
   // /auth/logout request.
   setAuthed: (a: boolean) => void
-  signIn: (username: string, password: string, profile: string) => Promise<void>
+  signIn: (
+    username: string,
+    password: string,
+    profile: string,
+    savePassword?: boolean
+  ) => Promise<void>
   signOut: () => Promise<void>
   connectMore: (
     username: string,
     password: string,
-    profile: string
+    profile: string,
+    savePassword?: boolean
   ) => Promise<void>
   disconnect: (connectionId: string) => void
   switchActive: (connectionId: string) => void
@@ -91,7 +98,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     async (
       username: string,
       password: string,
-      profile: string
+      profile: string,
+      savePassword?: boolean
     ): Promise<void> => {
       const result = await apiLogin(username, password, profile)
       // After login the server set the auth cookie. Mint a CSRF token
@@ -107,6 +115,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       setLatestToken(result.access_token)
       writeAuthHint(true)
       setIsAuthed(true)
+      if (savePassword) {
+        await storeSavedPassword(profile, username, password)
+      }
     },
     [conns]
   )
@@ -125,7 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     async (
       username: string,
       password: string,
-      profile: string
+      profile: string,
+      savePassword?: boolean
     ): Promise<void> => {
       const result = await apiLogin(username, password, profile)
       conns.add({
@@ -139,6 +151,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       // Defensive: ensure isAuthed boolean is true.
       writeAuthHint(true)
       setIsAuthed(true)
+      if (savePassword) {
+        await storeSavedPassword(profile, username, password)
+      }
     },
     [conns]
   )

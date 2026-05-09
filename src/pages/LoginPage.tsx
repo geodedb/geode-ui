@@ -6,6 +6,7 @@ import styled from 'styled-components'
 import { useAuth } from '../auth/AuthProvider'
 import { Button, Field, Input, Logo } from '../components/ui'
 import { fetchPublicProfiles, PublicProfile } from '../api/auth'
+import { getStoredPassword, isElectron } from '../api/electron-bridge'
 
 const Form = styled.form`
   max-width: 380px;
@@ -93,6 +94,7 @@ export const LoginPage: React.FC = () => {
   const [profile, setProfile] = useState<string>('default')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [savePw, setSavePw] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -113,12 +115,24 @@ export const LoginPage: React.FC = () => {
     }
   }, [])
 
+  useEffect(() => {
+    if (!username || !profile) return undefined
+    let cancelled = false
+    getStoredPassword(profile, username).then((pw) => {
+      if (cancelled) return
+      if (pw) setPassword(pw)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [profile, username])
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      await signIn(username, password, profile)
+      await signIn(username, password, profile, savePw)
       nav('/', { replace: true })
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : t('auth.loginFailed'))
@@ -183,6 +197,16 @@ export const LoginPage: React.FC = () => {
           required
         />
       </Field>
+      {isElectron() ? (
+        <Field label={t('auth.savePassword')} htmlFor="login-savePw">
+          <input
+            id="login-savePw"
+            type="checkbox"
+            checked={savePw}
+            onChange={(e) => setSavePw(e.target.checked)}
+          />
+        </Field>
+      ) : null}
       <Button type="submit" loading={busy} fullWidth>
         {t('auth.signInButton')}
       </Button>

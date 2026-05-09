@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { fetchPublicProfiles, PublicProfile } from '../../api/auth'
 import { listProfiles, ProfileView } from '../../api/profiles'
 import { Button, Field, Input, Modal } from '../ui'
+import { getStoredPassword, isElectron } from '../../api/electron-bridge'
 
 export interface Props {
   open: boolean
@@ -18,6 +19,7 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   const [profile, setProfile] = useState('default')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [savePw, setSavePw] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [authedProfiles, setAuthedProfiles] = useState<ProfileView[]>([])
@@ -58,12 +60,24 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
     }
   }, [profile, authedProfiles])
 
+  useEffect(() => {
+    if (!username || !profile) return undefined
+    let cancelled = false
+    getStoredPassword(profile, username).then((pw) => {
+      if (cancelled) return
+      if (pw) setPassword(pw)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [profile, username])
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      await connectMore(username, password, profile)
+      await connectMore(username, password, profile, savePw)
       onClose()
       setUsername('')
       setPassword('')
@@ -119,6 +133,16 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
             required
           />
         </Field>
+        {isElectron() ? (
+          <Field label={t('auth.savePassword')} htmlFor="add-savePw">
+            <input
+              id="add-savePw"
+              type="checkbox"
+              checked={savePw}
+              onChange={(e) => setSavePw(e.target.checked)}
+            />
+          </Field>
+        ) : null}
         <Button type="submit" loading={busy} fullWidth>
           {t('auth.signInButton')}
         </Button>

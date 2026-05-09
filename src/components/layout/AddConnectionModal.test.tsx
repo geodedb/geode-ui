@@ -76,6 +76,6 @@ test('submits via connectMore with the typed profile/credentials', async () => {
     await Promise.resolve()
     await Promise.resolve()
   })
-  expect(mockConnectMore).toHaveBeenCalledWith('alice', 'pw', 'default')
+  expect(mockConnectMore).toHaveBeenCalledWith('alice', 'pw', 'default', false)
   expect(onClose).toHaveBeenCalled()
 })
