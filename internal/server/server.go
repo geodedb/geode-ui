@@ -9,6 +9,7 @@ import (
 	gentypes "geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/jwt"
+	"geodedb.com/geode-ui/internal/profilestore"
 )
 
 // Pool is the subset of *conn.Pool the server uses; an interface for testing.
@@ -24,6 +25,14 @@ type Pool interface {
 type ProfileLookup interface {
 	Lookup(name string) (conn.Profile, error)
 	Names() []string
+}
+
+// PoolReloader is the write-side abstraction satisfied by *conn.Pool.
+// Profile CRUD handlers call Reload after a successful store mutation
+// so the in-memory pool reflects the persisted truth without requiring
+// a server restart.
+type PoolReloader interface {
+	Reload(profiles []conn.Profile) error
 }
 
 // Config carries dependencies for GraphServer.
@@ -67,6 +76,16 @@ type Config struct {
 	// non-TLS request, so accidentally launching against `http://` in
 	// production fails closed rather than silently leaking the JWT.
 	SecureCookies bool
+	// Store persists profile records and is the source of truth for
+	// scope=system + scope=personal profiles. Nil disables the CRUD
+	// endpoints (they 503). Tests that don't exercise CRUD may leave it
+	// nil; the legacy boot-time profile set still flows through Pool.
+	Store profilestore.Store
+
+	// PoolReloader is invoked after a successful Store mutation so the
+	// in-memory connection pool tracks the persisted set. Typically the
+	// same *conn.Pool that backs Pool. Nil disables hot-reload.
+	PoolReloader PoolReloader
 	// testAuthenticate is an optional override for authenticateUpstream
 	// used by handler tests that don't want to spin up the database/sql
 	// driver. When non-nil, Login calls this in place of

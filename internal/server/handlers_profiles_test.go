@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,7 +10,7 @@ import (
 
 // TestProfiles_ReturnsRegisteredNames verifies the handler enumerates
 // every profile name reported by the ProfileLookup, in the order the
-// lookup returned them, and emits each as a {"name": "<n>"} object.
+// lookup returned them, and emits each as a Profile with the correct name.
 func TestProfiles_ReturnsRegisteredNames(t *testing.T) {
 	srv := New(Config{Profiles: fakeProfileLookup{names: []string{"default", "prod", "stage"}}})
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles", nil)
@@ -23,13 +22,7 @@ func TestProfiles_ReturnsRegisteredNames(t *testing.T) {
 		t.Fatalf("profiles len = %d, want %d", got, want)
 	}
 	want := []string{"default", "prod", "stage"}
-	for i, raw := range resp.Profiles {
-		var entry struct {
-			Name string `json:"name"`
-		}
-		if err := json.Unmarshal(raw, &entry); err != nil {
-			t.Fatalf("decode entry[%d]: %v", i, err)
-		}
+	for i, entry := range resp.Profiles {
 		if entry.Name != want[i] {
 			t.Errorf("entry[%d].name = %q, want %q", i, entry.Name, want[i])
 		}
