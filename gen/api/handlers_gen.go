@@ -46,6 +46,7 @@ type ServerInterface interface {
 	GetName(w http.ResponseWriter, r *http.Request, req *types.PolicyParam) (*types.Policy, error)
 	GetProfiles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.ProfileList, error)
 	PostProfiles(w http.ResponseWriter, r *http.Request, req *types.CreateProfileReq) (*types.Profile, error)
+	Public(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PublicProfileList, error)
 	DeleteProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error)
 	GetProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error)
 	PatchProfileid(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error)
@@ -169,6 +170,10 @@ func (UnimplementedServer) GetProfiles(_ http.ResponseWriter, _ *http.Request, _
 }
 
 func (UnimplementedServer) PostProfiles(_ http.ResponseWriter, _ *http.Request, _ *types.CreateProfileReq) (*types.Profile, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Public(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.PublicProfileList, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -895,6 +900,30 @@ func (s catchAllServer) PostProfiles(w http.ResponseWriter, r *http.Request, req
 		ResponseType:       "*types.Profile",
 		RequestSchema:      "CreateProfileReq",
 		ResponseSchema:     "Profile",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Public(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PublicProfileList, error) {
+	return callCatchAll[*types.PublicProfileList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/profiles/public",
+		MuxPattern:         "GET /api/v1/profiles/public",
+		MethodName:         "Public",
+		BodyMode:           "query",
+		Auth:               "",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.PublicProfileList",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "PublicProfileList",
 		HasTypedRequest:    true,
 		HasTypedResponse:   true,
 		PathParams:         []string(nil),
@@ -3185,6 +3214,36 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.PostProfiles(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Public *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Public = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/profiles/public", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Public",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/profiles/public"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if bkt_get_Public != nil { lim, rem, reset := bkt_get_Public.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Public.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Public(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

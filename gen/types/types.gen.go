@@ -517,6 +517,30 @@ func (v ProfileList) Valid() error {
 	return nil
 }
 
+// PublicProfile generated from config schema
+type PublicProfile struct {
+	Description string `json:"description" genapi:"description"`
+	Name string `json:"name" genapi:"name"`
+}
+
+// Valid validates PublicProfile fields against schema constraints.
+func (v PublicProfile) Valid() error {
+	if len(v.Description) > 256 { return errors.New("description: too long") }
+	if len(v.Name) < 1 { return errors.New("name: too short") }
+	if len(v.Name) > 64 { return errors.New("name: too long") }
+	return nil
+}
+
+// PublicProfileList generated from config schema
+type PublicProfileList struct {
+	Profiles []PublicProfile `json:"profiles" genapi:"profiles"`
+}
+
+// Valid validates PublicProfileList fields against schema constraints.
+func (v PublicProfileList) Valid() error {
+	return nil
+}
+
 // QueryReq generated from config schema
 type QueryReq struct {
 	Graph string `json:"graph" genapi:"graph"`

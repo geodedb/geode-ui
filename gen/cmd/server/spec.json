@@ -403,6 +403,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/profiles/public",
+      "requestSchema": "Empty",
+      "responseSchema": "PublicProfileList",
+      "auth": "",
+      "rateLimit": 50
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/profiles",
       "requestSchema": "Empty",
       "responseSchema": "ProfileList",
@@ -927,6 +935,23 @@
         "ca_pem":          { "type": "string" },
         "client_cert_pem": { "type": "string" },
         "client_key_pem":  { "type": "string" }
+      }
+    },
+
+    "PublicProfile": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 256 }
+      }
+    },
+
+    "PublicProfileList": {
+      "type": "object",
+      "required": ["profiles"],
+      "properties": {
+        "profiles": { "type": "array", "items": { "$ref": "PublicProfile" } }
       }
     },
 

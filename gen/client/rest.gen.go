@@ -1052,6 +1052,44 @@ func (c *Client) PostProfiles(ctx context.Context, req *types.CreateProfileReq) 
 	}
 	return &out, nil
 }
+// Public performs GET /api/v1/profiles/public.
+func (c *Client) Public(ctx context.Context, req *types.Empty) (*types.PublicProfileList, error) {
+	target, err := c.buildURL("/api/v1/profiles/public")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.PublicProfileList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // DeleteProfileid performs DELETE /api/v1/profiles/{profileId}.
 func (c *Client) DeleteProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/profiles/{profileId}")

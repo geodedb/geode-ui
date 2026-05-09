@@ -844,6 +844,39 @@ components:
             required:
                 - profiles
             type: object
+        PublicProfile:
+            description: Generated schema for PublicProfile
+            example:
+                name: x
+            properties:
+                description:
+                    example: x
+                    maxLength: 256
+                    pattern: ^.*$
+                    type: string
+                name:
+                    example: x
+                    maxLength: 64
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
+            required:
+                - name
+            type: object
+        PublicProfileList:
+            description: Generated schema for PublicProfileList
+            example:
+                profiles: []
+            properties:
+                profiles:
+                    example: []
+                    items:
+                        $ref: '#/components/schemas/PublicProfile'
+                    maxItems: 100
+                    type: array
+            required:
+                - profiles
+            type: object
         QueryReq:
             description: Generated schema for QueryReq
             example:
@@ -2607,6 +2640,43 @@ paths:
             summary: PATCH /api/v1/profiles/{profileId}
             tags:
                 - Profileid
+    /api/v1/profiles/public:
+        get:
+            description: GET /api/v1/profiles/public operation
+            operationId: getApiV1ProfilesPublic
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicProfileList'
+                    description: GET /api/v1/profiles/public success
+                    headers:
+                        X-RateLimit-Limit:
+                            $ref: '#/components/headers/X-RateLimit-Limit'
+                        X-RateLimit-Remaining:
+                            $ref: '#/components/headers/X-RateLimit-Remaining'
+                        X-RateLimit-Reset:
+                            $ref: '#/components/headers/X-RateLimit-Reset'
+                "400":
+                    $ref: '#/components/responses/Standard400'
+                "401":
+                    $ref: '#/components/responses/Standard401'
+                "405":
+                    $ref: '#/components/responses/Standard405'
+                "413":
+                    $ref: '#/components/responses/Standard413'
+                "429":
+                    $ref: '#/components/responses/Standard429'
+                "500":
+                    $ref: '#/components/responses/Standard500'
+                "501":
+                    $ref: '#/components/responses/Standard501'
+            security:
+                - unauthenticated: []
+            summary: GET /api/v1/profiles/public
+            tags:
+                - Public
     /api/v1/query:
         post:
             description: POST /api/v1/query operation
@@ -3771,6 +3841,8 @@ tags:
       name: Profileid
     - description: Operations for Profiles
       name: Profiles
+    - description: Operations for Public
+      name: Public
     - description: Operations for Query
       name: Query
     - description: Operations for Restore

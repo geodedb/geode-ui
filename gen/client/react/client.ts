@@ -251,6 +251,13 @@ export interface ProfileIDPath {
 export interface ProfileList {
   profiles: Array<Profile>;
 }
+export interface PublicProfile {
+  description?: string;
+  name: string;
+}
+export interface PublicProfileList {
+  profiles: Array<PublicProfile>;
+}
 export interface QueryReq {
   graph?: string;
   page_size?: number;
@@ -1238,6 +1245,15 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
+  async public(req: Empty): Promise<PublicProfileList> {
+    return this.request<PublicProfileList>(
+      "GET",
+      "/api/v1/profiles/public",
+      "",
+      "query",
+      [], copyRecord(req),
+    );
+  }
   async deleteProfileid(req: ProfileIDPath): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
@@ -1557,6 +1573,9 @@ export function useGetProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyA
 }
 export function usePostProfilesMutation(client: GenAPIClient): MutationState<CreateProfileReq, Profile> {
   return useMutationState((req) => client.postProfiles(req));
+}
+export function usePublic(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<PublicProfileList> {
+  return usePromise(() => client.public(req), deps);
 }
 export function useDeleteProfileid(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
   return usePromise(() => client.deleteProfileid(req), deps);
