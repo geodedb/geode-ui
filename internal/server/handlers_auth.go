@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/url"
@@ -88,7 +90,8 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		roles = appendUnique(roles, "admin")
 	}
 
-	token, exp, err := s.cfg.JWT.Issue(req.Username, profile, roles, "")
+	connID := newConnectionID()
+	token, exp, err := s.cfg.JWT.Issue(req.Username, profile, roles, connID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +124,10 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		SameSite: http.SameSiteStrictMode,
 	})
 	return &gentypes.LoginResp{
-		AccessToken: token,
-		TokenType:   "Bearer",
-		ExpiresIn:   expiresIn,
+		AccessToken:  token,
+		TokenType:    "Bearer",
+		ExpiresIn:    expiresIn,
+		ConnectionID: connID,
 	}, nil
 }
 
@@ -267,6 +271,15 @@ func isAuthError(err error) bool {
 	return strings.Contains(msg, "authentication failed") ||
 		strings.Contains(msg, "invalid credentials") ||
 		strings.Contains(msg, "password reset required")
+}
+
+// newConnectionID returns a 16-byte hex-encoded random identifier
+// used as the JWT cid claim and the LoginResp.connection_id body
+// field. crypto/rand sourced; collision probability is negligible.
+func newConnectionID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 // injectCreds rewrites a Geode DSN to carry the supplied username and

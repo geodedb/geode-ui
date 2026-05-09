@@ -146,9 +146,10 @@ func TestInjectCreds_PercentEncodesPassword(t *testing.T) {
 // between Issue's outputs and the generated response validator.
 func TestLoginRespShape(t *testing.T) {
 	resp := &gentypes.LoginResp{
-		AccessToken: "ey.dummy.token",
-		TokenType:   "Bearer",
-		ExpiresIn:   3600,
+		AccessToken:  "ey.dummy.token",
+		TokenType:    "Bearer",
+		ExpiresIn:    3600,
+		ConnectionID: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4", // 32 hex chars
 	}
 	if err := resp.Valid(); err != nil {
 		t.Fatalf("LoginResp.Valid: %v", err)
@@ -204,6 +205,46 @@ func TestAppendUnique(t *testing.T) {
 }
 
 // equalStrings is defined in handlers_schema_test.go (same package).
+
+// TestLogin_ReturnsConnectionID asserts that Login mints a non-empty,
+// unique connection_id per call and that the value matches the cid
+// claim embedded in the returned JWT.
+func TestLogin_ReturnsConnectionID(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{
+		JWT:      iss,
+		Profiles: fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+		testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+			return true, nil, nil
+		},
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	resp, err := srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "p", Profile: "default",
+	})
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if resp.ConnectionID == "" {
+		t.Errorf("ConnectionID is empty")
+	}
+
+	w2 := httptest.NewRecorder()
+	r2 := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	resp2, _ := srv.Login(w2, r2, &gentypes.LoginReq{
+		Username: "alice", Password: "p", Profile: "default",
+	})
+	if resp2.ConnectionID == resp.ConnectionID {
+		t.Errorf("two Logins returned the same ConnectionID: %q", resp.ConnectionID)
+	}
+
+	claims, _ := iss.Parse(resp.AccessToken)
+	if claims.ConnectionID != resp.ConnectionID {
+		t.Errorf("JWT cid claim %q != LoginResp.ConnectionID %q", claims.ConnectionID, resp.ConnectionID)
+	}
+}
 
 // TestLogin_SetsAuthCookie (SEC-F7 / #62 S3a) is a stub that exercises
 // the cookie-write side of Login on an Authoritative path: a happy
