@@ -82,7 +82,7 @@ function numOrUndef(v: string): number | undefined {
 }
 
 function buildCreateInput(s: FormState): CreateProfileInput {
-  let tls
+  let tls: CreateProfileInput['tls']
   if (s.caPem || s.clientCertPem || s.clientKeyPem) {
     tls = {
       caPem: s.caPem || undefined,
@@ -90,7 +90,7 @@ function buildCreateInput(s: FormState): CreateProfileInput {
       clientKeyPem: s.clientKeyPem || undefined,
     }
   }
-  let poolOverrides
+  let poolOverrides: CreateProfileInput['poolOverrides']
   if (
     s.maxOpenConns ||
     s.maxIdleConns ||
