@@ -33,6 +33,7 @@ export type LoginResult = {
   access_token: string
   token_type: string
   expires_in: number
+  connection_id: string
 }
 
 export async function login(

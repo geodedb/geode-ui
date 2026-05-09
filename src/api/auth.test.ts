@@ -59,6 +59,7 @@ test('login posts credentials and returns the parsed body', async () => {
           access_token: 'jwt-here',
           token_type: 'Bearer',
           expires_in: 3600,
+          connection_id: 'mock-cid',
         }),
     } as unknown as Response)
   )
@@ -83,6 +84,7 @@ test('login does NOT write the token to localStorage in cookie mode', async () =
           access_token: 'jwt-here',
           token_type: 'Bearer',
           expires_in: 3600,
+          connection_id: 'mock-cid',
         }),
     } as unknown as Response)
   ) as unknown as typeof fetch
@@ -101,6 +103,7 @@ test('login writes the token to localStorage in legacy mode', async () => {
           access_token: 'jwt-here',
           token_type: 'Bearer',
           expires_in: 3600,
+          connection_id: 'mock-cid',
         }),
     } as unknown as Response)
   ) as unknown as typeof fetch
