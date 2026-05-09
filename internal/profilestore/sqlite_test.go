@@ -100,3 +100,65 @@ func TestSQLitePutValidation(t *testing.T) {
 		t.Errorf("missing dsn: want ErrInvalid, got %v", err)
 	}
 }
+
+func TestSQLitePatchUpdatesFields(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+	})
+	updated, err := st.Patch(context.Background(), saved.ID, conn.Profile{
+		Description:   "updated",
+		SavedUsername: "alice@host",
+	})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if updated.Description != "updated" || updated.SavedUsername != "alice@host" {
+		t.Errorf("Patch did not update: %+v", updated)
+	}
+	if updated.Name != "p1" {
+		t.Errorf("Patch clobbered Name: %s", updated.Name)
+	}
+}
+
+func TestSQLitePatchRefusesScopeChange(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "sys", DSN: "quic://x:1",
+	})
+	_, err := st.Patch(context.Background(), saved.ID, conn.Profile{
+		Scope: conn.ProfileScopePersonal,
+	})
+	if !errors.Is(err, ErrImmutable) {
+		t.Errorf("Patch with new scope: want ErrImmutable, got %v", err)
+	}
+}
+
+func TestSQLitePatchNotFound(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	_, err := st.Patch(context.Background(), "missing", conn.Profile{Description: "x"})
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Patch missing: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestSQLiteDelete(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "x", DSN: "quic://x:1",
+	})
+	if err := st.Delete(context.Background(), saved.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := st.Get(context.Background(), saved.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("post-Delete Get: want ErrNotFound, got %v", err)
+	}
+	if err := st.Delete(context.Background(), saved.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("double Delete: want ErrNotFound, got %v", err)
+	}
+}
