@@ -90,9 +90,9 @@ test.describe('schema explorer', () => {
     // labels-pane test above.
     await Promise.all(
       seed.edgeTypes.map((t) =>
-        expect(
-          page.getByRole('button', { name: t, exact: true })
-        ).toBeVisible({ timeout: 12_000 })
+        expect(page.getByRole('button', { name: t, exact: true })).toBeVisible({
+          timeout: 12_000,
+        })
       )
     )
   })

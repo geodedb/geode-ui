@@ -54,3 +54,10 @@ coverage.txt
 /e2e/playwright-report/
 /e2e/test-results/
 /e2e/.cache/
+
+# Electron-builder output (release/<platform>/*.dmg|AppImage|deb|exe)
+/release/
+/internal/ui/electron-dist/
+
+# GoReleaser output (already covered by /dist/ above; mirror for clarity)
+/dist/

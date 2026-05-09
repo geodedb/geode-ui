@@ -18,10 +18,17 @@ include:
 
 variables:
   NODE_VERSION: '22.14.0'
+  GO_VERSION: '1.26-alpine'
+  GORELEASER_VERSION: 'v2.13.3'
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
   FF_USE_FASTZIP: 'true'
   ARTIFACT_COMPRESSION_LEVEL: 'fast'
   CACHE_COMPRESSION_LEVEL: 'fast'
+  # Docker Hub credentials (set as protected CI variables in GitLab):
+  #   DOCKERHUB_USERNAME — Docker Hub login (e.g., "geodedb")
+  #   DOCKERHUB_TOKEN    — Docker Hub access token (NOT a password)
+  # When unset, goreleaser exports SKIP_DOCKERHUB=true and the dockerhub
+  # image variants are built locally but not pushed.
 
 default:
   image: node:${NODE_VERSION}
@@ -49,6 +56,7 @@ stages:
   - security
   - sbom
   - release
+  - publish
 
 # ============================================================================
 # INSTALL STAGE
@@ -346,3 +354,297 @@ e2e:playwright:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ============================================================================
+# RELEASE STAGE - GoReleaser (Go binary + container images + nfpm packages)
+# ============================================================================
+#
+# Two release entry points mirroring the ../geode pipeline:
+#
+#   • goreleaser:snapshot — runs on every main-branch commit. Builds the
+#     binaries + images locally and pushes the GitLab Container Registry
+#     tags only. Never touches Docker Hub or the GitLab Release page.
+#     allow_failure: true so a flaky goreleaser run doesn't block main.
+#
+#   • goreleaser:release — runs only on git tags matching v*. Pushes to
+#     Docker Hub when DOCKERHUB_USERNAME + DOCKERHUB_TOKEN are set.
+#     Hard-blocks on failure.
+#
+# Both jobs install pinned goreleaser via tarball download (no
+# pipe-to-shell), authenticate to registries, then invoke goreleaser.
+
+.goreleaser-base:
+  image: docker:25
+  services:
+    - docker:25-dind
+  tags:
+    - company
+  variables:
+    DOCKER_TLS_CERTDIR: ''
+    DOCKER_BUILDKIT: '1'
+    GIT_DEPTH: '0'
+  before_script:
+    # Tools: alpine package set + node (for the npm-build before-hook).
+    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm
+    # Goreleaser binary (pinned, integrity-verifiable via SHA next time).
+    - |
+      curl -fsSL "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" -o /tmp/gr.tgz
+      tar -xzf /tmp/gr.tgz -C /tmp goreleaser
+      install -m 0755 /tmp/goreleaser /usr/local/bin/goreleaser
+      goreleaser --version
+    # Wait for docker daemon
+    - |
+      for i in $(seq 1 60); do
+        if docker info >/dev/null 2>&1; then break; fi
+        sleep 1
+      done
+      docker info
+    # GitLab Container Registry login (always available).
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    # Optional Docker Hub login. SKIP_DOCKERHUB="true" silences the
+    # dockerhub image variants when credentials aren't present.
+    - |
+      export SKIP_DOCKERHUB=true
+      if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+        if echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin; then
+          export SKIP_DOCKERHUB=false
+          echo "✓ Docker Hub login successful (will push to docker.io/geodedb/geode-ui)"
+        else
+          echo "⚠ Docker Hub login failed — keeping SKIP_DOCKERHUB=true"
+        fi
+      fi
+      echo "SKIP_DOCKERHUB=$SKIP_DOCKERHUB" > /tmp/dockerhub.env
+    # Buildx for multi-arch image assembly.
+    - docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null
+    - docker buildx inspect --bootstrap
+    # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
+    - npm ci
+
+goreleaser:snapshot:
+  extends: .goreleaser-base
+  stage: release
+  interruptible: false
+  needs:
+    - job: unit-tests
+      artifacts: false
+    - job: build
+      artifacts: false
+    - job: go:test
+      artifacts: false
+  timeout: 1h
+  script:
+    - . /tmp/dockerhub.env
+    - echo "SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
+    # `--snapshot` skips git-tag validation, marks the build as a snapshot,
+    # and short-circuits any release-publish step. Container images are
+    # still pushed (snapshot tags carry the `-snapshot-<sha>` suffix).
+    - goreleaser release --snapshot --clean --timeout 60m
+    - ls -la dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 3 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG == null'
+  allow_failure: true
+
+goreleaser:release:
+  extends: .goreleaser-base
+  stage: release
+  interruptible: false
+  needs:
+    - job: unit-tests
+      artifacts: false
+    - job: build
+      artifacts: false
+    - job: go:test
+      artifacts: false
+  timeout: 2h
+  script:
+    - . /tmp/dockerhub.env
+    - echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"
+    - goreleaser release --clean --timeout 120m
+    - ls -la dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+# ============================================================================
+# RELEASE STAGE - Electron desktop installers (mac, linux, windows)
+# ============================================================================
+#
+# Three parallel jobs, each producing the platform-specific installer(s)
+# defined in electron-builder.yml. All artifacts surface as job artifacts
+# and the `release:publish` job below stitches them onto the GitLab
+# Release page.
+#
+# Runner availability (typical company-runner taxonomy):
+#   • electron:linux  → linux runner (always available)
+#   • electron:mac    → tag `macos`. allow_failure: true so missing
+#                       runner doesn't block release; use `when: manual`
+#                       fallback if no mac runner is registered.
+#   • electron:win    → tag `windows`. Same fallback rule as mac.
+#
+# Code signing:
+#   • mac:  CSC_LINK + CSC_KEY_PASSWORD CI vars (.p12 base64-encoded
+#           Developer ID cert). Without these the dmg is unsigned.
+#   • win:  WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD for Authenticode.
+#   • linux: AppImage + .deb don't require signing for distribution
+#           (.deb gpg signing is out of scope; sign the GitLab release
+#           tag itself for provenance).
+
+.electron-base:
+  stage: release
+  interruptible: false
+  needs:
+    - job: unit-tests
+      artifacts: false
+    - job: build
+      artifacts: false
+  timeout: 1h
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+electron:linux:
+  extends: .electron-base
+  image: node:${NODE_VERSION}
+  script:
+    - npm ci
+    # electron-builder needs a few system libs to package linux artifacts.
+    - apt-get update && apt-get install -y --no-install-recommends rpm fakeroot dpkg
+    - npm run electron:build
+    # Build BOTH AppImage + deb for x64 + arm64 (per electron-builder.yml).
+    - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml
+    - ls -la release/linux/ || true
+  artifacts:
+    paths:
+      - release/linux/
+    expire_in: 30 days
+
+electron:mac:
+  extends: .electron-base
+  tags:
+    - macos
+  script:
+    - npm ci
+    - npm run electron:build
+    # mac universal dmg. Code signing kicks in if CSC_LINK is set.
+    - npx electron-builder --mac --universal --config electron-builder.yml
+    - ls -la release/mac/ || true
+  artifacts:
+    paths:
+      - release/mac/
+    expire_in: 30 days
+  # No mac runner registered yet → skip without failing the pipeline.
+  # Switch to `allow_failure: false` once a macos runner is available.
+  allow_failure: true
+
+electron:win:
+  extends: .electron-base
+  tags:
+    - windows
+  script:
+    - npm ci
+    - npm run electron:build
+    - npx electron-builder --win --x64 --config electron-builder.yml
+    - dir release\win || echo "no win artifacts"
+  artifacts:
+    paths:
+      - release/win/
+    expire_in: 30 days
+  # Same windows-runner caveat as the mac job.
+  allow_failure: true
+
+# ============================================================================
+# PUBLISH STAGE - Attach goreleaser + electron artifacts to GitLab Release
+# ============================================================================
+#
+# After goreleaser:release + electron:* finish on a tag, this job:
+#   1. Uploads each binary / package / installer to the GitLab Generic
+#      Package Registry (permanent URL keyed by version + filename).
+#   2. Creates a GitLab Release pointing at those uploads as assets.
+#
+# We use the GitLab Release API directly instead of `release-cli` so the
+# job has full control over asset link names + descriptions.
+
+release:publish:
+  stage: publish
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: goreleaser:release
+      artifacts: true
+    - job: electron:linux
+      artifacts: true
+      optional: true
+    - job: electron:mac
+      artifacts: true
+      optional: true
+    - job: electron:win
+      artifacts: true
+      optional: true
+  before_script:
+    - apk add --no-cache curl jq bash coreutils
+  script:
+    - |
+      set -euo pipefail
+      VERSION="${CI_COMMIT_TAG#v}"
+      PKG_API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/geode-ui/${VERSION}"
+      ASSETS_JSON="/tmp/assets.json"
+      echo '{"links": []}' > "${ASSETS_JSON}"
+
+      upload() {
+        local file="$1"
+        local name; name="$(basename "$file")"
+        echo "→ uploading ${name}"
+        curl --silent --show-error --fail \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "${file}" \
+          "${PKG_API}/${name}"
+        local url="${PKG_API}/${name}"
+        jq --arg n "$name" --arg u "$url" \
+           '.links += [{"name":$n, "url":$u, "link_type":"package"}]' \
+           "${ASSETS_JSON}" > "${ASSETS_JSON}.tmp" && mv "${ASSETS_JSON}.tmp" "${ASSETS_JSON}"
+      }
+
+      # GoReleaser outputs (binaries, archives, packages, checksums)
+      for f in dist/*.tar.gz dist/*.zip dist/*.deb dist/*.rpm dist/*.apk dist/checksums.txt; do
+        [ -f "$f" ] && upload "$f"
+      done
+
+      # Electron installers (each per-OS job published to release/<os>/)
+      for f in release/linux/*.AppImage release/linux/*.deb release/mac/*.dmg release/win/*.exe; do
+        [ -f "$f" ] && upload "$f"
+      done
+
+      cat "${ASSETS_JSON}"
+      echo "Asset upload complete."
+  release:
+    name: Geode UI ${CI_COMMIT_TAG}
+    tag_name: ${CI_COMMIT_TAG}
+    description: |
+      Automated release for ${CI_COMMIT_TAG}.
+
+      ### Container images
+
+      ```
+      docker pull ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG#v}
+      docker pull docker.io/geodedb/geode-ui:${CI_COMMIT_TAG#v}
+      ```
+
+      ### Linux package
+
+      Download the `.deb` / `.rpm` / `.apk` for your platform from the assets below,
+      then `dpkg -i geode-ui_${CI_COMMIT_TAG#v}_Linux_x86_64.deb` (or rpm/apk equivalent).
+
+      ### Desktop app
+
+      The `.dmg` (macOS), `.AppImage` + `.deb` (Linux), and `.exe` (Windows) installers
+      bundle the Electron desktop client.
+
+      Full release notes generated by GoReleaser are in `dist/CHANGELOG.md`
+      attached as a job artifact.
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
