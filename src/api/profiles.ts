@@ -41,30 +41,51 @@ export interface CreateProfileInput {
 
 export type UpdateProfileInput = Partial<Omit<CreateProfileInput, 'scope'>>
 
+// parseMaybe coerces an unknown wire value into a plain object, handling
+// both the legacy string-encoded form (jsontext.Value serialised as a JSON
+// string token) and the current object form (nested JSON object).
+function parseMaybe(v: unknown): Record<string, unknown> | null {
+  if (!v) return null
+  if (typeof v === 'string') {
+    if (v.length === 0) return null
+    try {
+      const parsed = JSON.parse(v) as unknown
+      return typeof parsed === 'object' && parsed !== null
+        ? (parsed as Record<string, unknown>)
+        : null
+    } catch {
+      return null
+    }
+  }
+  if (typeof v === 'object') return v as Record<string, unknown>
+  return null
+}
+
 function parseTls(raw: unknown): TLSMaterial | undefined {
-  if (typeof raw !== 'string' || raw.length === 0) return undefined
-  const obj = JSON.parse(raw)
+  const obj = parseMaybe(raw)
+  if (!obj) return undefined
   return {
-    caPem: obj.ca_pem || undefined,
-    clientCertPem: obj.client_cert_pem || undefined,
-    clientKeyPem: obj.client_key_pem || undefined,
+    caPem: (obj.ca_pem as string | undefined) || undefined,
+    clientCertPem: (obj.client_cert_pem as string | undefined) || undefined,
+    clientKeyPem: (obj.client_key_pem as string | undefined) || undefined,
   }
 }
 
 function parsePoolOverrides(raw: unknown): PoolOverrides | undefined {
-  if (typeof raw !== 'string' || raw.length === 0) return undefined
-  const obj = JSON.parse(raw)
+  const obj = parseMaybe(raw)
+  if (!obj) return undefined
   return {
-    maxOpenConns: obj.max_open_conns,
-    maxIdleConns: obj.max_idle_conns,
-    connMaxLifetimeMs: obj.conn_max_lifetime_ms,
-    connMaxIdleMs: obj.conn_max_idle_ms,
+    maxOpenConns: obj.max_open_conns as number | undefined,
+    maxIdleConns: obj.max_idle_conns as number | undefined,
+    connMaxLifetimeMs: obj.conn_max_lifetime_ms as number | undefined,
+    connMaxIdleMs: obj.conn_max_idle_ms as number | undefined,
   }
 }
 
-// fromWireProfile parses the genapi-emitted Profile shape (with
-// jsontext.Value-as-string for tls and pool_overrides) into the SPA's
-// typed ProfileView.
+// fromWireProfile parses the server's Profile shape into the SPA's typed
+// ProfileView. tls and pool_overrides are accepted as either a nested JSON
+// object (current server output) or a JSON-encoded string (legacy/test
+// form), so the two sides can be deployed independently.
 export function fromWireProfile(wire: any): ProfileView {
   return {
     id: wire.id ?? '',
@@ -80,25 +101,36 @@ export function fromWireProfile(wire: any): ProfileView {
   }
 }
 
-function tlsToWire(t?: TLSMaterial): string | undefined {
+type WireTLS = {
+  ca_pem?: string
+  client_cert_pem?: string
+  client_key_pem?: string
+}
+function tlsToWire(t?: TLSMaterial): WireTLS | undefined {
   if (!t) return undefined
-  const obj: Record<string, string> = {}
-  if (t.caPem) obj.ca_pem = t.caPem
-  if (t.clientCertPem) obj.client_cert_pem = t.clientCertPem
-  if (t.clientKeyPem) obj.client_key_pem = t.clientKeyPem
-  return Object.keys(obj).length === 0 ? undefined : JSON.stringify(obj)
+  const out: WireTLS = {}
+  if (t.caPem) out.ca_pem = t.caPem
+  if (t.clientCertPem) out.client_cert_pem = t.clientCertPem
+  if (t.clientKeyPem) out.client_key_pem = t.clientKeyPem
+  return Object.keys(out).length === 0 ? undefined : out
 }
 
-function poToWire(o?: PoolOverrides): string | undefined {
+type WirePO = {
+  max_open_conns?: number
+  max_idle_conns?: number
+  conn_max_lifetime_ms?: number
+  conn_max_idle_ms?: number
+}
+function poToWire(o?: PoolOverrides): WirePO | undefined {
   if (!o) return undefined
-  const obj: Record<string, number> = {}
-  if (o.maxOpenConns !== undefined) obj.max_open_conns = o.maxOpenConns
-  if (o.maxIdleConns !== undefined) obj.max_idle_conns = o.maxIdleConns
+  const out: WirePO = {}
+  if (o.maxOpenConns !== undefined) out.max_open_conns = o.maxOpenConns
+  if (o.maxIdleConns !== undefined) out.max_idle_conns = o.maxIdleConns
   if (o.connMaxLifetimeMs !== undefined) {
-    obj.conn_max_lifetime_ms = o.connMaxLifetimeMs
+    out.conn_max_lifetime_ms = o.connMaxLifetimeMs
   }
-  if (o.connMaxIdleMs !== undefined) obj.conn_max_idle_ms = o.connMaxIdleMs
-  return Object.keys(obj).length === 0 ? undefined : JSON.stringify(obj)
+  if (o.connMaxIdleMs !== undefined) out.conn_max_idle_ms = o.connMaxIdleMs
+  return Object.keys(out).length === 0 ? undefined : out
 }
 
 export function toWireCreateRequest(

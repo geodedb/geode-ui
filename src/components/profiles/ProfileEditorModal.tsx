@@ -134,9 +134,12 @@ function buildUpdateInput(
   if (s.savedUsername !== (original.savedUsername ?? '')) {
     out.savedUsername = s.savedUsername
   }
-  if (s.isDefault !== original.isDefault) {
-    out.isDefault = s.isDefault
-  }
+  // is_default is ALWAYS included: the server's UpdateProfileReq has a
+  // non-pointer bool that zero-initialises to false on absence, and
+  // mergeProfile writes Default verbatim. Omitting the field would
+  // silently un-default the profile on every PATCH that touches another
+  // field. Always echoing the user's checkbox state preserves the flag.
+  out.isDefault = s.isDefault
 
   const tlsChanged =
     s.caPem !== (original.tls?.caPem ?? '') ||

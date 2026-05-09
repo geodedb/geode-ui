@@ -4,7 +4,7 @@ import {
   toWireUpdateRequest,
 } from './profiles'
 
-test('fromWireProfile parses tls and pool_overrides from jsontext.Value strings', () => {
+test('fromWireProfile parses tls and pool_overrides from object inputs', () => {
   const wire = {
     id: 'abc',
     scope: 'personal',
@@ -14,8 +14,8 @@ test('fromWireProfile parses tls and pool_overrides from jsontext.Value strings'
     description: 'desc',
     saved_username: 'alice',
     is_default: true,
-    tls: '{"ca_pem":"---CA---","client_cert_pem":"","client_key_pem":""}',
-    pool_overrides: '{"max_open_conns":32,"conn_max_lifetime_ms":90000}',
+    tls: { ca_pem: '---CA---', client_cert_pem: '', client_key_pem: '' },
+    pool_overrides: { max_open_conns: 32, conn_max_lifetime_ms: 90000 },
   }
   const got = fromWireProfile(wire)
   expect(got.id).toBe('abc')
@@ -25,7 +25,21 @@ test('fromWireProfile parses tls and pool_overrides from jsontext.Value strings'
   expect(got.poolOverrides?.connMaxLifetimeMs).toBe(90_000)
 })
 
-test('toWireCreateRequest serialises tls/pool_overrides as JSON strings', () => {
+test('fromWireProfile also accepts legacy string inputs (defensive)', () => {
+  const wire = {
+    id: 'abc',
+    scope: 'personal',
+    name: 'p1',
+    is_default: false,
+    tls: '{"ca_pem":"X"}',
+    pool_overrides: '{"max_open_conns":8}',
+  }
+  const got = fromWireProfile(wire)
+  expect(got.tls?.caPem).toBe('X')
+  expect(got.poolOverrides?.maxOpenConns).toBe(8)
+})
+
+test('toWireCreateRequest emits tls/pool_overrides as nested objects', () => {
   const got = toWireCreateRequest({
     scope: 'system',
     name: 'p',
@@ -35,11 +49,8 @@ test('toWireCreateRequest serialises tls/pool_overrides as JSON strings', () => 
     poolOverrides: { maxOpenConns: 16 },
   })
   expect(got.scope).toBe('system')
-  expect(typeof got.tls).toBe('string')
-  expect(JSON.parse(got.tls as string)).toEqual({ ca_pem: 'CA' })
-  expect(JSON.parse(got.pool_overrides as string)).toEqual({
-    max_open_conns: 16,
-  })
+  expect(got.tls).toEqual({ ca_pem: 'CA' })
+  expect(got.pool_overrides).toEqual({ max_open_conns: 16 })
 })
 
 test('toWireUpdateRequest omits keys that were not provided', () => {

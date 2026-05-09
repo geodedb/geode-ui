@@ -174,3 +174,27 @@ test('edit — scope select is disabled', () => {
   ) as HTMLSelectElement
   expect(scopeSelect.disabled).toBe(true)
 })
+
+test('edit — isDefault is always included in the PATCH (prevents silent unflagging)', async () => {
+  mockUpdate.mockReset()
+  mockUpdate.mockResolvedValueOnce({ ...editProfile, description: 'new desc' })
+  // editProfile has isDefault: false; we render with isDefault: true so
+  // the form checkbox is checked. The PATCH must carry isDefault: true
+  // explicitly — omitting it would silently un-default the profile.
+  renderEdit({ ...editProfile, isDefault: true }, jest.fn())
+  await waitFor(() => {
+    expect(
+      (document.getElementById('profile-description') as HTMLInputElement).value
+    ).toBe('old desc')
+  })
+  fireEvent.change(document.getElementById('profile-description')!, {
+    target: { value: 'new desc' },
+  })
+  await act(async () => {
+    fireEvent.submit(document.getElementById('profile-name')!.closest('form')!)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  const callArg = mockUpdate.mock.calls[0][1]
+  expect(callArg.isDefault).toBe(true) // explicitly preserved!
+})
