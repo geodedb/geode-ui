@@ -1,6 +1,14 @@
-// Package main is a throw-away smoke helper that mints a JWT using the
-// same internal/jwt package the server uses. Not shipped — only used by
-// the B-Task 10 smoke test.
+//go:build smoke
+
+// mint-token-smoke is a manual operator helper for the wire-level
+// Bearer round-trip smoke test from Plan B Task 10. It mints an
+// admin-scoped JWT bound to a hand-supplied secret. NOT compiled by
+// default — guarded by the `smoke` build tag so a stray `go build
+// ./cmd/...` cannot accidentally include it in a release image.
+//
+// Usage:
+//
+//	scripts/run-go.sh run -tags smoke ./cmd/mint-token-smoke -secret-hex "$HEX"
 package main
 
 import (
