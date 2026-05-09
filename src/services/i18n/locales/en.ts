@@ -57,6 +57,7 @@ export const en = {
     signIn: 'Sign in',
     signInButton: 'Sign in',
     profile: 'Profile',
+    profileList: 'Available profiles',
     username: 'Username',
     password: 'Password',
     loginFailed: 'login failed',
