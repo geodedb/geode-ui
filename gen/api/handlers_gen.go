@@ -3224,6 +3224,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if bkt_delete_DeleteProfileid != nil { lim, rem, reset := bkt_delete_DeleteProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
 		req.ProfileID = r.URL.Query().Get("profile_id")
+		req.ProfileID = r.PathValue("profileId")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.DeleteProfileid(w, r, &req)
 		if err != nil {
@@ -3265,6 +3266,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if bkt_get_GetProfileid != nil { lim, rem, reset := bkt_get_GetProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
 		req.ProfileID = r.URL.Query().Get("profile_id")
+		req.ProfileID = r.PathValue("profileId")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetProfileid(w, r, &req)
 		if err != nil {

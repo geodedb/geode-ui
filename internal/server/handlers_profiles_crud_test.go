@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	genapi "geodedb.com/geode-ui/gen/api"
 	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/profilestore"
 
@@ -157,5 +158,64 @@ func TestDeleteProfileid_NonAdminCannotDeleteSystem(t *testing.T) {
 	_, _ = srv.DeleteProfileid(w, r, &gentypes.ProfileIDPath{ProfileID: saved.ID})
 	if w.Code != http.StatusNotFound {
 		t.Errorf("non-admin DELETE system: status %d, want 404", w.Code)
+	}
+}
+
+// TestGetProfileid_MuxPathBinding_CamelCaseToken is an integration test that
+// verifies the genapi-emitted route handler correctly populates req.ProfileID
+// from r.PathValue("profileId") when the route is registered through the full
+// http.ServeMux via RegisterGeneratedAPI.
+//
+// Before the fix in the genapi generator, the emitted code omitted the
+// r.PathValue("profileId") line (because the path token "profileId" did not
+// exactly match the json tag "profile_id"), so req.ProfileID was always "",
+// the Valid() check failed (minLength=1 violated), and every GET/DELETE on a
+// per-id endpoint returned 400 {"error":"bad request: ..."} in production.
+//
+// This test proves the 400 → 404/200 transition: with the generator fix the
+// request now reaches the handler (ProfileID is correctly populated), and the
+// response is 404 for an unknown ID rather than 400 for a validation failure.
+func TestGetProfileid_MuxPathBinding_CamelCaseToken(t *testing.T) {
+	srv, _ := newTestServerWithStore(t)
+
+	// stubAuthJWT injects an actor into the request context so the JWT gate
+	// passes without a real token issuer. This mirrors the same-package
+	// technique used throughout this file (reqWithActor sets context values
+	// directly), adapted for the generated mux middleware which calls the
+	// AuthJWT function rather than reading the context values we set.
+	stubAuthJWT := func(r *http.Request) error {
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, userCtxKey, "alice")
+		ctx = context.WithValue(ctx, rolesCtxKey, []string{})
+		*r = *r.WithContext(ctx)
+		return nil
+	}
+
+	mux := http.NewServeMux()
+	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
+		AuthJWT: stubAuthJWT,
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	// Use a well-formed but non-existent UUID so the mux populates
+	// profileId, Valid() passes, and the handler reaches Store.Get.
+	// We expect 404 (profile not found), NOT 400 (bad request / missing_id).
+	fakeID := "00000000-0000-0000-0000-000000000000"
+	resp, err := http.Get(ts.URL + "/api/v1/profiles/" + fakeID)
+	if err != nil {
+		t.Fatalf("GET /api/v1/profiles/%s: %v", fakeID, err)
+	}
+	defer resp.Body.Close()
+
+	// Before the generator fix: 400 (req.ProfileID was "" → Valid() failed).
+	// After the fix:            404 (ProfileID correctly bound → handler ran → not found).
+	if resp.StatusCode == http.StatusBadRequest {
+		t.Errorf("GET /api/v1/profiles/{profileId} returned 400 (Bad Request); " +
+			"this indicates req.ProfileID was empty, meaning r.PathValue(\"profileId\") " +
+			"was not emitted by the generator. Expected 404 (Not Found).")
+	}
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /api/v1/profiles/%s: status=%d, want 404", fakeID, resp.StatusCode)
 	}
 }
