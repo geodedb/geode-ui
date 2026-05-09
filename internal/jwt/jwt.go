@@ -27,9 +27,10 @@ import (
 // package. It embeds jjwt.RegisteredClaims so iat/exp/sub from RFC 7519
 // are included and validated for free by the underlying library.
 type Claims struct {
-	Subject string   `json:"sub"`
-	Profile string   `json:"profile"`
-	Roles   []string `json:"roles"`
+	Subject      string   `json:"sub"`
+	Profile      string   `json:"profile"`
+	Roles        []string `json:"roles"`
+	ConnectionID string   `json:"cid,omitempty"`
 	jjwt.RegisteredClaims
 }
 
@@ -55,16 +56,18 @@ func NewIssuer(secret []byte, ttl time.Duration) (*Issuer, error) {
 	return &Issuer{secret: secret, ttl: ttl}, nil
 }
 
-// Issue mints a new HS256-signed token with the given subject, profile,
-// and roles. It returns the encoded token, the absolute expiry time,
-// and any signing error.
-func (i *Issuer) Issue(sub, profile string, roles []string) (string, time.Time, error) {
+// Issue mints a new HS256-signed token. connID identifies a single
+// authenticated connection so multi-session SPAs can hold multiple
+// tokens at once and the server can disambiguate them in audit logs.
+// Pass "" to omit the cid claim (legacy single-session callers).
+func (i *Issuer) Issue(sub, profile string, roles []string, connID string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(i.ttl)
 	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, Claims{
-		Subject: sub,
-		Profile: profile,
-		Roles:   roles,
+		Subject:      sub,
+		Profile:      profile,
+		Roles:        roles,
+		ConnectionID: connID,
 		RegisteredClaims: jjwt.RegisteredClaims{
 			IssuedAt:  jjwt.NewNumericDate(now),
 			ExpiresAt: jjwt.NewNumericDate(exp),

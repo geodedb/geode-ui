@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"strings"
@@ -27,7 +28,7 @@ func TestIssueAndParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, exp, err := iss.Issue("alice", "default", []string{"admin", "reader"})
+	tok, exp, err := iss.Issue("alice", "default", []string{"admin", "reader"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestParse_RejectsTamperedToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, _, err := iss.Issue("alice", "default", []string{"admin"})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,6 +228,28 @@ func TestParse_TolersClockSkew(t *testing.T) {
 	}
 	if _, err := iss.Parse(signed); err != nil {
 		t.Fatalf("expected leeway to tolerate +30s skew, got: %v", err)
+	}
+}
+
+func TestIssueAndParse_ConnectionID(t *testing.T) {
+	secret := bytes.Repeat([]byte("k"), 32)
+	iss, err := NewIssuer(secret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "conn-abc-123")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	claims, err := iss.Parse(tok)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if claims.ConnectionID != "conn-abc-123" {
+		t.Errorf("ConnectionID = %q, want %q", claims.ConnectionID, "conn-abc-123")
+	}
+	if claims.Subject != "alice" || claims.Profile != "default" {
+		t.Errorf("other claims drifted: %+v", claims)
 	}
 }
 

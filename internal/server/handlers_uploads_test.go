@@ -43,7 +43,7 @@ func buildUploadReq(t *testing.T, path, filename, body, token string) *http.Requ
 // matters for the upload role gate.
 func adminToken(t *testing.T, srv *GraphServer) string {
 	t.Helper()
-	tok, _, err := srv.cfg.JWT.Issue("alice", "default", []string{"admin"})
+	tok, _, err := srv.cfg.JWT.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestUpload_RejectsMissingJWT(t *testing.T) {
 func TestUpload_RejectsNonAdmin(t *testing.T) {
 	dir := t.TempDir()
 	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-	tok, _, err := srv.cfg.JWT.Issue("alice", "default", []string{"user"})
+	tok, _, err := srv.cfg.JWT.Issue("alice", "default", []string{"user"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

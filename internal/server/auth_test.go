@@ -53,7 +53,7 @@ func TestAuthJWT_MissingHeader(t *testing.T) {
 // can't set Authorization on the WebSocket upgrade request.
 func TestAuthJWT_QueryParamFallback(t *testing.T) {
 	iss := newTestIssuer(t)
-	tok, _, err := iss.Issue("alice", "default", []string{"admin"})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestAuthJWT_MalformedHeader(t *testing.T) {
 func TestAuthJWT_BadToken(t *testing.T) {
 	srv := New(Config{JWT: newTestIssuer(t)})
 	otherIssuer := newTestIssuer(t)
-	tok, _, err := otherIssuer.Issue("alice", "default", []string{"admin"})
+	tok, _, err := otherIssuer.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestAuthJWT_BadToken(t *testing.T) {
 func TestAuthJWT_ValidToken(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	tok, _, err := iss.Issue("alice", "prod", []string{"admin", "dba"})
+	tok, _, err := iss.Issue("alice", "prod", []string{"admin", "dba"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestAuthJWT_ValidToken(t *testing.T) {
 func TestAuthJWT_LowercaseBearer(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	tok, _, err := iss.Issue("alice", "default", nil)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -166,11 +166,11 @@ func TestAuthJWT_LowercaseBearer(t *testing.T) {
 func TestAuthJWT_HeaderTakesPrecedenceOverQuery(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	headerTok, _, err := iss.Issue("alice", "default", nil)
+	headerTok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	queryTok, _, err := iss.Issue("mallory", "default", nil)
+	queryTok, _, err := iss.Issue("mallory", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestAuthJWT_EmptyToken(t *testing.T) {
 func TestAuthJWT_CookieFallback(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	tok, _, err := iss.Issue("alice", "default", []string{"admin"})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -243,11 +243,11 @@ func TestAuthJWT_CookieFallback(t *testing.T) {
 func TestAuthJWT_HeaderTakesPrecedenceOverCookie(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	headerTok, _, err := iss.Issue("alice", "default", nil)
+	headerTok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	cookieTok, _, err := iss.Issue("mallory", "default", nil)
+	cookieTok, _, err := iss.Issue("mallory", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -271,11 +271,11 @@ func TestAuthJWT_HeaderTakesPrecedenceOverCookie(t *testing.T) {
 func TestAuthJWT_CookieTakesPrecedenceOverQuery(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	cookieTok, _, err := iss.Issue("alice", "default", nil)
+	cookieTok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	queryTok, _, err := iss.Issue("mallory", "default", nil)
+	queryTok, _, err := iss.Issue("mallory", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

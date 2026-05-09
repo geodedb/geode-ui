@@ -88,7 +88,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		roles = appendUnique(roles, "admin")
 	}
 
-	token, exp, err := s.cfg.JWT.Issue(req.Username, profile, roles)
+	token, exp, err := s.cfg.JWT.Issue(req.Username, profile, roles, "")
 	if err != nil {
 		return nil, err
 	}

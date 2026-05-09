@@ -172,7 +172,7 @@ func TestCSRFMiddleware_SkipsSafeMethods(t *testing.T) {
 // which point CSRF is moot).
 func TestCSRFMiddleware_SkipsBearerAuth(t *testing.T) {
 	iss := newTestIssuer(t)
-	tok, _, err := iss.Issue("alice", "default", nil)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestCSRFMiddleware_SkipsBearerAuth(t *testing.T) {
 // passes through.
 func TestCSRFMiddleware_EnforcesForCookieAuth(t *testing.T) {
 	iss := newTestIssuer(t)
-	tok, _, err := iss.Issue("alice", "default", nil)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
