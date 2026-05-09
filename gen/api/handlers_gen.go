@@ -46,9 +46,9 @@ type ServerInterface interface {
 	GetName(w http.ResponseWriter, r *http.Request, req *types.PolicyParam) (*types.Policy, error)
 	GetProfiles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.ProfileList, error)
 	PostProfiles(w http.ResponseWriter, r *http.Request, req *types.CreateProfileReq) (*types.Profile, error)
-	DeleteId(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error)
-	GetId(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error)
-	PatchId(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error)
+	DeleteProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error)
+	GetProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error)
+	PatchProfileid(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error)
 	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error)
 	Restore(w http.ResponseWriter, r *http.Request, req *types.RestoreReq) (*types.Empty, error)
 	GetRoles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.RoleList, error)
@@ -172,15 +172,15 @@ func (UnimplementedServer) PostProfiles(_ http.ResponseWriter, _ *http.Request, 
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) DeleteId(_ http.ResponseWriter, _ *http.Request, _ *types.ProfileIDPath) (*types.Empty, error) {
+func (UnimplementedServer) DeleteProfileid(_ http.ResponseWriter, _ *http.Request, _ *types.ProfileIDPath) (*types.Empty, error) {
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) GetId(_ http.ResponseWriter, _ *http.Request, _ *types.ProfileIDPath) (*types.Profile, error) {
+func (UnimplementedServer) GetProfileid(_ http.ResponseWriter, _ *http.Request, _ *types.ProfileIDPath) (*types.Profile, error) {
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) PatchId(_ http.ResponseWriter, _ *http.Request, _ *types.UpdateProfileReq) (*types.Profile, error) {
+func (UnimplementedServer) PatchProfileid(_ http.ResponseWriter, _ *http.Request, _ *types.UpdateProfileReq) (*types.Profile, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -904,12 +904,12 @@ func (s catchAllServer) PostProfiles(w http.ResponseWriter, r *http.Request, req
 	}, req)
 }
 
-func (s catchAllServer) DeleteId(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error) {
+func (s catchAllServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error) {
 	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
 		Method:             "DELETE",
-		Path:               "/api/v1/profiles/{id}",
-		MuxPattern:         "DELETE /api/v1/profiles/{id}",
-		MethodName:         "DeleteId",
+		Path:               "/api/v1/profiles/{profileId}",
+		MuxPattern:         "DELETE /api/v1/profiles/{profileId}",
+		MethodName:         "DeleteProfileid",
 		BodyMode:           "query",
 		Auth:               "jwt",
 		Surface:            "public",
@@ -921,19 +921,19 @@ func (s catchAllServer) DeleteId(w http.ResponseWriter, r *http.Request, req *ty
 		ResponseSchema:     "Empty",
 		HasTypedRequest:    true,
 		HasTypedResponse:   true,
-		PathParams:         []string{"id"},
+		PathParams:         []string{"profileId"},
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
 }
 
-func (s catchAllServer) GetId(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error) {
+func (s catchAllServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error) {
 	return callCatchAll[*types.Profile](s.handler, w, r, RouteInfo{
 		Method:             "GET",
-		Path:               "/api/v1/profiles/{id}",
-		MuxPattern:         "GET /api/v1/profiles/{id}",
-		MethodName:         "GetId",
+		Path:               "/api/v1/profiles/{profileId}",
+		MuxPattern:         "GET /api/v1/profiles/{profileId}",
+		MethodName:         "GetProfileid",
 		BodyMode:           "query",
 		Auth:               "jwt",
 		Surface:            "public",
@@ -945,19 +945,19 @@ func (s catchAllServer) GetId(w http.ResponseWriter, r *http.Request, req *types
 		ResponseSchema:     "Profile",
 		HasTypedRequest:    true,
 		HasTypedResponse:   true,
-		PathParams:         []string{"id"},
+		PathParams:         []string{"profileId"},
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
 }
 
-func (s catchAllServer) PatchId(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error) {
+func (s catchAllServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error) {
 	return callCatchAll[*types.Profile](s.handler, w, r, RouteInfo{
 		Method:             "PATCH",
-		Path:               "/api/v1/profiles/{id}",
-		MuxPattern:         "PATCH /api/v1/profiles/{id}",
-		MethodName:         "PatchId",
+		Path:               "/api/v1/profiles/{profileId}",
+		MuxPattern:         "PATCH /api/v1/profiles/{profileId}",
+		MethodName:         "PatchProfileid",
 		BodyMode:           "json",
 		Auth:               "jwt",
 		Surface:            "public",
@@ -969,7 +969,7 @@ func (s catchAllServer) PatchId(w http.ResponseWriter, r *http.Request, req *typ
 		ResponseSchema:     "Profile",
 		HasTypedRequest:    true,
 		HasTypedResponse:   true,
-		PathParams:         []string{"id"},
+		PathParams:         []string{"profileId"},
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
@@ -3199,12 +3199,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			_ = json.MarshalWrite(w, resp)
 		}
 	})
-	var bkt_delete_DeleteId *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteId = securex.NewBucket(20, opts.GlobalBurst) }
-	mux.HandleFunc("DELETE /api/v1/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
-		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteId",
+	var bkt_delete_DeleteProfileid *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteProfileid = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("DELETE /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteProfileid",
 			trace.WithAttributes(
-				attribute.String("http.route", "/api/v1/profiles/{id}"),
+				attribute.String("http.route", "/api/v1/profiles/{profileId}"),
 				attribute.String("http.method", "DELETE"),
 			))
 		defer _span.End()
@@ -3221,12 +3221,11 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if bkt_delete_DeleteId != nil { lim, rem, reset := bkt_delete_DeleteId.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteId.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{id}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteProfileid != nil { lim, rem, reset := bkt_delete_DeleteProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
-		req.ID = r.URL.Query().Get("id")
-		req.ID = r.PathValue("id")
+		req.ProfileID = r.URL.Query().Get("profile_id")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.DeleteId(w, r, &req)
+		resp, err := srv.DeleteProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -3241,12 +3240,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			_ = json.MarshalWrite(w, resp)
 		}
 	})
-	var bkt_get_GetId *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetId = securex.NewBucket(50, opts.GlobalBurst) }
-	mux.HandleFunc("GET /api/v1/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
-		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetId",
+	var bkt_get_GetProfileid *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetProfileid = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetProfileid",
 			trace.WithAttributes(
-				attribute.String("http.route", "/api/v1/profiles/{id}"),
+				attribute.String("http.route", "/api/v1/profiles/{profileId}"),
 				attribute.String("http.method", "GET"),
 			))
 		defer _span.End()
@@ -3263,12 +3262,11 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if bkt_get_GetId != nil { lim, rem, reset := bkt_get_GetId.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetId.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{id}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetProfileid != nil { lim, rem, reset := bkt_get_GetProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
-		req.ID = r.URL.Query().Get("id")
-		req.ID = r.PathValue("id")
+		req.ProfileID = r.URL.Query().Get("profile_id")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.GetId(w, r, &req)
+		resp, err := srv.GetProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -3283,12 +3281,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			_ = json.MarshalWrite(w, resp)
 		}
 	})
-	var bkt_patch_PatchId *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_patch_PatchId = securex.NewBucket(20, opts.GlobalBurst) }
-	mux.HandleFunc("PATCH /api/v1/profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
-		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PatchId",
+	var bkt_patch_PatchProfileid *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_patch_PatchProfileid = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("PATCH /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PatchProfileid",
 			trace.WithAttributes(
-				attribute.String("http.route", "/api/v1/profiles/{id}"),
+				attribute.String("http.route", "/api/v1/profiles/{profileId}"),
 				attribute.String("http.method", "PATCH"),
 			))
 		defer _span.End()
@@ -3305,11 +3303,11 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if bkt_patch_PatchId != nil { lim, rem, reset := bkt_patch_PatchId.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchId.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{id}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_patch_PatchProfileid != nil { lim, rem, reset := bkt_patch_PatchProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UpdateProfileReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.PatchId(w, r, &req)
+		resp, err := srv.PatchProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

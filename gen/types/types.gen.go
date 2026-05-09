@@ -494,13 +494,13 @@ func (v Profile) Valid() error {
 
 // ProfileIDPath generated from config schema
 type ProfileIDPath struct {
-	ID string `json:"id" genapi:"id"`
+	ProfileID string `json:"profile_id" genapi:"profile_id"`
 }
 
 // Valid validates ProfileIDPath fields against schema constraints.
 func (v ProfileIDPath) Valid() error {
-	if len(v.ID) < 1 { return errors.New("id: too short") }
-	if len(v.ID) > 64 { return errors.New("id: too long") }
+	if len(v.ProfileID) < 1 { return errors.New("profile_id: too short") }
+	if len(v.ProfileID) > 64 { return errors.New("profile_id: too long") }
 	return nil
 }
 

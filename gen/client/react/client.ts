@@ -245,7 +245,7 @@ export interface Profile {
   tls?: Record<string, unknown>;
 }
 export interface ProfileIDPath {
-  id: string;
+  profile_id: string;
 }
 export interface ProfileList {
   profiles: Array<Profile>;
@@ -1237,31 +1237,31 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
-  async deleteId(req: ProfileIDPath): Promise<Empty> {
+  async deleteProfileid(req: ProfileIDPath): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
-      "/api/v1/profiles/{id}",
+      "/api/v1/profiles/{profileId}",
       "jwt",
       "query",
-      ["id"], copyRecord(req),
+      ["profileId"], copyRecord(req),
     );
   }
-  async getId(req: ProfileIDPath): Promise<Profile> {
+  async getProfileid(req: ProfileIDPath): Promise<Profile> {
     return this.request<Profile>(
       "GET",
-      "/api/v1/profiles/{id}",
+      "/api/v1/profiles/{profileId}",
       "jwt",
       "query",
-      ["id"], copyRecord(req),
+      ["profileId"], copyRecord(req),
     );
   }
-  async patchId(req: UpdateProfileReq): Promise<Profile> {
+  async patchProfileid(req: UpdateProfileReq): Promise<Profile> {
     return this.request<Profile>(
       "PATCH",
-      "/api/v1/profiles/{id}",
+      "/api/v1/profiles/{profileId}",
       "jwt",
       "json",
-      ["id"], copyRecord(req),
+      ["profileId"], copyRecord(req),
     );
   }
   async query(req: QueryReq): Promise<QueryResp> {
@@ -1557,14 +1557,14 @@ export function useGetProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyA
 export function usePostProfilesMutation(client: GenAPIClient): MutationState<CreateProfileReq, Profile> {
   return useMutationState((req) => client.postProfiles(req));
 }
-export function useDeleteId(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
-  return usePromise(() => client.deleteId(req), deps);
+export function useDeleteProfileid(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
+  return usePromise(() => client.deleteProfileid(req), deps);
 }
-export function useGetId(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Profile> {
-  return usePromise(() => client.getId(req), deps);
+export function useGetProfileid(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Profile> {
+  return usePromise(() => client.getProfileid(req), deps);
 }
-export function usePatchIdMutation(client: GenAPIClient): MutationState<UpdateProfileReq, Profile> {
-  return useMutationState((req) => client.patchId(req));
+export function usePatchProfileidMutation(client: GenAPIClient): MutationState<UpdateProfileReq, Profile> {
+  return useMutationState((req) => client.patchProfileid(req));
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
   return useMutationState((req) => client.query(req));

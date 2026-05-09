@@ -419,7 +419,7 @@
     },
     {
       "method": "GET",
-      "path": "/api/v1/profiles/{id}",
+      "path": "/api/v1/profiles/{profileId}",
       "requestSchema": "ProfileIDPath",
       "responseSchema": "Profile",
       "auth": "jwt",
@@ -427,7 +427,7 @@
     },
     {
       "method": "PATCH",
-      "path": "/api/v1/profiles/{id}",
+      "path": "/api/v1/profiles/{profileId}",
       "requestSchema": "UpdateProfileReq",
       "responseSchema": "Profile",
       "auth": "jwt",
@@ -435,7 +435,7 @@
     },
     {
       "method": "DELETE",
-      "path": "/api/v1/profiles/{id}",
+      "path": "/api/v1/profiles/{profileId}",
       "requestSchema": "ProfileIDPath",
       "responseSchema": "Empty",
       "auth": "jwt",
@@ -956,8 +956,8 @@
 
     "ProfileIDPath": {
       "type": "object",
-      "required": ["id"],
-      "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 64 } }
+      "required": ["profile_id"],
+      "properties": { "profile_id": { "type": "string", "minLength": 1, "maxLength": 64 } }
     },
 
     "CreateProfileReq": {

@@ -1052,13 +1052,13 @@ func (c *Client) PostProfiles(ctx context.Context, req *types.CreateProfileReq) 
 	}
 	return &out, nil
 }
-// DeleteId performs DELETE /api/v1/profiles/{id}.
-func (c *Client) DeleteId(ctx context.Context, req *types.ProfileIDPath) (*types.Empty, error) {
-	target, err := c.buildURL("/api/v1/profiles/{id}")
+// DeleteProfileid performs DELETE /api/v1/profiles/{profileId}.
+func (c *Client) DeleteProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Empty, error) {
+	target, err := c.buildURL("/api/v1/profiles/{profileId}")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"id"}, req)
+	expanded, payload, err := expandRoute(target, []string{"profileId"}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1090,13 +1090,13 @@ func (c *Client) DeleteId(ctx context.Context, req *types.ProfileIDPath) (*types
 	}
 	return &out, nil
 }
-// GetId performs GET /api/v1/profiles/{id}.
-func (c *Client) GetId(ctx context.Context, req *types.ProfileIDPath) (*types.Profile, error) {
-	target, err := c.buildURL("/api/v1/profiles/{id}")
+// GetProfileid performs GET /api/v1/profiles/{profileId}.
+func (c *Client) GetProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Profile, error) {
+	target, err := c.buildURL("/api/v1/profiles/{profileId}")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"id"}, req)
+	expanded, payload, err := expandRoute(target, []string{"profileId"}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1128,13 +1128,13 @@ func (c *Client) GetId(ctx context.Context, req *types.ProfileIDPath) (*types.Pr
 	}
 	return &out, nil
 }
-// PatchId performs PATCH /api/v1/profiles/{id}.
-func (c *Client) PatchId(ctx context.Context, req *types.UpdateProfileReq) (*types.Profile, error) {
-	target, err := c.buildURL("/api/v1/profiles/{id}")
+// PatchProfileid performs PATCH /api/v1/profiles/{profileId}.
+func (c *Client) PatchProfileid(ctx context.Context, req *types.UpdateProfileReq) (*types.Profile, error) {
+	target, err := c.buildURL("/api/v1/profiles/{profileId}")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"id"}, req)
+	expanded, payload, err := expandRoute(target, []string{"profileId"}, req)
 	if err != nil {
 		return nil, err
 	}
