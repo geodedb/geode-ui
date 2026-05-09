@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,6 +22,7 @@ import (
 	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/jwt"
+	"geodedb.com/geode-ui/internal/profilestore"
 	"geodedb.com/geode-ui/internal/server"
 	"geodedb.com/geode-ui/internal/ui"
 )
@@ -29,6 +31,7 @@ func main() {
 	var (
 		listen        string
 		profilesFile  string
+		profileStore  string
 		secretHex     string
 		jwtTTL        time.Duration
 		adminUsers    string
@@ -36,7 +39,8 @@ func main() {
 		secureCookies bool
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
-	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
+	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config; on first launch with -profile-store empty, seeds the store as scope=system profiles, then is unused")
+	flag.StringVar(&profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
 	flag.StringVar(&secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
 	flag.DurationVar(&jwtTTL, "jwt-ttl", 8*time.Hour, "JWT TTL (1m..24h)")
 	flag.StringVar(&adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
@@ -81,6 +85,28 @@ func main() {
 	}
 	defer func() { _ = pool.Close() }()
 
+	store, err := profilestore.OpenSQLite(profileStore)
+	if err != nil {
+		slog.Error("profile store open", "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = store.Close() }()
+
+	// First-launch seed: if the store has zero profiles AND a -profiles
+	// JSON file was supplied, seed the store with the JSON contents as
+	// scope=system. Subsequent launches respect whatever's in the store —
+	// the JSON file becomes one-shot.
+	if err := seedFromJSON(context.Background(), store, profiles); err != nil {
+		slog.Error("profile store seed", "err", err)
+		os.Exit(1)
+	}
+
+	// Make the persisted set the source of truth for the in-memory pool.
+	if err := reloadPoolFromStore(context.Background(), store, pool); err != nil {
+		slog.Error("profile pool reload", "err", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 
 	adminSet := map[string]bool{}
@@ -99,6 +125,8 @@ func main() {
 		AdminUsernames: adminSet,
 		UploadDir:      uploadDir,
 		SecureCookies:  secureCookies,
+		Store:          store,
+		PoolReloader:   pool,
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
@@ -230,4 +258,72 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+}
+
+// seedFromJSON populates an empty store with the supplied profiles as
+// scope=system. PEM material is read from the legacy file paths if
+// present so existing deployments migrate cleanly. A non-empty store
+// is left untouched.
+func seedFromJSON(ctx context.Context, store profilestore.Store, profiles []conn.Profile) error {
+	existing, err := store.List(ctx, profilestore.Filter{})
+	if err != nil {
+		return fmt.Errorf("list: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+	for _, p := range profiles {
+		p.Scope = conn.ProfileScopeSystem
+		p.OwnerUserID = ""
+		if err := loadTLSFiles(&p); err != nil {
+			return fmt.Errorf("load tls for %q: %w", p.Name, err)
+		}
+		if _, err := store.Put(ctx, p); err != nil {
+			return fmt.Errorf("seed %q: %w", p.Name, err)
+		}
+	}
+	return nil
+}
+
+// loadTLSFiles reads the legacy file-path TLS fields off Profile and
+// populates the corresponding TLS PEM strings. Empty file paths are
+// left alone. Already-populated PEM strings (e.g., a profile loaded
+// from the store) take precedence.
+func loadTLSFiles(p *conn.Profile) error {
+	if p.TLSCAFile != "" && p.TLS.CAPEM == "" {
+		b, err := os.ReadFile(p.TLSCAFile)
+		if err != nil {
+			return err
+		}
+		p.TLS.CAPEM = string(b)
+	}
+	if p.ClientCertFile != "" && p.TLS.ClientCertPEM == "" {
+		b, err := os.ReadFile(p.ClientCertFile)
+		if err != nil {
+			return err
+		}
+		p.TLS.ClientCertPEM = string(b)
+	}
+	if p.ClientKeyFile != "" && p.TLS.ClientKeyPEM == "" {
+		b, err := os.ReadFile(p.ClientKeyFile)
+		if err != nil {
+			return err
+		}
+		p.TLS.ClientKeyPEM = string(b)
+	}
+	return nil
+}
+
+// reloadPoolFromStore lists every profile from the store and applies
+// the union as the pool's registered set. No-op when the store is
+// empty.
+func reloadPoolFromStore(ctx context.Context, store profilestore.Store, pool *conn.Pool) error {
+	all, err := store.List(ctx, profilestore.Filter{})
+	if err != nil {
+		return err
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	return pool.Reload(all)
 }
