@@ -49,6 +49,15 @@ type TLSMaterial struct {
 }
 
 // Profile is a named upstream Geode endpoint.
+//
+// Name is the lookup key used by the HTTP API and referenced in JWT
+// "profiles" claims. DSN is a Geode driver DSN as accepted by
+// sql.Open("geode", dsn) — see geodedb.com/geode for the format.
+// ID is assigned by the profilestore on Put; the legacy file-path
+// fields are kept only for the boot-time JSON migration path and
+// are NEVER persisted by the SQLite store (cmd/server/main.go's
+// seedFromJSON reads their contents into TLS.* PEM strings on first
+// launch).
 type Profile struct {
 	ID            string        `json:"id"`
 	Scope         ProfileScope  `json:"scope"`
@@ -58,8 +67,8 @@ type Profile struct {
 	Description   string        `json:"description,omitempty"`
 	SavedUsername string        `json:"saved_username,omitempty"`
 	Default       bool          `json:"is_default"`
-	TLS           TLSMaterial   `json:"tls,omitempty"`
-	PoolOverrides PoolOverrides `json:"pool_overrides,omitempty"`
+	TLS           TLSMaterial   `json:"tls,omitzero"`
+	PoolOverrides PoolOverrides `json:"pool_overrides,omitzero"`
 
 	// Legacy file-path fields kept for boot-time JSON migration. The
 	// store NEVER persists these; cmd/server/main.go:seedFromJSON reads
