@@ -285,6 +285,12 @@ export const en = {
       description: 'Description',
       owner: 'Owner',
     },
+    actions: {
+      create: 'Create profile',
+      edit: 'Edit',
+      delete: 'Delete',
+      setDefault: 'Set as default',
+    },
     empty: 'No profiles yet.',
     loading: 'Loading profiles…',
     error: 'Could not load profiles.',
