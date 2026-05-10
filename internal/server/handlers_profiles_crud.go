@@ -171,32 +171,10 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 		})
 		return nil, nil
 	}
-	tlsMat, err := tlsFromGenJSON(req.TLS)
-	if err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusBadRequest,
-			code:        "invalid_tls",
-			description: err.Error(),
-		})
+	patch, perr := buildProfilePatch(req)
+	if perr != nil {
+		writeEndpointError(w, perr)
 		return nil, nil
-	}
-	poolOv, err := poolOverridesFromGenJSON(req.PoolOverrides)
-	if err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusBadRequest,
-			code:        "invalid_pool_overrides",
-			description: err.Error(),
-		})
-		return nil, nil
-	}
-	patch := conn.Profile{
-		Name:          req.Name,
-		DSN:           req.Dsn,
-		Description:   req.Description,
-		SavedUsername: req.SavedUsername,
-		Default:       req.IsDefault,
-		TLS:           tlsMat,
-		PoolOverrides: poolOv,
 	}
 	updated, err := s.cfg.Store.Patch(r.Context(), id, patch)
 	if err != nil {
@@ -270,6 +248,11 @@ func canMutate(p conn.Profile, a actor, isAdmin bool) bool {
 
 // tlsFromGenJSON parses an incoming jsontext.Value as TLSMaterial wire
 // shape. Empty value → empty TLSMaterial.
+//
+// Used by PostProfiles where the schema requires the field be present
+// (the wire is always materialised on creation). PatchProfileid uses
+// tlsPatchFromGenJSON, which preserves the absent / present-empty
+// distinction required by PSR-G02.
 func tlsFromGenJSON(raw jsontext.Value) (conn.TLSMaterial, error) {
 	if len(raw) == 0 {
 		return conn.TLSMaterial{}, nil
@@ -312,6 +295,102 @@ func poolOverridesFromGenJSON(raw jsontext.Value) (conn.PoolOverrides, error) {
 		ConnMaxIdleTime: time.Duration(wire.ConnMaxIdleMs) * time.Millisecond,
 	}, nil
 }
+
+// tlsPatchFromGenJSON returns a *TLSMaterial when the incoming raw
+// jsontext.Value is non-empty (caller intends to set OR clear) and nil
+// when the wire key was absent (caller wants to leave the persisted
+// value alone). This is the half of PSR-G02 that the genapi-emitted
+// jsontext.Value field type already supports natively at the wire
+// layer; the SPA's tlsToWire helper sends `tls: {}` on the clear path
+// so the raw value here is the two-byte literal "{}", which decodes
+// to a non-nil pointer to an all-empty TLSMaterial -- exactly the
+// "clear all" signal mergeProfile is looking for.
+func tlsPatchFromGenJSON(raw jsontext.Value) (*conn.TLSMaterial, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	mat, err := tlsFromGenJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &mat, nil
+}
+
+// poolPatchFromGenJSON mirrors tlsPatchFromGenJSON for the
+// pool_overrides field.
+func poolPatchFromGenJSON(raw jsontext.Value) (*conn.PoolOverrides, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	po, err := poolOverridesFromGenJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &po, nil
+}
+
+// buildProfilePatch translates the genapi-emitted UpdateProfileReq
+// (where scalar fields are bare Go zero-values that cannot
+// distinguish "absent" from "empty string / false") into a
+// profilestore.ProfilePatch with pointer-typed optionals.
+//
+// LIMITATIONS / KNOWN-DEFERRED for PSR-G02:
+//   - tls and pool_overrides ARE jsontext.Value on the wire and so
+//     fully support the absent / clear / set distinction here.
+//   - description, saved_username, dsn, name come in as bare strings
+//     today, so this layer cannot tell "user wants to clear the
+//     description" apart from "user did not touch the description".
+//     We use a non-empty heuristic for these: empty string => leave
+//     untouched. The schema-side fix (emit *string from genapi) is
+//     tracked as a follow-up; once it lands, swap the heuristic for
+//     direct pointer pass-through.
+//   - is_default similarly cannot distinguish absent from `false`; we
+//     always pass it through (pre-fix behaviour) so a user CAN clear
+//     a default by sending `is_default: false`. This is the best we
+//     can do without the schema change.
+func buildProfilePatch(req *gentypes.UpdateProfileReq) (profilestore.ProfilePatch, *endpointError) {
+	patch := profilestore.ProfilePatch{}
+	if req.Name != "" {
+		patch.Name = strPtr(req.Name)
+	}
+	if req.Dsn != "" {
+		patch.DSN = strPtr(req.Dsn)
+	}
+	if req.Description != "" {
+		patch.Description = strPtr(req.Description)
+	}
+	if req.SavedUsername != "" {
+		patch.SavedUsername = strPtr(req.SavedUsername)
+	}
+	// is_default has no "absent" signal at this layer; always pass.
+	patch.Default = boolPtrLocal(req.IsDefault)
+
+	tlsP, err := tlsPatchFromGenJSON(req.TLS)
+	if err != nil {
+		return profilestore.ProfilePatch{}, &endpointError{
+			status: http.StatusBadRequest, code: "invalid_tls", description: err.Error(),
+		}
+	}
+	patch.TLS = tlsP
+
+	poP, err := poolPatchFromGenJSON(req.PoolOverrides)
+	if err != nil {
+		return profilestore.ProfilePatch{}, &endpointError{
+			status: http.StatusBadRequest, code: "invalid_pool_overrides", description: err.Error(),
+		}
+	}
+	patch.PoolOverrides = poP
+	return patch, nil
+}
+
+// strPtr returns a pointer to s. Local helper to keep buildProfilePatch
+// terse without leaking a generic helper into the package surface.
+func strPtr(s string) *string { return &s }
+
+// boolPtrLocal mirrors strPtr. Suffixed because boolPtr is a common
+// test-helper name and we don't want a future test file to redeclare
+// it at package scope.
+func boolPtrLocal(b bool) *bool { return &b }
 
 // maybeReload syncs the in-memory connection pool with the persisted
 // profile set after a successful Store mutation. Errors are logged but

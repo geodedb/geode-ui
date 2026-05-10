@@ -106,13 +106,24 @@ type WireTLS = {
   client_cert_pem?: string
   client_key_pem?: string
 }
+// tlsToWire serialises the SPA TLSMaterial onto the JSON wire shape.
+//
+// PSR-G02 contract:
+//   - undefined input -> undefined output (caller did not provide the key
+//     at all; PATCH should leave the server-side TLS material untouched).
+//   - defined input (even with all-empty fields) -> always returns an
+//     object (possibly empty `{}`); the server treats `{}` as an
+//     explicit "clear all TLS material" instruction.
+//
+// Pre-fix this function collapsed both shapes to undefined, which made
+// PATCH unable to clear previously-stored CA/cert/key PEM.
 function tlsToWire(t?: TLSMaterial): WireTLS | undefined {
-  if (!t) return undefined
+  if (t === undefined) return undefined
   const out: WireTLS = {}
   if (t.caPem) out.ca_pem = t.caPem
   if (t.clientCertPem) out.client_cert_pem = t.clientCertPem
   if (t.clientKeyPem) out.client_key_pem = t.clientKeyPem
-  return Object.keys(out).length === 0 ? undefined : out
+  return out
 }
 
 type WirePO = {
@@ -121,8 +132,12 @@ type WirePO = {
   conn_max_lifetime_ms?: number
   conn_max_idle_ms?: number
 }
+// poToWire mirrors tlsToWire's PSR-G02 contract: undefined means
+// "absent" (preserve server state); a defined object (even an empty
+// one) means the caller explicitly intends the new state, so an empty
+// `{}` clears every override on the server.
 function poToWire(o?: PoolOverrides): WirePO | undefined {
-  if (!o) return undefined
+  if (o === undefined) return undefined
   const out: WirePO = {}
   if (o.maxOpenConns !== undefined) out.max_open_conns = o.maxOpenConns
   if (o.maxIdleConns !== undefined) out.max_idle_conns = o.maxIdleConns
@@ -130,7 +145,7 @@ function poToWire(o?: PoolOverrides): WirePO | undefined {
     out.conn_max_lifetime_ms = o.connMaxLifetimeMs
   }
   if (o.connMaxIdleMs !== undefined) out.conn_max_idle_ms = o.connMaxIdleMs
-  return Object.keys(out).length === 0 ? undefined : out
+  return out
 }
 
 export function toWireCreateRequest(

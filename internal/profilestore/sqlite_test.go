@@ -101,6 +101,11 @@ func TestSQLitePutValidation(t *testing.T) {
 	}
 }
 
+// stringPtr / boolPtr are tiny helpers that keep the literal-pointer
+// boilerplate in tests readable.
+func stringPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool       { return &b }
+
 func TestSQLitePatchUpdatesFields(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
@@ -108,9 +113,9 @@ func TestSQLitePatchUpdatesFields(t *testing.T) {
 		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
 		Name: "p1", DSN: "quic://x:1",
 	})
-	updated, err := st.Patch(context.Background(), saved.ID, conn.Profile{
-		Description:   "updated",
-		SavedUsername: "alice@host",
+	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+		Description:   stringPtr("updated"),
+		SavedUsername: stringPtr("alice@host"),
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
@@ -123,24 +128,10 @@ func TestSQLitePatchUpdatesFields(t *testing.T) {
 	}
 }
 
-func TestSQLitePatchRefusesScopeChange(t *testing.T) {
-	st, _ := OpenSQLite(":memory:")
-	defer func() { _ = st.Close() }()
-	saved, _ := st.Put(context.Background(), conn.Profile{
-		Scope: conn.ProfileScopeSystem, Name: "sys", DSN: "quic://x:1",
-	})
-	_, err := st.Patch(context.Background(), saved.ID, conn.Profile{
-		Scope: conn.ProfileScopePersonal,
-	})
-	if !errors.Is(err, ErrImmutable) {
-		t.Errorf("Patch with new scope: want ErrImmutable, got %v", err)
-	}
-}
-
 func TestSQLitePatchNotFound(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
-	_, err := st.Patch(context.Background(), "missing", conn.Profile{Description: "x"})
+	_, err := st.Patch(context.Background(), "missing", ProfilePatch{Description: stringPtr("x")})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Patch missing: want ErrNotFound, got %v", err)
 	}
@@ -172,13 +163,138 @@ func TestSQLitePatchClearsDefault(t *testing.T) {
 	if !saved.Default {
 		t.Fatalf("Put: Default not stored as true: %+v", saved)
 	}
-	updated, err := st.Patch(context.Background(), saved.ID, conn.Profile{
-		Default: false,
+	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+		Default: boolPtr(false),
 	})
 	if err != nil {
 		t.Fatalf("Patch clearing default: %v", err)
 	}
 	if updated.Default {
 		t.Errorf("Patch with Default=false did not clear: %+v", updated)
+	}
+}
+
+// TestSQLitePatchClearsTLS pins PSR-G02: a PATCH that supplies an
+// empty TLSMaterial (non-nil pointer to all-empty struct) clears the
+// previously-stored CA, cert, and key PEM. Pre-fix the zero-value-skip
+// merge dropped the empty struct entirely, leaving stale TLS material
+// in place.
+func TestSQLitePatchClearsTLS(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "p1", DSN: "stub://x",
+		TLS: conn.TLSMaterial{
+			CAPEM:         "ca",
+			ClientCertPEM: "cert",
+			ClientKeyPEM:  "key",
+		},
+	})
+	if saved.TLS.CAPEM == "" {
+		t.Fatalf("Put did not store TLS: %+v", saved.TLS)
+	}
+	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+		TLS: &conn.TLSMaterial{}, // non-nil + all empty == clear all
+	})
+	if err != nil {
+		t.Fatalf("Patch clearing TLS: %v", err)
+	}
+	if updated.TLS.CAPEM != "" || updated.TLS.ClientCertPEM != "" || updated.TLS.ClientKeyPEM != "" {
+		t.Errorf("Patch did not clear TLS: %+v", updated.TLS)
+	}
+	// Round-trip through Get to make sure the SQL UPDATE actually wrote zeros.
+	got, _ := st.Get(context.Background(), saved.ID)
+	if got.TLS.CAPEM != "" || got.TLS.ClientCertPEM != "" || got.TLS.ClientKeyPEM != "" {
+		t.Errorf("post-Patch Get still has TLS: %+v", got.TLS)
+	}
+}
+
+// TestSQLitePatchPreservesTLSWhenAbsent is the matching positive case:
+// a PATCH that does NOT mention TLS (nil pointer) must leave the
+// previously-stored TLS material untouched.
+func TestSQLitePatchPreservesTLSWhenAbsent(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "p1", DSN: "stub://x",
+		TLS: conn.TLSMaterial{CAPEM: "keep-me"},
+	})
+	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+		Description: stringPtr("just a tweak"),
+	})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if updated.TLS.CAPEM != "keep-me" {
+		t.Errorf("Patch with TLS=nil clobbered CA: %q", updated.TLS.CAPEM)
+	}
+}
+
+// TestSQLitePatchClearsPoolOverrides pins PSR-G02 for pool overrides.
+func TestSQLitePatchClearsPoolOverrides(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "p1", DSN: "stub://x",
+		PoolOverrides: conn.PoolOverrides{
+			MaxOpenConns:    32,
+			MaxIdleConns:    8,
+			ConnMaxLifetime: 90 * time.Second,
+			ConnMaxIdleTime: 30 * time.Second,
+		},
+	})
+	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+		PoolOverrides: &conn.PoolOverrides{}, // zero out everything
+	})
+	if err != nil {
+		t.Fatalf("Patch clearing PoolOverrides: %v", err)
+	}
+	po := updated.PoolOverrides
+	if po.MaxOpenConns != 0 || po.MaxIdleConns != 0 || po.ConnMaxLifetime != 0 || po.ConnMaxIdleTime != 0 {
+		t.Errorf("Patch did not clear PoolOverrides: %+v", po)
+	}
+	got, _ := st.Get(context.Background(), saved.ID)
+	if got.PoolOverrides.MaxOpenConns != 0 {
+		t.Errorf("post-Patch Get still has MaxOpenConns: %d", got.PoolOverrides.MaxOpenConns)
+	}
+}
+
+// TestMergeProfile_OnlyAppliesNonNilFields exercises the merge
+// directly: every nil pointer leaves cur untouched, every non-nil
+// pointer overwrites verbatim (including zero values).
+func TestMergeProfile_OnlyAppliesNonNilFields(t *testing.T) {
+	cur := conn.Profile{
+		Name: "cur-name", DSN: "cur-dsn", Description: "cur-desc",
+		SavedUsername: "cur-user", Default: true,
+		TLS:           conn.TLSMaterial{CAPEM: "cur-ca"},
+		PoolOverrides: conn.PoolOverrides{MaxOpenConns: 16},
+	}
+
+	// All-nil patch: every field preserved.
+	got := mergeProfile(cur, ProfilePatch{})
+	if got != cur {
+		t.Errorf("all-nil patch mutated cur: got %+v want %+v", got, cur)
+	}
+
+	// Each non-nil pointer overwrites.
+	got = mergeProfile(cur, ProfilePatch{Name: stringPtr("new")})
+	if got.Name != "new" || got.DSN != "cur-dsn" {
+		t.Errorf("Name=new only: got %+v", got)
+	}
+	got = mergeProfile(cur, ProfilePatch{Description: stringPtr("")})
+	if got.Description != "" {
+		t.Errorf("Description=\"\" should clear: got %q", got.Description)
+	}
+	got = mergeProfile(cur, ProfilePatch{Default: boolPtr(false)})
+	if got.Default {
+		t.Errorf("Default=false should clear: got %v", got.Default)
+	}
+	got = mergeProfile(cur, ProfilePatch{TLS: &conn.TLSMaterial{}})
+	if got.TLS.CAPEM != "" {
+		t.Errorf("TLS=&{} should clear all PEM: got %+v", got.TLS)
+	}
+	got = mergeProfile(cur, ProfilePatch{PoolOverrides: &conn.PoolOverrides{}})
+	if got.PoolOverrides.MaxOpenConns != 0 {
+		t.Errorf("PoolOverrides=&{} should zero everything: got %+v", got.PoolOverrides)
 	}
 }

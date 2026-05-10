@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -323,6 +324,94 @@ func TestMaybeReload_EmitsAuditOnReloadFailure(t *testing.T) {
 	}
 	if !failed {
 		t.Errorf("profile_reload_failed event not emitted")
+	}
+}
+
+// TestPatchProfileid_TLSClearViaEmptyObject pins PSR-G02 end-to-end:
+// when the SPA sends `tls: {}` in the PATCH body (the wire signal for
+// "clear all TLS material"), the server actually clears every PEM
+// fragment instead of preserving the previous values.
+func TestPatchProfileid_TLSClearViaEmptyObject(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+		TLS: conn.TLSMaterial{CAPEM: "ca", ClientCertPEM: "cert", ClientKeyPEM: "key"},
+	})
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	got, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		TLS: jsontext.Value(`{}`),
+	})
+	if err != nil || got == nil {
+		t.Fatalf("PatchProfileid: got=%v err=%v code=%d body=%s", got, err, w.Code, w.Body.String())
+	}
+	// Persisted state should reflect the clear.
+	got2, _ := st.Get(context.Background(), saved.ID)
+	if got2.TLS.CAPEM != "" || got2.TLS.ClientCertPEM != "" || got2.TLS.ClientKeyPEM != "" {
+		t.Errorf("TLS not cleared by PATCH: %+v", got2.TLS)
+	}
+}
+
+// TestPatchProfileid_TLSPreservedWhenAbsent is the matching positive
+// case: a PATCH that omits the tls key entirely (jsontext.Value of
+// length 0) leaves the previously-stored TLS material untouched.
+func TestPatchProfileid_TLSPreservedWhenAbsent(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+		TLS: conn.TLSMaterial{CAPEM: "keep-me"},
+	})
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		Description: "tweak only",
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid: %v", err)
+	}
+	got, _ := st.Get(context.Background(), saved.ID)
+	if got.TLS.CAPEM != "keep-me" {
+		t.Errorf("TLS clobbered when absent: %q", got.TLS.CAPEM)
+	}
+	if got.Description != "tweak only" {
+		t.Errorf("Description not updated: %q", got.Description)
+	}
+}
+
+// TestPatchProfileid_PoolOverridesClearViaEmptyObject pins PSR-G02 for
+// pool overrides via the same `pool_overrides: {}` wire signal.
+func TestPatchProfileid_PoolOverridesClearViaEmptyObject(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+		PoolOverrides: conn.PoolOverrides{
+			MaxOpenConns:    32,
+			MaxIdleConns:    8,
+			ConnMaxLifetime: 90 * time.Second,
+			ConnMaxIdleTime: 30 * time.Second,
+		},
+	})
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		PoolOverrides: jsontext.Value(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid: %v", err)
+	}
+	got, _ := st.Get(context.Background(), saved.ID)
+	po := got.PoolOverrides
+	if po.MaxOpenConns != 0 || po.MaxIdleConns != 0 || po.ConnMaxLifetime != 0 || po.ConnMaxIdleTime != 0 {
+		t.Errorf("PoolOverrides not cleared by PATCH: %+v", po)
 	}
 }
 

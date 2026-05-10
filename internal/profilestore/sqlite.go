@@ -160,16 +160,10 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (conn.Profile, error) 
 	return p, nil
 }
 
-func (s *sqliteStore) Patch(ctx context.Context, id string, p conn.Profile) (conn.Profile, error) {
+func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (conn.Profile, error) {
 	cur, err := s.Get(ctx, id)
 	if err != nil {
 		return conn.Profile{}, err
-	}
-	if p.Scope != "" && p.Scope != cur.Scope {
-		return conn.Profile{}, fmt.Errorf("%w: scope", ErrImmutable)
-	}
-	if p.OwnerUserID != "" && p.OwnerUserID != cur.OwnerUserID {
-		return conn.Profile{}, fmt.Errorf("%w: owner_user_id", ErrImmutable)
 	}
 	merged := mergeProfile(cur, p)
 	now := time.Now().UnixNano()
@@ -215,46 +209,41 @@ func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// mergeProfile applies non-zero fields of patch over cur. The Default
-// flag is overwritten verbatim (true OR false) so callers can clear
-// it via PATCH. Callers that want "leave Default alone" must read the
-// current value first and re-send it (the SPA editor binds Default to
-// a checkbox state and always sends the user's intent).
-func mergeProfile(cur, patch conn.Profile) conn.Profile {
+// mergeProfile applies a ProfilePatch over cur using "set vs absent"
+// semantics: a nil pointer field on patch leaves the corresponding
+// field on cur untouched, while a non-nil pointer field overwrites it
+// with the dereferenced value. This is the partial-update contract
+// that PATCH requires (PSR-G02): without the pointer-presence check,
+// PATCH could not clear a previously-set Description, TLS PEM
+// material, or pool override.
+//
+// For TLS and PoolOverrides, the entire bundle is replaced as a unit:
+// passing &TLSMaterial{} (an all-empty struct) clears every PEM
+// fragment in one go; passing nil leaves the bundle alone. This
+// matches the wire shape (`tls: {}` clears, `tls` key absent
+// preserves).
+func mergeProfile(cur conn.Profile, patch ProfilePatch) conn.Profile {
 	out := cur
-	if patch.Name != "" {
-		out.Name = patch.Name
+	if patch.Name != nil {
+		out.Name = *patch.Name
 	}
-	if patch.DSN != "" {
-		out.DSN = patch.DSN
+	if patch.DSN != nil {
+		out.DSN = *patch.DSN
 	}
-	if patch.Description != "" {
-		out.Description = patch.Description
+	if patch.Description != nil {
+		out.Description = *patch.Description
 	}
-	if patch.SavedUsername != "" {
-		out.SavedUsername = patch.SavedUsername
+	if patch.SavedUsername != nil {
+		out.SavedUsername = *patch.SavedUsername
 	}
-	out.Default = patch.Default
-	if patch.TLS.CAPEM != "" {
-		out.TLS.CAPEM = patch.TLS.CAPEM
+	if patch.Default != nil {
+		out.Default = *patch.Default
 	}
-	if patch.TLS.ClientCertPEM != "" {
-		out.TLS.ClientCertPEM = patch.TLS.ClientCertPEM
+	if patch.TLS != nil {
+		out.TLS = *patch.TLS
 	}
-	if patch.TLS.ClientKeyPEM != "" {
-		out.TLS.ClientKeyPEM = patch.TLS.ClientKeyPEM
-	}
-	if patch.PoolOverrides.MaxOpenConns != 0 {
-		out.PoolOverrides.MaxOpenConns = patch.PoolOverrides.MaxOpenConns
-	}
-	if patch.PoolOverrides.MaxIdleConns != 0 {
-		out.PoolOverrides.MaxIdleConns = patch.PoolOverrides.MaxIdleConns
-	}
-	if patch.PoolOverrides.ConnMaxLifetime != 0 {
-		out.PoolOverrides.ConnMaxLifetime = patch.PoolOverrides.ConnMaxLifetime
-	}
-	if patch.PoolOverrides.ConnMaxIdleTime != 0 {
-		out.PoolOverrides.ConnMaxIdleTime = patch.PoolOverrides.ConnMaxIdleTime
+	if patch.PoolOverrides != nil {
+		out.PoolOverrides = *patch.PoolOverrides
 	}
 	return out
 }
