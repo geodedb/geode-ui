@@ -75,3 +75,34 @@ test('cancel — closes without calling deleteProfile', () => {
   expect(mockDelete).not.toHaveBeenCalled()
   expect(onClose).toHaveBeenCalled()
 })
+
+// ---------------------------------------------------------------------------
+// PSR-G05 (#82) — surface delete failures so the user can retry. Pre-fix
+// `onConfirm` swallowed the rejection in a try/finally with no catch
+// branch; the modal closed (or didn't, depending on timing) with no
+// indication that the deletion had actually failed and the row would
+// reappear after the next refresh.
+// ---------------------------------------------------------------------------
+
+test('PSR-G05: failed delete renders an inline error and the modal stays open', async () => {
+  mockDelete.mockRejectedValueOnce(new Error('403 forbidden'))
+  const onClose = jest.fn()
+  const onDeleted = jest.fn()
+  renderModal(true, onClose, onDeleted)
+  await waitFor(() => expect(screen.getByText(/my-dev/)).toBeInTheDocument())
+  const deleteBtns = screen.getAllByRole('button', { name: /^delete$/i })
+  const deleteBtn = deleteBtns[0]
+  if (!deleteBtn) throw new Error('expected at least one Delete button')
+  await act(async () => {
+    fireEvent.click(deleteBtn)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  // Error is announced for assistive tech AND visible.
+  const alert = await screen.findByRole('alert')
+  expect(alert).toHaveTextContent(/403 forbidden/i)
+  // Modal must NOT close and onDeleted must NOT fire so the user can retry.
+  expect(onClose).not.toHaveBeenCalled()
+  expect(onDeleted).not.toHaveBeenCalled()
+})

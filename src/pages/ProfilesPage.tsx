@@ -84,6 +84,12 @@ export const ProfilesPage: React.FC = () => {
   const { t } = useTranslation()
   const [profiles, setProfiles] = useState<ProfileView[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // PSR-G05 (#82): non-blocking failure surface for the multi-step
+  // setAsDefault dance. We can't fold this into `err` (which gates the
+  // whole-page error UI) because a partial setAsDefault failure leaves
+  // the table contents valid; the user just needs to know that one or
+  // both PATCH calls didn't land and they should retry.
+  const [setDefaultErr, setSetDefaultErr] = useState<string | null>(null)
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create')
@@ -122,7 +128,14 @@ export const ProfilesPage: React.FC = () => {
     setEditorOpen(true)
   }
 
+  // PSR-G05 (#82): both PATCH calls in the dance can fail. Pre-fix the
+  // whole function returned a rejected promise that the caller swallowed
+  // (`setAsDefault(p).catch(() => undefined)` in the click handler), so a
+  // 403/network-blip vanished into the void and the user had no idea
+  // their click had no effect. Now we catch in-line and surface the
+  // failure via the `setDefaultErr` banner so the user can retry.
   const setAsDefault = async (target: ProfileView) => {
+    setSetDefaultErr(null)
     const peers = (profiles ?? []).filter(
       (p) =>
         p.scope === target.scope &&
@@ -130,13 +143,23 @@ export const ProfilesPage: React.FC = () => {
         p.isDefault &&
         p.id !== target.id
     )
-    await peers.reduce(
-      (chain, peer) =>
-        chain.then(() => updateProfile(peer.id, { isDefault: false })),
-      Promise.resolve() as Promise<unknown>
-    )
-    await updateProfile(target.id, { isDefault: true })
-    await refresh()
+    try {
+      await peers.reduce(
+        (chain, peer) =>
+          chain.then(() => updateProfile(peer.id, { isDefault: false })),
+        Promise.resolve() as Promise<unknown>
+      )
+      await updateProfile(target.id, { isDefault: true })
+      await refresh()
+    } catch (e: unknown) {
+      // Refresh anyway so the table reflects whatever partial state
+      // landed on the server. A failure here is non-fatal for the
+      // overall page, so we deliberately don't escalate to `err`.
+      await refresh().catch(() => undefined)
+      setSetDefaultErr(
+        e instanceof Error ? e.message : t('profiles.setDefaultError')
+      )
+    }
   }
 
   if (profiles === null) {
@@ -193,6 +216,11 @@ export const ProfilesPage: React.FC = () => {
         </div>
         <Button onClick={openCreate}>{t('profiles.actions.create')}</Button>
       </Header>
+      {setDefaultErr && (
+        <ErrorText role="alert" data-testid="profiles-set-default-error">
+          {setDefaultErr}
+        </ErrorText>
+      )}
       <Table>
         <thead>
           <tr>

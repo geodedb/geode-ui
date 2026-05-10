@@ -53,6 +53,8 @@ jest.mock('../components/profiles/DeleteProfileModal', () => ({
 }))
 
 const mockList = jest.requireMock('../api/profiles').listProfiles as jest.Mock
+const mockUpdate = jest.requireMock('../api/profiles')
+  .updateProfile as jest.Mock
 
 const renderPage = () =>
   render(
@@ -67,7 +69,10 @@ const renderPage = () =>
     </I18nextProvider>
   )
 
-beforeEach(() => mockList.mockReset())
+beforeEach(() => {
+  mockList.mockReset()
+  mockUpdate.mockReset()
+})
 
 test('shows loading then renders fetched profiles', async () => {
   mockList.mockResolvedValueOnce([
@@ -174,6 +179,76 @@ test('owner: per-row Edit shown for their own personal profile', async () => {
   await waitFor(() => expect(screen.getByText('alice-dev')).toBeInTheDocument())
   expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument()
+})
+
+// ---------------------------------------------------------------------------
+// PSR-G05 (#82) — setAsDefault failures must surface so the user knows the
+// click had no effect (or only a partial effect across the two-PATCH dance).
+// ---------------------------------------------------------------------------
+
+test('PSR-G05: setAsDefault failure surfaces an error banner and the user can retry', async () => {
+  // Two profiles: prod (default) + staging (target). Clicking "Set as
+  // default" on staging will issue PATCH(prod, isDefault=false) then
+  // PATCH(staging, isDefault=true). Force the second PATCH to reject so
+  // the dance ends mid-flight.
+  mockList.mockResolvedValueOnce([
+    {
+      id: 'prod',
+      scope: 'system',
+      name: 'prod',
+      dsn: 'quic://prod:1',
+      isDefault: true,
+    },
+    {
+      id: 'stg',
+      scope: 'system',
+      name: 'staging',
+      dsn: 'quic://stg:1',
+      isDefault: false,
+    },
+  ])
+  // Refresh-after-failure also returns the same shape so the table
+  // re-renders cleanly.
+  mockList.mockResolvedValue([
+    {
+      id: 'prod',
+      scope: 'system',
+      name: 'prod',
+      dsn: 'quic://prod:1',
+      isDefault: false,
+    },
+    {
+      id: 'stg',
+      scope: 'system',
+      name: 'staging',
+      dsn: 'quic://stg:1',
+      isDefault: false,
+    },
+  ])
+  mockUpdate
+    .mockResolvedValueOnce(undefined) // prod cleared OK
+    .mockRejectedValueOnce(new Error('500 internal')) // staging promote fails
+    .mockResolvedValueOnce(undefined) // retry: prod no-op (already cleared)
+    .mockResolvedValueOnce(undefined) // retry: staging promote OK
+
+  renderPage()
+  await waitFor(() => expect(screen.getByText('staging')).toBeInTheDocument())
+
+  // Click setDefault on the staging row.
+  fireEvent.click(screen.getByRole('button', { name: /set as default/i }))
+
+  // Error banner appears; the user can see the failure.
+  const alert = await screen.findByTestId('profiles-set-default-error')
+  expect(alert).toHaveTextContent(/500 internal/i)
+
+  // After the failed dance the table still re-renders (the catch path
+  // calls refresh() so the user sees server-truth) and at least one
+  // "Set as default" button must remain so the user can retry. Use
+  // queryAllByRole to tolerate multiple rows being non-default.
+  const retryBtns = screen.queryAllByRole('button', {
+    name: /set as default/i,
+  })
+  expect(retryBtns.length).toBeGreaterThanOrEqual(1)
 })
 
 test('successful save refreshes the list', async () => {

@@ -352,11 +352,21 @@ export const en = {
     delete: {
       title: 'Delete profile',
       confirm: 'Delete profile "{{name}}"? This cannot be undone.',
+      // PSR-G05 (#82): surfaced when DELETE /profiles/{id} rejects so
+      // the user knows the row will reappear on next refresh and can
+      // retry.
+      error: 'Failed to delete profile',
       actions: {
         delete: 'Delete',
         cancel: 'Cancel',
       },
     },
+    // PSR-G05 (#82): surfaced when one of the two PATCH calls in
+    // ProfilesPage.setAsDefault rejects. The dance can leave the
+    // server in a partially-updated state (peer cleared, target not
+    // promoted, or vice-versa); the toast lets the user know they
+    // should re-run the action or reload.
+    setDefaultError: 'Failed to set default profile',
   },
 } as const
 
