@@ -26,7 +26,10 @@ interface GeodeBridge {
   onSystemThemeChange(handler: (variant: ThemeVariant) => void): () => void
   getStoredConnections(): Promise<ConnectionRecord[]>
   storeConnections(list: ConnectionRecord[]): Promise<boolean>
-  getStoredPassword(profileName: string, username: string): Promise<string | null>
+  getStoredPassword(
+    profileName: string,
+    username: string
+  ): Promise<string | null>
   storeSavedPassword(
     profileName: string,
     username: string,
@@ -53,11 +56,17 @@ const bridge: GeodeBridge = {
     }
   },
   getStoredConnections: () =>
-    ipcRenderer.invoke('geode:get-stored-connections') as Promise<ConnectionRecord[]>,
+    ipcRenderer.invoke('geode:get-stored-connections') as Promise<
+      ConnectionRecord[]
+    >,
   storeConnections: (list) =>
     ipcRenderer.invoke('geode:store-connections', list) as Promise<boolean>,
   getStoredPassword: (profileName, username) =>
-    ipcRenderer.invoke('geode:get-stored-password', profileName, username) as Promise<string | null>,
+    ipcRenderer.invoke(
+      'geode:get-stored-password',
+      profileName,
+      username
+    ) as Promise<string | null>,
   storeSavedPassword: (profileName, username, password) =>
     ipcRenderer.invoke(
       'geode:store-saved-password',
@@ -66,7 +75,11 @@ const bridge: GeodeBridge = {
       password
     ) as Promise<boolean>,
   clearStoredPassword: (profileName, username) =>
-    ipcRenderer.invoke('geode:clear-stored-password', profileName, username) as Promise<boolean>,
+    ipcRenderer.invoke(
+      'geode:clear-stored-password',
+      profileName,
+      username
+    ) as Promise<boolean>,
   pickPemFile: () =>
     ipcRenderer.invoke('geode:pick-pem-file') as Promise<string | null>,
 }

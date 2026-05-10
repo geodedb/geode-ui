@@ -1,7 +1,10 @@
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs/promises'
-import { createSecureStore, SafeStorageLike } from '../electron/lib/secure-store'
+import {
+  createSecureStore,
+  SafeStorageLike,
+} from '../electron/lib/secure-store'
 
 function fakeSafeStorage(): SafeStorageLike {
   return {
@@ -73,7 +76,10 @@ test('encryption unavailable: read returns empty, write is a no-op', async () =>
       throw new Error('not available')
     },
   }
-  const store = createSecureStore({ storePath: filePath, safeStorage: unavailable })
+  const store = createSecureStore({
+    storePath: filePath,
+    safeStorage: unavailable,
+  })
   await store.write({
     connections: [
       { connectionId: 'c', token: 't', profileName: 'p', expiresAt: 0 },
