@@ -192,7 +192,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 | Q04 | duplication      | high     | **Closed 2026-05-10** (release blocker) | [#93](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/93) | `electron/preload.ts:14-40` ↔ `src/types/electron.d.ts:8-34` -- canonical types now in `electron/shared/bridge-types.ts`; both files re-export from that single source. Cross-closes PSR-G07 (#84). |
 | Q05 | complexity       | medium   | Fix-Soon      | [#95](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/95)       | `src/components/profiles/ProfileEditorModal.tsx:50-190` (470 LOC; FormState mirrored 5x)            |
 | Q06 | duplication      | low      | Fix-Backlog (sub-task of Q05) | [#96](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/96)  | `src/components/profiles/ProfileEditorModal.tsx:216-227` (3 browse handlers, only target field differs) |
-| Q07 | maintainability  | medium   | Fix-Soon      | [#98](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/98)       | `internal/server/handlers_profiles_crud.go` (whole file; `writeEndpointError` boilerplate ~20x)     |
+| Q07 | maintainability  | medium   | **Closed 2026-05-10** | [#98](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/98)       | `internal/server/handlers_profiles_crud.go` (whole file; `writeEndpointError` boilerplate ~20x) -- **Closed 2026-05-10**: added `writeEndpointErr(w, status, code, msg)` and three named convenience helpers (`writeStoreUnavailable`, `writeBadRequest`, `writeNotFound`) in `internal/server/errors.go`. Converted every inline `&endpointError{...}` literal in `handlers_profiles_crud.go` (15 sites in PostProfiles / GetProfileid / PatchProfileid / DeleteProfileid). The remaining `writeEndpointError(w, storeErrorToHTTP(err))` and `writeEndpointError(w, perr)` callsites stay as-is because they thread an already-constructed `*endpointError` pointer (no boilerplate to collapse). `handlers_profiles.go` and `handlers_profiles_public.go` had zero inline literals. Per E2 hand-off note, validators stay pure -- the helper does NOT do PEM or other input validation. Existing CRUD tests pass unchanged. |
 | Q08 | duplication      | medium   | Fix-Soon      | [#100](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/100)     | `src/auth/AuthProvider.tsx:97-123` vs `:135-159` (`signIn` ↔ `connectMore`)                         |
 | Q09 | duplication      | low      | Fix-Backlog   | [#102](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/102)     | `src/pages/LoginPage.tsx:101-128` ↔ `src/components/layout/AddConnectionModal.tsx:27-73`            |
 | Q10 | complexity       | medium   | Fix-Soon      | [#104](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/104)     | `src/pages/ProfilesPage.tsx` (280 LOC; 3 Page returns; editor modal mounted twice)                  |
@@ -204,7 +204,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 ### Counts (PSR cohort)
 
 - High priority: 3 (Q02 upstream-shim, Q04 release blocker, Q12 — Q12 closed 2026-05-10)
-- Medium priority: 5 (Q01, Q05, Q07, Q08, Q10, Q14 closed 2026-05-10)
+- Medium priority: 5 (Q01, Q07, Q14 closed 2026-05-10; Q05, Q08, Q10 open)
 - Low priority: 4 (Q03 closed 2026-05-10, Q06, Q09, Q11 wont-fix-now)
 - Wont-fix (correct as-is): 1 (Q13)
 - Total filed in geode-ui: 12 issues + 1 upstream genapi issue. Q13 not filed.

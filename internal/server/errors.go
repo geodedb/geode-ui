@@ -31,6 +31,50 @@ func writeEndpointError(w http.ResponseWriter, e *endpointError) {
 	})
 }
 
+// writeEndpointErr is the boilerplate-free callsite helper for the
+// dozens of handler call sites that inline an &endpointError{...}
+// literal into writeEndpointError. Pure refactor; equivalent to
+// `writeEndpointError(w, &endpointError{status: status, code: code,
+// description: msg})`.
+//
+// GAP-Q07 (#98): introduced to collapse ~20 callsites in
+// handlers_profiles_crud.go (and twins elsewhere) from a 5-line
+// struct-literal block into a single call. Validators stay pure
+// (per E2 hand-off note for S10) — this helper does NOT do PEM or
+// other input validation, only the error-write boilerplate.
+func writeEndpointErr(w http.ResponseWriter, status int, code, msg string) {
+	writeEndpointError(w, &endpointError{
+		status:      status,
+		code:        code,
+		description: msg,
+	})
+}
+
+// writeStoreUnavailable is a named convenience for the recurring
+// "store not configured" 503 used by every CRUD handler when
+// s.cfg.Store is nil. Same shape across PostProfiles / GetProfileid /
+// PatchProfileid / DeleteProfileid.
+func writeStoreUnavailable(w http.ResponseWriter) {
+	writeEndpointErr(w, http.StatusServiceUnavailable,
+		"store_disabled", "profile store not configured")
+}
+
+// writeBadRequest is a named convenience for the recurring 400 +
+// stable code shape used by validation early-returns in CRUD
+// handlers. Equivalent to writeEndpointErr with
+// http.StatusBadRequest.
+func writeBadRequest(w http.ResponseWriter, code, msg string) {
+	writeEndpointErr(w, http.StatusBadRequest, code, msg)
+}
+
+// writeNotFound is a named convenience for the recurring 404 +
+// "profile not found" pattern used by both the visibility cloak
+// (returning 404 instead of 403 for a personal profile owned by
+// someone else) and the canMutate cloak in PATCH/DELETE.
+func writeNotFound(w http.ResponseWriter, msg string) {
+	writeEndpointErr(w, http.StatusNotFound, "not_found", msg)
+}
+
 // asEndpointError extracts an *endpointError from err if it is one (or wraps
 // one), otherwise returns nil.
 func asEndpointError(err error) *endpointError {
