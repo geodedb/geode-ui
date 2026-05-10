@@ -743,23 +743,23 @@ func (v TxRunReq) Valid() error {
 
 // UpdateProfileReq generated from config schema
 type UpdateProfileReq struct {
-	Description string `json:"description" genapi:"description"`
-	Dsn string `json:"dsn" genapi:"dsn"`
-	IsDefault bool `json:"is_default" genapi:"is_default"`
-	Name string `json:"name" genapi:"name"`
+	Description *string `json:"description,omitempty" genapi:"description"`
+	Dsn *string `json:"dsn,omitempty" genapi:"dsn"`
+	IsDefault *bool `json:"is_default,omitempty" genapi:"is_default"`
+	Name *string `json:"name,omitempty" genapi:"name"`
 	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
-	SavedUsername string `json:"saved_username" genapi:"saved_username"`
+	SavedUsername *string `json:"saved_username,omitempty" genapi:"saved_username"`
 	TLS jsontext.Value `json:"tls" genapi:"tls"`
 }
 
 // Valid validates UpdateProfileReq fields against schema constraints.
 func (v UpdateProfileReq) Valid() error {
-	if len(v.Description) > 256 { return errors.New("description: too long") }
-	if v.Dsn != "" && len(v.Dsn) < 1 { return errors.New("dsn: too short") }
-	if len(v.Dsn) > 1024 { return errors.New("dsn: too long") }
-	if v.Name != "" && len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 64 { return errors.New("name: too long") }
-	if len(v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
+	if v.Description != nil && len(*v.Description) > 256 { return errors.New("description: too long") }
+	if v.Dsn != nil && len(*v.Dsn) < 1 { return errors.New("dsn: too short") }
+	if v.Dsn != nil && len(*v.Dsn) > 1024 { return errors.New("dsn: too long") }
+	if v.Name != nil && len(*v.Name) < 1 { return errors.New("name: too short") }
+	if v.Name != nil && len(*v.Name) > 64 { return errors.New("name: too long") }
+	if v.SavedUsername != nil && len(*v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
 	return nil
 }
 

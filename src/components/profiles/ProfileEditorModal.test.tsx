@@ -183,12 +183,17 @@ test('edit — scope select is disabled', () => {
   expect(scopeSelect.disabled).toBe(true)
 })
 
-test('edit — isDefault is always included in the PATCH (prevents silent unflagging)', async () => {
+test('edit — isDefault is omitted when unchanged (PSR-G02-followup #124)', async () => {
+  // Post-PSR-G02-followup the server's UpdateProfileReq carries
+  // *bool for is_default, so a PATCH that doesn't touch the checkbox
+  // must omit the key entirely (nil pointer => preserve). The previous
+  // "always echo" workaround is no longer needed and would silently
+  // re-write the persisted Default flag on every unrelated edit.
   mockUpdate.mockReset()
   mockUpdate.mockResolvedValueOnce({ ...editProfile, description: 'new desc' })
-  // editProfile has isDefault: false; we render with isDefault: true so
-  // the form checkbox is checked. The PATCH must carry isDefault: true
-  // explicitly — omitting it would silently un-default the profile.
+  // Render with isDefault: true so the form checkbox starts checked.
+  // The user only edits the description and submits without toggling
+  // the checkbox, so the PATCH payload must NOT include isDefault.
   renderEdit({ ...editProfile, isDefault: true }, jest.fn())
   await waitFor(() => {
     expect(
@@ -204,7 +209,36 @@ test('edit — isDefault is always included in the PATCH (prevents silent unflag
     await Promise.resolve()
   })
   const callArg = mockUpdate.mock.calls[0][1]
-  expect(callArg.isDefault).toBe(true) // explicitly preserved!
+  expect(callArg.isDefault).toBeUndefined()
+  // Sanity-check the description WAS sent so we know the diff fired.
+  expect(callArg.description).toBe('new desc')
+})
+
+test('edit — toggling isDefault explicitly emits the new value', async () => {
+  // The other side of the contract: when the user actually changes
+  // the checkbox, the PATCH must carry the new value so the server
+  // can set/clear the persisted Default flag.
+  mockUpdate.mockReset()
+  mockUpdate.mockResolvedValueOnce({ ...editProfile, isDefault: true })
+  // editProfile has isDefault: false. Render as-is; click the checkbox
+  // to flip to true, then submit.
+  renderEdit({ ...editProfile, isDefault: false }, jest.fn())
+  await waitFor(() => {
+    expect(
+      (document.getElementById('profile-description') as HTMLInputElement).value
+    ).toBe('old desc')
+  })
+  const checkbox = document.getElementById(
+    'profile-isDefault'
+  ) as HTMLInputElement
+  fireEvent.click(checkbox)
+  await act(async () => {
+    fireEvent.submit(document.getElementById('profile-name')!.closest('form')!)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  const callArg = mockUpdate.mock.calls[0][1]
+  expect(callArg.isDefault).toBe(true)
 })
 
 test('create — Browse fills CA textarea with file contents (Electron)', async () => {

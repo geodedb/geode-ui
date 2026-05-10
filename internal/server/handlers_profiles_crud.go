@@ -330,40 +330,26 @@ func poolPatchFromGenJSON(raw jsontext.Value) (*conn.PoolOverrides, error) {
 }
 
 // buildProfilePatch translates the genapi-emitted UpdateProfileReq
-// (where scalar fields are bare Go zero-values that cannot
-// distinguish "absent" from "empty string / false") into a
-// profilestore.ProfilePatch with pointer-typed optionals.
+// (where nullable scalar fields arrive as Go pointers — *string, *bool —
+// thanks to genapi's nullable scalar support, see PSR-G02-followup) into
+// a profilestore.ProfilePatch with pointer-typed optionals.
 //
-// LIMITATIONS / KNOWN-DEFERRED for PSR-G02:
-//   - tls and pool_overrides ARE jsontext.Value on the wire and so
-//     fully support the absent / clear / set distinction here.
-//   - description, saved_username, dsn, name come in as bare strings
-//     today, so this layer cannot tell "user wants to clear the
-//     description" apart from "user did not touch the description".
-//     We use a non-empty heuristic for these: empty string => leave
-//     untouched. The schema-side fix (emit *string from genapi) is
-//     tracked as a follow-up; once it lands, swap the heuristic for
-//     direct pointer pass-through.
-//   - is_default similarly cannot distinguish absent from `false`; we
-//     always pass it through (pre-fix behaviour) so a user CAN clear
-//     a default by sending `is_default: false`. This is the best we
-//     can do without the schema change.
+// Pointer presence semantics flow straight through:
+//   - nil pointer  -> field absent on the wire    -> preserve current value
+//   - non-nil ptr  -> field present (incl. zero)  -> set / clear to the value
+//
+// For tls and pool_overrides the wire stays a jsontext.Value (object types
+// are not subject to the nullable-scalar treatment) and the existing
+// tlsPatchFromGenJSON / poolPatchFromGenJSON helpers preserve the
+// absent / clear / set distinction at the JSON layer.
 func buildProfilePatch(req *gentypes.UpdateProfileReq) (profilestore.ProfilePatch, *endpointError) {
-	patch := profilestore.ProfilePatch{}
-	if req.Name != "" {
-		patch.Name = strPtr(req.Name)
+	patch := profilestore.ProfilePatch{
+		Name:          req.Name,
+		DSN:           req.Dsn,
+		Description:   req.Description,
+		SavedUsername: req.SavedUsername,
+		Default:       req.IsDefault,
 	}
-	if req.Dsn != "" {
-		patch.DSN = strPtr(req.Dsn)
-	}
-	if req.Description != "" {
-		patch.Description = strPtr(req.Description)
-	}
-	if req.SavedUsername != "" {
-		patch.SavedUsername = strPtr(req.SavedUsername)
-	}
-	// is_default has no "absent" signal at this layer; always pass.
-	patch.Default = boolPtrLocal(req.IsDefault)
 
 	tlsP, err := tlsPatchFromGenJSON(req.TLS)
 	if err != nil {
@@ -382,15 +368,6 @@ func buildProfilePatch(req *gentypes.UpdateProfileReq) (profilestore.ProfilePatc
 	patch.PoolOverrides = poP
 	return patch, nil
 }
-
-// strPtr returns a pointer to s. Local helper to keep buildProfilePatch
-// terse without leaking a generic helper into the package surface.
-func strPtr(s string) *string { return &s }
-
-// boolPtrLocal mirrors strPtr. Suffixed because boolPtr is a common
-// test-helper name and we don't want a future test file to redeclare
-// it at package scope.
-func boolPtrLocal(b bool) *bool { return &b }
 
 // reloadSingleFlightKey is the constant key passed to
 // singleflight.Group.Do in reloadAsync. All triggers coalesce on this

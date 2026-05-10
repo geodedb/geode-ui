@@ -21,6 +21,13 @@ import (
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
+// sp returns &v. Test helper for building gentypes.UpdateProfileReq
+// literals now that nullable scalars come through as *string.
+func sp(v string) *string { return &v }
+
+// bp returns &v. Mirror of sp for *bool fields like is_default.
+func bp(v bool) *bool { return &v }
+
 // silenceSlog redirects slog.Default() to io.Discard for the lifetime
 // of the test/benchmark and restores the prior logger via b.Cleanup.
 // Used by the F1 benchmarks to keep the audit-event INFO lines from
@@ -165,7 +172,7 @@ func TestPatchProfileid_NonOwnerReturns404(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "bob")
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
-	_, _ = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "by bob"})
+	_, _ = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("by bob")})
 	if w.Code != http.StatusNotFound {
 		t.Errorf("non-owner PATCH personal: status %d, want 404", w.Code)
 	}
@@ -277,7 +284,7 @@ func TestPatchProfileid_EmitsAuditEvent(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
-	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "updated"})
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("updated")})
 	if err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
 	}
@@ -405,7 +412,7 @@ func TestPatchProfileid_TLSPreservedWhenAbsent(t *testing.T) {
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		Description: "tweak only",
+		Description: sp("tweak only"),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
@@ -564,7 +571,7 @@ func TestPatchProfileid_ReturnsBeforeReloadCompletes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		_, _ = srv.PatchProfileid(httptest.NewRecorder(), r, &gentypes.UpdateProfileReq{
-			Description: "updated",
+			Description: sp("updated"),
 		})
 		close(done)
 	}()
@@ -697,8 +704,9 @@ func BenchmarkPatchProfile(b *testing.B) {
 		id := ids[i%seed]
 		r := reqWithActor("PATCH", "/api/v1/profiles/"+id, "alice")
 		r.SetPathValue("profileId", id)
+		desc := "tweak-" + atoiBenchKey(i)
 		_, err := srv.PatchProfileid(httptest.NewRecorder(), r, &gentypes.UpdateProfileReq{
-			Description: "tweak-" + atoiBenchKey(i),
+			Description: &desc,
 		})
 		if err != nil {
 			b.Fatal(err)
@@ -847,20 +855,18 @@ func TestStoreErrorToHTTP_NilSafety(t *testing.T) {
 	}
 }
 
-// TestPatchProfileid_AlwaysEchoesIsDefault pins the contract documented
-// inline in handlers_profiles_crud.go::buildProfilePatch: because
-// genapi 0.x emits `IsDefault bool` (no pointer / no jsontext.Value),
-// the PATCH layer cannot tell "absent" from `false`. The codified
-// behaviour is to ALWAYS pass IsDefault through to the store, which
-// means a PATCH request that does not touch is_default will, on the
-// wire, set the persisted is_default to whatever the request struct's
-// zero-value carried (false).
+// TestPatchProfileid_IsDefaultPointerSemantics pins the post-PSR-G02
+// contract for is_default now that genapi emits `IsDefault *bool` (#124).
+// Pointer presence drives the semantics:
 //
-// This is the best we can do without a schema change; pinning the
-// contract here protects against an "innocent-looking" refactor that
-// adds an `if req.IsDefault` heuristic and silently drops the only
-// way the SPA has to clear a default flag.
-func TestPatchProfileid_AlwaysEchoesIsDefault(t *testing.T) {
+//   - IsDefault nil           -> absent on wire   -> preserve current default
+//   - IsDefault non-nil true  -> set to true
+//   - IsDefault non-nil false -> set to false (clear the default flag)
+//
+// Replaces the legacy AlwaysEchoesIsDefault contract that had to flip
+// is_default to false on every PATCH because the schema couldn't tell
+// "absent" from `false`.
+func TestPatchProfileid_IsDefaultPointerSemantics(t *testing.T) {
 	srv, st := newTestServerWithStore(t)
 	saved, _ := st.Put(context.Background(), conn.Profile{
 		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
@@ -870,16 +876,13 @@ func TestPatchProfileid_AlwaysEchoesIsDefault(t *testing.T) {
 		t.Fatalf("Put: Default not stored as true: %+v", saved)
 	}
 
-	// PATCH with NO IsDefault key in the body — the genapi-emitted
-	// struct's zero value is `false`, which buildProfilePatch ALWAYS
-	// passes through. The expected behaviour is that is_default
-	// flips to false on the persisted row.
+	// 1. PATCH that omits is_default leaves the persisted Default=true.
 	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	got, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		// IsDefault deliberately omitted -- genapi emits bool, so it's `false`.
-		Description: "tweak",
+		// IsDefault deliberately omitted (nil pointer => preserve).
+		Description: sp("tweak"),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
@@ -887,21 +890,38 @@ func TestPatchProfileid_AlwaysEchoesIsDefault(t *testing.T) {
 	if got == nil {
 		t.Fatalf("PatchProfileid returned nil profile")
 	}
-	if got.IsDefault {
-		t.Errorf("PATCH echoed IsDefault=true even though the request struct carried false")
+	if !got.IsDefault {
+		t.Errorf("PATCH cleared IsDefault when the request omitted the key")
 	}
 	persisted, _ := st.Get(context.Background(), saved.ID)
-	if persisted.Default {
-		t.Errorf("persisted Default = true; expected false (always-echo contract)")
+	if !persisted.Default {
+		t.Errorf("persisted Default flipped on omit-PATCH: %+v", persisted)
 	}
 
-	// Round-trip the other direction: a PATCH that explicitly sets
-	// IsDefault=true must also work end-to-end.
+	// 2. PATCH with IsDefault=false explicitly clears the default flag.
 	r = reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
 	r.SetPathValue("profileId", saved.ID)
 	w = httptest.NewRecorder()
 	got, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		IsDefault: true,
+		IsDefault: bp(false),
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid (set false): %v", err)
+	}
+	if got.IsDefault {
+		t.Errorf("PATCH IsDefault=false did not clear: %+v", got)
+	}
+	persisted, _ = st.Get(context.Background(), saved.ID)
+	if persisted.Default {
+		t.Errorf("PATCH IsDefault=false did not persist clear: %+v", persisted)
+	}
+
+	// 3. PATCH with IsDefault=true round-trips back to true.
+	r = reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w = httptest.NewRecorder()
+	got, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		IsDefault: bp(true),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid (set true): %v", err)
@@ -915,6 +935,51 @@ func TestPatchProfileid_AlwaysEchoesIsDefault(t *testing.T) {
 	}
 }
 
+// TestPatchProfileid_DescriptionClearViaEmptyString pins the new
+// PSR-G02-followup contract for nullable scalar fields: a non-nil
+// pointer to "" clears the persisted value, while a nil pointer
+// preserves it.
+func TestPatchProfileid_DescriptionClearViaEmptyString(t *testing.T) {
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1", Description: "keep-me",
+	})
+	if saved.Description != "keep-me" {
+		t.Fatalf("Put: Description not stored: %+v", saved)
+	}
+
+	// 1. Absent description preserves the persisted value.
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		// Description omitted; nil pointer => preserve.
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid (absent): %v", err)
+	}
+	persisted, _ := st.Get(context.Background(), saved.ID)
+	if persisted.Description != "keep-me" {
+		t.Errorf("Description clobbered on absent-PATCH: %q", persisted.Description)
+	}
+
+	// 2. Non-nil pointer to "" clears the persisted Description.
+	r = reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w = httptest.NewRecorder()
+	_, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		Description: sp(""),
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid (clear): %v", err)
+	}
+	persisted, _ = st.Get(context.Background(), saved.ID)
+	if persisted.Description != "" {
+		t.Errorf("Description not cleared by explicit empty pointer: %q", persisted.Description)
+	}
+}
+
 // TestPatchProfileid_StoreDisabled pins the early-return path: when
 // the server is wired without a Store, PATCH must respond 503 instead
 // of nil-panicking on s.cfg.Store.Get.
@@ -923,7 +988,7 @@ func TestPatchProfileid_StoreDisabled(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/abc", "alice")
 	r.SetPathValue("profileId", "abc")
 	w := httptest.NewRecorder()
-	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "x"})
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("x")})
 	if err != nil {
 		t.Fatalf("PatchProfileid (no store): %v", err)
 	}
@@ -942,7 +1007,7 @@ func TestPatchProfileid_MissingPathID(t *testing.T) {
 	// so r.PathValue("profileId") returns "".
 	r := reqWithActor("PATCH", "/api/v1/profiles/", "alice")
 	w := httptest.NewRecorder()
-	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "x"})
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("x")})
 	if err != nil {
 		t.Fatalf("PatchProfileid (no path id): %v", err)
 	}
@@ -971,7 +1036,7 @@ func TestPatchProfileid_StorePatchSurfaces500ToHTTP(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/abc", "alice")
 	r.SetPathValue("profileId", "abc")
 	w := httptest.NewRecorder()
-	if _, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "x"}); err != nil {
+	if _, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("x")}); err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
 	}
 	if w.Code != http.StatusInternalServerError {

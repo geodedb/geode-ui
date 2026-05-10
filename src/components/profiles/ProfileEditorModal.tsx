@@ -135,12 +135,15 @@ function buildUpdateInput(
   if (s.savedUsername !== (original.savedUsername ?? '')) {
     out.savedUsername = s.savedUsername
   }
-  // is_default is ALWAYS included: the server's UpdateProfileReq has a
-  // non-pointer bool that zero-initialises to false on absence, and
-  // mergeProfile writes Default verbatim. Omitting the field would
-  // silently un-default the profile on every PATCH that touches another
-  // field. Always echoing the user's checkbox state preserves the flag.
-  out.isDefault = s.isDefault
+  // is_default: only emit the key when the user actually toggled it.
+  // The server's UpdateProfileReq now uses *bool (PSR-G02-followup
+  // #124), so an absent key preserves the persisted Default value and
+  // an explicit `false` clears it. Always echoing was a workaround
+  // for the pre-pointer schema and would now silently overwrite the
+  // persisted state on every unrelated PATCH.
+  if (s.isDefault !== original.isDefault) {
+    out.isDefault = s.isDefault
+  }
 
   const tlsChanged =
     s.caPem !== (original.tls?.caPem ?? '') ||

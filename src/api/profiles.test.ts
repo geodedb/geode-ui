@@ -103,3 +103,50 @@ test('toWireUpdateRequest set->clear round-trip for pool overrides', () => {
   const clear = toWireUpdateRequest({ poolOverrides: {} })
   expect(clear.pool_overrides).toEqual({})
 })
+
+// PSR-G02-followup (#124): nullable scalar fields. With genapi now
+// emitting *string / *bool, the SPA can express:
+//   - absent          (input key undefined) -> wire key omitted
+//   - clear-to-empty  (input key '')        -> wire key present with ''
+//   - set-to-value    (input key 'foo')     -> wire key present with 'foo'
+//
+// And for is_default:
+//   - absent (undefined) -> wire key omitted
+//   - explicit false     -> wire key present with false (clears default)
+//   - explicit true      -> wire key present with true  (sets default)
+test('toWireUpdateRequest distinguishes absent vs explicit empty for description', () => {
+  // Absent: key omitted
+  const absent = toWireUpdateRequest({})
+  expect(absent).not.toHaveProperty('description')
+
+  // Explicit '' -> wire key present with empty string (server clears).
+  const cleared = toWireUpdateRequest({ description: '' })
+  expect(cleared).toHaveProperty('description')
+  expect(cleared.description).toBe('')
+
+  // Explicit value -> wire key present with the value.
+  const set = toWireUpdateRequest({ description: 'hello' })
+  expect(set.description).toBe('hello')
+})
+
+test('toWireUpdateRequest distinguishes absent vs explicit false for is_default', () => {
+  const absent = toWireUpdateRequest({})
+  expect(absent).not.toHaveProperty('is_default')
+
+  const cleared = toWireUpdateRequest({ isDefault: false })
+  expect(cleared).toHaveProperty('is_default')
+  expect(cleared.is_default).toBe(false)
+
+  const set = toWireUpdateRequest({ isDefault: true })
+  expect(set.is_default).toBe(true)
+})
+
+test('toWireUpdateRequest distinguishes absent vs explicit empty for saved_username and dsn', () => {
+  const absent = toWireUpdateRequest({})
+  expect(absent).not.toHaveProperty('saved_username')
+  expect(absent).not.toHaveProperty('dsn')
+
+  const cleared = toWireUpdateRequest({ savedUsername: '', dsn: '' })
+  expect(cleared.saved_username).toBe('')
+  expect(cleared.dsn).toBe('')
+})

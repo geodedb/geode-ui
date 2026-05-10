@@ -75,8 +75,9 @@ func BenchmarkPatchProfile_SyncReloadBaseline(b *testing.B) {
 		id := ids[i%seed]
 		r := reqWithActor("PATCH", "/api/v1/profiles/"+id, "alice")
 		r.SetPathValue("profileId", id)
+		desc := "tweak-" + atoiBenchKey(i)
 		_, err := srv.PatchProfileid(httptest.NewRecorder(), r, &gentypes.UpdateProfileReq{
-			Description: "tweak-" + atoiBenchKey(i),
+			Description: &desc,
 		})
 		if err != nil {
 			b.Fatal(err)

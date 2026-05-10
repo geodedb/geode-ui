@@ -1004,11 +1004,11 @@
     "UpdateProfileReq": {
       "type": "object",
       "properties": {
-        "name":           { "type": "string", "minLength": 1, "maxLength": 64 },
-        "dsn":            { "type": "string", "minLength": 1, "maxLength": 1024 },
-        "description":    { "type": "string", "maxLength": 256 },
-        "saved_username": { "type": "string", "maxLength": 128 },
-        "is_default":     { "type": "boolean" },
+        "name":           { "type": "string", "nullable": true, "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "nullable": true, "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "nullable": true, "maxLength": 256 },
+        "saved_username": { "type": "string", "nullable": true, "maxLength": 128 },
+        "is_default":     { "type": "boolean", "nullable": true },
         "tls":            { "type": "object" },
         "pool_overrides": { "type": "object" }
       }

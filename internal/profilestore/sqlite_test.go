@@ -136,6 +136,60 @@ func TestSQLitePatchUpdatesFields(t *testing.T) {
 	}
 }
 
+// TestSQLitePatchScalarSetThenClearRoundTrip pins the PSR-G02-followup
+// (#124) end-to-end pointer-presence contract on the SQLite store: a
+// non-nil pointer to "" clears the persisted value, while a subsequent
+// PATCH with a nil pointer preserves the cleared (empty) state.
+func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+	})
+
+	// 1. Set Description to "hello" via a non-nil pointer.
+	got, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+		Description: stringPtr("hello"),
+	})
+	if err != nil {
+		t.Fatalf("Patch (set): %v", err)
+	}
+	if got.Description != "hello" {
+		t.Fatalf("set: Description = %q, want \"hello\"", got.Description)
+	}
+
+	// 2. Clear Description by passing a non-nil pointer to "".
+	got, err = st.Patch(context.Background(), saved.ID, ProfilePatch{
+		Description: stringPtr(""),
+	})
+	if err != nil {
+		t.Fatalf("Patch (clear): %v", err)
+	}
+	if got.Description != "" {
+		t.Fatalf("clear: Description = %q, want \"\"", got.Description)
+	}
+	// Read back to confirm persistence.
+	read, _ := st.Get(context.Background(), saved.ID)
+	if read.Description != "" {
+		t.Errorf("post-clear Get: Description = %q, want \"\"", read.Description)
+	}
+
+	// 3. PATCH with a nil Description pointer preserves the cleared value.
+	got, err = st.Patch(context.Background(), saved.ID, ProfilePatch{
+		Name: stringPtr("p1-renamed"),
+	})
+	if err != nil {
+		t.Fatalf("Patch (preserve): %v", err)
+	}
+	if got.Description != "" {
+		t.Errorf("preserve: Description was repopulated: %q", got.Description)
+	}
+	if got.Name != "p1-renamed" {
+		t.Errorf("preserve: Name not updated: %q", got.Name)
+	}
+}
+
 func TestSQLitePatchNotFound(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
