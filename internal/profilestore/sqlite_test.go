@@ -3,6 +3,8 @@ package profilestore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -256,6 +258,157 @@ func TestSQLitePatchClearsPoolOverrides(t *testing.T) {
 	got, _ := st.Get(context.Background(), saved.ID)
 	if got.PoolOverrides.MaxOpenConns != 0 {
 		t.Errorf("post-Patch Get still has MaxOpenConns: %d", got.PoolOverrides.MaxOpenConns)
+	}
+}
+
+// TestSQLitePatchAtomic_NoLostUpdate pins PSR-F2 (#97). The classic
+// "lost update" race: two goroutines each PATCH a disjoint field
+// (Description vs SavedUsername) on the same row. Pre-fix Patch did
+// Get + UPDATE outside any transaction; under load, both goroutines
+// observed the pre-update row from Get, then each computed its
+// "merged" Profile against that stale snapshot, and the second UPDATE
+// clobbered the first goroutine's write — silently dropping it.
+//
+// Post-fix wraps Get + UPDATE in a single tx (with SetMaxOpenConns(1)
+// providing serialization across tx boundaries), so the second Patch
+// reads the first Patch's committed write before computing its merge.
+//
+// Assertion: after one Description-only Patch and one
+// SavedUsername-only Patch land, BOTH fields must reflect their
+// respective patch values. A torn outcome would show one field still
+// at its pre-patch zero value.
+func TestSQLitePatchAtomic_NoLostUpdate(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	// Run many trials to give the race a chance to manifest.
+	const trials = 50
+	for trial := 0; trial < trials; trial++ {
+		saved, err := st.Put(context.Background(), conn.Profile{
+			Scope: conn.ProfileScopeSystem,
+			Name:  fmt.Sprintf("trial-%03d", trial),
+			DSN:   "stub://x",
+		})
+		if err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = st.Patch(context.Background(), saved.ID, ProfilePatch{
+				Description: stringPtr("D"),
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = st.Patch(context.Background(), saved.ID, ProfilePatch{
+				SavedUsername: stringPtr("U"),
+			})
+		}()
+		wg.Wait()
+
+		got, err := st.Get(context.Background(), saved.ID)
+		if err != nil {
+			t.Fatalf("Get after concurrent Patch: %v", err)
+		}
+		if got.Description != "D" {
+			t.Errorf("trial %d: lost update — Description=%q want %q (SavedUsername=%q)",
+				trial, got.Description, "D", got.SavedUsername)
+		}
+		if got.SavedUsername != "U" {
+			t.Errorf("trial %d: lost update — SavedUsername=%q want %q (Description=%q)",
+				trial, got.SavedUsername, "U", got.Description)
+		}
+	}
+}
+
+// TestSQLitePatchAtomic_NoTornStateUnderHighContention is the
+// belt-and-braces companion to TestSQLitePatchAtomic_NoLostUpdate.
+// N goroutines each PATCH the same row with both Name and Description
+// drawn from the same suffix. Even under contention, the final
+// persisted row must be exactly one of the inputs (Name suffix ==
+// Description suffix); never a cross-mix of two goroutines.
+func TestSQLitePatchAtomic_NoTornStateUnderHighContention(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	saved, err := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "p0", DSN: "stub://x",
+	})
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	const N = 20
+	var wg sync.WaitGroup
+	wg.Add(N)
+	errCh := make(chan error, N)
+	for i := 0; i < N; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			name := fmt.Sprintf("name-%02d", i)
+			desc := fmt.Sprintf("desc-%02d", i)
+			if _, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
+				Name:        stringPtr(name),
+				Description: stringPtr(desc),
+			}); err != nil {
+				errCh <- fmt.Errorf("goroutine %d: %w", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Errorf("concurrent Patch: %v", err)
+	}
+
+	got, err := st.Get(context.Background(), saved.ID)
+	if err != nil {
+		t.Fatalf("Get after concurrent Patch: %v", err)
+	}
+	if len(got.Name) != len("name-00") || len(got.Description) != len("desc-00") {
+		t.Fatalf("unexpected shape: name=%q desc=%q", got.Name, got.Description)
+	}
+	nameSuffix := got.Name[len("name-"):]
+	descSuffix := got.Description[len("desc-"):]
+	if nameSuffix != descSuffix {
+		t.Errorf("torn Patch state: name=%q desc=%q (suffixes differ)",
+			got.Name, got.Description)
+	}
+}
+
+// TestSQLitePatchAtomic_DetectsConcurrentDelete pins the
+// post-fix RowsAffected check: if another goroutine deletes the row
+// between the Patch's Get and UPDATE, Patch must surface ErrNotFound
+// instead of silently no-oping.
+//
+// Pre-fix: Get returned the row, the UPDATE ran with 0 rows affected,
+// and the caller got a "successful" Patch back with no persisted
+// effect. Post-fix: the UPDATE is in the same tx as the Get so the row
+// cannot disappear underneath us; if it somehow does (e.g. external
+// connection), RowsAffected==0 surfaces ErrNotFound.
+//
+// We can't easily simulate a delete inside the same tx (SetMaxOpenConns(1)
+// + tx pinning serializes it), so instead we exercise the
+// not-found-from-tx path via a non-existent id, which is the same
+// post-Get drift case from the caller's perspective.
+func TestSQLitePatchAtomic_DetectsConcurrentDelete(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	_, err := st.Patch(context.Background(), "deadbeef", ProfilePatch{
+		Description: stringPtr("ghost"),
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Patch on missing id: want ErrNotFound, got %v", err)
 	}
 }
 

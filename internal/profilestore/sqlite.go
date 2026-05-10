@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -13,9 +12,20 @@ import (
 	"geodedb.com/geode-ui/internal/conn"
 )
 
+// sqliteStore is the modernc.org/sqlite-backed Store. Concurrency
+// model: SetMaxOpenConns(1) at Open time pins the *sql.DB to a single
+// connection, which serializes all SQL through one driver pipeline.
+// That is sufficient to make every method individually goroutine-safe
+// without an in-process mutex.
+//
+// PSR-F2 (#97): the prior implementation relied on a sync.Mutex held
+// only around UPDATE/DELETE while doing Get + compute outside the lock,
+// which exposed a lost-update window for Patch. The fix wraps Get +
+// UPDATE in a single sql.Tx so the read snapshot is bound to the same
+// commit as the write; the mutex is dropped because SetMaxOpenConns(1)
+// already provides single-flight serialization at the driver layer.
 type sqliteStore struct {
 	db *sql.DB
-	mu sync.Mutex
 }
 
 // OpenSQLite opens (or creates) a SQLite database at dsn and applies
@@ -115,9 +125,6 @@ func (s *sqliteStore) Put(ctx context.Context, p conn.Profile) (conn.Profile, er
 	}
 	now := time.Now().UnixNano()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO profiles
 		  (id, scope, owner_user_id, name, dsn, description, saved_username,
@@ -160,18 +167,58 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (conn.Profile, error) 
 	return p, nil
 }
 
+// Patch applies a ProfilePatch atomically: the read of the current row
+// and the UPDATE that overwrites it run in the same sql.Tx so no other
+// caller can interleave a write between Get and UPDATE.
+//
+// Concurrency notes:
+//   - SetMaxOpenConns(1) at Open serializes all access to the single
+//     underlying *sql.Conn. modernc.org/sqlite enforces SQLite's
+//     transaction model on top of that, so a tx held by one goroutine
+//     blocks every other goroutine's tx until Commit/Rollback. This is
+//     equivalent in effect to BEGIN IMMEDIATE for our embedded use
+//     case; we do not pass an explicit Isolation level because modernc
+//     defers to SQLite's default and we are not relying on snapshot
+//     isolation across multiple connections.
+//   - RowsAffected on the UPDATE detects the case where the row was
+//     deleted between the caller's Patch call and our tx Begin (only
+//     possible via an external connection; with SetMaxOpenConns(1) the
+//     in-process Delete cannot interleave a held tx). We surface
+//     ErrNotFound in that case so the handler returns 404 instead of
+//     a silent no-op success.
 func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (conn.Profile, error) {
-	cur, err := s.Get(ctx, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return conn.Profile{}, err
+		return conn.Profile{}, fmt.Errorf("profilestore: patch: begin: %w", err)
 	}
+	// rollback on every non-success path. Commit clears the rollback
+	// (re-calling Rollback on a committed tx is documented as safe / no-op
+	// returning sql.ErrTxDone, which we ignore).
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	row := tx.QueryRowContext(ctx, `
+		SELECT id, scope, owner_user_id, name, dsn, description,
+		       saved_username, is_default, tls_ca_pem, tls_cert_pem,
+		       tls_key_pem, max_open_conns, max_idle_conns,
+		       conn_max_lifetime_ns, conn_max_idle_ns
+		FROM profiles WHERE id = ?`, id)
+	cur, err := scanProfile(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return conn.Profile{}, ErrNotFound
+	}
+	if err != nil {
+		return conn.Profile{}, fmt.Errorf("profilestore: patch: get: %w", err)
+	}
+
 	merged := mergeProfile(cur, p)
 	now := time.Now().UnixNano()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	_, err = s.db.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 		UPDATE profiles SET
 		  name = ?, dsn = ?, description = ?, saved_username = ?,
 		  is_default = ?, tls_ca_pem = ?, tls_cert_pem = ?, tls_key_pem = ?,
@@ -190,14 +237,28 @@ func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (con
 		if isUniqueViolation(err) {
 			return conn.Profile{}, fmt.Errorf("%w: name=%s", ErrConflict, merged.Name)
 		}
-		return conn.Profile{}, fmt.Errorf("profilestore: patch: %w", err)
+		return conn.Profile{}, fmt.Errorf("profilestore: patch: update: %w", err)
 	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return conn.Profile{}, fmt.Errorf("profilestore: patch: rowsaffected: %w", err)
+	}
+	if n == 0 {
+		// Row vanished between scanProfile (above) and UPDATE. Under
+		// SetMaxOpenConns(1) this can't happen via this *sql.DB (the tx
+		// holds the only connection), but a separate process opening the
+		// same SQLite file could; surface as ErrNotFound rather than a
+		// silent successful Patch returning the merged-but-unsaved row.
+		return conn.Profile{}, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return conn.Profile{}, fmt.Errorf("profilestore: patch: commit: %w", err)
+	}
+	committed = true
 	return merged, nil
 }
 
 func (s *sqliteStore) Delete(ctx context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	res, err := s.db.ExecContext(ctx, `DELETE FROM profiles WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("profilestore: delete: %w", err)
