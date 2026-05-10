@@ -135,9 +135,14 @@ async function saveWindowState(win: BrowserWindow): Promise<void> {
   }
   try {
     await fs.writeFile(statePath(), JSON.stringify(state, null, 2), 'utf8')
-  } catch {
-    // Window-state persistence is best-effort. Failure here would only
-    // mean the user gets the default size on next launch.
+  } catch (err) {
+    // PSR-G11 (#88): window-state persistence is best-effort -- a
+    // failure here only means the user gets default sizing on next
+    // launch -- but the silent swallow hid misconfigured AppData paths
+    // and read-only volumes. Surface the error via console.warn so it
+    // shows up in dev tools / electron-log forwarders without blocking
+    // the close path.
+    console.warn('[geode] saveWindowState failed:', err)
   }
 }
 
