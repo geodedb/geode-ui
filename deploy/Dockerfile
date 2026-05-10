@@ -29,6 +29,15 @@ RUN npm ci
 COPY geode-ui/ ./
 # Webpack outputs to internal/ui/dist/ (per webpack.common.js); the Go
 # embed.go uses //go:embed all:dist relative to internal/ui/.
+#
+# SECURITY (GAP-S2 / #115): this is the *e2e* Dockerfile, used by
+# `make e2e-up` / docker-compose.test.yml. We set GEODE_E2E_BUILD=true
+# so webpack's DefinePlugin substitutes `__E2E_ENABLED__` as the literal
+# `true`, leaving the Playwright `addInitScript` backdoor reachable.
+# The release Dockerfiles (Dockerfile.release, Dockerfile.release.alpine)
+# deliberately do NOT set the env var, so production bundles dead-code-
+# eliminate the gated block.
+ENV GEODE_E2E_BUILD=true
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----

@@ -30,13 +30,25 @@ async function bootstrap(): Promise<void> {
   // from electron-bridge so the test path doesn't pretend to be Electron.
   // The bracket access bypasses no-underscore-dangle on the leading
   // sentinel and makes the test-only origin of the field explicit.
-  if (initialConnections.length === 0) {
-    const e2eKey = '__GEODE_E2E_INITIAL_CONNECTIONS__'
-    const e2e = (
-      window as unknown as Record<string, ConnectionState[] | undefined>
-    )[e2eKey]
-    if (e2e && e2e.length > 0) {
-      initialConnections = e2e
+  //
+  // SECURITY (GAP-S2 / #115): the entire block is wrapped in a
+  // `if (__E2E_ENABLED__)` build-time gate. `__E2E_ENABLED__` is a
+  // webpack DefinePlugin constant (see webpack.common.js) that is the
+  // literal `false` in every release build, so webpack + Terser
+  // dead-code-eliminate the block. Only e2e-targeted builds (the e2e
+  // Dockerfile sets `GEODE_E2E_BUILD=true`) leave the gate evaluating
+  // to `true`. The runtime `initialConnections.length === 0` guard
+  // remains as defense-in-depth so a populated stored-connections list
+  // is never overridden by a stray seed.
+  if (__E2E_ENABLED__) {
+    if (initialConnections.length === 0) {
+      const e2eKey = '__GEODE_E2E_INITIAL_CONNECTIONS__'
+      const e2e = (
+        window as unknown as Record<string, ConnectionState[] | undefined>
+      )[e2eKey]
+      if (e2e && e2e.length > 0) {
+        initialConnections = e2e
+      }
     }
   }
 

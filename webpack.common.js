@@ -1,4 +1,5 @@
 const path = require('path')
+const webpack = require('webpack')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin')
@@ -7,7 +8,27 @@ const CopyPlugin = require('copy-webpack-plugin')
 
 const devMode = process.env.NODE_ENV !== 'production'
 
+// SECURITY (GAP-S2 / #115): the SPA bootstrap wraps the
+// `__GEODE_E2E_INITIAL_CONNECTIONS__` backdoor block in
+// `if (__E2E_ENABLED__) { ... }`. Webpack DefinePlugin substitutes
+// `__E2E_ENABLED__` with the literal `true` only when the build
+// observed `GEODE_E2E_BUILD=true` in the environment; otherwise the
+// constant is the literal `false` and webpack + Terser dead-code-
+// eliminate the whole block. The release Dockerfiles
+// (deploy/Dockerfile.release, .release.alpine) deliberately do not set
+// the env var, so production bundles ship without the backdoor at all.
+// The e2e Dockerfile (deploy/Dockerfile) sets GEODE_E2E_BUILD=true so
+// Playwright fixtures keep working.
+const e2eEnabled = process.env.GEODE_E2E_BUILD === 'true'
+
 const plugins = [
+  // Build-time constant — see comment above on `e2eEnabled`.
+  // JSON.stringify keeps the substitution literal-typed (a bare `true`
+  // / `false` token, not the string "true"); Terser then folds the
+  // wrapping `if (__E2E_ENABLED__)` to nothing in production builds.
+  new webpack.DefinePlugin({
+    __E2E_ENABLED__: JSON.stringify(e2eEnabled),
+  }),
   new HtmlWebpackPlugin({
     template: path.resolve(__dirname, 'src', 'index.html'),
     favicon: path.resolve(__dirname, 'public', 'favicon.ico'),
