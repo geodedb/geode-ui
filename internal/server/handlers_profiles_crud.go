@@ -91,6 +91,13 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 		writeEndpointError(w, storeErrorToHTTP(err))
 		return nil, nil
 	}
+	emitAudit(auditEventProfileCreated,
+		"actor", actr.Subject,
+		"profile_id", saved.ID,
+		"scope", string(saved.Scope),
+		"owner", saved.OwnerUserID,
+		"name", saved.Name,
+	)
 	s.maybeReload(r.Context())
 	g := toGenProfile(saved, true)
 	return &g, nil
@@ -196,6 +203,13 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 		writeEndpointError(w, storeErrorToHTTP(err))
 		return nil, nil
 	}
+	emitAudit(auditEventProfileUpdated,
+		"actor", actr.Subject,
+		"profile_id", updated.ID,
+		"scope", string(updated.Scope),
+		"owner", updated.OwnerUserID,
+		"name", updated.Name,
+	)
 	s.maybeReload(r.Context())
 	g := toGenProfile(updated, true)
 	return &g, nil
@@ -229,6 +243,13 @@ func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, re
 		writeEndpointError(w, storeErrorToHTTP(err))
 		return nil, nil
 	}
+	emitAudit(auditEventProfileDeleted,
+		"actor", actr.Subject,
+		"profile_id", cur.ID,
+		"scope", string(cur.Scope),
+		"owner", cur.OwnerUserID,
+		"name", cur.Name,
+	)
 	s.maybeReload(r.Context())
 	return &gentypes.Empty{}, nil
 }
@@ -304,6 +325,11 @@ func (s *GraphServer) maybeReload(ctx context.Context) {
 	all, err := s.cfg.Store.List(ctx, profilestore.Filter{})
 	if err != nil {
 		slog.Warn("profile reload: list failed", "err", err)
+		emitAudit(auditEventProfileReloadFail,
+			"actor", actorFromContext(ctx).Subject,
+			"phase", "list",
+			"error", err.Error(),
+		)
 		return
 	}
 	if len(all) == 0 {
@@ -311,5 +337,10 @@ func (s *GraphServer) maybeReload(ctx context.Context) {
 	}
 	if err := s.cfg.PoolReloader.Reload(all); err != nil {
 		slog.Warn("profile reload: pool refused new set", "err", err)
+		emitAudit(auditEventProfileReloadFail,
+			"actor", actorFromContext(ctx).Subject,
+			"phase", "reload",
+			"error", err.Error(),
+		)
 	}
 }

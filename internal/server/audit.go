@@ -22,31 +22,35 @@ import (
 // call site fails compilation rather than silently breaking
 // downstream log-shipping pattern matches.
 const (
-	auditEventLoginSuccess     = "login_success"
-	auditEventLoginFailure     = "login_failure"
-	auditEventQueryExecuted    = "query_executed"
-	auditEventTxBegun          = "tx_begun"
-	auditEventTxCommitted      = "tx_committed"
-	auditEventTxRollback       = "tx_rollback"
-	auditEventUserCreated      = "user_created"
-	auditEventUserDeleted      = "user_deleted"
-	auditEventUserDisabled     = "user_disabled"
-	auditEventUserEnabled      = "user_enabled"
-	auditEventUserPasswordSet  = "user_password_set"
-	auditEventRoleAssigned     = "role_assigned"
-	auditEventRoleCreated      = "role_created"
-	auditEventRoleDeleted      = "role_deleted"
-	auditEventPolicyCreated    = "policy_created"
-	auditEventPolicyDeleted    = "policy_deleted"
-	auditEventGrantApplied     = "grant_applied"
-	auditEventGrantRevoked     = "grant_revoked"
-	auditEventBackupCreated    = "backup_created"
-	auditEventBackupDeleted    = "backup_deleted"
-	auditEventBackupRestored   = "backup_restored"
-	auditEventBackupCleanup    = "backup_cleanup"
-	auditEventMigrationRun     = "migration_run"
-	auditEventMigrationCreated = "migration_created"
-	auditEventMigrationSigned  = "migration_signed"
+	auditEventLoginSuccess      = "login_success"
+	auditEventLoginFailure      = "login_failure"
+	auditEventQueryExecuted     = "query_executed"
+	auditEventTxBegun           = "tx_begun"
+	auditEventTxCommitted       = "tx_committed"
+	auditEventTxRollback        = "tx_rollback"
+	auditEventUserCreated       = "user_created"
+	auditEventUserDeleted       = "user_deleted"
+	auditEventUserDisabled      = "user_disabled"
+	auditEventUserEnabled       = "user_enabled"
+	auditEventUserPasswordSet   = "user_password_set"
+	auditEventRoleAssigned      = "role_assigned"
+	auditEventRoleCreated       = "role_created"
+	auditEventRoleDeleted       = "role_deleted"
+	auditEventPolicyCreated     = "policy_created"
+	auditEventPolicyDeleted     = "policy_deleted"
+	auditEventGrantApplied      = "grant_applied"
+	auditEventGrantRevoked      = "grant_revoked"
+	auditEventBackupCreated     = "backup_created"
+	auditEventBackupDeleted     = "backup_deleted"
+	auditEventBackupRestored    = "backup_restored"
+	auditEventBackupCleanup     = "backup_cleanup"
+	auditEventMigrationRun      = "migration_run"
+	auditEventMigrationCreated  = "migration_created"
+	auditEventMigrationSigned   = "migration_signed"
+	auditEventProfileCreated    = "profile_created"
+	auditEventProfileUpdated    = "profile_updated"
+	auditEventProfileDeleted    = "profile_deleted"
+	auditEventProfileReloadFail = "profile_reload_failed"
 )
 
 // sensitiveKeys are case-insensitive substrings that, when found in an
@@ -56,16 +60,24 @@ const (
 var sensitiveKeys = []string{
 	"authorization",
 	"bearer",
+	"ca_pem",
+	"cert_pem",
 	"cipher",
 	"code_verifier",
 	"code_challenge",
+	"dsn",
 	"encryption",
 	"hash",
 	"jwt",
+	"key_pem",
 	"password",
+	"pem",
 	"private_key",
 	"salt",
 	"secret",
+	"tls_ca_pem",
+	"tls_cert_pem",
+	"tls_key_pem",
 	"token",
 }
 

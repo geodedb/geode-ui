@@ -158,10 +158,64 @@ func TestIsSensitive(t *testing.T) {
 		{"private_key", true},
 		{"profile", false},
 		{"event", false},
+		// SECURITY_GAP_ANALYSIS C3: profile-store columns must be
+		// redacted defensively even if a future call site forgets
+		// to strip them before passing into emitAudit.
+		{"dsn", true},
+		{"DSN", true},
+		{"tls_ca_pem", true},
+		{"tls_cert_pem", true},
+		{"tls_key_pem", true},
+		{"ca_pem", true},
+		{"cert_pem", true},
+		{"key_pem", true},
+		{"client_pem", true},
+		{"connection_dsn", true},
 	}
 	for _, c := range cases {
 		if got := isSensitive(c.key); got != c.want {
 			t.Errorf("isSensitive(%q) = %v, want %v", c.key, got, c.want)
+		}
+	}
+}
+
+// TestEmitAudit_RedactsProfileStoreSecrets verifies that even if a
+// caller passes a DSN, PEM fragment, or other persistence-layer secret
+// to emitAudit, the value never reaches slog or the in-memory ring.
+// This is defense-in-depth backing SECURITY_GAP_ANALYSIS S5/S6: the
+// profile CRUD audit events should not log secrets, but if a later
+// refactor accidentally adds one to the kv list, redaction kicks in.
+func TestEmitAudit_RedactsProfileStoreSecrets(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	// Use placeholder strings rather than real PEM headers so the
+	// detect-private-key pre-commit hook does not flag this test
+	// file. The redaction logic only inspects the *key* substring;
+	// the value content is irrelevant.
+	emitAudit("profile_updated",
+		"actor", "alice",
+		"profile_id", "p123",
+		"dsn", "quic://prod-host:1234?password=hunter2",
+		"tls_ca_pem", "ca-pem-placeholder",
+		"tls_cert_pem", "cert-pem-placeholder",
+		"tls_key_pem", "key-pem-placeholder",
+		"ca_pem", "ca-bundle",
+		"cert_pem", "cert-bundle",
+		"key_pem", "key-bundle",
+	)
+	got := defaultAuditRing.snapshot(time.Time{})
+	if len(got) != 1 {
+		t.Fatalf("snapshot len = %d, want 1", len(got))
+	}
+	f := got[0].Fields
+	if f["actor"] != "alice" {
+		t.Errorf("actor not preserved: %v", f["actor"])
+	}
+	if f["profile_id"] != "p123" {
+		t.Errorf("profile_id not preserved: %v", f["profile_id"])
+	}
+	for _, k := range []string{"dsn", "tls_ca_pem", "tls_cert_pem", "tls_key_pem", "ca_pem", "cert_pem", "key_pem"} {
+		if f[k] != "[REDACTED]" {
+			t.Errorf("key %q not redacted: %v", k, f[k])
 		}
 	}
 }
