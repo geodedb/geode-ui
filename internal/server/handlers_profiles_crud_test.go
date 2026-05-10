@@ -206,7 +206,7 @@ func TestGetProfileid_MuxPathBinding_CamelCaseToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/v1/profiles/%s: %v", fakeID, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Before the generator fix: 400 (req.ProfileID was "" → Valid() failed).
 	// After the fix:            404 (ProfileID correctly bound → handler ran → not found).
