@@ -82,7 +82,13 @@ for await (const f of walk(ROOT)) {
   const text = await fs.readFile(f, 'utf8')
   const lines = text.split('\n')
   lines.forEach((line, i) => {
-    // Strip comments (single-line // and /* */ on the same line).
+    // Strip JSDoc / block-comment continuation lines outright. A line
+    // that opens with optional whitespace then `*` (or `/*`/ `/**`) is
+    // comment body, never code -- this lets JSDoc reference issue
+    // numbers like `#121` without colliding with the hex-color guard.
+    if (/^\s*(?:\/?\*)/.test(line)) return
+
+    // Strip same-line comments (single-line // and /* */ on the same line).
     const code = line
       .replace(/\/\/.*$/, '')
       .replace(/\/\*.*?\*\//g, '')
