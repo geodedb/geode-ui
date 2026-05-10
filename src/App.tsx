@@ -85,13 +85,22 @@ const ProtectedShell: React.FC = () => (
 
 interface AppProps {
   initialConnections?: ConnectionState[]
+  // PSR-F16 (#113): when true, ConnectionsProvider mounts with an
+  // empty map + loading=true and dispatches the hydrated state once
+  // getStoredConnections resolves. The production bootstrap (src/
+  // index.tsx) sets this; tests mount with eager initialConnections
+  // and leave lazyHydrate undefined.
+  lazyHydrate?: boolean
 }
 
-const App: React.FC<AppProps> = ({ initialConnections }) => (
+const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
   <LocalizationProvider>
     <ThemeProvider>
       <GlobalStyle />
-      <ConnectionsProvider initialConnections={initialConnections}>
+      <ConnectionsProvider
+        initialConnections={initialConnections}
+        lazyHydrate={lazyHydrate}
+      >
         <AuthProvider>
           <BrowserRouter>
             <Routes>

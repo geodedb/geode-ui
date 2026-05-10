@@ -11,14 +11,19 @@ import {
 jest.mock('./electron-bridge', () => ({
   ...jest.requireActual('./electron-bridge'),
   storeConnections: jest.fn().mockResolvedValue(undefined),
+  getStoredConnections: jest.fn().mockResolvedValue([]),
   isElectron: jest.fn().mockReturnValue(false),
 }))
 
 const mockStore = jest.requireMock('./electron-bridge')
   .storeConnections as jest.Mock
+const mockGetStored = jest.requireMock('./electron-bridge')
+  .getStoredConnections as jest.Mock
 
 beforeEach(() => {
   mockStore.mockClear()
+  mockGetStored.mockReset()
+  mockGetStored.mockResolvedValue([])
   setLatestToken(null)
 })
 
@@ -267,4 +272,158 @@ test('PSR-F9: remove that actually deletes a connection bumps version (one IPC)'
   mockStore.mockClear()
   act(() => screen.getByTestId('remove-c1').click())
   expect(mockStore).toHaveBeenCalledTimes(1)
+})
+
+// ---------------------------------------------------------------------------
+// PSR-F16 (#113) — lazy-hydrate connections after first paint.
+//
+// Pre-fix src/index.tsx awaited getStoredConnections() before calling
+// createRoot, serialising safeStorage init + the secure-store decrypt
+// IPC on the critical path of first paint. Post-fix the React shell
+// mounts synchronously with `lazyHydrate=true`; the provider mounts
+// with `loading=true`, fires the bridge call from a useEffect, and
+// dispatches the populated state when it resolves. ProtectedRoute
+// treats `loading=true` as "wait, don't redirect" so a hydrated
+// session doesn't briefly bounce to /login before the byId map fills.
+// ---------------------------------------------------------------------------
+
+test('PSR-F16: lazyHydrate mounts with loading=true and empty map', async () => {
+  const STORED = [
+    {
+      connectionId: 'lazy-c1',
+      token: 'lazy-tok',
+      profileName: 'default',
+      expiresAt: Date.now() + 60_000,
+    },
+  ]
+  // Hold the bridge open so the post-mount effect can't resolve before
+  // we observe the loading state. mockResolvedValue with a never-
+  // resolving promise would also work but is harder to inspect.
+  let releaseHydrate: (v: typeof STORED) => void = () => undefined
+  mockGetStored.mockReturnValue(
+    new Promise((resolve) => {
+      releaseHydrate = resolve
+    })
+  )
+
+  const Probe: React.FC = () => {
+    const { connections, loading } = useConnections()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  // First paint: loading=true, empty map.
+  expect(screen.getByTestId('loading').textContent).toBe('yes')
+  expect(screen.getByTestId('size').textContent).toBe('0')
+
+  // Cleanup: release so jest can tear down without dangling promises.
+  // Wrap in act() so the resulting state flips don't trigger
+  // "update outside act" warnings.
+  await act(async () => {
+    releaseHydrate(STORED)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+})
+
+test('PSR-F16: lazyHydrate dispatches populated state after bridge resolves', async () => {
+  const STORED = [
+    {
+      connectionId: 'lazy-c1',
+      token: 'lazy-tok',
+      profileName: 'default',
+      expiresAt: Date.now() + 60_000,
+    },
+  ]
+  mockGetStored.mockResolvedValue(STORED)
+
+  const Probe: React.FC = () => {
+    const { connections, loading } = useConnections()
+    const active = useActiveConnection()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+        <span data-testid="active-token">{active?.token ?? 'none'}</span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  // Drain the post-mount effect.
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(screen.getByTestId('size').textContent).toBe('1')
+  expect(screen.getByTestId('active-token').textContent).toBe('lazy-tok')
+  // Module-level latch is in sync (the fetch wrapper reads this).
+  expect(getLatestToken()).toBe('lazy-tok')
+})
+
+test('PSR-F16: lazyHydrate=false (default) starts with loading=false and skips bridge', () => {
+  // Eager mounts (every existing test, browser mode where the bridge
+  // is a noop) must NOT touch getStoredConnections — the legacy
+  // contract is "the caller already provided initialConnections, do
+  // not double-load".
+  mockGetStored.mockClear()
+
+  const Probe: React.FC = () => {
+    const { loading } = useConnections()
+    return <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+  }
+  render(
+    <ConnectionsProvider>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(mockGetStored).not.toHaveBeenCalled()
+})
+
+test('PSR-F16: bridge failure flips loading off without crashing', async () => {
+  mockGetStored.mockRejectedValue(new Error('bridge unavailable'))
+
+  const Probe: React.FC = () => {
+    const { connections, loading } = useConnections()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  // Loading flips off and the map stays empty — caller will hit the
+  // unauthenticated path, ProtectedRoute will redirect to /login.
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(screen.getByTestId('size').textContent).toBe('0')
 })

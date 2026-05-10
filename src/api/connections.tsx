@@ -4,8 +4,9 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useState,
 } from 'react'
-import { storeConnections } from './electron-bridge'
+import { getStoredConnections, storeConnections } from './electron-bridge'
 
 // ConnectionState is the per-connection bookkeeping the SPA holds in
 // memory. The token is the JWT minted by /api/v1/auth/login; we
@@ -40,6 +41,15 @@ type Action =
   | { type: 'remove'; id: string }
   | { type: 'setActive'; id: string | null }
   | { type: 'clear' }
+  // PSR-F16 (#113): hydrate replaces the entire byId map + activeId in
+  // a single action so the lazy bootstrap path doesn't have to fan out
+  // into N `add` dispatches (each one would re-bump the persist
+  // version and IPC-write the same shape back to disk we just read it
+  // from). The version still bumps once so the persist effect runs.
+  // An empty payload is a no-op for the persisted shape — we use it
+  // to mean "hydration finished, but there was nothing on disk" so
+  // the loading flag flips off without spurious disk traffic.
+  | { type: 'hydrate'; conns: ConnectionState[] }
 
 const initialState: State = { byId: new Map(), activeId: null, version: 0 }
 
@@ -93,6 +103,22 @@ function reducer(s: State, a: Action): State {
       // effect — the disk image is already absent (or already empty).
       if (s.byId.size === 0 && s.activeId === null) return s
       return { ...initialState, version: s.version + 1 }
+    case 'hydrate': {
+      // Bulk replace from disk. If nothing came back AND the in-memory
+      // map is already empty, this is a no-op (avoids gratuitously
+      // bumping the version and re-writing an empty file). Otherwise
+      // we install the new map and mark active to the first entry, so
+      // ProtectedRoute sees a non-null active connection.
+      if (a.conns.length === 0 && s.byId.size === 0) return s
+      const byId = new Map<string, ConnectionState>(
+        a.conns.map((c) => [c.connectionId, c])
+      )
+      const activeId =
+        s.activeId && byId.has(s.activeId)
+          ? s.activeId
+          : (a.conns[0]?.connectionId ?? null)
+      return { byId, activeId, version: s.version + 1 }
+    }
     default:
       return s
   }
@@ -101,6 +127,14 @@ function reducer(s: State, a: Action): State {
 interface ContextValue {
   connections: ReadonlyMap<string, ConnectionState>
   activeId: string | null
+  // PSR-F16 (#113): true while the secure-store hydration round-trip
+  // is in flight. ProtectedRoute treats `loading=true` as "wait, do
+  // not redirect" so a hydrated session doesn't briefly bounce to
+  // /login before the byId map is populated. Eagerly-hydrated callers
+  // (test mounts that pass initialConnections, browser mode where
+  // storeConnections is a noop) start with loading=false because
+  // there is nothing to wait for.
+  loading: boolean
   add: (conn: ConnectionState) => void
   remove: (id: string) => void
   setActive: (id: string | null) => void
@@ -111,8 +145,20 @@ const Ctx = createContext<ContextValue | null>(null)
 
 export const ConnectionsProvider: React.FC<{
   children: React.ReactNode
+  // initialConnections is the eager-hydration path: callers that
+  // already have the connection list (every Jest test mount + the
+  // legacy bootstrap that awaited the bridge) pass it through and
+  // skip the lazy hydration round-trip below.
   initialConnections?: ConnectionState[]
-}> = ({ children, initialConnections }) => {
+  // lazyHydrate=true switches the provider into the post-mount
+  // hydration mode (PSR-F16 / #113). The provider mounts immediately
+  // with an empty map and `loading=true`, then dispatches a `hydrate`
+  // action once getStoredConnections() resolves. This is the production
+  // path: src/index.tsx no longer awaits the bridge before calling
+  // createRoot, so first paint happens before the safeStorage decrypt
+  // round-trip.
+  lazyHydrate?: boolean
+}> = ({ children, initialConnections, lazyHydrate }) => {
   const [state, dispatch] = useReducer(reducer, undefined, () => {
     if (!initialConnections || initialConnections.length === 0) {
       return initialState
@@ -127,6 +173,50 @@ export const ConnectionsProvider: React.FC<{
     // hydrated list back to disk on first paint).
     return { byId, activeId: first?.connectionId ?? null, version: 1 }
   })
+
+  // PSR-F16 (#113): when lazyHydrate is requested AND no eager
+  // initialConnections were supplied, mount with loading=true and let
+  // the post-mount effect populate the map. Eagerly-hydrated mounts
+  // (initialConnections provided OR lazyHydrate=false) are already
+  // settled, so loading starts false.
+  const wantsLazy =
+    lazyHydrate === true &&
+    (!initialConnections || initialConnections.length === 0)
+  const [loading, setLoading] = useState<boolean>(wantsLazy)
+
+  useEffect(() => {
+    if (!wantsLazy) return
+    let cancelled = false
+    getStoredConnections()
+      .then((stored) => {
+        if (cancelled) return
+        // Map the persisted records to the in-memory ConnectionState
+        // shape and dispatch a single hydrate action. Latching the
+        // first connection's token here keeps the fetch wrapper
+        // (which reads getLatestToken outside of React) in sync.
+        const conns: ConnectionState[] = stored.map((c) => ({
+          connectionId: c.connectionId,
+          token: c.token,
+          profileName: c.profileName,
+          expiresAt: c.expiresAt,
+        }))
+        if (conns[0]) setLatestToken(conns[0].token)
+        dispatch({ type: 'hydrate', conns })
+      })
+      .catch(() => {
+        // Bridge failure is non-fatal: the SPA falls through to the
+        // unauthenticated path. ProtectedRoute will redirect to /login
+        // because no active connection is set.
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // wantsLazy is captured at mount time and doesn't change for the
+    // life of the provider.
+  }, [wantsLazy])
 
   // Persist on every real state change. Browser mode (storeConnections
   // is a noop fallback) is unaffected; Electron mode mirrors the
@@ -153,12 +243,13 @@ export const ConnectionsProvider: React.FC<{
     () => ({
       connections: state.byId,
       activeId: state.activeId,
+      loading,
       add: (conn) => dispatch({ type: 'add', conn }),
       remove: (id) => dispatch({ type: 'remove', id }),
       setActive: (id) => dispatch({ type: 'setActive', id }),
       clear: () => dispatch({ type: 'clear' }),
     }),
-    [state]
+    [state, loading]
   )
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

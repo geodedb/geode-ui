@@ -96,10 +96,29 @@ export interface Props {
 
 export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   const { t } = useTranslation()
-  const { connections, activeId } = useConnections()
+  const { connections, activeId, loading } = useConnections()
   const active = useActiveConnection()
   const { disconnect, switchActive } = useAuth()
   const [open, setOpen] = useState(false)
+
+  // PSR-F16 (#113): the lazy-hydrate path mounts with an empty
+  // connection map; show a non-interactive placeholder while the
+  // secure-store decrypt round-trip is in flight rather than the
+  // "connect" affordance (which would race the hydrated state).
+  if (loading) {
+    return (
+      <SwitcherWrap>
+        <Trigger
+          type="button"
+          aria-busy="true"
+          aria-label={t('connection.noActive')}
+          disabled
+        >
+          {t('connection.noActive')}
+        </Trigger>
+      </SwitcherWrap>
+    )
+  }
 
   if (connections.size === 0) {
     return (

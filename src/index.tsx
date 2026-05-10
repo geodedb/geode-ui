@@ -3,25 +3,22 @@ import { createRoot } from 'react-dom/client'
 import './monaco-bootstrap'
 import './assets/fonts/fonts.css'
 import App from './App'
-import { getStoredConnections } from './api/electron-bridge'
 import type { ConnectionState } from './api/connections'
 
-async function bootstrap(): Promise<void> {
+// PSR-F16 (#113): the SPA used to await getStoredConnections() before
+// calling createRoot, which serialised safeStorage init + the secure-
+// store file read on the critical path of first paint. Cold-start
+// users stared at a blank window for the full IPC round-trip.
+//
+// Post-fix the React shell mounts synchronously with an empty initial
+// connection map; ConnectionsProvider's `lazyHydrate` mode dispatches
+// the populated state once getStoredConnections() resolves. The
+// E2E backdoor still injects its seed list eagerly (so the addInitScript
+// data is observable on first render) but production users see paint
+// happen as soon as React, the bundle, and the GlobalStyle are ready.
+function bootstrap(): void {
   const container = document.getElementById('root')
   if (!container) throw new Error('Root element not found')
-
-  // Hydrate the in-memory connection map from electron's secure store
-  // BEFORE first render. Browser mode falls through with an empty list
-  // (electron-bridge returns [] when window.geode is undefined).
-  // Expired tokens are dropped at the bridge boundary (main.ts filters
-  // by expiresAt > Date.now() before returning).
-  const stored = await getStoredConnections()
-  let initialConnections: ConnectionState[] = stored.map((c) => ({
-    connectionId: c.connectionId,
-    token: c.token,
-    profileName: c.profileName,
-    expiresAt: c.expiresAt,
-  }))
 
   // E2E backdoor: Playwright's authedContext fixture seeds a JWT-bearing
   // connection here via addInitScript so ProtectedRoute (which gates on
@@ -37,29 +34,30 @@ async function bootstrap(): Promise<void> {
   // literal `false` in every release build, so webpack + Terser
   // dead-code-eliminate the block. Only e2e-targeted builds (the e2e
   // Dockerfile sets `GEODE_E2E_BUILD=true`) leave the gate evaluating
-  // to `true`. The runtime `initialConnections.length === 0` guard
-  // remains as defense-in-depth so a populated stored-connections list
-  // is never overridden by a stray seed.
+  // to `true`. The eager-seed path is preserved here because Playwright
+  // assertions race the lazy-hydrate effect; the seed list must be on
+  // the first render for the test fixture to be observable.
+  let eagerInitial: ConnectionState[] | undefined
   if (__E2E_ENABLED__) {
-    if (initialConnections.length === 0) {
-      const e2eKey = '__GEODE_E2E_INITIAL_CONNECTIONS__'
-      const e2e = (
-        window as unknown as Record<string, ConnectionState[] | undefined>
-      )[e2eKey]
-      if (e2e && e2e.length > 0) {
-        initialConnections = e2e
-      }
+    const e2eKey = '__GEODE_E2E_INITIAL_CONNECTIONS__'
+    const e2e = (
+      window as unknown as Record<string, ConnectionState[] | undefined>
+    )[e2eKey]
+    if (e2e && e2e.length > 0) {
+      eagerInitial = e2e
     }
   }
 
   const root = createRoot(container)
   root.render(
     <React.StrictMode>
-      <App initialConnections={initialConnections} />
+      <App initialConnections={eagerInitial} lazyHydrate />
     </React.StrictMode>
   )
 }
 
-bootstrap().catch(() => {
+try {
+  bootstrap()
+} catch {
   // bootstrap failures are unrecoverable; the blank page is the signal
-})
+}
