@@ -10,10 +10,53 @@ import (
 // Scope="" returns both system and personal. OwnerUserID is only
 // consulted when Scope=personal — system profiles ignore it because
 // they are unowned by definition.
+//
+// PSR-F3 (#99): Limit caps the number of rows returned in a single
+// call; the zero value means "no limit" so the legacy default
+// behaviour is preserved for callers that haven't migrated. AfterID is
+// the cursor pagination cursor — when non-empty, only rows with
+// `id > AfterID` are returned. Combined with the rows being ordered by
+// `id ASC`, this provides stable forward pagination without needing
+// OFFSET (which would cost a full table scan up to the offset).
+//
+// To page through a large catalogue:
+//
+//	cursor := ""
+//	for {
+//	    page, _ := store.List(ctx, Filter{Limit: 100, AfterID: cursor})
+//	    if len(page) == 0 { break }
+//	    handle(page)
+//	    cursor = page[len(page)-1].ID
+//	}
+//
+// Implementations MUST surface rows in `id ASC` order whenever Limit
+// or AfterID is non-zero so the cursor advances deterministically. In
+// the unbounded "Limit==0 && AfterID==”" case the historical
+// (scope ASC, name ASC) ordering is preserved for backwards
+// compatibility with the existing reload path.
 type Filter struct {
 	Scope       conn.ProfileScope
 	OwnerUserID string
+	// Limit caps the result set; 0 means unbounded.
+	Limit int
+	// AfterID is the cursor: when non-empty, only rows whose id is
+	// lexicographically greater than AfterID are returned. Pass the
+	// last row's ID from the previous page to advance.
+	AfterID string
 }
+
+// DefaultListLimit is the page size that handlers SHOULD apply when a
+// caller does not supply an explicit limit. 100 is large enough to
+// hold the SPA's full-catalogue render in a single response for the
+// vast majority of installations, and small enough to put a hard cap
+// on memory + JSON encoding cost when the catalogue grows past that
+// point.
+//
+// The List method itself defaults to unlimited (Filter.Limit == 0)
+// to keep the reload-pool fast path one round-trip; the cap is
+// applied at the HTTP boundary where unbounded responses would be a
+// liability.
+const DefaultListLimit = 100
 
 // ProfilePatch is the partial-update payload accepted by Store.Patch.
 //

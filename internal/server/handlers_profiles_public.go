@@ -32,7 +32,18 @@ func (s *GraphServer) Public(w http.ResponseWriter, r *http.Request, _ *gentypes
 		return &gentypes.PublicProfileList{Profiles: out}, nil
 	}
 
-	all, err := s.cfg.Store.List(r.Context(), profilestore.Filter{Scope: conn.ProfileScopeSystem})
+	// Bound the response to DefaultListLimit (PSR-F3 / #99). The
+	// /public endpoint is unauthenticated and a name+description-only
+	// projection of system profiles, so an unbounded full-catalogue
+	// dump here would waste both the SPA's bootstrap budget and the
+	// server's JSON encoding cost. Operators with > DefaultListLimit
+	// system profiles need cursor pagination (Filter.AfterID) to
+	// surface every row; the unauthenticated bootstrap surface is not
+	// the right place to add that knob.
+	all, err := s.cfg.Store.List(r.Context(), profilestore.Filter{
+		Scope: conn.ProfileScopeSystem,
+		Limit: profilestore.DefaultListLimit,
+	})
 	if err != nil {
 		return nil, err
 	}

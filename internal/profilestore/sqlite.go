@@ -141,6 +141,27 @@ func (s *sqliteStore) unsealBytes(raw []byte) (string, error) {
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
 
+// List returns profiles matching the supplied Filter.
+//
+// PSR-F3 (#99): the prior implementation was an unbounded full table
+// scan, sorted by (scope, name). At scale (hundreds-to-thousands of
+// profiles) every reload + every UI list paid full O(N) JSON encoding
+// cost per request. List now honours Filter.Limit + Filter.AfterID so
+// callers can page through the catalogue without buffering everything.
+//
+// Two ordering modes preserve compatibility:
+//
+//   - Limit==0 && AfterID=="" (the unbounded path used by reloadAsync):
+//     results are sorted (scope ASC, name ASC) just like before. No
+//     existing caller relies on id-ordering in this mode.
+//   - Limit>0 || AfterID!="" (any paginated call): results are sorted
+//     by id ASC so the cursor advances deterministically. Without
+//     stable id-ordering, two pages could cover the same row twice or
+//     skip rows entirely.
+//
+// We never apply OFFSET — cursor pagination by id is O(log N) per
+// page (the PRIMARY KEY index covers it), while OFFSET is O(N) at the
+// tail of a large table.
 func (s *sqliteStore) List(ctx context.Context, f Filter) ([]conn.Profile, error) {
 	q := `SELECT id, scope, owner_user_id, name, dsn, description,
 	             saved_username, is_default, tls_ca_pem, tls_cert_pem,
@@ -156,7 +177,22 @@ func (s *sqliteStore) List(ctx context.Context, f Filter) ([]conn.Profile, error
 		q += " AND owner_user_id = ?"
 		args = append(args, f.OwnerUserID)
 	}
-	q += " ORDER BY scope ASC, name ASC"
+	if f.AfterID != "" {
+		q += " AND id > ?"
+		args = append(args, f.AfterID)
+	}
+	// Pagination switches the sort to id ASC. Without it, the cursor
+	// (`id > ?`) and the application-defined sort would disagree and
+	// rows could be skipped or duplicated across pages.
+	if f.Limit > 0 || f.AfterID != "" {
+		q += " ORDER BY id ASC"
+	} else {
+		q += " ORDER BY scope ASC, name ASC"
+	}
+	if f.Limit > 0 {
+		q += " LIMIT ?"
+		args = append(args, f.Limit)
+	}
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {

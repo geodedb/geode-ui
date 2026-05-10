@@ -766,6 +766,181 @@ func firstByte(b []byte) byte {
 // import of os as unused in case future tests drop the only os caller.
 var _ = os.PathSeparator
 
+// TestSQLiteList_LimitCapsResultSet pins PSR-F3 (#99): when
+// Filter.Limit is positive, List returns at most Limit rows. With
+// limit=2 against a 5-row table we expect 2 rows.
+func TestSQLiteList_LimitCapsResultSet(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopeSystem,
+			Name:  fmt.Sprintf("p%02d", i),
+			DSN:   "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+	}
+	got, err := st.List(ctx, Filter{Limit: 2})
+	if err != nil {
+		t.Fatalf("List(limit=2): %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("List(limit=2) returned %d rows, want 2", len(got))
+	}
+}
+
+// TestSQLiteList_LimitLargerThanTableReturnsAll pins the upper-bound
+// case: requesting limit=100 on a 5-row table returns 5 rows, not
+// errored, not truncated.
+func TestSQLiteList_LimitLargerThanTableReturnsAll(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopeSystem,
+			Name:  fmt.Sprintf("p%02d", i),
+			DSN:   "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+	}
+	got, err := st.List(ctx, Filter{Limit: 100})
+	if err != nil {
+		t.Fatalf("List(limit=100): %v", err)
+	}
+	if len(got) != 5 {
+		t.Errorf("List(limit=100) returned %d rows, want 5", len(got))
+	}
+}
+
+// TestSQLiteList_ZeroLimitReturnsAllUnordered pins the
+// backwards-compatibility contract: Filter{} (the legacy zero value)
+// returns every row, sorted by the legacy (scope, name) order. The
+// reloadAsync hot path depends on this — it must not silently start
+// truncating after this change.
+func TestSQLiteList_ZeroLimitReturnsAll(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	const N = 12
+	for i := 0; i < N; i++ {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopeSystem,
+			Name:  fmt.Sprintf("p%02d", i),
+			DSN:   "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+	}
+	got, err := st.List(ctx, Filter{})
+	if err != nil {
+		t.Fatalf("List(zero filter): %v", err)
+	}
+	if len(got) != N {
+		t.Errorf("List(zero filter) returned %d rows, want %d (default must be unbounded)", len(got), N)
+	}
+}
+
+// TestSQLiteList_CursorAdvancesCorrectly pins the cursor pagination
+// loop. We page through 5 rows in 2-row pages and assert every row
+// is visited exactly once.
+func TestSQLiteList_CursorAdvancesCorrectly(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	const N = 5
+	for i := 0; i < N; i++ {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopeSystem,
+			Name:  fmt.Sprintf("p%02d", i),
+			DSN:   "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+	}
+
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		page, err := st.List(ctx, Filter{Limit: 2, AfterID: cursor})
+		if err != nil {
+			t.Fatalf("List page %d: %v", pages, err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, p := range page {
+			if seen[p.ID] {
+				t.Errorf("cursor returned duplicate id %s on page %d", p.ID, pages)
+			}
+			seen[p.ID] = true
+		}
+		cursor = page[len(page)-1].ID
+		pages++
+		if pages > 10 {
+			t.Fatalf("cursor failed to terminate after 10 pages")
+		}
+	}
+	if len(seen) != N {
+		t.Errorf("cursor visited %d distinct ids, want %d", len(seen), N)
+	}
+	// 5 rows, 2 per page → 3 pages (2,2,1). The terminating empty
+	// page is not counted.
+	if pages != 3 {
+		t.Errorf("expected 3 pages over 5 rows w/ limit=2, got %d", pages)
+	}
+}
+
+// TestSQLiteList_PaginationOrdersById confirms paginated calls return
+// rows in id ASC order (so the cursor is monotonic and pages don't
+// overlap). The legacy (scope, name) ordering would risk re-emitting
+// rows whose name sorts after the cursor's id.
+func TestSQLiteList_PaginationOrdersById(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopeSystem,
+			Name:  fmt.Sprintf("p%02d", i),
+			DSN:   "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %d: %v", i, err)
+		}
+	}
+	got, err := st.List(ctx, Filter{Limit: 5})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("got %d rows want 5", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i-1].ID >= got[i].ID {
+			t.Errorf("rows not ordered by id ASC at index %d: %q >= %q",
+				i, got[i-1].ID, got[i].ID)
+		}
+	}
+}
+
+// TestSQLiteList_DefaultListLimitConstantSensible defends the public
+// constant: a renderer round-tripping every profile in one page is
+// the desirable default for typical installations. If a future tuning
+// drops this to e.g. 10 it should be a deliberate decision; the test
+// catches drift below a sensible floor.
+func TestSQLiteList_DefaultListLimitConstantSensible(t *testing.T) {
+	if DefaultListLimit < 50 {
+		t.Errorf("DefaultListLimit = %d; lowering below 50 silently truncates the SPA's profile list", DefaultListLimit)
+	}
+}
+
 // TestSQLiteListVisible_UnionScopeAndOwner pins PSR-F4 (#101): a
 // single ListVisible call must return ALL system profiles plus ONLY
 // the personal profiles owned by the supplied subject. The two
