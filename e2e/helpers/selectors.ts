@@ -63,4 +63,72 @@ export const sel = {
   // Ops
   newBackupBtn: (p: Page): Locator =>
     p.getByRole('button', { name: /new backup/i }),
+
+  // Profiles page (14-profiles-page.spec.ts)
+  // The Create button uses i18n key `profiles.actions.create` ("Create profile").
+  // Per-row Edit/Delete/Set-as-default labels come from
+  // profiles.actions.{edit,delete,setDefault}; their visibility depends on
+  // (isAdmin || row.dsn !== '') per ProfilesPage.tsx render gate.
+  profilesCreateBtn: (p: Page): Locator =>
+    p.getByRole('button', { name: 'Create profile', exact: true }),
+  profilesNameCell: (p: Page, name: string): Locator =>
+    p.getByRole('cell', { name }).first(),
+  profilesEditBtn: (p: Page, rowName: string): Locator =>
+    p
+      .getByRole('row', { name: new RegExp(rowName) })
+      .getByRole('button', { name: 'Edit', exact: true }),
+  profilesDeleteBtn: (p: Page, rowName: string): Locator =>
+    p
+      .getByRole('row', { name: new RegExp(rowName) })
+      .getByRole('button', { name: 'Delete', exact: true }),
+  profilesSetDefaultBtn: (p: Page, rowName: string): Locator =>
+    p
+      .getByRole('row', { name: new RegExp(rowName) })
+      .getByRole('button', { name: 'Set as default', exact: true }),
+  profilesSetDefaultError: (p: Page): Locator =>
+    p.getByTestId('profiles-set-default-error'),
+
+  // Profile editor modal (ProfileEditorModal.tsx)
+  // Field labels resolve to profiles.editor.field.{name,dsn,description,...}
+  profileEditorNameInput: (p: Page): Locator =>
+    p.getByLabel('Name', { exact: true }),
+  profileEditorDsnInput: (p: Page): Locator =>
+    p.getByLabel('DSN', { exact: true }),
+  profileEditorScopeSelect: (p: Page): Locator => p.getByLabel('Scope'),
+  profileEditorCaPem: (p: Page): Locator =>
+    p.getByLabel('CA PEM', { exact: true }),
+  // Editor submit button text resolves to i18n key
+  // `profiles.editor.actions.save` ("Save") in BOTH create and edit
+  // modes — confirmed against src/services/i18n/locales/en.ts:344-347.
+  profileEditorSaveBtn: (p: Page): Locator =>
+    p.getByRole('button', { name: 'Save', exact: true }),
+  profileEditorCancelBtn: (p: Page): Locator =>
+    p.getByRole('button', { name: 'Cancel', exact: true }),
+
+  // Delete confirmation modal (DeleteProfileModal.tsx)
+  profileDeleteConfirmBtn: (p: Page): Locator =>
+    p.getByRole('button', { name: 'Delete', exact: true }).last(),
+  profileDeleteError: (p: Page): Locator =>
+    p.getByTestId('delete-profile-error'),
+
+  // AddConnectionModal (AddConnectionModal.tsx)
+  // The trigger lives inside the ConnectionSwitcher menu — not a top-level
+  // button. We exercise it by opening the switcher and clicking the
+  // "Add another connection" affordance, OR by opening the empty-state
+  // Connect button. The submit button is the modal's primary action.
+  addConnectionMenuItem: (p: Page): Locator =>
+    p.getByRole('menuitem', { name: /add another connection/i }),
+  addConnectionPublicProfileWarning: (p: Page): Locator =>
+    p.getByTestId('add-connection-public-profile-warning'),
+  addConnectionAuthedProfileWarning: (p: Page): Locator =>
+    p.getByTestId('add-connection-authed-profile-warning'),
+  addConnectionSubmit: (p: Page): Locator =>
+    p.getByRole('button', { name: /^connect$/i }),
+
+  // ConnectionSwitcher (ConnectionSwitcher.tsx)
+  // Disconnect buttons are aria-labeled "Disconnect: <profileName>".
+  connectionDisconnect: (p: Page, profileName: string): Locator =>
+    p.getByRole('button', { name: `Disconnect: ${profileName}` }),
+  connectionMenuItemRadio: (p: Page, profileName: string): Locator =>
+    p.getByRole('menuitemradio', { name: profileName }),
 }
