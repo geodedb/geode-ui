@@ -20,6 +20,31 @@ import {
 } from './lib/safety'
 import { AssetCache, defaultCacheOptions } from './lib/cache'
 import { createSecureStore, SecureStore } from './lib/secure-store'
+import {
+  safeReadPemFile,
+  sanitizeConnections,
+  sanitizeSavedPasswordInput,
+} from './lib/ipc-guards'
+
+// Hard caps for IPC-supplied payloads (S8 — GitLab #121). Pre-fix the
+// `geode:store-connections` and `geode:store-saved-password` handlers
+// took whatever shape the renderer sent. A compromised renderer could
+// submit an unbounded array, type-confused fields, or non-finite
+// expiry timestamps; the secure-store would dutifully encrypt them.
+//
+// These caps are deliberately generous: 32 active connections per user
+// is more than the connection switcher could plausibly enumerate,
+// 4 KB tokens accommodate JWT + refresh-token style credentials, and
+// 7-day forward expiry matches the JWT issuer's max lifetime.
+const STORE_CONNECTIONS_MAX = 32
+const STORE_TOKEN_MAX_LEN = 4096
+const STORE_NAME_MAX_LEN = 128
+const STORE_USERNAME_MAX_LEN = 256
+const STORE_PASSWORD_MAX_LEN = 1024
+const STORE_EXPIRES_FORWARD_MS = 7 * 24 * 60 * 60 * 1000
+// 1 MiB cap on PEM material — real certs/keys are typically <10 KB; a
+// file larger than this is almost certainly the wrong thing.
+const PEM_FILE_MAX_BYTES = 1024 * 1024
 
 // P-NEW-7: keep recently-served SPA assets in memory so a hard reload
 // or a tight burst of subresource requests don't all hit the disk.
@@ -327,26 +352,48 @@ ipcMain.handle('geode:get-stored-connections', async () => {
   return (doc.connections ?? []).filter((c) => c.expiresAt > now)
 })
 
-ipcMain.handle(
-  'geode:store-connections',
-  async (
-    _evt,
-    list: Array<{
-      connectionId: string
-      token: string
-      profileName: string
-      expiresAt: number
-    }>
-  ) => {
-    const doc = await secureStore().read()
-    await secureStore().write({ ...doc, connections: list })
-    return true
+ipcMain.handle('geode:store-connections', async (_evt, raw: unknown) => {
+  // S8 (#121): validate the renderer-supplied list before persisting.
+  // A compromised renderer can hand us anything, including arbitrary
+  // JSON shapes or absurdly large arrays. Reject hard if validation
+  // fails — pre-fix the bad shape would round-trip through encrypt +
+  // disk + memo and return as `getStoredConnections()` later.
+  const list = sanitizeConnections(raw, {
+    maxLen: STORE_CONNECTIONS_MAX,
+    maxTokenLen: STORE_TOKEN_MAX_LEN,
+    maxNameLen: STORE_NAME_MAX_LEN,
+    maxExpiresMs: STORE_EXPIRES_FORWARD_MS,
+  })
+  if (list === null) {
+    // Surface a renderer-visible error so the caller can decide
+    // whether to retry. We deliberately do NOT echo the offending
+    // shape back — the renderer already has it.
+    throw new Error('geode:store-connections: invalid payload shape')
   }
-)
+  const doc = await secureStore().read()
+  await secureStore().write({ ...doc, connections: list })
+  return true
+})
 
 ipcMain.handle(
   'geode:get-stored-password',
-  async (_evt, profileName: string, username: string) => {
+  async (_evt, profileName: unknown, username: unknown) => {
+    // S8 (#121): the read path takes the same untrusted input shape;
+    // validate to prevent type-confused lookups (e.g. `{}` colliding
+    // with the empty-string key, or a number coerced via the pwKey
+    // template literal into a key for an unrelated entry).
+    if (
+      typeof profileName !== 'string' ||
+      typeof username !== 'string' ||
+      profileName.length === 0 ||
+      username.length === 0 ||
+      profileName.length > STORE_NAME_MAX_LEN ||
+      username.length > STORE_USERNAME_MAX_LEN ||
+      profileName.includes('\x00') ||
+      username.includes('\x00')
+    ) {
+      return null
+    }
     const doc = await secureStore().read()
     return doc.passwords?.[pwKey(profileName, username)] ?? null
   }
@@ -354,10 +401,29 @@ ipcMain.handle(
 
 ipcMain.handle(
   'geode:store-saved-password',
-  async (_evt, profileName: string, username: string, password: string) => {
+  async (
+    _evt,
+    profileName: unknown,
+    username: unknown,
+    password: unknown
+  ) => {
+    // S8 (#121): validate the triple as a single object so the helper
+    // can enforce per-field caps and the no-null-byte invariant
+    // around the pwKey separator.
+    const sanitized = sanitizeSavedPasswordInput(
+      { profile: profileName, username, password },
+      {
+        maxNameLen: STORE_NAME_MAX_LEN,
+        maxUsernameLen: STORE_USERNAME_MAX_LEN,
+        maxPasswordLen: STORE_PASSWORD_MAX_LEN,
+      }
+    )
+    if (sanitized === null) {
+      throw new Error('geode:store-saved-password: invalid payload shape')
+    }
     const doc = await secureStore().read()
     const passwords = { ...(doc.passwords ?? {}) }
-    passwords[pwKey(profileName, username)] = password
+    passwords[pwKey(sanitized.profile, sanitized.username)] = sanitized.password
     await secureStore().write({ ...doc, passwords })
     return true
   }
@@ -365,7 +431,22 @@ ipcMain.handle(
 
 ipcMain.handle(
   'geode:clear-stored-password',
-  async (_evt, profileName: string, username: string) => {
+  async (_evt, profileName: unknown, username: unknown) => {
+    // S8 (#121): same input gate as the read path. A malformed clear
+    // request silently returns true (idempotent), avoiding an
+    // observable error channel that could be used to probe key shape.
+    if (
+      typeof profileName !== 'string' ||
+      typeof username !== 'string' ||
+      profileName.length === 0 ||
+      username.length === 0 ||
+      profileName.length > STORE_NAME_MAX_LEN ||
+      username.length > STORE_USERNAME_MAX_LEN ||
+      profileName.includes('\x00') ||
+      username.includes('\x00')
+    ) {
+      return true
+    }
     const doc = await secureStore().read()
     if (!doc.passwords) return true
     const passwords = { ...doc.passwords }
@@ -389,21 +470,32 @@ ipcMain.handle('geode:get-system-theme', () =>
 ipcMain.handle('geode:pick-pem-file', async (evt) => {
   const win = BrowserWindow.fromWebContents(evt.sender)
   if (!win) return null
+  // S3 (#116): drop the `extensions: ['*']` "All files" filter — pre-fix
+  // the dialog let the user pick any pseudo-file (block device, FIFO,
+  // device node) which the read-then-stat path would happily slurp
+  // into the encrypted profile store.
   const result = await dialog.showOpenDialog(win, {
     title: 'Select a PEM file',
     properties: ['openFile'],
     filters: [
       { name: 'PEM files', extensions: ['pem', 'crt', 'key', 'cert', 'cer'] },
-      { name: 'All files', extensions: ['*'] },
     ],
   })
   if (result.canceled || result.filePaths.length === 0) return null
   const filePath = result.filePaths[0]!
-  // Cap at 1 MiB — PEM material is normally < 10 KB; anything larger
-  // is almost certainly not a real cert.
-  const stat = await fs.stat(filePath)
-  if (stat.size > 1024 * 1024) return null
-  return fs.readFile(filePath, 'utf8')
+  // S3 (#116): the read goes through `safeReadPemFile`, which:
+  //   • opens the path with O_NOFOLLOW so symlinks are rejected;
+  //   • fstats the descriptor (closing the TOCTOU window between the
+  //     pre-fix `fs.stat` and `fs.readFile` calls);
+  //   • caps the file at 1 MiB before any bytes are read;
+  //   • validates the body is PEM-shaped (BEGIN/END armor lines).
+  // Any failure returns null so the renderer surface stays unchanged
+  // while the security contract tightens.
+  try {
+    return await safeReadPemFile(filePath, { maxBytes: PEM_FILE_MAX_BYTES })
+  } catch {
+    return null
+  }
 })
 nativeTheme.on('updated', () => {
   for (const win of BrowserWindow.getAllWindows()) {

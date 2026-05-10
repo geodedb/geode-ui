@@ -6,6 +6,7 @@ import {
   createSecureStore,
   SafeStorageLike,
 } from '../electron/lib/secure-store'
+import { joinTmp, randomTmpSuffix } from '../electron/lib/ipc-guards'
 
 interface CountingFake extends SafeStorageLike {
   encryptCount: number
@@ -26,7 +27,13 @@ function countingFakeSafeStorage(): CountingFake {
     decryptCount: 0,
     isEncryptionAvailable: () => true,
     encryptString(s: string): Buffer {
-      fake.encryptCount += 1
+      // The S4 HMAC envelope derives a per-store MAC key by encrypting
+      // a constant label. That derivation runs once per store and must
+      // not inflate the payload encrypt count tracked by the F6 perf
+      // assertions (which pin the number of *payload* encrypts).
+      if (s !== 'geode-ui-mac-key-v1') {
+        fake.encryptCount += 1
+      }
       return Buffer.from(`enc:${s}`, 'utf8')
     },
     decryptString(b: Buffer): string {
@@ -255,7 +262,7 @@ test('F6: clear resets memo and removes file', async () => {
   await fs.rm(dir, { recursive: true })
 })
 
-test('encryption unavailable: read returns empty, write is a no-op', async () => {
+test('encryption unavailable (legacy surfaceUnavailable=false): write is silent no-op', async () => {
   const dir = await tmpDir()
   const filePath = path.join(dir, 'secure.json')
   const unavailable: SafeStorageLike = {
@@ -270,6 +277,7 @@ test('encryption unavailable: read returns empty, write is a no-op', async () =>
   const store = createSecureStore({
     storePath: filePath,
     safeStorage: unavailable,
+    surfaceUnavailable: false,
   })
   await store.write({
     connections: [
@@ -281,4 +289,139 @@ test('encryption unavailable: read returns empty, write is a no-op', async () =>
   // No file should have been written.
   await expect(fs.access(filePath)).rejects.toThrow()
   await fs.rm(dir, { recursive: true })
+})
+
+// ---------------------------------------------------------------------------
+// S4 (#117) — secure-store integrity: HMAC envelope, surface unavailable
+// instead of silent no-op, randomized tmp file. The four tests below
+// pin the new on-disk envelope shape (v2 JSON), the tampered-MAC
+// rejection, the SecureStoreUnavailableError surface, and the legacy
+// `{encrypted}` envelope migration on next write.
+// ---------------------------------------------------------------------------
+
+test('S4: write emits a v2 envelope with hmac field', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  const store = createSecureStore({
+    storePath: filePath,
+    safeStorage: fakeSafeStorage(),
+  })
+  await store.write({ passwords: { 'a\x00b': 'pw' } })
+  await store.flushSync()
+  const raw = await fs.readFile(filePath, 'utf8')
+  const parsed = JSON.parse(raw) as Record<string, unknown>
+  expect(parsed.v).toBe(2)
+  expect(typeof parsed.ciphertext).toBe('string')
+  expect(typeof parsed.hmac).toBe('string')
+  // hmac is hex-encoded SHA256 → 64 hex chars.
+  expect((parsed.hmac as string).length).toBe(64)
+  await fs.rm(dir, { recursive: true })
+})
+
+test('S4: tampered ciphertext fails MAC and yields empty doc on read', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  const fake = fakeSafeStorage()
+  // Seed a v2 envelope.
+  {
+    const seedStore = createSecureStore({
+      storePath: filePath,
+      safeStorage: fake,
+    })
+    await seedStore.write({ passwords: { 'a\x00b': 'pw' } })
+    await seedStore.flushSync()
+  }
+  // Tamper: flip a bit in the ciphertext field.
+  const raw = JSON.parse(
+    await fs.readFile(filePath, 'utf8')
+  ) as Record<string, unknown>
+  const tampered = Buffer.from(raw.ciphertext as string, 'base64')
+  tampered[0] = (tampered[0]! ^ 0x01) & 0xff
+  raw.ciphertext = tampered.toString('base64')
+  await fs.writeFile(filePath, JSON.stringify(raw))
+
+  // Fresh store (cold memo) — must reject the tampered envelope.
+  const store = createSecureStore({
+    storePath: filePath,
+    safeStorage: fakeSafeStorage(),
+  })
+  const got = await store.read()
+  expect(got).toEqual({})
+  await fs.rm(dir, { recursive: true })
+})
+
+test('S4: surfaceUnavailable=true throws SecureStoreUnavailableError on write', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  const unavailable: SafeStorageLike = {
+    isEncryptionAvailable: () => false,
+    encryptString: () => {
+      throw new Error('not available')
+    },
+    decryptString: () => {
+      throw new Error('not available')
+    },
+  }
+  const store = createSecureStore({
+    storePath: filePath,
+    safeStorage: unavailable,
+    // Default is true; pinning explicitly for clarity.
+    surfaceUnavailable: true,
+  })
+  await expect(
+    store.write({
+      connections: [
+        { connectionId: 'c', token: 't', profileName: 'p', expiresAt: 0 },
+      ],
+    })
+  ).rejects.toThrow(/safeStorage/i)
+  await fs.rm(dir, { recursive: true })
+})
+
+test('S4: legacy {encrypted} envelope is migrated to v2 on next write', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  const fake = fakeSafeStorage()
+  // Hand-craft a legacy envelope (pre-S4 shape).
+  const plain = JSON.stringify({ passwords: { 'a\x00b': 'legacy' } })
+  const legacy = {
+    encrypted: fake.encryptString(plain).toString('base64'),
+  }
+  await fs.writeFile(filePath, JSON.stringify(legacy), 'utf8')
+
+  const store = createSecureStore({
+    storePath: filePath,
+    safeStorage: fakeSafeStorage(),
+  })
+  // Cold read should still surface the legacy doc.
+  const got = await store.read()
+  expect(got.passwords?.['a\x00b']).toBe('legacy')
+
+  // Trigger a write so the legacy envelope is migrated. The memo is
+  // marked dirty by ensureLoaded() when it detects the legacy shape,
+  // so even a no-op write triggers the migration.
+  await store.write({ passwords: { 'a\x00b': 'legacy', new: 'now' } })
+  await store.flushSync()
+
+  // The on-disk envelope is now v2.
+  const raw = JSON.parse(
+    await fs.readFile(filePath, 'utf8')
+  ) as Record<string, unknown>
+  expect(raw.v).toBe(2)
+  expect(raw.encrypted).toBeUndefined()
+  expect(typeof raw.ciphertext).toBe('string')
+  expect(typeof raw.hmac).toBe('string')
+  await fs.rm(dir, { recursive: true })
+})
+
+test('S4: tmp file uses a randomized hex suffix (no predictable .tmp)', () => {
+  // We cannot observe the tmp file directly because rename happens
+  // synchronously from our perspective, but we CAN verify the helper
+  // that names it returns distinct paths each call.
+  const a = joinTmp('/var/secure.json', randomTmpSuffix())
+  const b = joinTmp('/var/secure.json', randomTmpSuffix())
+  expect(a).not.toBe(b)
+  expect(a.endsWith('.tmp')).toBe(true)
+  // Suffix is 16 hex chars + '.tmp' before basename of storePath.
+  expect(a).toMatch(/secure\.json\.[0-9a-f]{16}\.tmp$/)
 })

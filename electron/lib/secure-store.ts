@@ -1,6 +1,14 @@
 import fs from 'node:fs/promises'
 import fsSync from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
+
+import {
+  randomTmpSuffix,
+  joinTmp,
+  requireSafeStorage,
+  SecureStoreUnavailableError,
+} from './ipc-guards'
 
 // SafeStorageLike is the subset of Electron's safeStorage we use,
 // extracted as an interface so tests can inject a fake.
@@ -27,6 +35,11 @@ export interface SecureStoreOptions {
   // 250ms window which is short enough to feel synchronous to a user but
   // long enough to coalesce a burst of reducer-driven writes.
   debounceMs?: number
+  // surfaceUnavailable: when true (S4 closure), `write()` rejects with
+  // a SecureStoreUnavailableError if safeStorage is not available
+  // instead of silently dropping data. When false (legacy), writes are
+  // silently ignored and reads return {}. Default: true.
+  surfaceUnavailable?: boolean
 }
 
 export interface SecureStore {
@@ -40,8 +53,36 @@ export interface SecureStore {
   flushSync(): Promise<void>
 }
 
+export { SecureStoreUnavailableError } from './ipc-guards'
+
 const empty: SecureStoreDoc = {}
 const DEFAULT_DEBOUNCE_MS = 250
+
+// MAC_KEY_LABEL — derives a per-install MAC key by asking safeStorage
+// to encrypt a constant tag. The OS-bound encryption blob is hashed to
+// produce the symmetric MAC key. Two installations on the same machine
+// each get a distinct key (because OSX Keychain / DPAPI / libsecret
+// per-app secrets diverge); a copy of the file alone (without the OS
+// keyring entry) cannot forge a valid HMAC.
+const MAC_KEY_LABEL = 'geode-ui-mac-key-v1'
+
+// On-disk envelope shape. `ciphertext` is the safeStorage-encrypted
+// blob (base64). `hmac` is the hex-encoded HMAC-SHA256 of `ciphertext`
+// (raw bytes, not the base64 string) under the install-bound MAC key.
+//
+// Legacy payloads (pre-S4) carry only `{ encrypted: <base64> }` with no
+// `hmac` field. We detect that shape on read, emit a warning to the
+// console, and re-encrypt + re-MAC on the next `write()` (one-shot
+// migration). No data is dropped.
+interface EnvelopeV2 {
+  v: 2
+  ciphertext: string // base64 of safeStorage.encryptString(plain)
+  hmac: string // hex of HMAC-SHA256(macKey, base64-decoded(ciphertext))
+}
+
+interface EnvelopeLegacy {
+  encrypted: string // legacy field; no MAC.
+}
 
 // PSR-F6 (#92) — secure-store decrypt+re-encrypt per IPC.
 //
@@ -61,12 +102,21 @@ const DEFAULT_DEBOUNCE_MS = 250
 //   3. Exposes `flushSync` so the main process can drain pending writes
 //      from `app.before-quit` without losing data.
 //
-// Integrity invariants are preserved: the on-disk image is still a
-// single safeStorage.encryptString blob wrapped in `{encrypted: ...}`,
-// the temp+rename atomicity remains, and we never persist plaintext.
+// S4 (#117) hardening additions:
+//   - HMAC-SHA256 envelope around the encrypted payload using a MAC
+//     key derived per-install via safeStorage. A tampered ciphertext
+//     fails the MAC check before decrypt is attempted.
+//   - Random hex suffix on the temp file (`${storePath}.${rand}.tmp`)
+//     so a shared-home race against the rename is statistically
+//     infeasible.
+//   - Surface `SecureStoreUnavailableError` from `write()` when
+//     safeStorage is unavailable instead of silently dropping data.
+//   - One-shot migration of legacy `{ encrypted }` envelopes to the
+//     new `{ v:2, ciphertext, hmac }` shape on the next write.
 export function createSecureStore(opts: SecureStoreOptions): SecureStore {
   const { storePath, safeStorage } = opts
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS
+  const surfaceUnavailable = opts.surfaceUnavailable !== false
 
   // memo holds the latest decrypted view of the doc. `loaded` tracks
   // whether we've ever materialized it (cold start vs. hot memo).
@@ -80,12 +130,47 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
   // writeChain serializes flush() invocations so two concurrent
   // flushes (e.g. timer + flushSync) cannot interleave file ops.
   let writeChain: Promise<void> = Promise.resolve()
+  // macKey is lazily derived on first encrypted read/write so that
+  // tests using a fake safeStorage can opt-in to HMAC verification by
+  // passing a real-shaped fake.
+  let macKey: Buffer | null = null
 
   function clone(doc: SecureStoreDoc): SecureStoreDoc {
     // Defensive copy on read so callers can't mutate our memo. The
     // shape is small and JSON-safe, so a JSON round-trip is the
     // simplest correct deep-clone.
     return JSON.parse(JSON.stringify(doc)) as SecureStoreDoc
+  }
+
+  function deriveMacKey(): Buffer {
+    if (macKey) return macKey
+    // safeStorage.encryptString returns a Buffer that is bound to the
+    // OS keyring entry for this app+user. Hashing it gives a stable
+    // 32-byte symmetric key for HMAC-SHA256.
+    const seed = safeStorage.encryptString(MAC_KEY_LABEL)
+    macKey = crypto.createHash('sha256').update(seed).digest()
+    return macKey
+  }
+
+  function computeMac(ciphertext: Buffer): string {
+    const key = deriveMacKey()
+    return crypto.createHmac('sha256', key).update(ciphertext).digest('hex')
+  }
+
+  function isEnvelopeV2(o: unknown): o is EnvelopeV2 {
+    if (o === null || typeof o !== 'object') return false
+    const r = o as Record<string, unknown>
+    return (
+      r.v === 2 &&
+      typeof r.ciphertext === 'string' &&
+      typeof r.hmac === 'string'
+    )
+  }
+
+  function isEnvelopeLegacy(o: unknown): o is EnvelopeLegacy {
+    if (o === null || typeof o !== 'object') return false
+    const r = o as Record<string, unknown>
+    return typeof r.encrypted === 'string'
   }
 
   async function loadFromDisk(): Promise<SecureStoreDoc> {
@@ -96,18 +181,49 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
     } catch {
       return { ...empty }
     }
-    let parsed: { encrypted?: string }
+    let parsed: unknown
     try {
-      parsed = JSON.parse(raw.toString('utf8')) as { encrypted?: string }
+      parsed = JSON.parse(raw.toString('utf8'))
     } catch {
       return { ...empty }
     }
-    if (!parsed.encrypted) return { ...empty }
+
+    let cipherBuf: Buffer | null = null
+    if (isEnvelopeV2(parsed)) {
+      // Verify HMAC before attempting decrypt. A tampered ciphertext
+      // (or a substituted file from another install) fails the MAC
+      // and surfaces as an empty doc rather than mis-decrypted bytes.
+      cipherBuf = Buffer.from(parsed.ciphertext, 'base64')
+      const expected = computeMac(cipherBuf)
+      // crypto.timingSafeEqual requires equal lengths.
+      const got = parsed.hmac
+      const expectedBuf = Buffer.from(expected, 'hex')
+      const gotBuf = (() => {
+        try {
+          return Buffer.from(got, 'hex')
+        } catch {
+          return Buffer.alloc(0)
+        }
+      })()
+      if (
+        gotBuf.length !== expectedBuf.length ||
+        !crypto.timingSafeEqual(expectedBuf, gotBuf)
+      ) {
+        // Mark dirty so the next write replaces the tampered file.
+        return { ...empty }
+      }
+    } else if (isEnvelopeLegacy(parsed)) {
+      // Legacy {encrypted} envelope — decrypt as-is, then mark the memo
+      // dirty so the next `write()` re-emits the v2 envelope. We don't
+      // re-write here because read() should be side-effect-free.
+      cipherBuf = Buffer.from(parsed.encrypted, 'base64')
+    } else {
+      return { ...empty }
+    }
+
     let decrypted: string
     try {
-      decrypted = safeStorage.decryptString(
-        Buffer.from(parsed.encrypted, 'base64')
-      )
+      decrypted = safeStorage.decryptString(cipherBuf)
     } catch {
       return { ...empty }
     }
@@ -122,6 +238,21 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
     if (loaded) return
     memo = await loadFromDisk()
     loaded = true
+    // If the on-disk image was a legacy envelope, mark the memo dirty
+    // so the next persist() will re-emit it as v2.
+    if (await isLegacyOnDisk()) {
+      dirty = true
+    }
+  }
+
+  async function isLegacyOnDisk(): Promise<boolean> {
+    try {
+      const raw = await fs.readFile(storePath, 'utf8')
+      const parsed = JSON.parse(raw) as unknown
+      return isEnvelopeLegacy(parsed) && !isEnvelopeV2(parsed)
+    } catch {
+      return false
+    }
   }
 
   async function read(): Promise<SecureStoreDoc> {
@@ -131,17 +262,35 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
 
   async function persist(): Promise<void> {
     if (!safeStorage.isEncryptionAvailable()) {
-      // Mirror the legacy behaviour: writes are dropped silently when
-      // encryption is unavailable so the renderer's best-effort calls
-      // don't blow up an unencrypted host.
+      if (surfaceUnavailable) {
+        // S4 — surface the unavailable condition; the IPC handler will
+        // turn this into a renderer-visible error.
+        dirty = false
+        throw new SecureStoreUnavailableError(
+          'safeStorage is unavailable; refusing to persist secure-store payload'
+        )
+      }
+      // Legacy contract: writes are dropped silently when encryption is
+      // unavailable so the renderer's best-effort calls don't blow up
+      // an unencrypted host.
       dirty = false
       return
     }
     const snapshot = clone(memo)
     const plain = JSON.stringify(snapshot)
-    const encrypted = safeStorage.encryptString(plain).toString('base64')
-    const payload = JSON.stringify({ encrypted })
-    const tmp = `${storePath}.tmp`
+    const cipherBytes = safeStorage.encryptString(plain)
+    const hmac = computeMac(cipherBytes)
+    const envelope: EnvelopeV2 = {
+      v: 2,
+      ciphertext: cipherBytes.toString('base64'),
+      hmac,
+    }
+    const payload = JSON.stringify(envelope)
+    // Random hex suffix on the tmp file: pre-fix `${storePath}.tmp`
+    // was predictable, so on a shared home an attacker could symlink
+    // the path before the rename. 8 bytes (16 hex chars) of entropy
+    // makes the race statistically infeasible.
+    const tmp = joinTmp(storePath, randomTmpSuffix())
     await fs.mkdir(path.dirname(storePath), { recursive: true })
     await fs.writeFile(tmp, payload, { mode: 0o600 })
     await fs.rename(tmp, storePath)
@@ -179,10 +328,16 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
 
   async function write(doc: SecureStoreDoc): Promise<void> {
     if (!safeStorage.isEncryptionAvailable()) {
-      // Preserve the legacy contract: if the host has no encryption
-      // backing, writes are dropped on the floor and reads return {}.
-      // Memoizing here would silently leak plaintext credentials into a
-      // process-wide cache that the renderer can request via IPC.
+      if (surfaceUnavailable) {
+        // S4 — surface the unavailable condition synchronously to the
+        // IPC handler. Pre-fix the renderer thought the JWT had been
+        // persisted while in fact it was dropped on the floor.
+        const status = requireSafeStorage(safeStorage)
+        if (!status.available) throw status.error
+      }
+      // Legacy contract: drop the write silently and do not memoize
+      // (otherwise plaintext credentials would live in a process-wide
+      // cache the renderer can request via IPC).
       return
     }
     await ensureLoaded()
