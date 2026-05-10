@@ -1,9 +1,11 @@
 # Security Gap Analysis — geode-ui
 
-**Last updated:** 2026-05-07
-**Audit:** /codepros:audit Phase 3 → Phase 4 tracking
+**Last updated:** 2026-05-10
+**Audit:** /codepros:audit Phase 3 → Phase 4 tracking (PSR cohort)
 **Repository:** `devnw/codepros/geode/geode-ui`
-**Branch reviewed:** `main` @ `c47534a`
+**Branch reviewed:** `main` @ `0b73836`
+
+> **PSR cohort jump-link:** see [Profile System Rebuild (PSR) — 2026-05-10 audit](#profile-system-rebuild-psr--2026-05-10-audit) for the 10 newly-filed S01-S10 findings (issues #114-#123) covering the recent profile-system rebuild only. Prior cohort (F*/N* series, issues #58-#77) below remains the canonical baseline.
 
 ## Scope
 
@@ -181,3 +183,70 @@ These were flagged by tools or surfaced during manual review but are **confirmed
 ## Immediate Actions
 
 None of the findings require immediate secret rotation or active-RCE remediation. F14 was the only secret-adjacent flag and is a confirmed placeholder. **No production credentials are leaked; no active RCE path was identified.**
+
+---
+
+## Profile System Rebuild (PSR) — 2026-05-10 audit
+
+**Scope:** Recent profile-system rebuild only — Electron main/preload/IPC additions, the new `internal/profilestore` module, the new profile CRUD handlers, the SPA bootstrap rewrite, and the new `secure-store` and `AuthProvider` paths. Excludes the prior cohort (F*/N*) which is tracked above.
+
+**All 10 findings are PUBLIC** (no `--confidential` flag). None expose live secrets; the highest-impact items (S1, S2, S5, S6) all require either a renderer/admin foothold or local file access, so the exploit narratives are already in the public record once issues are filed. Filed as `psr` cohort.
+
+### Coordinated fix modules
+
+The 10 findings collapse into **3 coordinated PRs**. Cross-issue references in the bodies should drive these to land as cohorts, not 10 separate MRs.
+
+| Module | New file | Closes | Touches |
+|--------|----------|--------|---------|
+| **C1** | `electron/lib/ipc-guards.ts` | **S3** (TOCTOU + `*` filter on `pickPemFile`), **S8** (no IPC input validation), **S4-partial** (callsite hardening for `secure-store`) | `electron/main.ts` (handler rewrites), `electron/lib/ipc-guards.ts` (new), tests |
+| **C2** | `internal/profilestore/crypto.go` | **S5** (plaintext PEM/DSN at rest) | `internal/profilestore/sqlite.go`, `internal/profilestore/schema.go`, `internal/profilestore/crypto.go` (new), `cmd/server/main.go` (key bootstrap), tests |
+| **C3** | Expanded `audit.go` event taxonomy | **S6** (no audit on profile CRUD) — also tightens defense-in-depth around **S5** (encrypted column names listed in redaction allowlist) | `internal/server/audit.go`, `internal/server/handlers_profiles_crud.go`, tests |
+
+**Standalone PRs** (no shared module): S1, S2, S7, S9, S10.
+
+### PSR findings — stack ranked by risk score
+
+| ID | OWASP / CIS | Risk | Severity | Decision | GitLab issue | File:Line | Title |
+|----|-------------|-----:|----------|----------|--------------|-----------|-------|
+| S1 | A05 + A03 / CWE-939, CWE-1188 | **30** | High | **Closed 2026-05-10** (release blocker) | [#114](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/114) | `electron/main.ts:303-308` | **Closed 2026-05-10** -- new `safeOpenExternal` helper in `electron/lib/safety.ts` funnels both `setWindowOpenHandler` and `will-navigate` through `isAllowedExternal` before any `shell.openExternal` call. 25 new test cases pin the gate (https/mailto allowed; file://, javascript:, blob:, data:, app://, ftp://, geode://app/admin, non-strings all rejected). |
+| S5 | A02 + CIS 3.11 / CWE-311, CWE-312 | **30** | High | Fix-Soon | [#118](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/118) | `internal/profilestore/sqlite.go:18-22`, `schema.go:18` | Plaintext PEM/DSN (with embedded DB password) in profilestore SQLite |
+| S2 | A05 / CWE-489 | **22** | High | **Fix-Now** (release blocker) | [#115](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/115) | `src/index.tsx:33-41` | E2E backdoor `__GEODE_E2E_INITIAL_CONNECTIONS__` honored unconditionally; no env gate; ships in prod bundle |
+| S3 | A04 / CWE-367, CWE-22 | **17** | Medium | Fix-Soon | [#116](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/116) | `electron/main.ts:379-397` | `pickPemFile` TOCTOU (`fs.stat` then `fs.readFile`); `extensions:['*']` allows pseudo-files |
+| S6 | A09 + CIS 8.5/8.11 / CWE-778 | **17** | Medium | **Fix-Now** (release blocker) | [#119](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/119) | `handlers_profiles_crud.go:24-234` | Zero `emitAudit` calls across profile CRUD; spec advertises audit |
+| S8 | A04 + A03 / CWE-20, CWE-1284 | **17** | Medium | Fix-Soon | [#121](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/121) | `electron/main.ts:320-335`, `:345-354` | No runtime IPC validation on `store-connections` / `store-saved-password` |
+| S4 | A02 / CWE-311, CWE-353 | **16** | Medium | Fix-Soon-with-Workaround | [#117](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/117) | `electron/lib/secure-store.ts:69-77`, `:66` | Silent no-op when `safeStorage` unavailable; no MAC; predictable tmp file |
+| S7 | A04 / CWE-799 | **11** | Low | Backlog | [#120](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/120) | `cmd/server/main.go` (route wiring) | No rate-limit on profile CRUD routes (only `/auth/login` is rate-limited) |
+| S10 | A04 / CWE-20 | **7** | Low | Fix-Soon | [#123](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/123) | `handlers_profiles_crud.go:252-269` | `tlsFromGenJSON` accepts arbitrary strings; no `pem.Decode` / `x509.ParseCertificate` / size cap |
+| S9 | (accepted-risk) | **3** | Low | **Accepted Risk** (docs only) | [#122](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/122) | `src/auth/AuthProvider.tsx:125-133` | `signOut` does not `clearStoredPassword` — intentional per Plan E §8 (browser-password-manager analog) |
+
+### PSR — release blockers
+
+Three issues must land before the next tagged release:
+
+1. **S1 (#114)** — trivial one-line allowlist fix; no excuse to ship without it.
+2. **S2 (#115)** — backdoor-in-production class; build-time strip is the right primary fix, runtime gate is the safety net.
+3. **S6 (#119)** — compliance-stop. The spec advertises an audit trail that does not exist; release notes that say "audit-tracked profile changes" would be false advertising.
+
+### PSR — cross-references
+
+- **S2 (#115) ↔ #64 (SEC-N2)** — JWT revocation deferred amplifies S2's blast radius. Until N2 lands, fixing S2 is the only short-term mitigation against a long-lived seeded session.
+- **S6 (#119) ↔ #78 (PSR-G01)** — gap-sync filed a parallel issue covering the same code from the requirements-coverage angle. Both should close in the same MR.
+- **S5 (#118) ↔ S6 (#119)** — encrypted column names (S5) must appear in S6's redaction allowlist. Defense in depth: even if a future emitter passes `dsn` to `emitAudit`, redaction kicks in.
+- **S3 (#116) ↔ S10 (#123)** — same payload (PEM material), two ends of the wire. Electron-side picker (S3) and server-side validator (S10) should both land before the v0.6 cutover.
+
+### PSR — accepted risk
+
+**S9 (#122)** is documented and intentional. No code-behaviour change; only a comment in `signOut` and a Settings UI affordance ("Forget Saved Password"). Future reviewers should not "fix" it without re-reading Plan E §8.
+
+### PSR — verdict
+
+The PSR cohort is **healthier than the prior F*/N* cohort** by raw count of release blockers (3 vs 5 from the prior cohort's first pass). The dominant pattern is **trust-boundary porosity at the IPC layer** (S3, S4, S8 all live under `electron/`) and **missing crypto/audit envelopes** at the persistence layer (S5, S6). Both clusters have well-scoped fixes via the C1/C2/C3 coordinated modules.
+
+**No production credentials are leaked; no active RCE path was identified.** S1 is the closest thing to a remote-pivot primitive but is gated on a renderer compromise.
+
+**Recommended sequencing for the v0.6 release window:**
+
+1. **Week 1:** Land S1 (#114), S2 (#115), S6 (#119) — release blockers, all small PRs.
+2. **Week 2:** Land C1 (S3 + S8 + S4-partial) and C2 (S5) — coordinated PRs, two reviewers each.
+3. **Week 3:** Land S4 (full) and S10 — straightforward; depend on C1/C2 review feedback.
+4. **Backlog:** S7, S9 — post-release hardening + docs.

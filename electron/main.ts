@@ -16,6 +16,7 @@ import {
   contentTypeFor,
   isAllowedExternal,
   resolveProtocolAsset,
+  safeOpenExternal,
 } from './lib/safety'
 import { AssetCache, defaultCacheOptions } from './lib/cache'
 import { createSecureStore, SecureStore } from './lib/secure-store'
@@ -293,18 +294,27 @@ async function createWindow(): Promise<void> {
   win.on('close', persist)
 
   // Force any external link to open in the user's default browser
-  // rather than a new electron window.
+  // rather than a new electron window. Pre-S1 the URL was passed
+  // straight to shell.openExternal; that bypassed the
+  // `isAllowedExternal` whitelist and let a renderer compromise (or a
+  // crafted anchor that survived CSP) ask the OS to launch
+  // `file://`, `javascript:`, or arbitrary custom-scheme URLs. Both
+  // hand-offs now funnel through `safeOpenExternal`, which mirrors
+  // the gate the IPC handler `geode:open-external` already enforced.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
+    safeOpenExternal(url, (u) => {
+      void shell.openExternal(u)
+    })
     return { action: 'deny' }
   })
 
   // Block in-process navigation to anything outside our protocol.
   win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(`${PROTOCOL_NAME}://`)) {
-      event.preventDefault()
-      void shell.openExternal(url)
-    }
+    if (url.startsWith(`${PROTOCOL_NAME}://`)) return
+    event.preventDefault()
+    safeOpenExternal(url, (u) => {
+      void shell.openExternal(u)
+    })
   })
 
   await win.loadURL(APP_URL)
