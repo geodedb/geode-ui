@@ -1,17 +1,26 @@
-import React, { useEffect, useState } from 'react'
+// ProfileEditorModal — create/edit form for connection profiles.
+//
+// GAP-Q05 (#95): the prior 470-LOC monolith carried a 13-field
+// FormState, four mirroring helpers, and three near-identical PEM
+// browse handlers. The form-state plumbing now lives in
+// `useProfileForm.ts`; the TLS textareas + Browse buttons live in
+// `TLSFieldset.tsx`. This file is a thin presentational wrapper
+// over a `Modal` and a flat list of `<Field>`s — the modal body
+// itself is now under 150 LOC of JSX.
+
+import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import { Button, Field, Input, Select, Textarea, Modal } from '../ui'
+import { Button, Field, Input, Select, Modal } from '../ui'
 import {
-  CreateProfileInput,
-  UpdateProfileInput,
   ProfileView,
   Scope,
   createProfile,
   updateProfile,
 } from '../../api/profiles'
-import { isElectron, pickPemFile } from '../../api/electron-bridge'
+import { useProfileForm } from './useProfileForm'
+import { TLSFieldset } from './TLSFieldset'
 
 const Section = styled.section`
   margin-top: ${({ theme }) => theme.spacing.md};
@@ -37,7 +46,6 @@ const ErrText = styled.p`
   color: ${({ theme }) => theme.text.danger};
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
-
 export interface Props {
   mode: 'create' | 'edit'
   open: boolean
@@ -45,151 +53,6 @@ export interface Props {
   onSaved: () => void
   isAdmin: boolean
   profile?: ProfileView
-}
-
-interface FormState {
-  scope: Scope
-  name: string
-  dsn: string
-  description: string
-  savedUsername: string
-  isDefault: boolean
-  caPem: string
-  clientCertPem: string
-  clientKeyPem: string
-  maxOpenConns: string
-  maxIdleConns: string
-  connMaxLifetimeMs: string
-  connMaxIdleMs: string
-}
-
-const empty: FormState = {
-  scope: 'personal',
-  name: '',
-  dsn: '',
-  description: '',
-  savedUsername: '',
-  isDefault: false,
-  caPem: '',
-  clientCertPem: '',
-  clientKeyPem: '',
-  maxOpenConns: '',
-  maxIdleConns: '',
-  connMaxLifetimeMs: '',
-  connMaxIdleMs: '',
-}
-
-function numOrUndef(v: string): number | undefined {
-  return v === '' ? undefined : Number(v)
-}
-
-function buildCreateInput(s: FormState): CreateProfileInput {
-  let tls: CreateProfileInput['tls']
-  if (s.caPem || s.clientCertPem || s.clientKeyPem) {
-    tls = {
-      caPem: s.caPem || undefined,
-      clientCertPem: s.clientCertPem || undefined,
-      clientKeyPem: s.clientKeyPem || undefined,
-    }
-  }
-  let poolOverrides: CreateProfileInput['poolOverrides']
-  if (
-    s.maxOpenConns ||
-    s.maxIdleConns ||
-    s.connMaxLifetimeMs ||
-    s.connMaxIdleMs
-  ) {
-    poolOverrides = {
-      maxOpenConns: numOrUndef(s.maxOpenConns),
-      maxIdleConns: numOrUndef(s.maxIdleConns),
-      connMaxLifetimeMs: numOrUndef(s.connMaxLifetimeMs),
-      connMaxIdleMs: numOrUndef(s.connMaxIdleMs),
-    }
-  }
-  return {
-    scope: s.scope,
-    name: s.name,
-    dsn: s.dsn,
-    description: s.description || undefined,
-    savedUsername: s.savedUsername || undefined,
-    isDefault: s.isDefault,
-    tls,
-    poolOverrides,
-  }
-}
-
-function buildUpdateInput(
-  s: FormState,
-  original: ProfileView
-): UpdateProfileInput {
-  const out: UpdateProfileInput = {}
-  if (s.name !== original.name) {
-    out.name = s.name
-  }
-  if (s.dsn !== (original.dsn ?? '')) {
-    out.dsn = s.dsn
-  }
-  if (s.description !== (original.description ?? '')) {
-    out.description = s.description
-  }
-  if (s.savedUsername !== (original.savedUsername ?? '')) {
-    out.savedUsername = s.savedUsername
-  }
-  // is_default: only emit the key when the user actually toggled it.
-  // The server's UpdateProfileReq now uses *bool (PSR-G02-followup
-  // #124), so an absent key preserves the persisted Default value and
-  // an explicit `false` clears it. Always echoing was a workaround
-  // for the pre-pointer schema and would now silently overwrite the
-  // persisted state on every unrelated PATCH.
-  if (s.isDefault !== original.isDefault) {
-    out.isDefault = s.isDefault
-  }
-
-  const tlsChanged =
-    s.caPem !== (original.tls?.caPem ?? '') ||
-    s.clientCertPem !== (original.tls?.clientCertPem ?? '') ||
-    s.clientKeyPem !== (original.tls?.clientKeyPem ?? '')
-  if (tlsChanged) {
-    out.tls = {
-      caPem: s.caPem || undefined,
-      clientCertPem: s.clientCertPem || undefined,
-      clientKeyPem: s.clientKeyPem || undefined,
-    }
-  }
-
-  const poChanged =
-    s.maxOpenConns !== String(original.poolOverrides?.maxOpenConns ?? '') ||
-    s.maxIdleConns !== String(original.poolOverrides?.maxIdleConns ?? '') ||
-    s.connMaxLifetimeMs !==
-      String(original.poolOverrides?.connMaxLifetimeMs ?? '') ||
-    s.connMaxIdleMs !== String(original.poolOverrides?.connMaxIdleMs ?? '')
-  if (poChanged) {
-    out.poolOverrides = {
-      maxOpenConns: numOrUndef(s.maxOpenConns),
-      maxIdleConns: numOrUndef(s.maxIdleConns),
-      connMaxLifetimeMs: numOrUndef(s.connMaxLifetimeMs),
-      connMaxIdleMs: numOrUndef(s.connMaxIdleMs),
-    }
-  }
-  return out
-}
-
-function fromProfile(p: ProfileView): FormState {
-  return {
-    scope: p.scope,
-    name: p.name,
-    dsn: p.dsn ?? '',
-    description: p.description ?? '',
-    savedUsername: p.savedUsername ?? '',
-    isDefault: p.isDefault,
-    caPem: p.tls?.caPem ?? '',
-    clientCertPem: p.tls?.clientCertPem ?? '',
-    clientKeyPem: p.tls?.clientKeyPem ?? '',
-    maxOpenConns: p.poolOverrides?.maxOpenConns?.toString() ?? '',
-    maxIdleConns: p.poolOverrides?.maxIdleConns?.toString() ?? '',
-    connMaxLifetimeMs: p.poolOverrides?.connMaxLifetimeMs?.toString() ?? '',
-    connMaxIdleMs: p.poolOverrides?.connMaxIdleMs?.toString() ?? '',
-  }
 }
 
 export const ProfileEditorModal: React.FC<Props> = ({
@@ -201,47 +64,29 @@ export const ProfileEditorModal: React.FC<Props> = ({
   profile,
 }) => {
   const { t } = useTranslation()
-  const [s, setS] = useState<FormState>(empty)
+  // useProfileForm hydrates from `profile` on edit-mode and re-syncs
+  // whenever the prop reference changes (the parent may swap which
+  // row is being edited without unmounting). Pass `undefined` for
+  // create-mode so the form starts empty and `reset()` returns to
+  // empty after a successful submit.
+  const form = useProfileForm(mode === 'edit' ? profile : undefined)
+  const { state: s, setField, buildCreateInput, buildUpdateInput, reset } = form
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // Populate the form from the supplied profile on edit-mode mount or
-  // when the profile prop changes (parent may swap which row is being
-  // edited without unmounting the modal).
-  useEffect(() => {
-    if (mode === 'edit' && profile) {
-      setS(fromProfile(profile))
-    } else if (mode === 'create') {
-      setS(empty)
-    }
-  }, [mode, profile])
-
-  const browseCAPem = async (): Promise<void> => {
-    const text = await pickPemFile()
-    if (text !== null) setS({ ...s, caPem: text })
-  }
-  const browseClientCertPem = async (): Promise<void> => {
-    const text = await pickPemFile()
-    if (text !== null) setS({ ...s, clientCertPem: text })
-  }
-  const browseClientKeyPem = async (): Promise<void> => {
-    const text = await pickPemFile()
-    if (text !== null) setS({ ...s, clientKeyPem: text })
-  }
-
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
       if (mode === 'create') {
-        await createProfile(buildCreateInput(s))
+        await createProfile(buildCreateInput())
       } else if (profile) {
-        await updateProfile(profile.id, buildUpdateInput(s, profile))
+        await updateProfile(profile.id, buildUpdateInput(profile))
       }
       onSaved()
       onClose()
-      if (mode === 'create') setS(empty)
+      if (mode === 'create') reset()
     } catch (e2: unknown) {
       setErr(
         e2 instanceof Error ? e2.message : t('profiles.editor.error.failed')
@@ -264,7 +109,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
             id="profile-scope"
             value={s.scope}
             disabled={mode === 'edit'}
-            onChange={(e) => setS({ ...s, scope: e.target.value as Scope })}
+            onChange={(e) => setField('scope', e.target.value as Scope)}
           >
             <option value="personal">{t('profiles.scope.personal')}</option>
             {isAdmin ? (
@@ -280,7 +125,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
           <Input
             id="profile-name"
             value={s.name}
-            onChange={(e) => setS({ ...s, name: e.target.value })}
+            onChange={(e) => setField('name', e.target.value)}
             required
             maxLength={64}
           />
@@ -293,7 +138,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
           <Input
             id="profile-dsn"
             value={s.dsn}
-            onChange={(e) => setS({ ...s, dsn: e.target.value })}
+            onChange={(e) => setField('dsn', e.target.value)}
             required
             maxLength={1024}
           />
@@ -305,7 +150,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
           <Input
             id="profile-description"
             value={s.description}
-            onChange={(e) => setS({ ...s, description: e.target.value })}
+            onChange={(e) => setField('description', e.target.value)}
             maxLength={256}
           />
         </Field>
@@ -316,7 +161,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
           <Input
             id="profile-savedUsername"
             value={s.savedUsername}
-            onChange={(e) => setS({ ...s, savedUsername: e.target.value })}
+            onChange={(e) => setField('savedUsername', e.target.value)}
             maxLength={128}
           />
         </Field>
@@ -328,79 +173,11 @@ export const ProfileEditorModal: React.FC<Props> = ({
             id="profile-isDefault"
             type="checkbox"
             checked={s.isDefault}
-            onChange={(e) => setS({ ...s, isDefault: e.target.checked })}
+            onChange={(e) => setField('isDefault', e.target.checked)}
           />
         </Field>
 
-        <Section>
-          <SectionTitle>{t('profiles.editor.section.tls')}</SectionTitle>
-          <Field
-            label={t('profiles.editor.field.caPem')}
-            htmlFor="profile-caPem"
-          >
-            {isElectron() ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  browseCAPem().catch(() => undefined)
-                }}
-              >
-                {t('electron.browse')}
-              </Button>
-            ) : null}
-            <Textarea
-              id="profile-caPem"
-              value={s.caPem}
-              onChange={(e) => setS({ ...s, caPem: e.target.value })}
-            />
-          </Field>
-          <Field
-            label={t('profiles.editor.field.clientCertPem')}
-            htmlFor="profile-clientCertPem"
-          >
-            {isElectron() ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  browseClientCertPem().catch(() => undefined)
-                }}
-              >
-                {t('electron.browse')}
-              </Button>
-            ) : null}
-            <Textarea
-              id="profile-clientCertPem"
-              value={s.clientCertPem}
-              onChange={(e) => setS({ ...s, clientCertPem: e.target.value })}
-            />
-          </Field>
-          <Field
-            label={t('profiles.editor.field.clientKeyPem')}
-            htmlFor="profile-clientKeyPem"
-          >
-            {isElectron() ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  browseClientKeyPem().catch(() => undefined)
-                }}
-              >
-                {t('electron.browse')}
-              </Button>
-            ) : null}
-            <Textarea
-              id="profile-clientKeyPem"
-              value={s.clientKeyPem}
-              onChange={(e) => setS({ ...s, clientKeyPem: e.target.value })}
-            />
-          </Field>
-        </Section>
+        <TLSFieldset state={s} setField={setField} />
 
         <Section>
           <SectionTitle>{t('profiles.editor.section.pool')}</SectionTitle>
@@ -413,7 +190,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
                 id="profile-maxOpenConns"
                 type="number"
                 value={s.maxOpenConns}
-                onChange={(e) => setS({ ...s, maxOpenConns: e.target.value })}
+                onChange={(e) => setField('maxOpenConns', e.target.value)}
                 min={0}
               />
             </Field>
@@ -425,7 +202,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
                 id="profile-maxIdleConns"
                 type="number"
                 value={s.maxIdleConns}
-                onChange={(e) => setS({ ...s, maxIdleConns: e.target.value })}
+                onChange={(e) => setField('maxIdleConns', e.target.value)}
                 min={0}
               />
             </Field>
@@ -437,9 +214,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
                 id="profile-connMaxLifetimeMs"
                 type="number"
                 value={s.connMaxLifetimeMs}
-                onChange={(e) => {
-                  setS((p) => ({ ...p, connMaxLifetimeMs: e.target.value }))
-                }}
+                onChange={(e) => setField('connMaxLifetimeMs', e.target.value)}
                 min={0}
               />
             </Field>
@@ -451,7 +226,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
                 id="profile-connMaxIdleMs"
                 type="number"
                 value={s.connMaxIdleMs}
-                onChange={(e) => setS({ ...s, connMaxIdleMs: e.target.value })}
+                onChange={(e) => setField('connMaxIdleMs', e.target.value)}
                 min={0}
               />
             </Field>
