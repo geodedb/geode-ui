@@ -92,12 +92,19 @@ export const sel = {
     p.getByTestId('profiles-set-default-error'),
 
   // Profile editor modal (ProfileEditorModal.tsx)
-  // Field labels resolve to profiles.editor.field.{name,dsn,description,...}
-  profileEditorNameInput: (p: Page): Locator =>
-    p.getByLabel('Name', { exact: true }),
-  profileEditorDsnInput: (p: Page): Locator =>
-    p.getByLabel('DSN', { exact: true }),
-  profileEditorScopeSelect: (p: Page): Locator => p.getByLabel('Scope'),
+  // Field labels resolve to profiles.editor.field.{name,dsn,description,...}.
+  // Required-field labels render the i18n string + an aria-hidden "*"
+  // with NO whitespace, so the visible label text is "Name*" / "DSN*"
+  // rather than "Name" / "DSN". getByLabel('Name', { exact: true })
+  // returns 0 matches against that markup, so the required inputs are
+  // located by their stable component-assigned ids instead. The
+  // optional Description field (no asterisk) stays on getByLabel.
+  profileEditorNameInput: (p: Page): Locator => p.locator('#profile-name'),
+  profileEditorDsnInput: (p: Page): Locator => p.locator('#profile-dsn'),
+  // exact: true is required because the modal also renders "Default
+  // for this scope" as a checkbox label, which substring-matches "Scope".
+  profileEditorScopeSelect: (p: Page): Locator =>
+    p.getByLabel('Scope', { exact: true }),
   profileEditorCaPem: (p: Page): Locator =>
     p.getByLabel('CA PEM', { exact: true }),
   // Editor submit button text resolves to i18n key

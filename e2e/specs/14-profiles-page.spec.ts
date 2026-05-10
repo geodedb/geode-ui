@@ -11,9 +11,7 @@
 
 import { test, expect } from '../fixtures'
 import { sel } from '../helpers/selectors'
-// NOTE: Tasks 4–8 will append tests that import createProfileViaApi,
-// deleteProfileViaApi, and makeProfileName from '../helpers/profiles'.
-// Imports are omitted here to keep eslint happy until those tests land.
+import { deleteProfileViaApi, makeProfileName } from '../helpers/profiles'
 
 test.describe('profiles page', () => {
   test('renders the table heading and Create button', async ({
@@ -24,5 +22,38 @@ test.describe('profiles page', () => {
       page.getByRole('heading', { name: 'Profiles', exact: true })
     ).toBeVisible()
     await expect(sel.profilesCreateBtn(page)).toBeVisible()
+  })
+
+  test('create profile via UI persists and appears in the table', async ({
+    authedPage: page,
+    authToken,
+    request,
+  }) => {
+    const name = makeProfileName('create-ui')
+    await page.goto('/profiles')
+    await sel.profilesCreateBtn(page).click()
+
+    await sel.profileEditorNameInput(page).fill(name)
+    await sel.profileEditorDsnInput(page).fill('bolt://localhost:7687')
+    // Personal scope avoids needing the (admin-only) system-scope
+    // permission, but the bootstrap admin can write either; using
+    // personal keeps the test stable when the suite runs against a
+    // non-admin actor in the future.
+    await sel.profileEditorScopeSelect(page).selectOption('personal')
+
+    await sel.profileEditorSaveBtn(page).click()
+
+    // The modal closes on success; the new row appears after refresh().
+    await expect(sel.profilesNameCell(page, name)).toBeVisible({
+      timeout: 5000,
+    })
+
+    // Cleanup: look up the id via the listProfiles API and DELETE.
+    const list = await request.get('/api/v1/profiles', {
+      headers: { authorization: `Bearer ${authToken}` },
+    })
+    const json = (await list.json()) as { profiles: { id: string; name: string }[] }
+    const created = json.profiles.find((p) => p.name === name)
+    if (created) await deleteProfileViaApi(request, authToken, created.id)
   })
 })
