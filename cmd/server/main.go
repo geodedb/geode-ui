@@ -234,6 +234,16 @@ func main() {
 	// follow-up issue is filed.
 	loginLimiter := server.NewLoginLimiter(server.LoginLimiterDefaults())
 	limited := server.WrapLoginLimit(loginLimiter, mux)
+	// Per-actor (JWT subject) profile-CRUD limiter (GAP-S7 #120).
+	// Wraps the post-login chain so authenticated POST/PATCH/DELETE on
+	// /api/v1/profiles routes share a 30-req/min ceiling per JWT
+	// subject. Unauthenticated callers fall back to a per-IP bucket
+	// (the genapi middleware will 401 them anyway, but the IP bucket
+	// stops a flood of malformed POSTs from being free).
+	profileLimiterCfg := server.ProfileLimiterDefaults()
+	profileLimiterCfg.JWT = issuer
+	profileLimiter := server.NewProfileLimiter(profileLimiterCfg)
+	limited = server.WrapProfileLimit(profileLimiter, limited)
 	// SEC-F7 (#62 S3b): CSRF double-submit middleware. Inspects the
 	// raw request's auth cookie to decide whether to enforce — runs
 	// upstream of AuthJWT but the path-exempt + method-safe guards
