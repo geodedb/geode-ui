@@ -72,7 +72,10 @@ export const sel = {
   profilesCreateBtn: (p: Page): Locator =>
     p.getByRole('button', { name: 'Create profile', exact: true }),
   profilesNameCell: (p: Page, name: string): Locator =>
-    p.getByRole('cell', { name }).first(),
+    p
+      .getByRole('row', { name: new RegExp(name) })
+      .getByRole('cell', { name, exact: true })
+      .first(),
   profilesEditBtn: (p: Page, rowName: string): Locator =>
     p
       .getByRole('row', { name: new RegExp(rowName) })
@@ -101,13 +104,13 @@ export const sel = {
   // `profiles.editor.actions.save` ("Save") in BOTH create and edit
   // modes — confirmed against src/services/i18n/locales/en.ts:344-347.
   profileEditorSaveBtn: (p: Page): Locator =>
-    p.getByRole('button', { name: 'Save', exact: true }),
+    p.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }),
   profileEditorCancelBtn: (p: Page): Locator =>
-    p.getByRole('button', { name: 'Cancel', exact: true }),
+    p.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }),
 
   // Delete confirmation modal (DeleteProfileModal.tsx)
   profileDeleteConfirmBtn: (p: Page): Locator =>
-    p.getByRole('button', { name: 'Delete', exact: true }).last(),
+    p.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }),
   profileDeleteError: (p: Page): Locator =>
     p.getByTestId('delete-profile-error'),
 
