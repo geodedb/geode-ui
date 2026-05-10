@@ -91,4 +91,34 @@ test.describe('profiles page', () => {
       await deleteProfileViaApi(request, authToken, seeded.id)
     }
   })
+
+  test('delete profile via UI removes the row', async ({
+    authedPage: page,
+    authToken,
+    request,
+  }) => {
+    const name = makeProfileName('delete-ui')
+    const seeded = await createProfileViaApi(request, authToken, { name })
+
+    let stillExists = false
+    try {
+      await page.goto('/profiles')
+      await expect(sel.profilesNameCell(page, name)).toBeVisible()
+
+      await sel.profilesDeleteBtn(page, name).click()
+      // The DeleteProfileModal renders a second "Delete" button as
+      // confirmation; the locator is dialog-scoped.
+      await sel.profileDeleteConfirmBtn(page).click()
+
+      // Row disappears after refresh().
+      await expect(sel.profilesNameCell(page, name)).toHaveCount(0, {
+        timeout: 5000,
+      })
+      stillExists = true
+    } finally {
+      // Belt-and-suspenders cleanup: if the UI didn't actually delete
+      // (test failed), kill the row by id.
+      if (!stillExists) await deleteProfileViaApi(request, authToken, seeded.id)
+    }
+  })
 })
