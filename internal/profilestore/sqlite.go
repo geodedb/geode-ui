@@ -175,6 +175,60 @@ func (s *sqliteStore) List(ctx context.Context, f Filter) ([]conn.Profile, error
 	return out, rows.Err()
 }
 
+// ListVisible returns the union of all system profiles and the
+// personal profiles owned by ownerUserID in a single SQL query.
+//
+// PSR-F4 (#101): the prior GET /profiles handler called Store.List
+// twice (once for system, once for personal+owner) and concatenated
+// the results in Go. Two sequential round-trips through the
+// SetMaxOpenConns(1) pipeline meant the second always waited for the
+// first to finish. Collapsing them into one query halves the round-
+// trip count for the most common GET /profiles request.
+//
+// SQL semantics: `scope='system' OR (scope='personal' AND owner_user_id=?)`.
+// When ownerUserID is empty, only system profiles match (the
+// owner_user_id=” branch picks up no personal rows because personal
+// profiles always carry a non-empty owner — that invariant is
+// enforced upstream by handlers_profiles_crud.PostProfiles).
+//
+// Ordering matches List for shape compatibility with callers that
+// previously concatenated sys+personal: scope ASC ('personal' <
+// 'system' lexically), then name ASC. The `personal` rows therefore
+// sort before the `system` rows; this differs from the old `sys then
+// personal` Go-side concat order, but no caller depends on the
+// scope-grouping order — the API contract is "an unordered set of
+// visible profiles" and the renderer sorts client-side.
+func (s *sqliteStore) ListVisible(ctx context.Context, ownerUserID string) ([]conn.Profile, error) {
+	const q = `
+		SELECT id, scope, owner_user_id, name, dsn, description,
+		       saved_username, is_default, tls_ca_pem, tls_cert_pem,
+		       tls_key_pem, max_open_conns, max_idle_conns,
+		       conn_max_lifetime_ns, conn_max_idle_ns
+		FROM profiles
+		WHERE scope = ?
+		   OR (scope = ? AND owner_user_id = ?)
+		ORDER BY scope ASC, name ASC`
+	rows, err := s.db.QueryContext(ctx, q,
+		string(conn.ProfileScopeSystem),
+		string(conn.ProfileScopePersonal),
+		ownerUserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("profilestore: list_visible: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := []conn.Profile{}
+	for rows.Next() {
+		p, err := s.scanProfile(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("profilestore: list_visible scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // scanFn matches *sql.Row.Scan and *sql.Rows.Scan so scanProfile is
 // reusable from both Get and List. scanProfile does not wrap the scan
 // error so callers can distinguish sql.ErrNoRows.

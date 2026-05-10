@@ -11,6 +11,12 @@ import (
 	"geodedb.com/geode-ui/internal/profilestore"
 )
 
+// PSR-F4 / #101: GetProfiles previously issued two sequential
+// Store.List calls (system, then personal+owner) and concatenated the
+// results in Go. Under SetMaxOpenConns(1) the second always blocked
+// behind the first. The handler now issues a single
+// Store.ListVisible call that expresses the union in one SQL query.
+
 // GetProfiles implements GET /api/v1/profiles. Behaviour:
 //
 //   - When Config.Store is set, returns the union of system profiles
@@ -27,18 +33,18 @@ func (s *GraphServer) GetProfiles(_ http.ResponseWriter, r *http.Request, _ *gen
 		actr := actorFromContext(ctx)
 		isAdmin := hasRole(actr.Roles, "admin")
 
-		sys, err := s.cfg.Store.List(ctx, profilestore.Filter{Scope: conn.ProfileScopeSystem})
+		// Single visibility-scoped query: the store walks the
+		// `scope='system' OR (scope='personal' AND owner_user_id=?)`
+		// predicate once (PSR-F4). For non-admins this is the exact
+		// row set the response includes; admins still see only their
+		// own personal profiles via this path because the response
+		// contract is "your visible profiles", not "all profiles" —
+		// admin reach across other personal scopes is gated by the
+		// per-id GET handler with audit logging.
+		all, err := s.cfg.Store.ListVisible(ctx, actr.Subject)
 		if err != nil {
 			return nil, err
 		}
-		personal, err := s.cfg.Store.List(ctx, profilestore.Filter{
-			Scope:       conn.ProfileScopePersonal,
-			OwnerUserID: actr.Subject,
-		})
-		if err != nil {
-			return nil, err
-		}
-		all := append(sys, personal...)
 		out := make([]gentypes.Profile, 0, len(all))
 		for _, p := range all {
 			reveal := isAdmin || p.OwnerUserID == actr.Subject

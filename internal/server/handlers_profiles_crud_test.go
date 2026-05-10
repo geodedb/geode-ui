@@ -1061,6 +1061,9 @@ func (s *patchErrStore) Get(_ context.Context, _ string) (conn.Profile, error) {
 func (s *patchErrStore) List(_ context.Context, _ profilestore.Filter) ([]conn.Profile, error) {
 	return nil, nil
 }
+func (s *patchErrStore) ListVisible(_ context.Context, _ string) ([]conn.Profile, error) {
+	return nil, nil
+}
 func (s *patchErrStore) Put(_ context.Context, p conn.Profile) (conn.Profile, error) {
 	return p, nil
 }

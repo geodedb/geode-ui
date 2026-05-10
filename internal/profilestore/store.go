@@ -43,6 +43,21 @@ type ProfilePatch struct {
 type Store interface {
 	Get(ctx context.Context, id string) (conn.Profile, error)
 	List(ctx context.Context, f Filter) ([]conn.Profile, error)
+	// ListVisible returns the union of system profiles and the
+	// personal profiles owned by ownerUserID, computed in a single
+	// SQL round-trip. This is the GET /profiles fast path
+	// (PSR-F4 / #101): the previous implementation issued two
+	// sequential List queries (one filtered to scope=system, one
+	// filtered to scope=personal+owner) and concatenated the results
+	// in Go. ListVisible collapses both into a single query whose
+	// WHERE clause expresses `scope='system' OR (scope='personal'
+	// AND owner_user_id=?)`. Ordering matches List
+	// (scope ASC, name ASC) so callers see a stable shape.
+	//
+	// An empty ownerUserID is honoured (only system profiles are
+	// returned) so the legacy "no authenticated subject" path stays
+	// well-defined.
+	ListVisible(ctx context.Context, ownerUserID string) ([]conn.Profile, error)
 	// Put creates a new profile. p.ID may be empty; Put assigns a
 	// random ID. Returns the persisted profile (with ID populated).
 	Put(ctx context.Context, p conn.Profile) (conn.Profile, error)

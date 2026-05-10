@@ -103,6 +103,9 @@ func (s *listErrStore) Get(_ context.Context, _ string) (conn.Profile, error) {
 func (s *listErrStore) List(_ context.Context, _ profilestore.Filter) ([]conn.Profile, error) {
 	return nil, s.err
 }
+func (s *listErrStore) ListVisible(_ context.Context, _ string) ([]conn.Profile, error) {
+	return nil, s.err
+}
 func (s *listErrStore) Put(_ context.Context, p conn.Profile) (conn.Profile, error) {
 	return p, nil
 }

@@ -766,6 +766,145 @@ func firstByte(b []byte) byte {
 // import of os as unused in case future tests drop the only os caller.
 var _ = os.PathSeparator
 
+// TestSQLiteListVisible_UnionScopeAndOwner pins PSR-F4 (#101): a
+// single ListVisible call must return ALL system profiles plus ONLY
+// the personal profiles owned by the supplied subject. The two
+// previously-separate Store.List calls in handlers_profiles.go are
+// now collapsed into this one query; this test asserts the row set
+// is unchanged.
+func TestSQLiteListVisible_UnionScopeAndOwner(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	ctx := context.Background()
+
+	// Two system profiles + alice's personal + bob's personal.
+	mustPut := func(p conn.Profile) conn.Profile {
+		t.Helper()
+		got, err := st.Put(ctx, p)
+		if err != nil {
+			t.Fatalf("Put %s: %v", p.Name, err)
+		}
+		return got
+	}
+	mustPut(conn.Profile{Scope: conn.ProfileScopeSystem, Name: "sys-a", DSN: "stub://x"})
+	mustPut(conn.Profile{Scope: conn.ProfileScopeSystem, Name: "sys-b", DSN: "stub://x"})
+	mustPut(conn.Profile{Scope: conn.ProfileScopePersonal, OwnerUserID: "alice", Name: "alice-p1", DSN: "stub://x"})
+	mustPut(conn.Profile{Scope: conn.ProfileScopePersonal, OwnerUserID: "alice", Name: "alice-p2", DSN: "stub://x"})
+	mustPut(conn.Profile{Scope: conn.ProfileScopePersonal, OwnerUserID: "bob", Name: "bob-p1", DSN: "stub://x"})
+
+	got, err := st.ListVisible(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ListVisible(alice): %v", err)
+	}
+	// 2 system + 2 alice = 4 rows. NO bob.
+	if len(got) != 4 {
+		t.Fatalf("ListVisible(alice) row count = %d, want 4 (got %+v)", len(got), namesOf(got))
+	}
+	want := map[string]bool{"sys-a": true, "sys-b": true, "alice-p1": true, "alice-p2": true}
+	for _, p := range got {
+		if !want[p.Name] {
+			t.Errorf("ListVisible(alice) returned unexpected row %q (scope=%s owner=%s)",
+				p.Name, p.Scope, p.OwnerUserID)
+		}
+		if p.Scope == conn.ProfileScopePersonal && p.OwnerUserID != "alice" {
+			t.Errorf("ListVisible(alice) leaked %s's personal profile: %q", p.OwnerUserID, p.Name)
+		}
+	}
+
+	// And bob's view excludes alice.
+	got, err = st.ListVisible(ctx, "bob")
+	if err != nil {
+		t.Fatalf("ListVisible(bob): %v", err)
+	}
+	if len(got) != 3 { // 2 system + 1 bob
+		t.Fatalf("ListVisible(bob) row count = %d, want 3 (got %+v)", len(got), namesOf(got))
+	}
+}
+
+// TestSQLiteListVisible_EmptyOwnerReturnsSystemOnly exercises the
+// "no authenticated subject" edge case: an empty owner string must
+// surface only system profiles. A personal profile is invariantly
+// owned by a non-empty subject (enforced by the create handlers), so
+// `owner_user_id = ”` matches no personal row.
+func TestSQLiteListVisible_EmptyOwnerReturnsSystemOnly(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	ctx := context.Background()
+	if _, err := st.Put(ctx, conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "sys-only", DSN: "stub://x",
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if _, err := st.Put(ctx, conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice", Name: "p1", DSN: "stub://x",
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+
+	got, err := st.ListVisible(ctx, "")
+	if err != nil {
+		t.Fatalf("ListVisible(\"\"): %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "sys-only" {
+		t.Errorf("ListVisible(\"\") = %+v, want only sys-only", namesOf(got))
+	}
+}
+
+// TestSQLiteListVisible_OrderingMatchesList pins the documented order
+// (scope ASC, name ASC) so callers that previously relied on the
+// concatenated [sys..., personal...] shape see a predictable layout.
+func TestSQLiteListVisible_OrderingMatchesList(t *testing.T) {
+	st, _ := OpenSQLite(":memory:")
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	for _, n := range []string{"sys-z", "sys-a"} {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopeSystem, Name: n, DSN: "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %s: %v", n, err)
+		}
+	}
+	for _, n := range []string{"per-z", "per-a"} {
+		if _, err := st.Put(ctx, conn.Profile{
+			Scope: conn.ProfileScopePersonal, OwnerUserID: "alice", Name: n, DSN: "stub://x",
+		}); err != nil {
+			t.Fatalf("Put %s: %v", n, err)
+		}
+	}
+	got, err := st.ListVisible(ctx, "alice")
+	if err != nil {
+		t.Fatalf("ListVisible: %v", err)
+	}
+	want := []string{"per-a", "per-z", "sys-a", "sys-z"}
+	gotNames := namesOf(got)
+	if len(gotNames) != len(want) {
+		t.Fatalf("ListVisible len=%d want %d (%v)", len(gotNames), len(want), gotNames)
+	}
+	for i, n := range want {
+		if gotNames[i] != n {
+			t.Errorf("ListVisible[%d] = %q, want %q (full: %v)", i, gotNames[i], n, gotNames)
+		}
+	}
+}
+
+// namesOf is a tiny test helper: extracts profile names for readable
+// failure messages.
+func namesOf(ps []conn.Profile) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.Name
+	}
+	return out
+}
+
 // TestMergeProfile_OnlyAppliesNonNilFields exercises the merge
 // directly: every nil pointer leaves cur untouched, every non-nil
 // pointer overwrites verbatim (including zero values).
