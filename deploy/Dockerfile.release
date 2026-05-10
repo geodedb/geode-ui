@@ -34,6 +34,11 @@ COPY geode-ui /usr/local/bin/geode-ui
 
 USER geode
 WORKDIR /var/lib/geode-ui
+# GAP-S5 (#118): GEODE_PROFILESTORE_KEY (base64 of 32 bytes) is required
+# at runtime for at-rest encryption of the SQLite profile store. The
+# release image does NOT bake one in — operators MUST supply it via
+# their orchestrator (k8s Secret, Docker Swarm secret, etc.). Generate
+# with: `openssl rand -base64 32`.
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/geode-ui"]
 CMD ["-listen", ":8080"]

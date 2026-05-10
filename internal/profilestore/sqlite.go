@@ -24,8 +24,20 @@ import (
 // UPDATE in a single sql.Tx so the read snapshot is bound to the same
 // commit as the write; the mutex is dropped because SetMaxOpenConns(1)
 // already provides single-flight serialization at the driver layer.
+//
+// GAP-S5 (#118): when cipher is non-nil the four sensitive columns
+// (dsn, tls_ca_pem, tls_cert_pem, tls_key_pem) are AES-256-GCM-sealed
+// before INSERT/UPDATE and unsealed transparently on read. Other
+// columns (name, description, owner_user_id, scope, saved_username,
+// timestamps, integers) are NOT encrypted: they have low individual
+// sensitivity and need to remain queryable for the UNIQUE
+// (scope, owner_user_id, name) constraint and the scope/owner filters
+// on List. Legacy plaintext rows from before the encryption rollout
+// are detected via IsCiphertext on the read path and surfaced
+// transparently; the next Patch through the row will re-encrypt.
 type sqliteStore struct {
-	db *sql.DB
+	db     *sql.DB
+	cipher *Cipher
 }
 
 // OpenSQLite opens (or creates) a SQLite database at dsn and applies
@@ -34,7 +46,40 @@ type sqliteStore struct {
 // constrained to a single open connection: modernc serialises writes,
 // and one connection avoids "database is locked" races on the embedded
 // use case.
+//
+// SECURITY (GAP-S5): OpenSQLite leaves the column-level cipher field
+// nil — DSN and TLS PEM material are written and read AS PLAINTEXT.
+// Production callers MUST use OpenSQLiteEncrypted instead. The
+// plain-OpenSQLite constructor is preserved only because every existing
+// in-package test relies on it; downstream binaries should treat it as
+// a legacy shim and migrate.
 func OpenSQLite(dsn string) (Store, error) {
+	return openSQLiteWithCipher(dsn, nil)
+}
+
+// OpenSQLiteEncrypted is the production constructor: it wires a
+// non-nil Cipher into the store, so writes seal the four sensitive
+// columns (dsn, tls_ca_pem, tls_cert_pem, tls_key_pem) before they
+// reach the SQLite file and reads unseal them transparently. The
+// cipher MUST be the same one across process restarts that share the
+// same on-disk file — losing the key permanently locks the
+// previously-written rows out of decryption.
+//
+// Legacy plaintext rows (those written by OpenSQLite or by an older
+// build before encryption was wired in) are still readable: the read
+// path uses IsCiphertext to distinguish v1-sealed bytes from raw
+// plaintext, and PEM/DSN never collides with the v1 sentinel byte. The
+// next Patch through a legacy row re-encrypts it; full back-fill is
+// out of scope for this change (and unnecessary for the security
+// argument so long as new writes are encrypted).
+func OpenSQLiteEncrypted(dsn string, cipher *Cipher) (Store, error) {
+	if cipher == nil {
+		return nil, fmt.Errorf("profilestore: OpenSQLiteEncrypted: cipher is required")
+	}
+	return openSQLiteWithCipher(dsn, cipher)
+}
+
+func openSQLiteWithCipher(dsn string, cipher *Cipher) (Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("profilestore: open: %w", err)
@@ -49,7 +94,49 @@ func OpenSQLite(dsn string) (Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("profilestore: schema: %w", err)
 	}
-	return &sqliteStore{db: db}, nil
+	return &sqliteStore{db: db, cipher: cipher}, nil
+}
+
+// sealString runs s through the column-level cipher and returns the
+// resulting bytes. The bytes are stored in a TEXT SQLite column; that
+// works because modernc.org/sqlite passes byte slices through TEXT
+// columns as BLOBs without coercion, and SQLite itself treats the row
+// as opaque bytes regardless of declared type. Reading back via Get
+// /List uses unsealString to reverse the transform.
+//
+// When cipher is nil, sealString returns s unchanged so the
+// non-encrypted fast-path through Put/Patch stays a single code path.
+func (s *sqliteStore) sealString(plain string) (any, error) {
+	if s.cipher == nil {
+		return plain, nil
+	}
+	ct, err := s.cipher.Encrypt([]byte(plain))
+	if err != nil {
+		return nil, fmt.Errorf("profilestore: seal: %w", err)
+	}
+	return ct, nil
+}
+
+// unsealBytes is the read-side inverse of sealString. It accepts the
+// value SQLite scanned into a []byte (the "any plaintext or any v1
+// ciphertext" union) and returns the underlying plaintext string.
+//
+// Legacy migration path (GAP-S5): rows written by an older build
+// before the encryption rollout still hold raw plaintext in the four
+// sensitive columns. The leading byte of any v1 ciphertext is the
+// sentinel 0x01, which never appears as the first byte of a legitimate
+// PEM block (always '-' = 0x2D) or DSN scheme letter. We dispatch on
+// IsCiphertext: if the bytes are sealed, decrypt; otherwise pass
+// through unchanged. The next Patch through this row re-encrypts.
+func (s *sqliteStore) unsealBytes(raw []byte) (string, error) {
+	if s.cipher == nil || !IsCiphertext(raw) {
+		return string(raw), nil
+	}
+	plain, err := s.cipher.Decrypt(raw)
+	if err != nil {
+		return "", fmt.Errorf("profilestore: unseal: %w", err)
+	}
+	return string(plain), nil
 }
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
@@ -79,7 +166,7 @@ func (s *sqliteStore) List(ctx context.Context, f Filter) ([]conn.Profile, error
 
 	out := []conn.Profile{}
 	for rows.Next() {
-		p, err := scanProfile(rows.Scan)
+		p, err := s.scanProfile(rows.Scan)
 		if err != nil {
 			return nil, fmt.Errorf("profilestore: scan: %w", err)
 		}
@@ -93,16 +180,28 @@ func (s *sqliteStore) List(ctx context.Context, f Filter) ([]conn.Profile, error
 // error so callers can distinguish sql.ErrNoRows.
 type scanFn = func(dest ...any) error
 
-func scanProfile(scan scanFn) (conn.Profile, error) {
+// scanProfile materialises one row into a conn.Profile. The four
+// sensitive columns (dsn, tls_ca_pem, tls_cert_pem, tls_key_pem) are
+// scanned into []byte so the unseal path can dispatch on the v1
+// sentinel byte before turning bytes into strings. Non-sensitive
+// columns (name, description, saved_username, owner_user_id, scope,
+// timestamps, integers) scan straight to their typed destinations.
+//
+// scanProfile is a method on sqliteStore (rather than a free function
+// as it was pre-S5) because it needs the cipher pointer to dispatch
+// the unseal path. The error value is returned bare so callers can
+// distinguish sql.ErrNoRows from genuine scan failures.
+func (s *sqliteStore) scanProfile(scan scanFn) (conn.Profile, error) {
 	var (
-		p                  conn.Profile
-		def                int
-		lifetimeNs, idleNs int64
+		p                              conn.Profile
+		def                            int
+		lifetimeNs, idleNs             int64
+		dsnRaw, caRaw, certRaw, keyRaw []byte
 	)
 	if err := scan(
-		&p.ID, &p.Scope, &p.OwnerUserID, &p.Name, &p.DSN, &p.Description,
-		&p.SavedUsername, &def, &p.TLS.CAPEM, &p.TLS.ClientCertPEM,
-		&p.TLS.ClientKeyPEM, &p.PoolOverrides.MaxOpenConns,
+		&p.ID, &p.Scope, &p.OwnerUserID, &p.Name, &dsnRaw, &p.Description,
+		&p.SavedUsername, &def, &caRaw, &certRaw,
+		&keyRaw, &p.PoolOverrides.MaxOpenConns,
 		&p.PoolOverrides.MaxIdleConns, &lifetimeNs, &idleNs,
 	); err != nil {
 		return conn.Profile{}, err
@@ -110,6 +209,19 @@ func scanProfile(scan scanFn) (conn.Profile, error) {
 	p.Default = def != 0
 	p.PoolOverrides.ConnMaxLifetime = nsAsDuration(lifetimeNs)
 	p.PoolOverrides.ConnMaxIdleTime = nsAsDuration(idleNs)
+	var err error
+	if p.DSN, err = s.unsealBytes(dsnRaw); err != nil {
+		return conn.Profile{}, err
+	}
+	if p.TLS.CAPEM, err = s.unsealBytes(caRaw); err != nil {
+		return conn.Profile{}, err
+	}
+	if p.TLS.ClientCertPEM, err = s.unsealBytes(certRaw); err != nil {
+		return conn.Profile{}, err
+	}
+	if p.TLS.ClientKeyPEM, err = s.unsealBytes(keyRaw); err != nil {
+		return conn.Profile{}, err
+	}
 	return p, nil
 }
 
@@ -125,16 +237,33 @@ func (s *sqliteStore) Put(ctx context.Context, p conn.Profile) (conn.Profile, er
 	}
 	now := time.Now().UnixNano()
 
-	_, err := s.db.ExecContext(ctx, `
+	dsnSealed, err := s.sealString(p.DSN)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+	caSealed, err := s.sealString(p.TLS.CAPEM)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+	certSealed, err := s.sealString(p.TLS.ClientCertPEM)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+	keySealed, err := s.sealString(p.TLS.ClientKeyPEM)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO profiles
 		  (id, scope, owner_user_id, name, dsn, description, saved_username,
 		   is_default, tls_ca_pem, tls_cert_pem, tls_key_pem,
 		   max_open_conns, max_idle_conns, conn_max_lifetime_ns,
 		   conn_max_idle_ns, created_at, updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		p.ID, string(p.Scope), p.OwnerUserID, p.Name, p.DSN, p.Description,
+		p.ID, string(p.Scope), p.OwnerUserID, p.Name, dsnSealed, p.Description,
 		p.SavedUsername, boolAsInt(p.Default),
-		p.TLS.CAPEM, p.TLS.ClientCertPEM, p.TLS.ClientKeyPEM,
+		caSealed, certSealed, keySealed,
 		p.PoolOverrides.MaxOpenConns, p.PoolOverrides.MaxIdleConns,
 		durationAsNs(p.PoolOverrides.ConnMaxLifetime),
 		durationAsNs(p.PoolOverrides.ConnMaxIdleTime),
@@ -157,7 +286,7 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (conn.Profile, error) 
 		       tls_key_pem, max_open_conns, max_idle_conns,
 		       conn_max_lifetime_ns, conn_max_idle_ns
 		FROM profiles WHERE id = ?`, id)
-	p, err := scanProfile(row.Scan)
+	p, err := s.scanProfile(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return conn.Profile{}, ErrNotFound
 	}
@@ -207,7 +336,7 @@ func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (con
 		       tls_key_pem, max_open_conns, max_idle_conns,
 		       conn_max_lifetime_ns, conn_max_idle_ns
 		FROM profiles WHERE id = ?`, id)
-	cur, err := scanProfile(row.Scan)
+	cur, err := s.scanProfile(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return conn.Profile{}, ErrNotFound
 	}
@@ -218,6 +347,23 @@ func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (con
 	merged := mergeProfile(cur, p)
 	now := time.Now().UnixNano()
 
+	dsnSealed, err := s.sealString(merged.DSN)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+	caSealed, err := s.sealString(merged.TLS.CAPEM)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+	certSealed, err := s.sealString(merged.TLS.ClientCertPEM)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+	keySealed, err := s.sealString(merged.TLS.ClientKeyPEM)
+	if err != nil {
+		return conn.Profile{}, err
+	}
+
 	res, err := tx.ExecContext(ctx, `
 		UPDATE profiles SET
 		  name = ?, dsn = ?, description = ?, saved_username = ?,
@@ -225,9 +371,9 @@ func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (con
 		  max_open_conns = ?, max_idle_conns = ?,
 		  conn_max_lifetime_ns = ?, conn_max_idle_ns = ?, updated_at = ?
 		WHERE id = ?`,
-		merged.Name, merged.DSN, merged.Description, merged.SavedUsername,
-		boolAsInt(merged.Default), merged.TLS.CAPEM, merged.TLS.ClientCertPEM,
-		merged.TLS.ClientKeyPEM, merged.PoolOverrides.MaxOpenConns,
+		merged.Name, dsnSealed, merged.Description, merged.SavedUsername,
+		boolAsInt(merged.Default), caSealed, certSealed,
+		keySealed, merged.PoolOverrides.MaxOpenConns,
 		merged.PoolOverrides.MaxIdleConns,
 		durationAsNs(merged.PoolOverrides.ConnMaxLifetime),
 		durationAsNs(merged.PoolOverrides.ConnMaxIdleTime),

@@ -85,7 +85,19 @@ func main() {
 	}
 	defer func() { _ = pool.Close() }()
 
-	store, err := profilestore.OpenSQLite(profileStore)
+	// GAP-S5 (#118): the profile store holds DSN strings (with embedded
+	// database passwords) and full TLS PEM material at rest. Encrypt
+	// those four columns with AES-256-GCM. The key MUST be supplied via
+	// GEODE_PROFILESTORE_KEY (base64-encoded 32 bytes) — fail-fast if
+	// missing so we never silently fall back to plaintext-on-disk in a
+	// production process. See internal/profilestore/crypto.go for the
+	// wire format and the legacy-row migration path.
+	cipher, err := profilestore.NewCipherFromEnv("GEODE_PROFILESTORE_KEY")
+	if err != nil {
+		slog.Error("profile store encryption key", "err", err)
+		os.Exit(1)
+	}
+	store, err := profilestore.OpenSQLiteEncrypted(profileStore, cipher)
 	if err != nil {
 		slog.Error("profile store open", "err", err)
 		os.Exit(1)

@@ -72,6 +72,19 @@ COPY --from=gobuild /out/geode-ui /usr/local/bin/geode-ui
 RUN mkdir -p /var/lib/geode-ui/uploads/backups /var/lib/geode-ui/uploads/migrations && \
     chown -R geode:geode /var/lib/geode-ui
 USER geode
+# GAP-S5 (#118): the runtime requires GEODE_PROFILESTORE_KEY (base64 of
+# 32 random bytes) to bring up the at-rest encryption layer for the
+# SQLite profile store. We deliberately do NOT bake a key into the
+# image — that would defeat the encryption-at-rest argument the moment
+# the image leaks. Operators MUST supply the env var at `docker run`
+# time (or via compose `environment:` / k8s Secret), e.g.:
+#
+#   docker run -e GEODE_PROFILESTORE_KEY="$(openssl rand -base64 32)" \
+#              -p 8080:8080 geode-ui:dev ...
+#
+# The deploy/docker-compose.test.yml file pins a known test key so
+# Playwright runs reproducibly; deploy/docker-compose.example.yml
+# documents the production-recommended `openssl rand -base64 32` flow.
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/geode-ui"]
 CMD ["-listen", ":8080"]

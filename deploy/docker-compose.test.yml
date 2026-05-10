@@ -114,6 +114,14 @@ services:
     depends_on:
       geode-init:
         condition: service_completed_successfully
+    environment:
+      # GAP-S5 (#118): the server requires GEODE_PROFILESTORE_KEY
+      # (base64 of 32 bytes) to bring up the at-rest encryption layer
+      # for the SQLite profile store. The e2e stack uses a fixed
+      # known-test key — base64 of 32 zero bytes — so Playwright runs
+      # are reproducible. A production deployment MUST generate its own
+      # via `openssl rand -base64 32`.
+      GEODE_PROFILESTORE_KEY: ${GEODE_PROFILESTORE_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
     command:
     - -listen
     - :8080
