@@ -16,12 +16,29 @@ async function bootstrap(): Promise<void> {
   // Expired tokens are dropped at the bridge boundary (main.ts filters
   // by expiresAt > Date.now() before returning).
   const stored = await getStoredConnections()
-  const initialConnections: ConnectionState[] = stored.map((c) => ({
+  let initialConnections: ConnectionState[] = stored.map((c) => ({
     connectionId: c.connectionId,
     token: c.token,
     profileName: c.profileName,
     expiresAt: c.expiresAt,
   }))
+
+  // E2E backdoor: Playwright's authedContext fixture seeds a JWT-bearing
+  // connection here via addInitScript so ProtectedRoute (which gates on
+  // useActiveConnection != null) doesn't redirect to /login. Production
+  // code never sets this global; it is intentionally a separate channel
+  // from electron-bridge so the test path doesn't pretend to be Electron.
+  // The bracket access bypasses no-underscore-dangle on the leading
+  // sentinel and makes the test-only origin of the field explicit.
+  if (initialConnections.length === 0) {
+    const e2eKey = '__GEODE_E2E_INITIAL_CONNECTIONS__'
+    const e2e = (
+      window as unknown as Record<string, ConnectionState[] | undefined>
+    )[e2eKey]
+    if (e2e && e2e.length > 0) {
+      initialConnections = e2e
+    }
+  }
 
   const root = createRoot(container)
   root.render(

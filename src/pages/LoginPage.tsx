@@ -159,6 +159,7 @@ export const LoginPage: React.FC = () => {
                 $selected={p.name === profile}
                 onClick={() => setProfile(p.name)}
                 aria-pressed={p.name === profile}
+                aria-label={p.name}
               >
                 <strong>{p.name}</strong>
                 {p.description ? (
