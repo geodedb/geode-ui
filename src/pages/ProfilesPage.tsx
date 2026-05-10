@@ -6,6 +6,7 @@ import { listProfiles, updateProfile, ProfileView } from '../api/profiles'
 import { Button } from '../components/ui'
 import { ProfileEditorModal } from '../components/profiles/ProfileEditorModal'
 import { DeleteProfileModal } from '../components/profiles/DeleteProfileModal'
+import { useAuth } from '../auth/AuthProvider'
 
 const Page = styled.section`
   max-width: 1024px;
@@ -82,6 +83,19 @@ function scopeLabel(scope: string, t: (k: string) => string): string {
 
 export const ProfilesPage: React.FC = () => {
   const { t } = useTranslation()
+  // PSR-G09 (#86): admin status now comes from the JWT roles claim
+  // (surfaced through AuthProvider.isAdmin) rather than the previous
+  // `profiles?.some(p => p.scope === 'system' && !!p.dsn)` heuristic.
+  // The heuristic conflated two unrelated signals: DSN visibility
+  // (which the server uses as a redaction marker for non-admin
+  // viewers) and the admin role (which actually authorises CRUD).
+  // A user with no admin role but who happened to be looking at a
+  // system profile with a leaked DSN would have seen Edit/Delete
+  // buttons that the server would reject; conversely an admin
+  // looking at a profile-list where every system profile had its DSN
+  // redacted (because the server scrubbed them) would see none of
+  // the buttons they were actually authorised to use.
+  const { isAdmin } = useAuth()
   const [profiles, setProfiles] = useState<ProfileView[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   // PSR-G05 (#82): non-blocking failure surface for the multi-step
@@ -112,9 +126,6 @@ export const ProfilesPage: React.FC = () => {
   useEffect(() => {
     refresh().catch(() => undefined)
   }, [refresh])
-
-  const isAdmin =
-    profiles?.some((p) => p.scope === 'system' && !!p.dsn) ?? false
 
   const openCreate = () => {
     setEditorMode('create')
@@ -249,7 +260,20 @@ export const ProfilesPage: React.FC = () => {
               <td>{p.description ?? ''}</td>
               <td>{p.ownerUserId ?? ''}</td>
               <td>
-                {!!p.dsn && (
+                {/*
+                  PSR-G09 (#86): per-row CRUD visibility now combines two
+                  signals correctly. (1) isAdmin from JWT roles — an
+                  admin can edit/delete any profile, including system
+                  profiles whose DSN the server scrubbed for redaction
+                  reasons (admins still authoritatively see them via the
+                  edit modal which re-fetches); (2) `!!p.dsn` — for
+                  non-admins this is the server's "you own this" signal
+                  (the server emits the DSN only when the viewer is the
+                  profile owner). Pre-fix the gate was `!!p.dsn` alone
+                  which meant an admin viewing a redacted system row
+                  would see no buttons.
+                */}
+                {(isAdmin || !!p.dsn) && (
                   <>
                     <Button
                       size="sm"

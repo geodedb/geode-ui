@@ -29,8 +29,17 @@ import {
 import { clearCsrfToken, refreshCsrfToken } from '../api/csrf'
 import { useConnections, setLatestToken } from '../api/connections'
 import { storeSavedPassword } from '../api/electron-bridge'
+import { extractRoles } from './jwt-claims'
 
 const AUTH_HINT_KEY = 'geode-ui.session-hint'
+// PSR-G09 (#86): persist the roles claim across reloads. The HttpOnly
+// cookie carries the JWT (so the server still authenticates the next
+// page load), but the SPA cannot read it; without a sessionStorage
+// echo the React tree would briefly render with `roles=[]` after every
+// reload and admin actions would flicker. The storage cleared on
+// logout/setAuthed(false) so a stale roles list never outlives a
+// session.
+const AUTH_ROLES_KEY = 'geode-ui.session-roles'
 
 function readAuthHint(): boolean {
   try {
@@ -49,6 +58,34 @@ function writeAuthHint(authed: boolean): void {
   }
 }
 
+// PSR-G09 (#86): role persistence helpers. We deliberately store the
+// resolved string array (not the raw JWT) so a future widening of the
+// JWT shape doesn't require migrating sessionStorage; rotating the
+// roles list is a fresh login.
+function readStoredRoles(): string[] {
+  try {
+    const raw = sessionStorage.getItem(AUTH_ROLES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((r): r is string => typeof r === 'string')
+  } catch {
+    return []
+  }
+}
+
+function writeStoredRoles(roles: readonly string[] | null): void {
+  try {
+    if (roles && roles.length > 0) {
+      sessionStorage.setItem(AUTH_ROLES_KEY, JSON.stringify([...roles]))
+    } else {
+      sessionStorage.removeItem(AUTH_ROLES_KEY)
+    }
+  } catch {
+    /* private-mode browsers throw — best-effort */
+  }
+}
+
 type AuthState = {
   isAuthed: boolean
   // setAuthed lets the API layer mark the SPA logged-out on a 401 from
@@ -56,6 +93,16 @@ type AuthState = {
   // login/logout so the call site doesn't trigger a redundant
   // /auth/logout request.
   setAuthed: (a: boolean) => void
+  // PSR-G09 (#86): the role list extracted from the JWT's `roles`
+  // claim at last login. Empty when logged out or when the cookie
+  // existed across a reload but the SPA never saw the access token
+  // (the storage echo bridges that gap; see AUTH_ROLES_KEY). Use
+  // `hasRole('admin')` for the common authority check rather than
+  // hand-rolling `.includes()` so future role-aliasing or wildcards
+  // can land in one place.
+  roles: readonly string[]
+  hasRole: (role: string) => boolean
+  isAdmin: boolean
   signIn: (
     username: string,
     password: string,
@@ -80,6 +127,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const conns = useConnections()
   const [isAuthed, setIsAuthed] = useState<boolean>(readAuthHint())
+  // PSR-G09 (#86): `roles` is hydrated from sessionStorage on mount so
+  // a page reload immediately renders with the same admin/non-admin
+  // posture the user had before the reload. signIn/connectMore
+  // refreshes it from the freshly-issued JWT; setAuthed(false) /
+  // signOut clears it.
+  const [roles, setRoles] = useState<readonly string[]>(() => readStoredRoles())
 
   const setAuthed = useCallback(
     (authed: boolean) => {
@@ -89,6 +142,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         clearCsrfToken()
         conns.clear()
         setLatestToken(null)
+        // Drop the role echo so a logged-out tab never carries a stale
+        // admin posture into its next session.
+        writeStoredRoles(null)
+        setRoles([])
       }
     },
     [conns]
@@ -128,6 +185,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       setLatestToken(result.access_token)
       writeAuthHint(true)
       setIsAuthed(true)
+      // PSR-G09: extract the JWT roles claim so role-gated UI (e.g.
+      // ProfilesPage) can render without the previous DSN-visibility
+      // heuristic. Persist to sessionStorage so a page reload keeps
+      // the same posture (the cookie still authenticates the next
+      // request, but JS can't read the cookie).
+      const fresh = extractRoles(result.access_token)
+      writeStoredRoles(fresh)
+      setRoles(fresh)
       // storeSavedPassword is fire-and-forget by design (PSR-F10):
       // it's a best-effort safeStorage write that is safe to background
       // after the SPA hands off control to the post-login route. A
@@ -159,6 +224,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setLatestToken(null)
     writeAuthHint(false)
     setIsAuthed(false)
+    // PSR-G09: drop the cached roles list on logout so the next
+    // login starts from a known-empty role posture.
+    writeStoredRoles(null)
+    setRoles([])
   }, [conns])
 
   const connectMore = useCallback(
@@ -187,6 +256,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       // Defensive: ensure isAuthed boolean is true.
       writeAuthHint(true)
       setIsAuthed(true)
+      // PSR-G09: connectMore mints a fresh JWT (apiLogin above) so the
+      // returned token's roles claim is authoritative for the new
+      // session. Refresh the role list so a privilege change at the
+      // upstream Geode (e.g. user just got the admin role) is reflected
+      // without a full re-login.
+      const fresh = extractRoles(result.access_token)
+      writeStoredRoles(fresh)
+      setRoles(fresh)
       if (savePassword) {
         await storeSavedPassword(profile, username, password)
       }
@@ -243,10 +320,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     })
   }, [isAuthed])
 
+  // PSR-G09: convenience selectors derived from `roles`. `hasRole` is
+  // the canonical check; `isAdmin` is a thin wrapper for the
+  // overwhelmingly-common admin gate so consumers don't repeat the
+  // string literal everywhere.
+  const hasRole = useCallback(
+    (role: string): boolean => roles.includes(role),
+    [roles]
+  )
+  const isAdmin = roles.includes('admin')
+
   const value = useMemo<AuthState>(
     () => ({
       isAuthed,
       setAuthed,
+      roles,
+      hasRole,
+      isAdmin,
       signIn,
       signOut,
       connectMore,
@@ -256,6 +346,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     [
       isAuthed,
       setAuthed,
+      roles,
+      hasRole,
+      isAdmin,
       signIn,
       signOut,
       connectMore,

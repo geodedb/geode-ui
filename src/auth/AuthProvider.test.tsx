@@ -728,4 +728,177 @@ describe('AuthProvider → ConnectionsContext integration', () => {
 
     global.fetch = orig
   })
+
+  // -------------------------------------------------------------------------
+  // PSR-G09 (#86) — roles must derive from the JWT's roles claim, not
+  // from a client-side heuristic (the previous DSN-visibility hack
+  // conflated server-side redaction with role authority). These tests
+  // pin the AuthProvider's role surface.
+  // -------------------------------------------------------------------------
+
+  test('PSR-G09: signIn extracts roles from the JWT and exposes them via useAuth', async () => {
+    function makeJwt(payload: Record<string, unknown>): string {
+      const header = Buffer.from(
+        JSON.stringify({ alg: 'HS256', typ: 'JWT' })
+      ).toString('base64url')
+      const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+      return `${header}.${body}.fake-sig`
+    }
+    const adminToken = makeJwt({
+      sub: 'alice',
+      profile: 'default',
+      roles: ['admin', 'reader'],
+    })
+
+    const orig = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/v1/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            access_token: adminToken,
+            token_type: 'Bearer',
+            expires_in: 3600,
+            connection_id: 'cid-roles',
+          }),
+        } as unknown as Response
+      }
+      if (url.endsWith('/api/v1/csrf')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: 'csrf-mock' }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    const InnerR: React.FC = () => {
+      captured = useAuth()
+      return (
+        <button
+          data-testid="signin"
+          onClick={() => {
+            captured!.signIn('alice', 'pw', 'default').catch(() => undefined)
+          }}
+          aria-label="sign in"
+        />
+      )
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerR />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    // Pre-signin: roles list is empty and isAdmin false.
+    expect(captured!.roles).toEqual([])
+    expect(captured!.isAdmin).toBe(false)
+    expect(captured!.hasRole('admin')).toBe(false)
+
+    await act(async () => {
+      screen.getByTestId('signin').click()
+      for (let i = 0; i < 8; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve()
+      }
+    })
+
+    expect(captured!.roles).toEqual(['admin', 'reader'])
+    expect(captured!.isAdmin).toBe(true)
+    expect(captured!.hasRole('admin')).toBe(true)
+    expect(captured!.hasRole('reader')).toBe(true)
+    expect(captured!.hasRole('writer')).toBe(false)
+
+    global.fetch = orig
+  })
+
+  test('PSR-G09: setAuthed(false) clears the cached roles posture', async () => {
+    function makeJwt(payload: Record<string, unknown>): string {
+      const header = Buffer.from(
+        JSON.stringify({ alg: 'HS256', typ: 'JWT' })
+      ).toString('base64url')
+      const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+      return `${header}.${body}.fake-sig`
+    }
+    const adminToken = makeJwt({ roles: ['admin'] })
+    const orig = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/v1/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            access_token: adminToken,
+            token_type: 'Bearer',
+            expires_in: 3600,
+            connection_id: 'cid-clear',
+          }),
+        } as unknown as Response
+      }
+      if (url.endsWith('/api/v1/csrf')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: 'csrf-mock' }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    const InnerC: React.FC = () => {
+      captured = useAuth()
+      return (
+        <button
+          data-testid="signin"
+          aria-label="sign in"
+          onClick={() => {
+            captured!.signIn('alice', 'pw', 'default').catch(() => undefined)
+          }}
+        />
+      )
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerC />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    await act(async () => {
+      screen.getByTestId('signin').click()
+      for (let i = 0; i < 8; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve()
+      }
+    })
+    expect(captured!.isAdmin).toBe(true)
+    expect(sessionStorage.getItem('geode-ui.session-roles')).toBeTruthy()
+
+    await act(async () => {
+      captured!.setAuthed(false)
+      await Promise.resolve()
+    })
+    expect(captured!.isAdmin).toBe(false)
+    expect(captured!.roles).toEqual([])
+    expect(sessionStorage.getItem('geode-ui.session-roles')).toBeNull()
+
+    global.fetch = orig
+  })
 })
