@@ -228,6 +228,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     // login starts from a known-empty role posture.
     writeStoredRoles(null)
     setRoles([])
+    // S9 (#122): saved passwords intentionally PERSIST past signOut.
+    // This mirrors the browser-password-manager analog called out in
+    // Plan E §8 — logging out should not silently nuke the user's
+    // stored credential. The user controls forgetting via Settings →
+    // "Forget Saved Password" (TODO #122: surface the Settings UI
+    // affordance; the underlying `clearStoredPassword` IPC + API helper
+    // already exist). Do NOT add a `clearStoredPassword` call here
+    // without re-reading Plan E §8 and SECURITY_GAP_ANALYSIS.md S9 —
+    // this is sec::accepted-risk, not an oversight.
   }, [conns])
 
   const connectMore = useCallback(
