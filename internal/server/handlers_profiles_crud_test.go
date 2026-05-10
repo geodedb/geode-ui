@@ -736,3 +736,271 @@ func atoiBenchKey(i int) string {
 	}
 	return string(buf[pos:])
 }
+
+// TestStoreErrorToHTTP pins GAP-Q12 (#107): every profilestore.Err*
+// variant maps to a stable HTTP status + machine-readable code, and
+// every other error falls through to a 500 with the wrapped error
+// surfaced verbatim in the description (so server logs can reproduce
+// it). This is the only spot in the server where we translate the
+// store's typed errors back to a wire shape; tightening it pre-empts
+// the "404 turned into a 500 because someone shadowed the variant"
+// regression class.
+//
+// Each case constructs an error wrapping the variant (errors.Is must
+// see through a fmt.Errorf("%w", ...) wrapper, which is the actual
+// shape the store returns). The default branch is exercised with a
+// novel sentinel so we observe the description carries the wrapped
+// message verbatim.
+func TestStoreErrorToHTTP(t *testing.T) {
+	customDB := errors.New("disk full")
+	cases := []struct {
+		name       string
+		in         error
+		wantStatus int
+		wantCode   string
+		// wantDescContains is checked with strings.Contains so the
+		// table doesn't have to mirror the exact wording for variants
+		// whose description is statically declared.
+		wantDescContains string
+	}{
+		{
+			name:             "ErrNotFound",
+			in:               profilestore.ErrNotFound,
+			wantStatus:       http.StatusNotFound,
+			wantCode:         "not_found",
+			wantDescContains: "profile not found",
+		},
+		{
+			name:             "ErrNotFound_wrapped",
+			in:               errors.Join(errors.New("layer1"), profilestore.ErrNotFound),
+			wantStatus:       http.StatusNotFound,
+			wantCode:         "not_found",
+			wantDescContains: "profile not found",
+		},
+		{
+			name:             "ErrConflict",
+			in:               profilestore.ErrConflict,
+			wantStatus:       http.StatusConflict,
+			wantCode:         "conflict",
+			wantDescContains: "already exists",
+		},
+		{
+			name:             "ErrConflict_wrapped_with_scope_name",
+			in:               errors.Join(profilestore.ErrConflict, errors.New("scope=system name=p1")),
+			wantStatus:       http.StatusConflict,
+			wantCode:         "conflict",
+			wantDescContains: "already exists",
+		},
+		{
+			name:             "ErrImmutable",
+			in:               profilestore.ErrImmutable,
+			wantStatus:       http.StatusBadRequest,
+			wantCode:         "immutable",
+			wantDescContains: "scope and owner",
+		},
+		{
+			name:             "ErrInvalid",
+			in:               profilestore.ErrInvalid,
+			wantStatus:       http.StatusBadRequest,
+			wantCode:         "invalid",
+			wantDescContains: "validation",
+		},
+		{
+			name:             "default_unknown_error",
+			in:               customDB,
+			wantStatus:       http.StatusInternalServerError,
+			wantCode:         "internal_error",
+			wantDescContains: "disk full",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ep := storeErrorToHTTP(tc.in)
+			if ep == nil {
+				t.Fatalf("storeErrorToHTTP returned nil for %v", tc.in)
+			}
+			if ep.status != tc.wantStatus {
+				t.Errorf("status = %d, want %d", ep.status, tc.wantStatus)
+			}
+			if ep.code != tc.wantCode {
+				t.Errorf("code = %q, want %q", ep.code, tc.wantCode)
+			}
+			if tc.wantDescContains != "" && !strings.Contains(ep.description, tc.wantDescContains) {
+				t.Errorf("description = %q, want substring %q", ep.description, tc.wantDescContains)
+			}
+		})
+	}
+}
+
+// TestStoreErrorToHTTP_NilSafety pins one defensive branch: storeErrorToHTTP(nil)
+// must not panic. The existing CRUD handlers all gate the call on a non-nil
+// error, but nothing in the helper's signature enforces that contract; if a
+// future caller ever passes nil through, we should fail loudly with a 500
+// rather than crashing the request goroutine.
+func TestStoreErrorToHTTP_NilSafety(t *testing.T) {
+	ep := storeErrorToHTTP(nil)
+	if ep == nil {
+		t.Fatal("storeErrorToHTTP(nil) returned nil; want a 500 endpointError")
+	}
+	if ep.status != http.StatusInternalServerError {
+		t.Errorf("nil-input status = %d, want 500", ep.status)
+	}
+}
+
+// TestPatchProfileid_AlwaysEchoesIsDefault pins the contract documented
+// inline in handlers_profiles_crud.go::buildProfilePatch: because
+// genapi 0.x emits `IsDefault bool` (no pointer / no jsontext.Value),
+// the PATCH layer cannot tell "absent" from `false`. The codified
+// behaviour is to ALWAYS pass IsDefault through to the store, which
+// means a PATCH request that does not touch is_default will, on the
+// wire, set the persisted is_default to whatever the request struct's
+// zero-value carried (false).
+//
+// This is the best we can do without a schema change; pinning the
+// contract here protects against an "innocent-looking" refactor that
+// adds an `if req.IsDefault` heuristic and silently drops the only
+// way the SPA has to clear a default flag.
+func TestPatchProfileid_AlwaysEchoesIsDefault(t *testing.T) {
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1", Default: true,
+	})
+	if !saved.Default {
+		t.Fatalf("Put: Default not stored as true: %+v", saved)
+	}
+
+	// PATCH with NO IsDefault key in the body — the genapi-emitted
+	// struct's zero value is `false`, which buildProfilePatch ALWAYS
+	// passes through. The expected behaviour is that is_default
+	// flips to false on the persisted row.
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	got, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		// IsDefault deliberately omitted -- genapi emits bool, so it's `false`.
+		Description: "tweak",
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid: %v", err)
+	}
+	if got == nil {
+		t.Fatalf("PatchProfileid returned nil profile")
+	}
+	if got.IsDefault {
+		t.Errorf("PATCH echoed IsDefault=true even though the request struct carried false")
+	}
+	persisted, _ := st.Get(context.Background(), saved.ID)
+	if persisted.Default {
+		t.Errorf("persisted Default = true; expected false (always-echo contract)")
+	}
+
+	// Round-trip the other direction: a PATCH that explicitly sets
+	// IsDefault=true must also work end-to-end.
+	r = reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w = httptest.NewRecorder()
+	got, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		IsDefault: true,
+	})
+	if err != nil {
+		t.Fatalf("PatchProfileid (set true): %v", err)
+	}
+	if !got.IsDefault {
+		t.Errorf("PATCH IsDefault=true did not stick on response: %+v", got)
+	}
+	persisted, _ = st.Get(context.Background(), saved.ID)
+	if !persisted.Default {
+		t.Errorf("PATCH IsDefault=true did not persist: %+v", persisted)
+	}
+}
+
+// TestPatchProfileid_StoreDisabled pins the early-return path: when
+// the server is wired without a Store, PATCH must respond 503 instead
+// of nil-panicking on s.cfg.Store.Get.
+func TestPatchProfileid_StoreDisabled(t *testing.T) {
+	srv := New(Config{}) // no Store
+	r := reqWithActor("PATCH", "/api/v1/profiles/abc", "alice")
+	r.SetPathValue("profileId", "abc")
+	w := httptest.NewRecorder()
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "x"})
+	if err != nil {
+		t.Fatalf("PatchProfileid (no store): %v", err)
+	}
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", w.Code)
+	}
+}
+
+// TestPatchProfileid_MissingPathID pins the bad-request path: the
+// genapi-emitted PatchProfileid signature does not bind the path
+// parameter into the request struct, so we read it off
+// r.PathValue("profileId"). Empty path value must be a 400.
+func TestPatchProfileid_MissingPathID(t *testing.T) {
+	srv, _ := newTestServerWithStore(t)
+	// Construct a request that does NOT call SetPathValue("profileId", ...)
+	// so r.PathValue("profileId") returns "".
+	r := reqWithActor("PATCH", "/api/v1/profiles/", "alice")
+	w := httptest.NewRecorder()
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "x"})
+	if err != nil {
+		t.Fatalf("PatchProfileid (no path id): %v", err)
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// TestPatchProfileid_StorePatchSurfaces500ToHTTP pins the
+// store-error → HTTP path of PatchProfileid: when the store's Patch
+// returns a non-typed error (e.g. "disk full"), the handler must
+// surface a 500 via storeErrorToHTTP rather than swallowing the error.
+//
+// We use a fake Store that returns a custom error from Patch but a
+// real profile from Get (so canMutate passes).
+func TestPatchProfileid_StorePatchSurfaces500ToHTTP(t *testing.T) {
+	disk := errors.New("disk full")
+	st := &patchErrStore{
+		row: conn.Profile{
+			ID: "abc", Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+			Name: "p1", DSN: "quic://x:1",
+		},
+		patchErr: disk,
+	}
+	srv := New(Config{Store: st})
+	r := reqWithActor("PATCH", "/api/v1/profiles/abc", "alice")
+	r.SetPathValue("profileId", "abc")
+	w := httptest.NewRecorder()
+	if _, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: "x"}); err != nil {
+		t.Fatalf("PatchProfileid: %v", err)
+	}
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 500", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "disk full") {
+		t.Errorf("body should surface wrapped error: %q", w.Body.String())
+	}
+}
+
+// patchErrStore is a fake profilestore.Store that returns a fixed Get
+// row but a configurable Patch error. Used by
+// TestPatchProfileid_StorePatchSurfaces500ToHTTP.
+type patchErrStore struct {
+	row      conn.Profile
+	patchErr error
+}
+
+func (s *patchErrStore) Get(_ context.Context, _ string) (conn.Profile, error) {
+	return s.row, nil
+}
+func (s *patchErrStore) List(_ context.Context, _ profilestore.Filter) ([]conn.Profile, error) {
+	return nil, nil
+}
+func (s *patchErrStore) Put(_ context.Context, p conn.Profile) (conn.Profile, error) {
+	return p, nil
+}
+func (s *patchErrStore) Patch(_ context.Context, _ string, _ profilestore.ProfilePatch) (conn.Profile, error) {
+	return conn.Profile{}, s.patchErr
+}
+func (s *patchErrStore) Delete(_ context.Context, _ string) error { return nil }
+func (s *patchErrStore) Close() error                             { return nil }

@@ -138,7 +138,22 @@ func marshalPoolOverrides(o conn.PoolOverrides) (jsontext.Value, error) {
 
 // storeErrorToHTTP maps profilestore errors to endpointError values.
 // Used by the CRUD handlers in handlers_profiles_crud.go.
+//
+// Defensive contract (GAP-Q12 / #107): all known profilestore.Err*
+// variants get a stable HTTP status + machine-readable code; anything
+// else falls through to a 500 with the wrapped error surfaced
+// verbatim so server logs can reproduce it. A nil input is treated as
+// the same internal-error path (rather than panicking on err.Error()).
+// In practice every CRUD callsite gates the call on `if err != nil`,
+// so the nil branch is purely defensive.
 func storeErrorToHTTP(err error) *endpointError {
+	if err == nil {
+		return &endpointError{
+			status:      http.StatusInternalServerError,
+			code:        "internal_error",
+			description: "unknown store error",
+		}
+	}
 	switch {
 	case errors.Is(err, profilestore.ErrNotFound):
 		return &endpointError{
