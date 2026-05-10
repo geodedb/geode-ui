@@ -264,6 +264,85 @@ test('PSR-F14: re-typing the same (profile, username) tuple is a cache hit (no e
   }
 })
 
+// ---------------------------------------------------------------------------
+// PSR-G04 (#81) + PSR-G10 (#87) — surface listProfiles + fetchPublicProfiles
+// errors instead of swallowing them. Pre-fix the modal opened looking
+// healthy with no profile dropdown / no saved-username fill and no
+// indication that anything had failed; users couldn't tell whether the
+// network was down or whether they simply had no saved profiles.
+// ---------------------------------------------------------------------------
+
+test('PSR-G04: submit failure renders an inline error message', async () => {
+  mockConnectMore.mockRejectedValueOnce(new Error('upstream auth refused'))
+  const onClose = jest.fn()
+  renderModal(true, onClose)
+  await waitFor(() => {
+    expect(
+      screen.getByRole('combobox', { name: /profile/i })
+    ).toBeInTheDocument()
+  })
+  fireEvent.change(screen.getByLabelText(/username/i), {
+    target: { value: 'alice' },
+  })
+  fireEvent.change(
+    screen.getByLabelText(/password/i, { selector: 'input[type="password"]' }),
+    { target: { value: 'pw' } }
+  )
+  await act(async () => {
+    fireEvent.submit(screen.getByLabelText(/username/i).closest('form')!)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  // Error must be visible to screen readers AND on-screen.
+  const alert = await screen.findByRole('alert')
+  expect(alert).toHaveTextContent(/upstream auth refused/i)
+  // Modal must NOT auto-close on a failed submit so the user can retry.
+  expect(onClose).not.toHaveBeenCalled()
+})
+
+test('PSR-G04/G10: listProfiles failure renders fallback warning and form stays usable', async () => {
+  const { listProfiles } = jest.requireMock('../../api/profiles') as {
+    listProfiles: jest.Mock
+  }
+  listProfiles.mockRejectedValueOnce(new Error('500 internal'))
+  renderModal(true, jest.fn())
+  // The public-profile select should still render (it is independent
+  // of listProfiles), and the warning banner should appear.
+  await waitFor(() => {
+    expect(
+      screen.getByTestId('add-connection-authed-profile-warning')
+    ).toBeInTheDocument()
+  })
+  // Form remains usable: typing into the username field still works.
+  fireEvent.change(screen.getByLabelText(/username/i), {
+    target: { value: 'still-typing' },
+  })
+  expect(screen.getByLabelText(/username/i)).toHaveValue('still-typing')
+})
+
+test('PSR-G04: fetchPublicProfiles failure renders fallback warning and switches to free-form input', async () => {
+  const { fetchPublicProfiles } = jest.requireMock('../../api/auth') as {
+    fetchPublicProfiles: jest.Mock
+  }
+  fetchPublicProfiles.mockRejectedValueOnce(new Error('network down'))
+  renderModal(true, jest.fn())
+  await waitFor(() => {
+    expect(
+      screen.getByTestId('add-connection-public-profile-warning')
+    ).toBeInTheDocument()
+  })
+  // No <select role="combobox"> when the public list failed — it falls
+  // through to the free-form Input branch.
+  expect(
+    screen.queryByRole('combobox', { name: /profile/i })
+  ).not.toBeInTheDocument()
+  // Reset the rejection so subsequent tests get the default mock.
+  fetchPublicProfiles.mockResolvedValue([
+    { name: 'default', description: 'Default cluster' },
+    { name: 'prod', description: 'Production' },
+  ])
+})
+
 test('PSR-F14: closing the modal clears the password cache (no leak across opens)', async () => {
   jest.useFakeTimers()
   try {

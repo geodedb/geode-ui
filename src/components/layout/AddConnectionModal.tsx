@@ -33,6 +33,14 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [authedProfiles, setAuthedProfiles] = useState<ProfileView[]>([])
+  // PSR-G04 (#81) / PSR-G10 (#87): the open-time effect previously
+  // swallowed errors from both fetchPublicProfiles + listProfiles, so a
+  // failed bootstrap left the user with no feedback (the modal opened
+  // looking healthy but with no profile dropdown / no saved-username
+  // fill). These flags surface each failure independently so the form
+  // stays usable while telling the user what degraded.
+  const [publicProfilesErr, setPublicProfilesErr] = useState(false)
+  const [authedProfilesErr, setAuthedProfilesErr] = useState(false)
   // PSR-F14 — explicit opt-in for the saved-password lookup. Pre-fix
   // every keystroke fired getStoredPassword whether or not the user
   // actually wanted to reuse a saved credential, paying the
@@ -56,16 +64,34 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   useEffect(() => {
     if (!open) return undefined
     let cancelled = false
-    Promise.all([
-      fetchPublicProfiles().catch(() => [] as PublicProfile[]),
-      listProfiles().catch(() => [] as ProfileView[]),
-    ])
-      .then(([publicList, authedList]) => {
+    // Reset the per-open error flags so a previous failure doesn't
+    // bleed across modal open/close cycles.
+    setPublicProfilesErr(false)
+    setAuthedProfilesErr(false)
+    // PSR-G04: capture each promise's outcome individually so the UI
+    // can surface "the public profile picker failed to load" and "the
+    // saved-profile dropdown failed to load" with separate copy. Using
+    // allSettled (rather than per-promise .catch) keeps both branches
+    // observable so we can distinguish "loaded zero profiles" from
+    // "load failed and has no entries to show".
+    Promise.allSettled([fetchPublicProfiles(), listProfiles()])
+      .then(([publicResult, authedResult]) => {
         if (cancelled) return
-        setProfiles(publicList)
-        setAuthedProfiles(authedList)
-        const first = publicList[0]
-        if (first) setProfile(first.name)
+        if (publicResult.status === 'fulfilled') {
+          const publicList = publicResult.value
+          setProfiles(publicList)
+          const first = publicList[0]
+          if (first) setProfile(first.name)
+        } else {
+          setProfiles([])
+          setPublicProfilesErr(true)
+        }
+        if (authedResult.status === 'fulfilled') {
+          setAuthedProfiles(authedResult.value)
+        } else {
+          setAuthedProfiles([])
+          setAuthedProfilesErr(true)
+        }
       })
       .catch(() => undefined)
     return () => {
@@ -163,6 +189,32 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   return (
     <Modal open={open} onClose={onClose} title={t('connection.addAnother')}>
       <form onSubmit={submit}>
+        {/*
+          PSR-G04 (#81) — surface load failures from the open-time
+          effect. The form is still usable when these fail (the profile
+          field falls back to a free-form input via the `profiles &&
+          profiles.length > 0` ternary below), so we render a non-
+          blocking warning rather than a hard error block. role="status"
+          + aria-live="polite" matches the LoginPage error pattern.
+        */}
+        {publicProfilesErr && (
+          <p
+            role="status"
+            aria-live="polite"
+            data-testid="add-connection-public-profile-warning"
+          >
+            {t('connection.publicProfileListLoadFailed')}
+          </p>
+        )}
+        {authedProfilesErr && (
+          <p
+            role="status"
+            aria-live="polite"
+            data-testid="add-connection-authed-profile-warning"
+          >
+            {t('connection.profileListLoadFailed')}
+          </p>
+        )}
         {profiles && profiles.length > 0 ? (
           <Field label={t('auth.profile')} htmlFor="add-profile">
             <select

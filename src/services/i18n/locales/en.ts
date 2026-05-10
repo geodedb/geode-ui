@@ -273,6 +273,16 @@ export const en = {
     connect: 'Connect',
     disconnect: 'Disconnect',
     addAnother: 'Add another connection',
+    // PSR-G04 (#81) — surfaced when the open-time `listProfiles` call
+    // fails so the user knows the saved-username dropdown will not
+    // populate. The form remains usable; the error is informational.
+    profileListLoadFailed:
+      'Could not load saved profiles — you can still type credentials manually.',
+    // PSR-G04 (#81) — surfaced when `fetchPublicProfiles` fails so the
+    // user knows the bootstrap profile picker is using a free-form
+    // input rather than a populated select.
+    publicProfileListLoadFailed:
+      'Could not load the profile list — pick a profile name manually.',
   },
 
   electron: {
