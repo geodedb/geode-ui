@@ -1,6 +1,6 @@
 # QUALITY_GAP_ANALYSIS.md
 
-Last updated: 2026-05-07
+Last updated: 2026-05-10
 Repo: `devnw/codepros/geode/geode-ui`
 Source: `/codepros:audit` Phase 4 — quality-issue-tracker
 
@@ -158,3 +158,88 @@ The strongest signal that the team has a healthy quality posture: the issues are
 Naming is consistent enough that "show me everywhere `userDB` is called from a non-user
 file" is a one-liner. That is the precondition for everything in this report being
 actionable rather than aspirational.
+
+---
+
+## Profile System Rebuild (PSR) — 2026-05-10 audit
+
+This cohort tracks quality findings scoped strictly to the recent **profile-system rebuild**
+(server CRUD + handlers, public listing, electron bridge for stored credentials, profile UI
+modal/page, auth provider, public-profile fetch flow). Not in scope: anything outside the
+profile feature and not touched by the rebuild.
+
+All issues carry the `psr` label. PSR audit also produced gap-side findings (`PSR-G##`) and
+performance/security cohorts in their own GAP files.
+
+### Tooling at audit time
+
+- geode-ui SHA: `0b73836` (`fix(ui): ConnectionSwitcher menu anchors left so it stays on-screen`).
+- Working-tree mods: e2e specs (post-rebuild auth + switcher UX), `pnpm-lock.yaml`. `tsc --noEmit`, ESLint, Prettier, Jest, `go vet`, `gofmt`, `golangci-lint` all clean against the rebuild surface.
+- Server coverage: `~68.7%` overall (geode-ui server) but with named gaps on the new endpoints (see Q12).
+
+### Scoring framework (recap)
+
+`PriorityScore = Impact (1-5) × Likelihood (1-5) × 4`. Decisions: **Fix-Now** (release
+blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (tracked-only).
+
+### Findings table (PSR cohort)
+
+| ID  | Category         | Priority | Decision      | GitLab issue                                                                  | File:Line                                                                                          |
+|-----|------------------|----------|---------------|-------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| Q01 | api-contract     | medium   | Fix-Soon      | [#89](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/89)       | `src/api/profiles.ts:89` (`fromWireProfile` accepts `any`)                                          |
+| Q02 | api-contract (upstream) | high | Fix-Soon (upstream) | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/90) (shim); upstream [genapi#216](https://gitlab.com/devnw/apps/genapi/-/work_items/216) | `src/api/profiles.ts:173,187,196,208,215` (5x `as unknown as` casts)                                |
+| Q03 | dead-code        | low      | Fix-Backlog   | [#91](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/91)       | `src/api/profiles.ts:186` (`getProfile` exported, no caller)                                        |
+| Q04 | duplication      | high     | **Closed 2026-05-10** (release blocker) | [#93](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/93) | `electron/preload.ts:14-40` ↔ `src/types/electron.d.ts:8-34` -- canonical types now in `electron/shared/bridge-types.ts`; both files re-export from that single source. Cross-closes PSR-G07 (#84). |
+| Q05 | complexity       | medium   | Fix-Soon      | [#95](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/95)       | `src/components/profiles/ProfileEditorModal.tsx:50-190` (470 LOC; FormState mirrored 5x)            |
+| Q06 | duplication      | low      | Fix-Backlog (sub-task of Q05) | [#96](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/96)  | `src/components/profiles/ProfileEditorModal.tsx:216-227` (3 browse handlers, only target field differs) |
+| Q07 | maintainability  | medium   | Fix-Soon      | [#98](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/98)       | `internal/server/handlers_profiles_crud.go` (whole file; `writeEndpointError` boilerplate ~20x)     |
+| Q08 | duplication      | medium   | Fix-Soon      | [#100](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/100)     | `src/auth/AuthProvider.tsx:97-123` vs `:135-159` (`signIn` ↔ `connectMore`)                         |
+| Q09 | duplication      | low      | Fix-Backlog   | [#102](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/102)     | `src/pages/LoginPage.tsx:101-128` ↔ `src/components/layout/AddConnectionModal.tsx:27-73`            |
+| Q10 | complexity       | medium   | Fix-Soon      | [#104](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/104)     | `src/pages/ProfilesPage.tsx` (280 LOC; 3 Page returns; editor modal mounted twice)                  |
+| Q11 | complexity       | low      | **Wont-Fix-Now** | [#105](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/105)  | `internal/server/handlers_profiles_crud.go:24-97` (`PostProfiles`, 73 LOC, cyclomatic ~10)          |
+| Q12 | test-coverage    | high     | Fix-Soon      | [#107](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/107)     | `internal/server/handlers_profiles*.go` (`storeErrorToHTTP` 33%, `Public` 47%, `PatchProfileid` 31%) |
+| Q13 | tests            | n/a      | **Wont-Fix** (correct as-is) | *(not filed; tracked here only)*                               | `src/components/profiles/ProfileEditorModal.test.tsx` (mocks the wire layer)                        |
+| Q14 | docs             | medium   | Fix-Soon      | [#109](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/109)     | `src/api/electron-bridge.ts` (7 exports, zero JSDoc)                                                |
+
+### Counts (PSR cohort)
+
+- High priority: 3 (Q02 upstream-shim, Q04 release blocker, Q12)
+- Medium priority: 5 (Q01, Q05, Q07, Q08, Q10, Q14)
+- Low priority: 4 (Q03, Q06, Q09, Q11 wont-fix-now)
+- Wont-fix (correct as-is): 1 (Q13)
+- Total filed in geode-ui: 12 issues + 1 upstream genapi issue. Q13 not filed.
+
+### Wont-fix rationale
+
+- **Q11 (`PostProfiles` complexity)** — cyclomatic ~10 is at threshold but the branches are uniform validation early-returns. Splitting them out introduces indirection without a readability win. Re-open if cyclomatic > 12 or a non-validation branch is introduced. Tracked as #105.
+- **Q13 (`ProfileEditorModal.test.tsx` mocks the wire layer)** — this is the **correct** unit-test isolation for a presentational/form component. The wire layer has its own tests (and Q12 is adding more). Mocking it here is by-design, not a smell. **Not filed as a GitLab issue**; recorded here for audit traceability.
+
+### Upstream / cross-links
+
+- **Q02 → genapi#216** ([https://gitlab.com/devnw/apps/genapi/-/work_items/216](https://gitlab.com/devnw/apps/genapi/-/work_items/216)) — root cause of the five `as unknown as` casts. Geode-ui carries a tracking shim (#90) that closes when the upstream lands and the client is regenerated. **Per repo memory: do NOT hand-edit `gen/`.**
+- **Q04 ↔ PSR-G07** — same code, two framings: Q04 (#93) is the quality framing (duplication / release blocker); PSR-G07 (filed by parallel gap-sync agent) is the gap framing (single-source-of-truth requirement). Cross-link recorded in both issue bodies; once PSR-G07 issue number is known, both descriptions can be reciprocally linked.
+
+### Roadmap
+
+#### Quick wins (≤ 1 day each)
+
+- **Q01** — type the wire boundary; ~30 min.
+- **Q03** — delete (or wire) `getProfile`; ~15 min.
+- **Q06** — collapses naturally with Q05.
+- **Q14** — JSDoc the seven electron-bridge exports.
+
+#### Release-blocker first
+
+- **Q04** — extract shared `bridge-types` and delete the duplicate. Lands the PSR with the IPC contract single-sourced.
+
+#### Sprint-sized
+
+- **Q05 + Q06 + Q10** — modal + page refactor. Best as one MR (single render path on the page; hook + fieldset on the modal).
+- **Q07** — `writeEndpointErr` helper + 20-site conversion.
+- **Q08** — `performAuth` extraction.
+- **Q09** — `usePublicProfilesWithStoredPasswords` hook.
+- **Q12** — table-driven tests on `storeErrorToHTTP`, `Public`, `PatchProfileid` (esp. the always-echo-`isDefault` contract).
+
+#### Upstream-blocked
+
+- **Q02** — waits on genapi#216, then a one-MR cast cleanup.

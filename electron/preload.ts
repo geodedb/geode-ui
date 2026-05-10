@@ -1,5 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+// Q4 / PSR-G07: ConnectionRecord, ThemeVariant, and GeodeBridge live
+// in `./shared/bridge-types`. Both this preload AND the renderer's
+// `src/types/electron.d.ts` import from that single source so a
+// future divergence (preload exposes method X, renderer types it with
+// arity M) is impossible to introduce.
+import type {
+  ConnectionRecord,
+  GeodeBridge,
+  ThemeVariant,
+} from './shared/bridge-types'
+
 // Geode UI — Electron preload.
 //
 // Exposes a tightly-scoped `window.geode` surface to the renderer via
@@ -8,36 +19,6 @@ import { contextBridge, ipcRenderer } from 'electron'
 // main.ts. Anything the SPA needs from the OS (open external links,
 // app version, system theme) must funnel through an explicit IPC call
 // here.
-
-type ThemeVariant = 'light' | 'dark'
-
-interface ConnectionRecord {
-  connectionId: string
-  token: string
-  profileName: string
-  expiresAt: number
-}
-
-interface GeodeBridge {
-  isElectron: true
-  getVersion(): Promise<string>
-  openExternal(url: string): Promise<boolean>
-  getSystemTheme(): Promise<ThemeVariant>
-  onSystemThemeChange(handler: (variant: ThemeVariant) => void): () => void
-  getStoredConnections(): Promise<ConnectionRecord[]>
-  storeConnections(list: ConnectionRecord[]): Promise<boolean>
-  getStoredPassword(
-    profileName: string,
-    username: string
-  ): Promise<string | null>
-  storeSavedPassword(
-    profileName: string,
-    username: string,
-    password: string
-  ): Promise<boolean>
-  clearStoredPassword(profileName: string, username: string): Promise<boolean>
-  pickPemFile(): Promise<string | null>
-}
 
 const bridge: GeodeBridge = {
   isElectron: true,
