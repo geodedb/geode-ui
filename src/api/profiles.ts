@@ -198,12 +198,11 @@ export async function listProfiles(): Promise<ProfileView[]> {
 // structural fix lives in genapi's TS template (~/src/devnw/go/genapi);
 // tracked as a follow-up to Plan A's path-binding fix.
 
-export async function getProfile(id: string): Promise<ProfileView> {
-  const r = await client.getProfileid({ profileId: id } as unknown as {
-    profile_id: string
-  })
-  return fromWireProfile(r)
-}
+// NOTE: a single-row `getProfile(id)` helper used to live here. It was
+// removed (Q03 / #91) because it had zero callers in the SPA -- the page
+// always rehydrates via `listProfiles()` after a mutation. Add it back in
+// a focused commit when a caller actually appears (the genapi workaround
+// pattern documented above is the template).
 
 export async function createProfile(
   input: CreateProfileInput

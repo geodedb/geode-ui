@@ -188,7 +188,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 |-----|------------------|----------|---------------|-------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | Q01 | api-contract     | medium   | Fix-Soon      | [#89](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/89)       | `src/api/profiles.ts:89` (`fromWireProfile` accepts `any`)                                          |
 | Q02 | api-contract (upstream) | high | Fix-Soon (upstream) | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/90) (shim); upstream [genapi#216](https://gitlab.com/devnw/apps/genapi/-/work_items/216) | `src/api/profiles.ts:173,187,196,208,215` (5x `as unknown as` casts)                                |
-| Q03 | dead-code        | low      | Fix-Backlog   | [#91](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/91)       | `src/api/profiles.ts:186` (`getProfile` exported, no caller)                                        |
+| Q03 | dead-code        | low      | **Closed 2026-05-10** | [#91](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/91)       | `src/api/profiles.ts:186` (`getProfile` exported, no caller) -- **Closed 2026-05-10**: deleted the unused export. Comment block left in place pointing at the removal so a future hand re-adding the helper finds the genapi workaround pattern (cast to `{ profile_id: string }` via `as unknown`). No tests removed because no test ever exercised `getProfile`. The page rehydrates via `listProfiles()` after every mutation, so a single-row fetch is unbounded scope until a real caller appears. |
 | Q04 | duplication      | high     | **Closed 2026-05-10** (release blocker) | [#93](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/93) | `electron/preload.ts:14-40` ↔ `src/types/electron.d.ts:8-34` -- canonical types now in `electron/shared/bridge-types.ts`; both files re-export from that single source. Cross-closes PSR-G07 (#84). |
 | Q05 | complexity       | medium   | Fix-Soon      | [#95](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/95)       | `src/components/profiles/ProfileEditorModal.tsx:50-190` (470 LOC; FormState mirrored 5x)            |
 | Q06 | duplication      | low      | Fix-Backlog (sub-task of Q05) | [#96](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/96)  | `src/components/profiles/ProfileEditorModal.tsx:216-227` (3 browse handlers, only target field differs) |
@@ -205,7 +205,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 
 - High priority: 3 (Q02 upstream-shim, Q04 release blocker, Q12 — Q12 closed 2026-05-10)
 - Medium priority: 5 (Q01, Q05, Q07, Q08, Q10, Q14)
-- Low priority: 4 (Q03, Q06, Q09, Q11 wont-fix-now)
+- Low priority: 4 (Q03 closed 2026-05-10, Q06, Q09, Q11 wont-fix-now)
 - Wont-fix (correct as-is): 1 (Q13)
 - Total filed in geode-ui: 12 issues + 1 upstream genapi issue. Q13 not filed.
 
