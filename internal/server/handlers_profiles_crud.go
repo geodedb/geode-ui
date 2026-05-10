@@ -253,6 +253,11 @@ func canMutate(p conn.Profile, a actor, isAdmin bool) bool {
 // (the wire is always materialised on creation). PatchProfileid uses
 // tlsPatchFromGenJSON, which preserves the absent / present-empty
 // distinction required by PSR-G02.
+//
+// GAP-S10 (#123): each non-empty PEM field is validated via validatePEM
+// (pemvalidate.go) before being returned. Empty strings continue to
+// flow through unchanged so the "clear all TLS material" PATCH path
+// (PSR-G02) keeps working. Caps each field at 64 KiB.
 func tlsFromGenJSON(raw jsontext.Value) (conn.TLSMaterial, error) {
 	if len(raw) == 0 {
 		return conn.TLSMaterial{}, nil
@@ -264,6 +269,9 @@ func tlsFromGenJSON(raw jsontext.Value) (conn.TLSMaterial, error) {
 	}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return conn.TLSMaterial{}, fmt.Errorf("tls: %w", err)
+	}
+	if err := validateTLSMaterialPEM(wire.CAPEM, wire.ClientCertPEM, wire.ClientKeyPEM); err != nil {
+		return conn.TLSMaterial{}, err
 	}
 	return conn.TLSMaterial{
 		CAPEM:         wire.CAPEM,

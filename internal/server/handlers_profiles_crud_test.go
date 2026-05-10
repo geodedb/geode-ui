@@ -1072,3 +1072,137 @@ func (s *patchErrStore) Patch(_ context.Context, _ string, _ profilestore.Profil
 }
 func (s *patchErrStore) Delete(_ context.Context, _ string) error { return nil }
 func (s *patchErrStore) Close() error                             { return nil }
+
+// TestPostProfiles_RejectsGarbagePEM pins GAP-S10 (#123) at the handler
+// boundary: a CREATE request whose tls.ca_pem carries a non-PEM string
+// must be rejected with 400 invalid_tls before anything reaches the
+// store. Pre-fix the garbage payload persisted into the SQLite store
+// and only failed at connection-establishment time.
+func TestPostProfiles_RejectsGarbagePEM(t *testing.T) {
+	srv, _ := newTestServerWithStore(t)
+	r := reqWithActor("POST", "/api/v1/profiles", "alice")
+	w := httptest.NewRecorder()
+	_, _ = srv.PostProfiles(w, r, &gentypes.CreateProfileReq{
+		Scope: string(conn.ProfileScopePersonal),
+		Name:  "p1",
+		Dsn:   "quic://x:1",
+		TLS:   jsontext.Value(`{"ca_pem":"not a pem"}`),
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid_tls") {
+		t.Errorf("body = %q, want code invalid_tls", w.Body.String())
+	}
+}
+
+// TestPostProfiles_AcceptsValidPEM is the positive-path companion of
+// TestPostProfiles_RejectsGarbagePEM: a CREATE carrying valid CA + cert
+// + key PEM must persist cleanly.
+func TestPostProfiles_AcceptsValidPEM(t *testing.T) {
+	srv, _ := newTestServerWithStore(t)
+	ca := genTestCAPEM(t)
+	cert := genTestClientCertPEM(t)
+	key := genTestPKCS8KeyPEM(t)
+	tlsJSON := `{"ca_pem":` + jsonString(ca) +
+		`,"client_cert_pem":` + jsonString(cert) +
+		`,"client_key_pem":` + jsonString(key) + `}`
+	r := reqWithActor("POST", "/api/v1/profiles", "alice")
+	w := httptest.NewRecorder()
+	got, err := srv.PostProfiles(w, r, &gentypes.CreateProfileReq{
+		Scope: string(conn.ProfileScopePersonal),
+		Name:  "p1",
+		Dsn:   "quic://x:1",
+		TLS:   jsontext.Value(tlsJSON),
+	})
+	if err != nil || got == nil {
+		t.Fatalf("PostProfiles: got=%v err=%v body=%s", got, err, w.Body.String())
+	}
+}
+
+// TestPatchProfileid_RejectsGarbagePEM confirms PATCH inherits the
+// validation through tlsPatchFromGenJSON.
+func TestPatchProfileid_RejectsGarbagePEM(t *testing.T) {
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+	})
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	_, _ = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		TLS: jsontext.Value(`{"ca_pem":"definitely not pem"}`),
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid_tls") {
+		t.Errorf("body = %q, want code invalid_tls", w.Body.String())
+	}
+}
+
+// TestPatchProfileid_TLSClearViaEmptyObject_StillWorks re-affirms the
+// PSR-G02 contract under the S10 hardening: an empty `tls: {}` (the
+// "clear all" signal) is NOT validated as a PEM block; it persists
+// the all-empty material on the store.
+func TestPatchProfileid_TLSClearViaEmptyObject_StillWorks(t *testing.T) {
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+		TLS: conn.TLSMaterial{CAPEM: "ca", ClientCertPEM: "cert", ClientKeyPEM: "key"},
+	})
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	w := httptest.NewRecorder()
+	got, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
+		TLS: jsontext.Value(`{}`),
+	})
+	if err != nil || got == nil {
+		t.Fatalf("PatchProfileid clear: got=%v err=%v code=%d body=%s", got, err, w.Code, w.Body.String())
+	}
+	persisted, _ := st.Get(context.Background(), saved.ID)
+	if persisted.TLS.CAPEM != "" || persisted.TLS.ClientCertPEM != "" || persisted.TLS.ClientKeyPEM != "" {
+		t.Errorf("clear-via-empty-object did not actually clear: %+v", persisted.TLS)
+	}
+}
+
+// jsonString returns the JSON-encoded form of s as a Go string. We use
+// it to splice multi-line PEM payloads (with embedded \n) into the
+// jsontext.Value literal without manual escape-handling. Test helper.
+func jsonString(s string) string {
+	// Use the Go standard encoder via fmt.Sprintf("%q", ...) which
+	// produces JSON-compatible escapes for ", \, control chars, and
+	// embedded newlines (\n). Matches encoding/json output for ASCII
+	// with embedded newlines, which is all PEM material is.
+	return goQuote(s)
+}
+
+// goQuote escapes s as a JSON string literal. Implemented by hand so
+// we don't have to import encoding/json/v2 just for tests; the inputs
+// are small ASCII PEM blobs with newlines.
+func goQuote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
