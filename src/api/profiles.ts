@@ -82,11 +82,69 @@ function parsePoolOverrides(raw: unknown): PoolOverrides | undefined {
   }
 }
 
+// WireProfile mirrors the server's Profile shape (see
+// gen/types/types.gen.go:614 `type Profile struct`). All scalar fields
+// are present on the wire (the server emits zero values rather than
+// omitting keys), so they are typed required-but-possibly-empty.
+// `tls` and `pool_overrides` arrive as either a nested JSON object
+// (current server output) or a JSON-encoded string (legacy / test
+// form); typed `unknown` here so `parseTls` / `parsePoolOverrides`
+// own the narrowing.
+//
+// IMPORTANT: this type is the SPA's view of the wire contract, not a
+// re-export of the genapi Go struct. If `gen/types/types.gen.go`'s
+// Profile shape changes, this type and `fromWireProfile` below must
+// move with it. Keeping it co-located with `fromWireProfile` avoids
+// the indirection of a separate types file for one consumer.
+export type WireProfile = {
+  id?: string
+  scope?: string
+  owner_user_id?: string
+  name?: string
+  dsn?: string
+  description?: string
+  saved_username?: string
+  is_default?: boolean
+  tls?: unknown
+  pool_overrides?: unknown
+}
+
+// isWireProfile narrows an unknown value to WireProfile.
+//
+// The narrowing is intentionally permissive on the scalar fields --
+// the server already gates the schema; this guard's job is to fail
+// closed on shapes that aren't even objects (null, arrays, strings,
+// numbers, undefined). Once we're inside an object, every field is
+// optional on the wire (the genapi-emitted struct emits zero values
+// silently) so the narrowing accepts a partial shape and lets
+// `fromWireProfile` apply the per-field defaults.
+//
+// Closes the same parser-fail-closed contract that the server-side
+// PEM validator (GAP-S10) enforces in the other direction.
+export function isWireProfile(x: unknown): x is WireProfile {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
 // fromWireProfile parses the server's Profile shape into the SPA's typed
 // ProfileView. tls and pool_overrides are accepted as either a nested JSON
 // object (current server output) or a JSON-encoded string (legacy/test
 // form), so the two sides can be deployed independently.
-export function fromWireProfile(wire: any): ProfileView {
+//
+// Closes GAP-Q1 (#89): the parameter is typed `unknown`, narrowed via
+// `isWireProfile`. A non-object input (null, array, string, number,
+// undefined) returns the SPA's all-empty default ProfileView rather
+// than crashing on `wire.id` indirection. The previous `any` type
+// silently swallowed shape errors at the type layer; `unknown` forces
+// every consumer through the narrowing guard.
+export function fromWireProfile(wire: unknown): ProfileView {
+  if (!isWireProfile(wire)) {
+    return {
+      id: '',
+      scope: 'system',
+      name: '',
+      isDefault: false,
+    }
+  }
   return {
     id: wire.id ?? '',
     scope: (wire.scope ?? 'system') as Scope,
@@ -185,7 +243,12 @@ export function toWireUpdateRequest(
 
 export async function listProfiles(): Promise<ProfileView[]> {
   const r = await client.getProfiles({})
-  return ((r.profiles ?? []) as unknown[]).map((p) => fromWireProfile(p as any))
+  // GAP-Q1 (#89): fromWireProfile now accepts `unknown` and narrows
+  // internally via isWireProfile, so the `as any` cast is gone. The
+  // surrounding `as unknown[]` cast persists because the genapi client
+  // types `r.profiles` as the legacy WireProfile-shaped struct (Q2 /
+  // genapi#216 will let us drop it once the upstream TS templates land).
+  return ((r.profiles ?? []) as unknown[]).map((p) => fromWireProfile(p))
 }
 
 // NOTE: the genapi TS client extracts the path-token name from the

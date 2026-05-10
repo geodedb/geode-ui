@@ -1,5 +1,6 @@
 import {
   fromWireProfile,
+  isWireProfile,
   toWireCreateRequest,
   toWireUpdateRequest,
 } from './profiles'
@@ -149,4 +150,42 @@ test('toWireUpdateRequest distinguishes absent vs explicit empty for saved_usern
   const cleared = toWireUpdateRequest({ savedUsername: '', dsn: '' })
   expect(cleared.saved_username).toBe('')
   expect(cleared.dsn).toBe('')
+})
+
+// GAP-Q1 (#89): fromWireProfile previously accepted `wire: any`, which
+// silently swallowed shape errors at the type layer; a non-object input
+// would crash on `wire.id` indirection. The post-fix signature is
+// `(wire: unknown)` with an internal `isWireProfile` narrowing guard.
+// Non-object inputs return the SPA's all-empty default ProfileView so
+// downstream consumers see a stable shape rather than a runtime throw.
+test('isWireProfile rejects non-object inputs', () => {
+  expect(isWireProfile(null)).toBe(false)
+  expect(isWireProfile(undefined)).toBe(false)
+  expect(isWireProfile('a string')).toBe(false)
+  expect(isWireProfile(42)).toBe(false)
+  expect(isWireProfile(true)).toBe(false)
+  expect(isWireProfile([])).toBe(false)
+  expect(isWireProfile([{ id: 'x' }])).toBe(false)
+})
+
+test('isWireProfile accepts plain objects (including empty)', () => {
+  expect(isWireProfile({})).toBe(true)
+  expect(isWireProfile({ id: 'x' })).toBe(true)
+})
+
+test('fromWireProfile returns safe default ProfileView on non-object input', () => {
+  // null / undefined / array / scalar should NOT crash; they should
+  // produce the all-empty default shape so downstream consumers see
+  // a stable ProfileView. ESLint forbids `for...of` here so we iterate
+  // via .forEach.
+  const bads: unknown[] = [null, undefined, 'a string', 42, true, []]
+  bads.forEach((bad) => {
+    const got = fromWireProfile(bad)
+    expect(got.id).toBe('')
+    expect(got.scope).toBe('system')
+    expect(got.name).toBe('')
+    expect(got.isDefault).toBe(false)
+    expect(got.tls).toBeUndefined()
+    expect(got.poolOverrides).toBeUndefined()
+  })
 })
