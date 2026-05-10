@@ -23,9 +23,18 @@ const Trigger = styled.button`
   }
 `
 
+// The switcher trigger sits on the LEFT side of the header (right after
+// the brand logo, before the desktop nav). Anchoring the menu's left
+// edge to the trigger's left edge keeps it on-screen across viewports;
+// the previous right-anchor meant the menu extended leftward off the
+// viewport on every screen size (overflow-left ~17 px desktop, ~33 px
+// mobile). max-height + overflow-y keeps the menu scrollable when the
+// user has many connections instead of stretching past the viewport
+// bottom. max-width caps a pathologically long profile name from
+// pushing the menu past the right edge in narrow viewports.
 const Menu = styled.ul`
   position: absolute;
-  right: 0;
+  left: 0;
   top: 100%;
   margin: 4px 0 0 0;
   padding: ${({ theme }) => theme.spacing.xs};
@@ -34,6 +43,9 @@ const Menu = styled.ul`
   border-radius: ${({ theme }) => theme.radii.md};
   list-style: none;
   min-width: 220px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
   box-shadow: ${({ theme }) => theme.shadows.md};
   z-index: 50;
 `
