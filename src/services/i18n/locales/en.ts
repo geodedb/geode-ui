@@ -62,6 +62,11 @@ export const en = {
     password: 'Password',
     loginFailed: 'login failed',
     savePassword: 'Save password for this profile',
+    // PSR-F14 (#111): explicit opt-in to fetching a previously saved
+    // password from the secure store. Pre-fix the renderer auto-fired
+    // getStoredPassword on every keystroke; the gate avoids that
+    // implicit safeStorage.decrypt round-trip.
+    useSavedPassword: 'Use saved password',
   },
 
   query: {

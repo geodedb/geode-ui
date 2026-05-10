@@ -131,3 +131,140 @@ test('add triggers storeConnections via the bridge', () => {
     ])
   )
 })
+
+// ---------------------------------------------------------------------------
+// PSR-F9 (#106) — persist useEffect IPC chattiness.
+//
+// Pre-fix the persist effect's dep array was `[state.byId]`, but the
+// reducer creates a new Map on every dispatch — including no-op
+// transitions like a redundant `setActive` to the same id. That caused
+// the effect to fire on every reducer tick, sending a fresh IPC down to
+// the secure store (which then triple-passes the encrypt + atomic
+// rename per fire). The fix is a `version: number` that only bumps when
+// the persisted shape actually changes.
+// ---------------------------------------------------------------------------
+
+test('PSR-F9: a single add fires storeConnections exactly once', () => {
+  render(
+    <ConnectionsProvider>
+      <Inner />
+    </ConnectionsProvider>
+  )
+  // The provider mount runs the persist effect once with the empty
+  // initial state. Clear so we can isolate the post-add fire count.
+  mockStore.mockClear()
+  act(() => screen.getByTestId('add').click())
+  expect(mockStore).toHaveBeenCalledTimes(1)
+})
+
+test('PSR-F9: setActive that does not change the active id is a no-op (no extra IPC)', () => {
+  render(
+    <ConnectionsProvider>
+      <Inner />
+    </ConnectionsProvider>
+  )
+  act(() => screen.getByTestId('add').click())
+  // First add auto-activates c1; clear after that so we measure only
+  // the no-op setActive that follows.
+  mockStore.mockClear()
+  // Re-issue setActive('c1') — same id, no real state change. Pre-fix
+  // this still produced a new Map identity on `byId`, firing the
+  // persist effect a second time. Post-fix the version doesn't bump.
+  act(() => screen.getByTestId('setactive-c1').click())
+  expect(mockStore).not.toHaveBeenCalled()
+})
+
+test('PSR-F9: re-adding the same connection identity does not re-fire IPC', () => {
+  // Pre-fix the reducer cloned `byId` on every dispatch and `set`
+  // overwrote with the same value, producing a new Map identity that
+  // re-tripped the `[state.byId]` dep array. Post-fix the reducer
+  // detects the no-op and skips the version bump.
+  const FixedAdder: React.FC = () => {
+    const { add } = useConnections()
+    const handle = () =>
+      add({
+        connectionId: 'fixed',
+        token: 'tok-fixed',
+        profileName: 'default',
+        expiresAt: 1700000000000, // fixed so two clicks compare equal
+      })
+    return (
+      <button data-testid="add-fixed" aria-label="add-fixed" onClick={handle} />
+    )
+  }
+  render(
+    <ConnectionsProvider>
+      <FixedAdder />
+    </ConnectionsProvider>
+  )
+  act(() => screen.getByTestId('add-fixed').click())
+  mockStore.mockClear()
+  // Same connectionId, same token, same expiresAt → no real change.
+  act(() => screen.getByTestId('add-fixed').click())
+  expect(mockStore).not.toHaveBeenCalled()
+})
+
+test('PSR-F9: removing a connection that does not exist is a no-op (no IPC)', () => {
+  render(
+    <ConnectionsProvider>
+      <Inner />
+    </ConnectionsProvider>
+  )
+  // Provider mount fires once with the empty initial state; reset.
+  mockStore.mockClear()
+  // Remove a non-existent id — pre-fix this still cloned `byId` and
+  // re-fired the persist effect. Post-fix: no version bump, no IPC.
+  act(() => screen.getByTestId('remove-c1').click())
+  expect(mockStore).not.toHaveBeenCalled()
+})
+
+test('PSR-F9: 5 sequential adds fire 5 IPCs, one per real change', () => {
+  const Multi: React.FC = () => {
+    const { add } = useConnections()
+    const handle = (i: number) => () =>
+      add({
+        connectionId: `c${i}`,
+        token: `t${i}`,
+        profileName: 'p',
+        expiresAt: Date.now() + 60_000,
+      })
+    return (
+      <div>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <button
+            key={i}
+            data-testid={`add-${i}`}
+            aria-label={`add-${i}`}
+            onClick={handle(i)}
+          />
+        ))}
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider>
+      <Multi />
+    </ConnectionsProvider>
+  )
+  mockStore.mockClear()
+  act(() => screen.getByTestId('add-0').click())
+  act(() => screen.getByTestId('add-1').click())
+  act(() => screen.getByTestId('add-2').click())
+  act(() => screen.getByTestId('add-3').click())
+  act(() => screen.getByTestId('add-4').click())
+  // Each add bumps the version; the secure-store layer (PSR-F6) is
+  // responsible for coalescing the resulting writes.
+  expect(mockStore).toHaveBeenCalledTimes(5)
+})
+
+test('PSR-F9: remove that actually deletes a connection bumps version (one IPC)', () => {
+  render(
+    <ConnectionsProvider>
+      <Inner />
+    </ConnectionsProvider>
+  )
+  act(() => screen.getByTestId('add').click())
+  mockStore.mockClear()
+  act(() => screen.getByTestId('remove-c1').click())
+  expect(mockStore).toHaveBeenCalledTimes(1)
+})

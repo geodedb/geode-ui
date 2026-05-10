@@ -427,3 +427,29 @@ void app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+// PSR-F6 (#92): drain any pending debounced secure-store writes before
+// the process exits. Without this hook, a user who quits inside the
+// 250ms coalescing window would lose freshly minted JWTs from the
+// connection switcher (or saved passwords from a sign-in burst). The
+// store only has work to do if it was lazily initialised, so we guard
+// on `_store` to avoid forcing a cold-start decrypt on quit.
+app.on('before-quit', (event) => {
+  if (!_store) return
+  // before-quit fires synchronously; flushSync is a Promise but we
+  // can't `await` here without tearing the event semantics. The store's
+  // own writeChain serialises file ops, so we kick the flush and let
+  // electron's quit-deferral keep the process alive long enough for
+  // the rename to finish (well under the OS-imposed quit timeout).
+  event.preventDefault()
+  _store
+    .flushSync()
+    .catch(() => {
+      // Persistence failure here is best-effort; the user already
+      // asked to quit and there's no UI surface to surface this on.
+    })
+    .finally(() => {
+      // Re-enter the quit path once the disk image is consistent.
+      app.exit(0)
+    })
+})
