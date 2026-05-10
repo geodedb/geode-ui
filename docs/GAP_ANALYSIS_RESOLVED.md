@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-07
+- **Last updated:** 2026-05-10
 - **Sibling docs:** [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) (open requirement gaps), [PERF_GAP_ANALYSIS.md](./PERF_GAP_ANALYSIS.md), [QUALITY_GAP_ANALYSIS.md](./QUALITY_GAP_ANALYSIS.md), [SECURITY_GAP_ANALYSIS.md](./SECURITY_GAP_ANALYSIS.md)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors closed issues across the perf / quality / security tracking files.
 
@@ -186,6 +186,144 @@ Verifier returned ALL CLEAR; tracking docs and platform issues were updated toge
 
 ---
 
+### 2026-05-10 closure run -- PSR top-13 batch (13 distinct issues, 9 commits)
+
+Verifier returned SAFE-TO-CLOSE for all 9 commits. Three Security (1 cross-close), three Performance (epic + 2 standalone), four Quality (1 cross-close), three Gap (1 partial). One follow-up issue (#124) opened for the deferred PSR-G02 scalar-clear genapi work.
+
+#### Security (3)
+
+##### S1 (#114): Electron will-navigate openExternal allowlist [RESOLVED]
+
+- **Issue:** [#114](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/114) (closed)
+- **Domain:** Security
+- **Severity at close:** High (Risk 30, release blocker)
+- **Closure commit(s):** `debbeb3`
+- **Resolution:** New `safeOpenExternal` helper in `electron/lib/safety.ts` funnels both `setWindowOpenHandler` and `will-navigate` through `isAllowedExternal` before `shell.openExternal`.
+- **Evidence:** `electron/main.ts:303-308`; 25 new tests in `__tests__/electron-safety.test.ts`.
+- **Resolved date:** 2026-05-10
+
+##### S2 (#115): E2E backdoor stripped from production bundles [RESOLVED]
+
+- **Issue:** [#115](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/115) (closed)
+- **Domain:** Security
+- **Severity at close:** High (Risk 22, release blocker)
+- **Closure commit(s):** `8e8406d`
+- **Resolution:** Webpack `DefinePlugin` substitutes `__E2E_ENABLED__` -> `false` in releases; Terser dead-code-eliminates the wrapped block in `src/index.tsx:33-41`. E2E variant Dockerfile sets `GEODE_E2E_BUILD=true`; release Dockerfiles deliberately omit it.
+- **Evidence:** `grep GEODE_E2E_INITIAL_CONNECTIONS internal/ui/dist/main.*.js` -> 0 hits in release, 1 hit in e2e build. `src/__tests__/index-e2e-flag.test.tsx`.
+- **Resolved date:** 2026-05-10
+
+##### S6 (#119): Profile CRUD audit events with PEM/DSN redaction [RESOLVED, cross-closes PSR-G01]
+
+- **Issue:** [#119](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/119) (closed)
+- **Domain:** Security
+- **Severity at close:** Medium (Risk 17, release blocker)
+- **Closure commit(s):** `5d2fcff`
+- **Resolution:** POST/PATCH/DELETE handlers emit `profile_created` / `profile_updated` / `profile_deleted` events. `internal/server/audit.go` redaction substring list extended with `dsn`, `pem`, `ca_pem`, `cert_pem`, `key_pem`, `tls_*_pem` (defense-in-depth).
+- **Evidence:** `internal/server/handlers_profiles_crud.go:24,134,205`; `TestPostProfiles_EmitsAuditEvent`, `TestPatchProfileid_EmitsAuditEvent`, `TestDeleteProfileid_EmitsAuditEvent`, `TestEmitAudit_RedactsProfileStoreSecrets`, extended `TestIsSensitive`. internal/server coverage 70.4% -> 71.9%.
+- **Cross-closes:** PSR-G01 (#78) -- duplicate framing; PSR-G08 (#85) audit-emission half.
+- **Resolved date:** 2026-05-10
+
+#### Performance (3)
+
+##### F1 (#94): async single-flight maybeReload off the request critical path [RESOLVED]
+
+- **Issue:** [#94](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/94) (closed)
+- **Domain:** Performance
+- **Severity at close:** PerfScore +8
+- **Closure commit(s):** `d822bc0`
+- **Resolution:** `maybeReload` now spawns reload in a goroutine; `singleflight.Group` coalesces concurrent triggers (1-2 Reloads per N triggers).
+- **Evidence:** `internal/server/handlers_profiles_crud.go:401-490`, `internal/server/server.go:99-145`. Bench: POST 7.58 ms -> 0.23 ms (-97%); PATCH 7.17 ms -> 0.58 ms (-92%). `profile_reload_failed` audit preserved.
+- **Resolved date:** 2026-05-10
+
+##### F2 (#97): atomic Patch transaction; drop redundant mutex [RESOLVED]
+
+- **Issue:** [#97](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/97) (closed)
+- **Domain:** Performance + Correctness
+- **Severity at close:** Correctness (perf bonus)
+- **Closure commit(s):** `fb922fd`
+- **Resolution:** `Patch` wraps Get + UPDATE in a single `sql.Tx`; redundant `sync.Mutex` removed (SetMaxOpenConns(1) already serializes); `RowsAffected==0` surfaces `ErrNotFound`.
+- **Evidence:** `internal/profilestore/sqlite.go:163-263`. -race -cover green. internal/profilestore coverage 75.6% -> 78.6%.
+- **Resolved date:** 2026-05-10
+
+##### F6+F9+F13+F14 (#92, #106, #110, #111): secure-store coalescing epic [RESOLVED]
+
+- **Issues:** [#92](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/92), [#106](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/106), [#110](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/110), [#111](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/111) (all closed)
+- **Domain:** Performance
+- **Severity at close:** PerfScore +10/+9/+8/+9 (epic)
+- **Closure commit(s):** `4fea9c2` (single MR -- all 4 issues)
+- **Resolution (joint):**
+  - **F6:** `electron/lib/secure-store.ts` -- in-process memo + 250ms debounced flush + `flushSync` on `app.before-quit`.
+  - **F9:** `src/api/connections.tsx` -- reducer carries `version: number`; persist effect deps on `[state.version]`; reducer only bumps on real shape changes.
+  - **F13:** `src/components/layout/AddConnectionModal.tsx` -- four modal-open `useEffect`s collapsed; `Promise.all` batch.
+  - **F14:** Saved-password lookup gated behind "Use saved password" toggle; 300ms debounce; renderer-local `(profile,username)->pw` cache; reset on modal close.
+- **Evidence (representative reductions):**
+  - Modal-open + 5-keystroke (toggle OFF): 5 IPCs -> 0 IPCs.
+  - Modal-open + 5-keystroke (toggle ON, no cache hit): 5 decrypts + 5 reads -> 1 decrypt at end of debounce.
+  - 5 sequential `add` dispatches: 5 encrypts + 5 atomic renames -> 1 encrypt + 1 atomic rename.
+  - Reducer no-op transitions: N IPCs -> 0 IPCs.
+- **Resolved date:** 2026-05-10
+
+#### Quality (1)
+
+##### Q4 (#93): Single-source GeodeBridge types in shared module [RESOLVED, cross-closes PSR-G07]
+
+- **Issue:** [#93](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/93) (closed)
+- **Domain:** Quality
+- **Severity at close:** High (PriorityScore -- release blocker)
+- **Closure commit(s):** `fc44a6b`
+- **Resolution:** New `electron/shared/bridge-types.ts` is the single source of truth; `electron/preload.ts` and `src/types/electron.d.ts` both `import type` from it.
+- **Evidence:** `__tests__/electron-bridge-types.test.ts` mutually assigns the two type aliases as a compile-time drift guard.
+- **Cross-closes:** PSR-G07 (#84) -- duplicate framing.
+- **Resolved date:** 2026-05-10
+
+#### Gap (3)
+
+##### PSR-G01 (#78): Profile CRUD audit emission [RESOLVED, cross-closed]
+
+- **Issue:** [#78](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/78) (closed)
+- **Closure commit(s):** `5d2fcff` (same commit as S6 / #119)
+- **Resolution:** See S6 (#119).
+- **Resolved date:** 2026-05-10
+
+##### PSR-G03 (#80): Refresh CSRF after connectMore [RESOLVED]
+
+- **Issue:** [#80](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/80) (closed)
+- **Domain:** Gap (release blocker)
+- **Closure commit(s):** `6b4d2ba`
+- **Resolution:** `connectMore` now `await refreshCsrfToken()` immediately after `apiLogin`, mirroring `signIn`.
+- **Evidence:** `src/auth/AuthProvider.tsx:135-159`; new jest case `PSR-G03: connectMore refreshes the CSRF token after apiLogin`.
+- **Resolved date:** 2026-05-10
+
+##### PSR-G07 (#84): GeodeBridge type single-source [RESOLVED, cross-closed]
+
+- **Issue:** [#84](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/84) (closed)
+- **Closure commit(s):** `fc44a6b` (same commit as Q4 / #93)
+- **Resolution:** See Q4 (#93).
+- **Resolved date:** 2026-05-10
+
+##### PSR-G08 (#85): Audit on reload failure [RESOLVED, both halves]
+
+- **Issue:** [#85](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/85) (closed)
+- **Closure commit(s):** `5d2fcff` (audit emission), `d822bc0` (5xx-on-required-reload supplanted by F1 design)
+- **Resolution:** `maybeReload` emits `profile_reload_failed` audit events with `actor` / `phase` / `error` keys. The original 5xx-on-required-reload escalation is structurally moot now that F1 redesigned reload as async + single-flight: there is no synchronous result on which to escalate, and operator visibility comes from the audit event + slog warning.
+- **Evidence:** `TestMaybeReload_EmitsAuditOnReloadFailure`.
+- **Resolved date:** 2026-05-10
+
+#### Partial closures (recorded for cross-reference; follow-up open)
+
+##### PSR-G02 (#79): mergeProfile clear semantics [PARTIAL]
+
+- **Issue:** [#79](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/79) (closed; release-blocker portion shipped)
+- **Domain:** Gap (release blocker)
+- **Closure commit(s):** `97b8ed4`
+- **What this commit closes:** Pointer-typed optionals on `profilestore.ProfilePatch`; `mergeProfile` rewritten to apply only non-nil fields; `&TLSMaterial{}` clears all PEM material; `&PoolOverrides{}` zeroes every override; SPA wire builders emit `tls: {}` / `pool_overrides: {}` for defined-but-empty inputs.
+- **Evidence:** `internal/profilestore/store.go:18-49`, `sqlite.go:218-256`, `handlers_profiles_crud.go:165-310`, `src/api/profiles.ts:104-148`. `TestSQLitePatchClearsTLS`, `TestPatchProfileid_TLSClearViaEmptyObject`, `TestPatchProfileid_PoolOverridesClearViaEmptyObject`, `TestMergeProfile_OnlyAppliesNonNilFields` + 4 SPA cases.
+- **Deferred (scalar-clear):** Clearing `description` / `saved_username` / `dsn` via PATCH requires genapi schema work (`*string` / `*bool` for nullable scalars) per the repo's never-edit-`gen/` rule. KNOWN-DEFERRED comment at `internal/server/handlers_profiles_crud.go:337`. Tracked at **#124** -- *[PSR-G02-followup] genapi schema: emit `*string` / `*bool` for nullable PATCH scalars*.
+- **Resolved date:** 2026-05-10 (release-blocker half)
+
+---
+
 ## Index by closure date
 
 - **2026-05-07:** #18, #21, #26, #27, #29, #32, #43, #53, #55, #58, #60, #62, #65 (cross-closed). Genapi follow-ups: `genapi#214`, `genapi#215`. #66 partially closed (open).
+- **2026-05-10 (PSR top-13):** #78, #79 (partial), #80, #84, #85, #92, #93, #94, #97, #106, #110, #111, #114, #115, #119. Follow-up opened: #124. Total: 9 commits, 13 + 2 (#114/#115 batched) issues fully closed, 1 partial.
