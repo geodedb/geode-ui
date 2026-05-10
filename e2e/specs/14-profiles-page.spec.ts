@@ -121,4 +121,40 @@ test.describe('profiles page', () => {
       if (!stillExists) await deleteProfileViaApi(request, authToken, seeded.id)
     }
   })
+
+  test('set-as-default promotes a non-default personal profile', async ({
+    authedPage: page,
+    authToken,
+    request,
+  }) => {
+    // Two personal profiles in the same scope/owner so the page's
+    // setAsDefault dance has a peer to demote.
+    const a = await createProfileViaApi(request, authToken, {
+      name: makeProfileName('default-a'),
+      is_default: true,
+    })
+    const b = await createProfileViaApi(request, authToken, {
+      name: makeProfileName('default-b'),
+      is_default: false,
+    })
+
+    try {
+      await page.goto('/profiles')
+      await expect(sel.profilesNameCell(page, b.name)).toBeVisible()
+
+      await sel.profilesSetDefaultBtn(page, b.name).click()
+
+      // After the dance: row B carries the "Default" badge.
+      const rowB = page.getByRole('row', { name: new RegExp(b.name) })
+      await expect(rowB.getByText('Default', { exact: true })).toBeVisible({
+        timeout: 5000,
+      })
+
+      // The error banner must NOT appear on the happy path.
+      await expect(sel.profilesSetDefaultError(page)).toHaveCount(0)
+    } finally {
+      await deleteProfileViaApi(request, authToken, a.id)
+      await deleteProfileViaApi(request, authToken, b.id)
+    }
+  })
 })
