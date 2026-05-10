@@ -39,6 +39,12 @@ const ALLOW_FILES = [
   path.join(ROOT, 'components', 'results', 'cytoscapeStyle.ts'),
   // Self-hosted webfont CSS — declares woff2 sources, not colors.
   path.join(ROOT, 'assets', 'fonts', 'fonts.css'),
+  // PSR-G06 (#83): the FatalBootstrapError panel renders BEFORE any
+  // ThemeProvider has been mounted (and is the surface shown when the
+  // theme module itself fails to load). It deliberately uses a hard-
+  // coded neutral palette so the failure UI cannot itself depend on
+  // the bootstrap path it is trying to recover from.
+  path.join(ROOT, 'components', 'FatalBootstrapError.tsx'),
 ]
 
 const HEX = /#[0-9a-fA-F]{3,8}\b/

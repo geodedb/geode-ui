@@ -4,6 +4,7 @@ import './monaco-bootstrap'
 import './assets/fonts/fonts.css'
 import App from './App'
 import type { ConnectionState } from './api/connections'
+import { FatalBootstrapError } from './components/FatalBootstrapError'
 
 // PSR-F16 (#113): the SPA used to await getStoredConnections() before
 // calling createRoot, which serialised safeStorage init + the secure-
@@ -16,7 +17,11 @@ import type { ConnectionState } from './api/connections'
 // E2E backdoor still injects its seed list eagerly (so the addInitScript
 // data is observable on first render) but production users see paint
 // happen as soon as React, the bundle, and the GlobalStyle are ready.
-function bootstrap(): void {
+// PSR-G06 (#83): bootstrap is exported so the regression test can drive
+// it directly with a mocked DOM and a forced rejection inside the
+// react-dom render path. The IIFE below is the production entrypoint;
+// the export itself is harmless to bundle (it is just a symbol).
+export function bootstrap(): void {
   const container = document.getElementById('root')
   if (!container) throw new Error('Root element not found')
 
@@ -56,8 +61,40 @@ function bootstrap(): void {
   )
 }
 
-try {
-  bootstrap()
-} catch {
-  // bootstrap failures are unrecoverable; the blank page is the signal
+// PSR-G06 (#83): renderFatal mounts the FatalBootstrapError panel into
+// whichever container we can find. Pre-fix the catch swallowed the
+// error and the user got a blank page with an empty console; the
+// post-fix path:
+//   1. Logs the error via console.error so devtools / Sentry / Playwright
+//      / electron-log can pick it up.
+//   2. Tries to render the FatalBootstrapError panel into #root.
+//   3. If #root itself is missing (the most-common cause), falls back
+//      to <body> so the user sees something useful even when the SPA
+//      shell is broken.
+//   4. If even THAT fails (jsdom without document.body, etc.), the
+//      console.error remains the surviving signal.
+export function renderFatal(error: unknown): void {
+  // The console.error is the primary signal for any monitoring layer;
+  // do it first so a downstream throw can't suppress it.
+  // eslint-disable-next-line no-console
+  console.error('[geode-ui] bootstrap failed:', error)
+  try {
+    const target = document.getElementById('root') ?? document.body ?? null
+    if (!target) return
+    const root = createRoot(target)
+    root.render(<FatalBootstrapError error={error} />)
+  } catch {
+    // Best-effort — the console.error above is the surviving signal.
+  }
+}
+
+// Don't run bootstrap when the module is imported by jest (the test
+// drives bootstrap()/renderFatal directly with controlled DOM state).
+// In production the module is loaded once at runtime and the IIFE runs.
+if (typeof process === 'undefined' || process.env.NODE_ENV !== 'test') {
+  try {
+    bootstrap()
+  } catch (err) {
+    renderFatal(err)
+  }
 }
