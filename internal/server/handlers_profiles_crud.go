@@ -392,34 +392,87 @@ func strPtr(s string) *string { return &s }
 // it at package scope.
 func boolPtrLocal(b bool) *bool { return &b }
 
-// maybeReload syncs the in-memory connection pool with the persisted
-// profile set after a successful Store mutation. Errors are logged but
-// not returned: the mutation has been persisted, and a failed reload
-// only delays propagation until the next successful mutation or
-// process restart.
+// reloadSingleFlightKey is the constant key passed to
+// singleflight.Group.Do in reloadAsync. All triggers coalesce on this
+// single key; the Group's internal map ensures only one List+Reload is
+// in flight at a time across the whole process.
+const reloadSingleFlightKey = "profile-reload"
+
+// maybeReload schedules an asynchronous sync of the in-memory
+// connection pool with the persisted profile set. It is a fire-and-
+// forget trigger: the caller (a CRUD handler) is freed from the
+// request critical path immediately and the actual List + Reload runs
+// in a background goroutine.
+//
+// Coalescing (PSR-F1 / #94):
+//   - reloadVersion is bumped on every call. Concurrent triggers all
+//     observe a strictly increasing version.
+//   - The background worker uses singleflight.Group to ensure at most
+//     one List+Reload pair is in flight at a time across the whole
+//     server. A burst of N rapid CRUD writes collapses to 1 (or 2)
+//     underlying Reload calls instead of N.
+//
+// Errors are logged via slog and emitted to the audit ring (the
+// auditEventProfileReloadFail event preserved from PSR-G08); the
+// HTTP response has already been written by the time these surface,
+// so they cannot be returned to the caller. A failed reload only
+// delays propagation until the next successful mutation or process
+// restart.
+//
+// The captured actor for audit purposes is read from ctx BEFORE
+// spawning the goroutine; the request context itself is not used in
+// the background worker because the worker outlives the HTTP request.
 func (s *GraphServer) maybeReload(ctx context.Context) {
 	if s.cfg.PoolReloader == nil || s.cfg.Store == nil {
 		return
 	}
-	all, err := s.cfg.Store.List(ctx, profilestore.Filter{})
-	if err != nil {
-		slog.Warn("profile reload: list failed", "err", err)
-		emitAudit(auditEventProfileReloadFail,
-			"actor", actorFromContext(ctx).Subject,
-			"phase", "list",
-			"error", err.Error(),
-		)
-		return
-	}
-	if len(all) == 0 {
-		return
-	}
-	if err := s.cfg.PoolReloader.Reload(all); err != nil {
-		slog.Warn("profile reload: pool refused new set", "err", err)
-		emitAudit(auditEventProfileReloadFail,
-			"actor", actorFromContext(ctx).Subject,
-			"phase", "reload",
-			"error", err.Error(),
-		)
-	}
+	actorSubject := actorFromContext(ctx).Subject
+	triggeredAt := s.reloadVersion.Add(1)
+	s.reloadInflight.Add(1)
+	go func() {
+		defer s.reloadInflight.Done()
+		s.reloadAsync(actorSubject, triggeredAt)
+	}()
+}
+
+// reloadAsync is the singleflight-coalesced background worker that
+// drives one List+Reload pair. Multiple concurrent invocations with
+// the same key share the same in-flight result; the first goroutine
+// runs the work, the rest wait and return immediately.
+//
+// We use Forget() unconditionally after Do returns so the next trigger
+// (which may have observed a newer reloadVersion) is not deduplicated
+// against the just-completed run. Without Forget, a write that landed
+// while the prior reload was mid-flight could share the same cached
+// result and never actually be applied to the pool.
+func (s *GraphServer) reloadAsync(actorSubject string, _ int64) {
+	_, _, _ = s.reloadGroup.Do(reloadSingleFlightKey, func() (any, error) {
+		// Fresh background context; the originating HTTP request may
+		// have been cancelled by the time we run.
+		ctx := context.Background()
+		all, err := s.cfg.Store.List(ctx, profilestore.Filter{})
+		if err != nil {
+			slog.Warn("profile reload: list failed", "err", err)
+			emitAudit(auditEventProfileReloadFail,
+				"actor", actorSubject,
+				"phase", "list",
+				"error", err.Error(),
+			)
+			return nil, err
+		}
+		if len(all) == 0 {
+			return nil, nil
+		}
+		if err := s.cfg.PoolReloader.Reload(all); err != nil {
+			slog.Warn("profile reload: pool refused new set", "err", err)
+			emitAudit(auditEventProfileReloadFail,
+				"actor", actorSubject,
+				"phase", "reload",
+				"error", err.Error(),
+			)
+			return nil, err
+		}
+		return nil, nil
+	})
+	s.reloadGroup.Forget(reloadSingleFlightKey)
 }

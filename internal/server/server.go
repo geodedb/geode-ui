@@ -4,6 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"sync"
+	"sync/atomic"
+
+	"golang.org/x/sync/singleflight"
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	gentypes "geodedb.com/geode-ui/gen/types"
@@ -96,9 +100,29 @@ type Config struct {
 }
 
 // GraphServer implements gen/api.ServerInterface.
+//
+// Concurrency state used by maybeReload (PSR-F1 / #94):
+//
+//   - reloadGroup coalesces concurrent reload triggers behind a single
+//     in-flight Reload. A burst of CRUD writes that all need the
+//     in-memory pool refreshed collapses to one underlying List+Reload
+//     instead of N back-to-back ones.
+//
+//   - reloadVersion is bumped on every maybeReload trigger. The async
+//     worker captures the version at the moment it acquires the
+//     singleflight slot; if a newer trigger lands while it is mid-flight,
+//     the post-success follow-up re-runs to absorb that newer write set.
+//
+//   - reloadInflight is incremented whenever a goroutine is spawned to
+//     drive an async reload and decremented when it finishes. Tests use
+//     awaitReloadIdle to drain background work before sampling the audit
+//     ring.
 type GraphServer struct {
 	genapi.UnimplementedServer
-	cfg Config
+	cfg            Config
+	reloadGroup    singleflight.Group
+	reloadVersion  atomic.Int64
+	reloadInflight sync.WaitGroup
 }
 
 // New constructs a GraphServer with the given Config.
@@ -107,6 +131,16 @@ func New(cfg Config) *GraphServer {
 		cfg.Version = "dev"
 	}
 	return &GraphServer{cfg: cfg}
+}
+
+// awaitReloadIdle blocks until every async maybeReload spawned by this
+// server has completed. Test-only — production code never needs to
+// observe reload completion (the whole point of F1 is decoupling the
+// HTTP response from reload latency). Exposed lower-camel-case at
+// package scope so same-package tests can call it without leaking it
+// into the public API.
+func (s *GraphServer) awaitReloadIdle() {
+	s.reloadInflight.Wait()
 }
 
 // Healthz returns liveness info. Open route, no auth.

@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +21,17 @@ import (
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
+// silenceSlog redirects slog.Default() to io.Discard for the lifetime
+// of the test/benchmark and restores the prior logger via b.Cleanup.
+// Used by the F1 benchmarks to keep the audit-event INFO lines from
+// dominating the run and skewing the wall-clock measurement.
+func silenceSlog(tb testing.TB) {
+	tb.Helper()
+	prior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	tb.Cleanup(func() { slog.SetDefault(prior) })
+}
+
 // poolReloaderStub is a minimal PoolReloader for tests that need to
 // observe maybeReload's behavior on success/failure.
 type poolReloaderStub struct{ err error }
@@ -24,6 +39,23 @@ type poolReloaderStub struct{ err error }
 func (p poolReloaderStub) Reload(_ []conn.Profile) error { return p.err }
 
 var errStubReloadFailed = errors.New("stub reload failed")
+
+// poolReloaderCounter tracks the number of Reload invocations and
+// optionally blocks each call on a release channel. Used by F1
+// (async + singleflight) tests.
+type poolReloaderCounter struct {
+	calls   atomic.Int64
+	release chan struct{} // optional: when non-nil, every Reload waits on receive before returning
+	err     error
+}
+
+func (p *poolReloaderCounter) Reload(_ []conn.Profile) error {
+	p.calls.Add(1)
+	if p.release != nil {
+		<-p.release
+	}
+	return p.err
+}
 
 // newTestServerWithStore builds a GraphServer wired to an in-memory
 // profilestore. The legacy Profiles lookup is left nil; only Store
@@ -310,6 +342,9 @@ func TestMaybeReload_EmitsAuditOnReloadFailure(t *testing.T) {
 	})
 	srv.cfg.PoolReloader = poolReloaderStub{err: errStubReloadFailed}
 	srv.maybeReload(context.WithValue(context.Background(), userCtxKey, "alice"))
+	// Post-F1 maybeReload spawns the work in a goroutine; wait for it
+	// to drain before sampling the audit ring.
+	srv.awaitReloadIdle()
 	failed := false
 	for _, e := range defaultAuditRing.snapshot(time.Time{}) {
 		if e.Event == "profile_reload_failed" {
@@ -472,4 +507,232 @@ func TestGetProfileid_MuxPathBinding_CamelCaseToken(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET /api/v1/profiles/%s: status=%d, want 404", fakeID, resp.StatusCode)
 	}
+}
+
+// TestPostProfiles_ReturnsBeforeReloadCompletes pins PSR-F1 (#94):
+// PostProfiles must return to the client without waiting for the
+// PoolReloader to finish. Pre-fix maybeReload was a synchronous call
+// in the handler critical path, so a slow Reload (cold pool warm-up,
+// upstream Geode handshake, etc.) blocked the HTTP response until it
+// returned.
+//
+// We block the stub PoolReloader on a release channel and assert
+// PostProfiles returns within a short timeout. If the handler is
+// still synchronous, this will deadlock and time out.
+func TestPostProfiles_ReturnsBeforeReloadCompletes(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	srv, _ := newTestServerWithStore(t)
+	stub := &poolReloaderCounter{release: make(chan struct{})}
+	srv.cfg.PoolReloader = stub
+
+	r := reqWithActor("POST", "/api/v1/profiles", "alice")
+	done := make(chan struct{})
+	go func() {
+		_, _ = srv.PostProfiles(httptest.NewRecorder(), r, &gentypes.CreateProfileReq{
+			Scope: string(conn.ProfileScopePersonal),
+			Name:  "p1",
+			Dsn:   "quic://x:1",
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+		// expected: handler returned without waiting for Reload
+	case <-time.After(2 * time.Second):
+		t.Fatalf("PostProfiles blocked on Reload; handler is still synchronous")
+	}
+	// Release the in-flight Reload BEFORE awaiting it; otherwise the
+	// background goroutine deadlocks on the receive.
+	close(stub.release)
+	srv.awaitReloadIdle()
+}
+
+// TestPatchProfileid_ReturnsBeforeReloadCompletes is the PATCH analogue
+// of TestPostProfiles_ReturnsBeforeReloadCompletes.
+func TestPatchProfileid_ReturnsBeforeReloadCompletes(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+	})
+	stub := &poolReloaderCounter{release: make(chan struct{})}
+	srv.cfg.PoolReloader = stub
+
+	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
+	r.SetPathValue("profileId", saved.ID)
+	done := make(chan struct{})
+	go func() {
+		_, _ = srv.PatchProfileid(httptest.NewRecorder(), r, &gentypes.UpdateProfileReq{
+			Description: "updated",
+		})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("PatchProfileid blocked on Reload; handler is still synchronous")
+	}
+	close(stub.release)
+	srv.awaitReloadIdle()
+}
+
+// TestMaybeReload_CoalescesConcurrentTriggers pins the singleflight
+// semantics: N rapid PATCHes that overlap each other in time MUST
+// collapse to a small constant number of underlying Reload calls (1-2,
+// not N). The first goroutine's Reload runs while the rest pile up
+// behind the singleflight key; once the first completes, at most one
+// follow-up runs to absorb the latest version.
+func TestMaybeReload_CoalescesConcurrentTriggers(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	srv, st := newTestServerWithStore(t)
+	saved, _ := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+		Name: "p1", DSN: "quic://x:1",
+	})
+
+	release := make(chan struct{})
+	stub := &poolReloaderCounter{release: release}
+	srv.cfg.PoolReloader = stub
+
+	// Fire 10 rapid maybeReload triggers. Without singleflight this
+	// would spawn 10 in-flight Reload goroutines, all blocked on
+	// release. With singleflight, only 1 is in-flight; the rest are
+	// coalesced behind the same key.
+	const N = 10
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx := context.WithValue(context.Background(), userCtxKey, "alice")
+			srv.maybeReload(ctx)
+		}()
+	}
+	wg.Wait()
+
+	// Give the spawned goroutines a moment to register with the
+	// singleflight Group, then release.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	srv.awaitReloadIdle()
+
+	// We expect 1 (perfect coalescing) or 2 (one in-flight + one
+	// follow-up that observed a newer version mid-flight). Anything
+	// >= N indicates singleflight is not engaged.
+	got := stub.calls.Load()
+	if got < 1 || got > 2 {
+		t.Errorf("Reload calls = %d after %d triggers; want 1 or 2 (singleflight coalescing)",
+			got, N)
+	}
+	// Sanity: ensure the row we created is still the only one persisted.
+	all, _ := st.List(context.Background(), profilestore.Filter{})
+	if len(all) != 1 || all[0].ID != saved.ID {
+		t.Errorf("unexpected store state: %+v", all)
+	}
+}
+
+// slowPoolReloader is a benchmark-side PoolReloader that sleeps for a
+// fixed duration to simulate a real Reload doing pool warm-up,
+// upstream handshake, etc. The sleep is the single dominant cost we
+// want to keep OFF the request critical path post-F1.
+type slowPoolReloader struct {
+	d     time.Duration
+	calls atomic.Int64
+}
+
+func (s *slowPoolReloader) Reload(_ []conn.Profile) error {
+	s.calls.Add(1)
+	time.Sleep(s.d)
+	return nil
+}
+
+// BenchmarkPostProfile measures POST /api/v1/profiles handler latency
+// when PoolReloader.Reload sleeps for a fixed 5 ms (representative of
+// a cold pool warm-up). Pre-F1 the handler waited for Reload, so each
+// op carried the 5ms tax. Post-F1 the handler returns immediately and
+// the Reload runs out-of-band; the benchmark measures the
+// request-critical-path latency only.
+func BenchmarkPostProfile(b *testing.B) {
+	silenceSlog(b)
+	srv, _ := newBenchServer(b)
+	srv.cfg.PoolReloader = &slowPoolReloader{d: 5 * time.Millisecond}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		r := reqWithActor("POST", "/api/v1/profiles", "alice")
+		_, err := srv.PostProfiles(httptest.NewRecorder(), r, &gentypes.CreateProfileReq{
+			Scope: string(conn.ProfileScopePersonal),
+			Name:  "p" + atoiBenchKey(i),
+			Dsn:   "quic://x:1",
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	srv.awaitReloadIdle()
+}
+
+// BenchmarkPatchProfile is the PATCH analogue of BenchmarkPostProfile.
+// We pre-seed N profiles and PATCH them in round-robin order so each
+// op does a real Get + UPDATE (no caching tricks).
+func BenchmarkPatchProfile(b *testing.B) {
+	silenceSlog(b)
+	srv, st := newBenchServer(b)
+	srv.cfg.PoolReloader = &slowPoolReloader{d: 5 * time.Millisecond}
+	const seed = 64
+	ids := make([]string, seed)
+	for i := 0; i < seed; i++ {
+		saved, _ := st.Put(context.Background(), conn.Profile{
+			Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
+			Name: "p" + atoiBenchKey(i), DSN: "quic://x:1",
+		})
+		ids[i] = saved.ID
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := ids[i%seed]
+		r := reqWithActor("PATCH", "/api/v1/profiles/"+id, "alice")
+		r.SetPathValue("profileId", id)
+		_, err := srv.PatchProfileid(httptest.NewRecorder(), r, &gentypes.UpdateProfileReq{
+			Description: "tweak-" + atoiBenchKey(i),
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.StopTimer()
+	srv.awaitReloadIdle()
+}
+
+// newBenchServer is a benchmark-only wrapper around newTestServerWithStore
+// that accepts a *testing.B (the test helper requires *testing.T).
+func newBenchServer(b *testing.B) (*GraphServer, profilestore.Store) {
+	b.Helper()
+	st, err := profilestore.OpenSQLite(":memory:")
+	if err != nil {
+		b.Fatalf("OpenSQLite: %v", err)
+	}
+	b.Cleanup(func() { _ = st.Close() })
+	return New(Config{Store: st}), st
+}
+
+// atoiBenchKey returns a short stable string for benchmark id padding.
+// Avoids strconv import drift in this file.
+func atoiBenchKey(i int) string {
+	const digits = "0123456789abcdef"
+	if i == 0 {
+		return "0"
+	}
+	var buf [16]byte
+	pos := len(buf)
+	for i > 0 {
+		pos--
+		buf[pos] = digits[i&0xF]
+		i >>= 4
+	}
+	return string(buf[pos:])
 }
