@@ -106,6 +106,175 @@ describe('AuthProvider → ConnectionsContext integration', () => {
     expect(getLatestToken()).toBe('tok-integration-abc')
   })
 
+  // PSR-F10 (#108): pre-fix signIn awaited refreshCsrfToken BEFORE
+  // touching the connections state, so the active-connection latch
+  // was unnecessarily blocked behind the CSRF round-trip. Post-fix
+  // the synchronous reducer dispatches and latch writes happen
+  // concurrently with the CSRF promise. We assert this directly: hold
+  // the CSRF response open and verify conns.add already landed (the
+  // active-token latch is populated) BEFORE refreshCsrfToken
+  // resolves.
+  test('PSR-F10: signIn parallelizes CSRF refresh with conns.add', async () => {
+    let releaseCsrf: () => void = () => undefined
+    const csrfHeld = new Promise<void>((resolve) => {
+      releaseCsrf = resolve
+    })
+
+    const orig = global.fetch
+    const csrfStartedAt: number[] = []
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/v1/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            access_token: 'tok-parallel',
+            token_type: 'Bearer',
+            expires_in: 3600,
+            connection_id: 'cid-parallel',
+          }),
+        } as unknown as Response
+      }
+      if (url.endsWith('/api/v1/csrf')) {
+        csrfStartedAt.push(Date.now())
+        // Block the CSRF round-trip until the test releases it.
+        await csrfHeld
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: 'csrf-parallel' }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    let signInPromise: Promise<void> | null = null
+    const InnerP: React.FC = () => {
+      captured = useAuth()
+      return (
+        <button
+          data-testid="signin"
+          onClick={() => {
+            signInPromise = captured!.signIn('alice', 'pw', 'default')
+            // Catch is added by the test via signInPromise to avoid
+            // unhandled-rejection warnings during the held window.
+            signInPromise.catch(() => undefined)
+          }}
+          aria-label="sign in"
+        />
+      )
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerP />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    // Click signIn but DO NOT release CSRF yet.
+    await act(async () => {
+      screen.getByTestId('signin').click()
+      // Drain microtasks so apiLogin's response resolves and signIn
+      // has reached the `const csrfPromise = refreshCsrfToken()` line.
+      // Subsequent ticks let the synchronous conns.add + setActive +
+      // setLatestToken run.
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // CSRF was started but is still held. The latch MUST already be
+    // populated — that's the parallelism we're proving.
+    expect(csrfStartedAt.length).toBeGreaterThanOrEqual(1)
+    expect(getLatestToken()).toBe('tok-parallel')
+
+    // Release CSRF; signIn promise should now resolve.
+    await act(async () => {
+      releaseCsrf()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await expect(signInPromise!).resolves.toBeUndefined()
+
+    global.fetch = orig
+  })
+
+  // PSR-F10 partner test: signIn invokes storeSavedPassword via the
+  // electron bridge when savePassword=true, but does NOT await it on
+  // the critical path. We mock the bridge with a never-resolving
+  // promise and assert signIn still resolves.
+  test('PSR-F10: signIn fires storeSavedPassword without awaiting', async () => {
+    const stored: Array<{ profile: string; user: string; pw: string }> = []
+    let releaseStore: () => void = () => undefined
+    const storeHeld = new Promise<void>((resolve) => {
+      releaseStore = resolve
+    })
+    // Inject a fake electron bridge before render. The real
+    // storeSavedPassword reads window.geode at call time, so
+    // installing the stub before signIn fires is enough.
+    const fakeBridge = {
+      isElectron: true,
+      storeSavedPassword: jest.fn(
+        async (profile: string, user: string, pw: string) => {
+          stored.push({ profile, user, pw })
+          // Single held promise — signIn must NOT block on it.
+          await storeHeld
+        }
+      ),
+    }
+    const win = window as unknown as { geode: typeof fakeBridge }
+    win.geode = fakeBridge
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    const InnerSP: React.FC = () => {
+      captured = useAuth()
+      return <span />
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerSP />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    let signInDone = false
+    await act(async () => {
+      const p = captured!.signIn('alice', 'pw', 'default', true)
+      p.then(() => {
+        signInDone = true
+      })
+      // Drain microtasks for apiLogin + CSRF mock + storeSavedPassword
+      // initial dispatch.
+      for (let i = 0; i < 12; i += 1) {
+        // eslint-disable-next-line no-await-in-loop -- intentional microtask drain
+        await Promise.resolve()
+      }
+    })
+    // signIn already resolved even though storeSavedPassword is still
+    // held — that's the parallelism we're proving.
+    expect(signInDone).toBe(true)
+    // The bridge call landed exactly once.
+    expect(stored.length).toBe(1)
+    expect(stored[0]).toEqual({ profile: 'default', user: 'alice', pw: 'pw' })
+
+    // Cleanup: release the held promise so the bridge call settles
+    // and Jest can tear down cleanly.
+    releaseStore()
+    await Promise.resolve()
+    delete (win as unknown as { geode?: unknown }).geode
+  })
+
   test('PSR-G03: connectMore refreshes the CSRF token after apiLogin', async () => {
     // Pre-fix `connectMore` swapped the access cookie via apiLogin
     // but never called `/api/v1/csrf`, so the in-memory CSRF latch

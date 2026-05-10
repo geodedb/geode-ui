@@ -102,9 +102,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       savePassword?: boolean
     ): Promise<void> => {
       const result = await apiLogin(username, password, profile)
-      // After login the server set the auth cookie. Mint a CSRF token
-      // so the first state-changing request has the matching pair.
-      await refreshCsrfToken()
+      // PSR-F10 (#108): apiLogin is on the critical path (the server
+      // can't issue a CSRF token before it sets the auth cookie), so
+      // it stays serial. Everything that follows is independent of
+      // the CSRF round-trip's *response* and can run in parallel:
+      //   - refreshCsrfToken (network round-trip to /api/v1/csrf)
+      //   - conns.add + setActive + setLatestToken + auth-hint flip
+      //     (all synchronous reducer dispatches and module-level
+      //     latch writes)
+      // Pre-fix awaited refreshCsrfToken before touching the
+      // connections state, so the active-connection latch was
+      // unnecessarily gated behind one full HTTP round-trip. Post-fix
+      // the synchronous state-machine work happens immediately while
+      // refreshCsrfToken is in flight; we await the CSRF promise at
+      // the end so signIn's resolved promise still implies the CSRF
+      // double-submit pair is ready for the first mutation.
+      const csrfPromise = refreshCsrfToken()
       conns.add({
         connectionId: result.connection_id,
         token: result.access_token,
@@ -115,9 +128,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       setLatestToken(result.access_token)
       writeAuthHint(true)
       setIsAuthed(true)
+      // storeSavedPassword is fire-and-forget by design (PSR-F10):
+      // it's a best-effort safeStorage write that is safe to background
+      // after the SPA hands off control to the post-login route. A
+      // failure here is non-fatal — the user can re-enter their
+      // password on the next sign-in. Awaiting it would block the
+      // login navigation on a synchronous IPC + safeStorage decrypt
+      // round-trip that has nothing to do with the auth handshake's
+      // success.
       if (savePassword) {
-        await storeSavedPassword(profile, username, password)
+        storeSavedPassword(profile, username, password).catch(() => {
+          /* swallow — saved-password write is best-effort */
+        })
       }
+      // Await the CSRF round-trip so the resolved signIn promise
+      // implies "the next mutation has a valid double-submit pair".
+      // This call is concurrent with all the synchronous state work
+      // above, so it costs at most one HTTP RTT (down from one for
+      // CSRF + the storeSavedPassword IPC pre-fix).
+      await csrfPromise
     },
     [conns]
   )
