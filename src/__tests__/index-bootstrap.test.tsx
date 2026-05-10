@@ -31,7 +31,7 @@ jest.mock('../assets/fonts/fonts.css', () => ({}))
 // Mock createRoot so the test can both observe what got rendered AND
 // force a controlled failure inside the React render path.
 const renderMock = jest.fn()
-const createRootMock = jest.fn(() => ({
+const createRootMock: jest.Mock = jest.fn(() => ({
   render: renderMock,
   unmount: jest.fn(),
 }))
