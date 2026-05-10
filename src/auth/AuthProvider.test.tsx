@@ -106,6 +106,100 @@ describe('AuthProvider → ConnectionsContext integration', () => {
     expect(getLatestToken()).toBe('tok-integration-abc')
   })
 
+  test('PSR-G03: connectMore refreshes the CSRF token after apiLogin', async () => {
+    // Pre-fix `connectMore` swapped the access cookie via apiLogin
+    // but never called `/api/v1/csrf`, so the in-memory CSRF latch
+    // pointed at the old session. Subsequent state-changing requests
+    // would 403 with a stale double-submit pair.
+    //
+    // This test counts the GETs against `/api/v1/csrf`. signIn fires
+    // exactly one (we drain it first); connectMore must fire exactly
+    // one more, total two.
+    let csrfCalls = 0
+    const orig = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/v1/auth/login')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            access_token: 'tok-csrf-test',
+            token_type: 'Bearer',
+            expires_in: 3600,
+            connection_id: 'cid-csrf-test',
+          }),
+        } as unknown as Response
+      }
+      if (url.endsWith('/api/v1/csrf')) {
+        csrfCalls += 1
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: `csrf-token-${csrfCalls}` }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    const InnerCsrf: React.FC = () => {
+      captured = useAuth()
+      return (
+        <button
+          data-testid="signin"
+          onClick={() => {
+            captured!.signIn('alice', 'pw', 'default').catch(() => undefined)
+          }}
+          aria-label="sign in"
+        />
+      )
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerCsrf />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    await act(async () => {
+      screen.getByTestId('signin').click()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // signIn already calls refreshCsrfToken, plus the AuthProvider
+    // useEffect that fires once isAuthed flips true. Snapshot the
+    // count BEFORE connectMore so we measure the delta the call
+    // itself contributes.
+    const csrfCallsAfterSignIn = csrfCalls
+    expect(csrfCallsAfterSignIn).toBeGreaterThanOrEqual(1)
+
+    await act(async () => {
+      captured!.connectMore('bob', 'pw', 'prod').catch(() => undefined)
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // The release-blocker assertion: connectMore MUST trigger at
+    // least one additional /api/v1/csrf round-trip. Pre-fix the
+    // delta was zero (PSR-G03 / GitLab #80).
+    expect(csrfCalls).toBeGreaterThan(csrfCallsAfterSignIn)
+
+    global.fetch = orig
+  })
+
   test('connectMore adds a connection without displacing the active one', async () => {
     const responses = [
       {

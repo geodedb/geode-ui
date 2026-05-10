@@ -140,6 +140,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       savePassword?: boolean
     ): Promise<void> => {
       const result = await apiLogin(username, password, profile)
+      // PSR-G03 (GitLab #80): the access cookie was just rotated by
+      // apiLogin, so the in-memory CSRF latch points at the previous
+      // session. Mint a fresh CSRF pair before any subsequent state-
+      // changing request can fire — otherwise the next mutation 403s
+      // with a stale double-submit cookie/header pair. Mirrors the
+      // refreshCsrfToken call that signIn issues on the same line.
+      await refreshCsrfToken()
       conns.add({
         connectionId: result.connection_id,
         token: result.access_token,

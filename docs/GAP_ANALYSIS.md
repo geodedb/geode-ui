@@ -202,3 +202,42 @@ The Phase 3 audit verified the following as safe; they are intentionally **not**
 ## Resolved
 
 See [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md). Empty as of 2026-05-07.
+
+## Profile System Rebuild (PSR) -- 2026-05-10 audit
+
+Phase 3 of `/codepros:audit` re-ran against the recent profile-system rebuild
+(handlers_profiles_crud, internal/profilestore, AuthProvider.connectMore,
+ProfilesPage / Add+DeleteConnectionModal, electron preload + main, SPA
+bootstrap). Twelve gap candidates surfaced; eleven became GitLab issues, one
+was confirmed already-fixed and is recorded here as `wont-do/not-a-bug` for
+traceability. All eleven open items inherit the `gap` + `gap-status::open`
+labels; release blockers are flagged below.
+
+| Gap-ID  | Severity | Status         | Issue                                                                  | File:Line                                                                              | Description                                                                                                |
+|---------|----------|----------------|------------------------------------------------------------------------|----------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| PSR-G01 | High **(release blocker)** | open           | [#78](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/78)    | `internal/server/handlers_profiles_crud.go:24,134,205`                                  | Profile create/update/delete handlers emit zero `emitAudit` calls; pattern is established elsewhere; `COMPLETE.md` falsely claims audit coverage. |
+| PSR-G02 | High **(release blocker)** | open           | [#79](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/79)    | `internal/profilestore/sqlite.go:238-258`                                              | `mergeProfile` zero-value-skip merge prevents PATCH from clearing TLS material or zeroing pool overrides; breaks "PATCH is partial update" contract. Server fix required. |
+| PSR-G03 | High **(release blocker)** | **Closed 2026-05-10** | [#80](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/80)    | `src/auth/AuthProvider.tsx:135-159`                                                    | **Closed 2026-05-10** -- `connectMore` now `await refreshCsrfToken()` immediately after `apiLogin` (mirrors the `signIn` shape). New jest case "PSR-G03: connectMore refreshes the CSRF token after apiLogin" pins the fix by counting `/api/v1/csrf` GETs before/after the call. |
+| PSR-G04 | Medium                   | open           | [#81](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/81)    | `src/components/layout/AddConnectionModal.tsx:37,50`                                   | Submit and `listProfiles` errors are swallowed silently; failures render as no-op. Add inline error UX + RTL coverage.                                                    |
+| PSR-G05 | Medium                   | open           | [#82](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/82)    | `src/components/layout/DeleteProfileModal.tsx:23-32`, `src/pages/ProfilesPage.tsx:245` | `DeleteProfileModal` and `setAsDefault` swallow failures with no visible error.                                                                                            |
+| PSR-G06 | Medium                   | open           | [#83](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/83)    | `src/index.tsx:51-53`                                                                  | SPA bootstrap silently catches errors; failure renders as a blank page with an empty console.                                                                              |
+| PSR-G07 | Medium                   | open           | [#84](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/84)    | `electron/preload.ts:14-40` vs `src/types/electron.d.ts:8-34`                          | `ConnectionRecord` / `GeodeBridge` types verbatim duplicated; first divergence silently breaks renderer. Extract shared module + tsc both trees.                          |
+| PSR-G08 | Medium                   | open           | [#85](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/85)    | `internal/server/handlers_profiles_crud.go:306,313`                                    | `maybeReload` only `slog.Warn`s on reload errors; emit `profile_reload_failed` audit event and consider 5xx when reload is required.                                       |
+| PSR-G09 | Medium                   | open           | [#86](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/86)    | `src/pages/ProfilesPage.tsx:110-111`                                                   | `isAdmin` heuristic `p.scope === 'system' && !!p.dsn` conflates DSN visibility with the admin role; use `useAuth().roles?.includes('admin')` instead.                       |
+| PSR-G10 | Low                      | open (dup)     | [#87](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/87)    | `src/components/layout/AddConnectionModal.tsx:50`                                      | Second site of PSR-G04. Filed for closure traceability; close as duplicate-of PSR-G04 when that lands.                                                                     |
+| PSR-G11 | Low                      | open           | [#88](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/88)    | `electron/main.ts:110-115`                                                             | `saveWindowState` swallows write failures; cosmetic but `console.warn` would catch a misconfigured AppData path early.                                                     |
+| PSR-G12 | --                       | wont-do / not-a-bug | --                                                                | `src/api/connections.test.tsx:22`                                                      | Phase 2 candidate "connections.test latch leak" was already fixed in the test setup at the cited line. No issue opened. Recorded here for traceability only.                |
+
+### Release-blocker gating
+
+PSR-G01, PSR-G02, and PSR-G03 are gating: the audit-trail loss (G01),
+silently-impossible PATCH-clear semantics (G02), and stale-CSRF after
+`connectMore` (G03) each block ship of the profile rebuild. They should be
+addressed before the rebuild is tagged as a release.
+
+### Cross-links
+
+- PSR-G01 <-> PSR-G08: same audit-trail-loss family (mutation paths +
+  reload path).
+- PSR-G04 <-> PSR-G10: same file (`AddConnectionModal.tsx`); G10 is the
+  duplicate site, fold into G04's PR.
