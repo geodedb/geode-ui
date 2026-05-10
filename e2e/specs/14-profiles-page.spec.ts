@@ -11,7 +11,11 @@
 
 import { test, expect } from '../fixtures'
 import { sel } from '../helpers/selectors'
-import { deleteProfileViaApi, makeProfileName } from '../helpers/profiles'
+import {
+  createProfileViaApi,
+  deleteProfileViaApi,
+  makeProfileName,
+} from '../helpers/profiles'
 
 test.describe('profiles page', () => {
   test('renders the table heading and Create button', async ({
@@ -55,5 +59,36 @@ test.describe('profiles page', () => {
     const json = (await list.json()) as { profiles: { id: string; name: string }[] }
     const created = json.profiles.find((p) => p.name === name)
     if (created) await deleteProfileViaApi(request, authToken, created.id)
+  })
+
+  test('edit profile via UI mutates the description', async ({
+    authedPage: page,
+    authToken,
+    request,
+  }) => {
+    const name = makeProfileName('edit-ui')
+    const seeded = await createProfileViaApi(request, authToken, {
+      name,
+      description: 'before',
+    })
+
+    try {
+      await page.goto('/profiles')
+      await expect(sel.profilesNameCell(page, name)).toBeVisible()
+
+      await sel.profilesEditBtn(page, name).click()
+      // The Description field uses the same label string in en.ts.
+      const descField = page.getByLabel('Description', { exact: true })
+      await descField.fill('after')
+
+      await sel.profileEditorSaveBtn(page).click()
+
+      // Confirm the new value lands in the table cell after refresh.
+      await expect(page.getByRole('cell', { name: 'after' })).toBeVisible({
+        timeout: 5000,
+      })
+    } finally {
+      await deleteProfileViaApi(request, authToken, seeded.id)
+    }
   })
 })
