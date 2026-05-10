@@ -151,69 +151,116 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     [conns]
   )
 
-  const signIn = useCallback(
-    async (
-      username: string,
-      password: string,
-      profile: string,
+  // performAuth is the shared body for signIn and connectMore. Both
+  // wrap a successful apiLogin handshake with: register the new
+  // connection, mint a fresh CSRF pair, flip the auth hint, refresh
+  // the cached roles, and (optionally) persist the password through
+  // the electron bridge. The two callers differ in three points:
+  //
+  //   - signIn promotes the new connection to active and writes its
+  //     token into the in-memory latch (so subsequent fetches attach
+  //     it as a Bearer header). connectMore deliberately does NOT —
+  //     the existing active connection keeps focus.
+  //   - signIn parallelizes the CSRF refresh with the synchronous
+  //     reducer/latch writes (PSR-F10 / #108): the round-trip starts
+  //     immediately and is awaited at the end so the resolved
+  //     promise still implies "next mutation has a valid double-
+  //     submit pair". connectMore must serialize the CSRF refresh
+  //     BEFORE adding the new connection (PSR-G03 / #80) so a
+  //     stale double-submit pair from the rotated cookie does not
+  //     race a follow-up mutation.
+  //   - signIn fire-and-forgets storeSavedPassword (PSR-F10): the
+  //     login navigation should not block on a synchronous IPC +
+  //     safeStorage decrypt. connectMore awaits it because there is
+  //     no navigation pending and the caller may want to know the
+  //     write completed.
+  //
+  // GAP-Q08 (#100): pure refactor. Behaviour is preserved exactly
+  // for both modes; the mode discriminator selects the
+  // setActive/latch/CSRF-ordering shape rather than introducing any
+  // new branching at the network layer.
+  const performAuth = useCallback(
+    async (params: {
+      mode: 'signIn' | 'connectMore'
+      profile: string
+      username: string
+      password: string
       savePassword?: boolean
-    ): Promise<void> => {
+    }): Promise<void> => {
+      const { mode, profile, username, password, savePassword } = params
       const result = await apiLogin(username, password, profile)
-      // PSR-F10 (#108): apiLogin is on the critical path (the server
-      // can't issue a CSRF token before it sets the auth cookie), so
-      // it stays serial. Everything that follows is independent of
-      // the CSRF round-trip's *response* and can run in parallel:
-      //   - refreshCsrfToken (network round-trip to /api/v1/csrf)
-      //   - conns.add + setActive + setLatestToken + auth-hint flip
-      //     (all synchronous reducer dispatches and module-level
-      //     latch writes)
-      // Pre-fix awaited refreshCsrfToken before touching the
-      // connections state, so the active-connection latch was
-      // unnecessarily gated behind one full HTTP round-trip. Post-fix
-      // the synchronous state-machine work happens immediately while
-      // refreshCsrfToken is in flight; we await the CSRF promise at
-      // the end so signIn's resolved promise still implies the CSRF
-      // double-submit pair is ready for the first mutation.
-      const csrfPromise = refreshCsrfToken()
+
+      // CSRF ordering depends on mode: signIn parallelises (F10),
+      // connectMore serialises before any further state writes (G03).
+      let csrfPromise: Promise<unknown> | null = null
+      if (mode === 'signIn') {
+        csrfPromise = refreshCsrfToken()
+      } else {
+        await refreshCsrfToken()
+      }
+
       conns.add({
         connectionId: result.connection_id,
         token: result.access_token,
         profileName: profile,
         expiresAt: Date.now() + result.expires_in * 1000,
       })
-      conns.setActive(result.connection_id)
-      setLatestToken(result.access_token)
+
+      // Active-connection promotion + latch only on signIn.
+      // connectMore keeps the existing active connection focused.
+      if (mode === 'signIn') {
+        conns.setActive(result.connection_id)
+        setLatestToken(result.access_token)
+      }
+
       writeAuthHint(true)
       setIsAuthed(true)
-      // PSR-G09: extract the JWT roles claim so role-gated UI (e.g.
-      // ProfilesPage) can render without the previous DSN-visibility
-      // heuristic. Persist to sessionStorage so a page reload keeps
-      // the same posture (the cookie still authenticates the next
-      // request, but JS can't read the cookie).
+
+      // PSR-G09: refresh role posture from the freshly-issued JWT for
+      // both modes. connectMore picks up role grants that landed at
+      // the upstream Geode since signIn.
       const fresh = extractRoles(result.access_token)
       writeStoredRoles(fresh)
       setRoles(fresh)
-      // storeSavedPassword is fire-and-forget by design (PSR-F10):
-      // it's a best-effort safeStorage write that is safe to background
-      // after the SPA hands off control to the post-login route. A
-      // failure here is non-fatal — the user can re-enter their
-      // password on the next sign-in. Awaiting it would block the
-      // login navigation on a synchronous IPC + safeStorage decrypt
-      // round-trip that has nothing to do with the auth handshake's
-      // success.
+
+      // savePassword shape differs: signIn fire-and-forgets (PSR-F10)
+      // because the login navigation should not block on safeStorage;
+      // connectMore awaits because there is no navigation pending.
       if (savePassword) {
-        storeSavedPassword(profile, username, password).catch(() => {
-          /* swallow — saved-password write is best-effort */
-        })
+        if (mode === 'signIn') {
+          storeSavedPassword(profile, username, password).catch(() => {
+            /* swallow — saved-password write is best-effort */
+          })
+        } else {
+          await storeSavedPassword(profile, username, password)
+        }
       }
-      // Await the CSRF round-trip so the resolved signIn promise
-      // implies "the next mutation has a valid double-submit pair".
-      // This call is concurrent with all the synchronous state work
-      // above, so it costs at most one HTTP RTT (down from one for
-      // CSRF + the storeSavedPassword IPC pre-fix).
-      await csrfPromise
+
+      if (csrfPromise) {
+        // Await the parallelised CSRF round-trip so the resolved
+        // signIn promise still implies "next mutation has a valid
+        // double-submit pair".
+        await csrfPromise
+      }
     },
     [conns]
+  )
+
+  const signIn = useCallback(
+    (
+      username: string,
+      password: string,
+      profile: string,
+      savePassword?: boolean
+    ): Promise<void> =>
+      performAuth({
+        mode: 'signIn',
+        profile,
+        username,
+        password,
+        savePassword,
+      }),
+    [performAuth]
   )
 
   const signOut = useCallback(async (): Promise<void> => {
@@ -240,44 +287,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [conns])
 
   const connectMore = useCallback(
-    async (
+    (
       username: string,
       password: string,
       profile: string,
       savePassword?: boolean
-    ): Promise<void> => {
-      const result = await apiLogin(username, password, profile)
-      // PSR-G03 (GitLab #80): the access cookie was just rotated by
-      // apiLogin, so the in-memory CSRF latch points at the previous
-      // session. Mint a fresh CSRF pair before any subsequent state-
-      // changing request can fire — otherwise the next mutation 403s
-      // with a stale double-submit cookie/header pair. Mirrors the
-      // refreshCsrfToken call that signIn issues on the same line.
-      await refreshCsrfToken()
-      conns.add({
-        connectionId: result.connection_id,
-        token: result.access_token,
-        profileName: profile,
-        expiresAt: Date.now() + result.expires_in * 1000,
-      })
-      // Do NOT setActive — keep the existing active connection.
-      // Do NOT setLatestToken — same reason.
-      // Defensive: ensure isAuthed boolean is true.
-      writeAuthHint(true)
-      setIsAuthed(true)
-      // PSR-G09: connectMore mints a fresh JWT (apiLogin above) so the
-      // returned token's roles claim is authoritative for the new
-      // session. Refresh the role list so a privilege change at the
-      // upstream Geode (e.g. user just got the admin role) is reflected
-      // without a full re-login.
-      const fresh = extractRoles(result.access_token)
-      writeStoredRoles(fresh)
-      setRoles(fresh)
-      if (savePassword) {
-        await storeSavedPassword(profile, username, password)
-      }
-    },
-    [conns]
+    ): Promise<void> =>
+      performAuth({
+        mode: 'connectMore',
+        profile,
+        username,
+        password,
+        savePassword,
+      }),
+    [performAuth]
   )
 
   const disconnect = useCallback(

@@ -822,6 +822,111 @@ describe('AuthProvider → ConnectionsContext integration', () => {
     global.fetch = orig
   })
 
+  // GAP-Q08 (#100): signIn and connectMore now share a `performAuth`
+  // helper. Pin the unification by asserting both call paths flow
+  // through the same shared step (`apiLogin` is invoked once per
+  // call with mode-specific args, conns.add lands on both), without
+  // changing the user-visible behaviour the prior tests already pin.
+  test('GAP-Q08: signIn and connectMore both flow through the shared performAuth step', async () => {
+    const loginCalls: Array<{ user: string; pw: string; profile: string }> = []
+    const responses = [
+      {
+        access_token: 'tok-shared-A',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        connection_id: 'cid-shared-A',
+      },
+      {
+        access_token: 'tok-shared-B',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        connection_id: 'cid-shared-B',
+      },
+    ]
+    let callIdx = 0
+    const orig = global.fetch
+    global.fetch = jest.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        if (url.endsWith('/api/v1/auth/login')) {
+          // Capture the URL-encoded body so we can assert both modes
+          // called the same shared apiLogin step with their own args.
+          const params =
+            init && typeof init.body === 'string'
+              ? new URLSearchParams(init.body)
+              : new URLSearchParams()
+          loginCalls.push({
+            user: params.get('username') ?? '',
+            pw: params.get('password') ?? '',
+            profile: params.get('profile') ?? '',
+          })
+          const resp = responses[callIdx]
+          callIdx += 1
+          return {
+            ok: true,
+            status: 200,
+            json: async () => resp,
+          } as unknown as Response
+        }
+        if (url.endsWith('/api/v1/csrf')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ token: 'csrf-mock' }),
+          } as unknown as Response
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        } as unknown as Response
+      }
+    ) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    let connsSize = 0
+    const InnerShared: React.FC = () => {
+      captured = useAuth()
+      const conns = useConnections()
+      connsSize = conns.connections.size
+      return <span />
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerShared />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    await act(async () => {
+      captured!.signIn('alice', 'pw-A', 'default').catch(() => undefined)
+      for (let i = 0; i < 8; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve()
+      }
+    })
+    await act(async () => {
+      captured!.connectMore('bob', 'pw-B', 'prod').catch(() => undefined)
+      for (let i = 0; i < 8; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve()
+      }
+    })
+
+    // Shared apiLogin step fired exactly once per call with each
+    // caller's distinct args — the unification did not collapse them.
+    expect(loginCalls).toEqual([
+      { user: 'alice', pw: 'pw-A', profile: 'default' },
+      { user: 'bob', pw: 'pw-B', profile: 'prod' },
+    ])
+    // Shared conns.add step landed for both — connectMore added
+    // without displacing.
+    expect(connsSize).toBe(2)
+
+    global.fetch = orig
+  })
+
   test('PSR-G09: setAuthed(false) clears the cached roles posture', async () => {
     function makeJwt(payload: Record<string, unknown>): string {
       const header = Buffer.from(
