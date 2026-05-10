@@ -31,7 +31,7 @@ export const test = base.extend<Fixtures>({
     const ctx = await browser.newContext({
       storageState: await request.storageState(),
     })
-    // Seed the SPA's per-mount auth hint and profile cache.
+    // Seed the SPA's per-mount auth state.
     //
     // - geode-ui.session-hint: AuthProvider reads this from sessionStorage
     //   on mount (it cannot see the HttpOnly auth cookie). Without it,
@@ -39,10 +39,31 @@ export const test = base.extend<Fixtures>({
     //   though the cookie is valid.
     // - geode-ui.profile: non-secret default profile name, cached in
     //   localStorage so the picker doesn't reset on first render.
-    await ctx.addInitScript(() => {
+    // - __GEODE_E2E_INITIAL_CONNECTIONS__: post-multi-session-rebuild
+    //   ProtectedRoute gates on useActiveConnection() != null. Production
+    //   primes that latch via signIn / Electron's secure store; tests
+    //   shortcut by seeding the global the SPA's bootstrap reads as a
+    //   fallback (src/index.tsx). The token here is the JWT minted by
+    //   the programmatic login above, so Bearer-mode requests authenticate
+    //   correctly.
+    await ctx.addInitScript((token: string) => {
       sessionStorage.setItem('geode-ui.session-hint', '1')
       localStorage.setItem('geode-ui.profile', 'default')
-    })
+      // Bracket access avoids the no-underscore-dangle lint and signals
+      // that this is a test-only sentinel global. src/index.tsx reads
+      // the same key as a fallback when Electron-bridge has nothing.
+      const e2eKey = '__GEODE_E2E_INITIAL_CONNECTIONS__'
+      const seed = [
+        {
+          connectionId: 'e2e-seed',
+          token,
+          profileName: 'default',
+          expiresAt: Date.now() + 8 * 3600 * 1000,
+        },
+      ]
+      const w = window as unknown as Record<string, unknown>
+      w[e2eKey] = seed
+    }, authToken)
     await use(ctx)
     await ctx.close()
   },
