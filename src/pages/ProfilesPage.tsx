@@ -1,4 +1,34 @@
-import React, { useCallback, useEffect, useState } from 'react'
+// ProfilesPage — the connection-profiles administration surface.
+//
+// GAP-Q10 (#104): pre-refactor this page had three full Page returns
+// (loading / error / empty + the live list) and mounted the editor
+// modal twice — once inside the empty branch and once inside the
+// list branch. The setDefaultErr banner only ever rendered inside
+// the list branch, so a setAsDefault failure on a "now-empty" view
+// (e.g. the user just deleted the last profile) was invisible. This
+// refactor collapses the four branches into one render path:
+//
+//   - The header + Create button render unconditionally.
+//   - Loading / error / empty are inline content WITHIN the table
+//     area (not separate page returns).
+//   - <ProfileEditorModal> is mounted ONCE at top level. The (mode,
+//     target) tuple is driven by a reducer-shaped `editorState`
+//     ({mode: 'create' | 'edit' | 'closed', target?: ProfileView}),
+//     which removes the prior triple of (editorOpen, editorMode,
+//     editorProfile) booleans/enums and the implicit invariant that
+//     editorMode === 'edit' implies editorProfile !== undefined.
+//
+// Behaviour preserved:
+//   - PSR-G09 (#86): isAdmin still sourced from useAuth().isAdmin
+//     (JWT roles claim).
+//   - PSR-G05 (#82): setDefaultErr banner still renders on
+//     setAsDefault failure (and now does so even when the profile
+//     list is empty after the failed dance).
+//   - All existing per-row CRUD-button visibility (admin OR DSN
+//     visible) and the two-PATCH default-promotion dance are
+//     unchanged.
+
+import React, { useCallback, useEffect, useReducer, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled, { DefaultTheme } from 'styled-components'
 
@@ -81,35 +111,55 @@ function scopeLabel(scope: string, t: (k: string) => string): string {
   return t('profiles.scope.system')
 }
 
+// editorState is the reducer-shaped tuple that replaces the prior
+// (editorOpen, editorMode, editorProfile) triple. The `target?` is
+// only present when mode === 'edit'; collapsing the three pieces of
+// state into one discriminated value removes the implicit invariant
+// the prior code carried (editorMode === 'edit' implies
+// editorProfile !== undefined).
+type EditorState =
+  | { mode: 'closed' }
+  | { mode: 'create' }
+  | { mode: 'edit'; target: ProfileView }
+
+type EditorAction =
+  | { type: 'open-create' }
+  | { type: 'open-edit'; target: ProfileView }
+  | { type: 'close' }
+
+function editorReducer(state: EditorState, action: EditorAction): EditorState {
+  switch (action.type) {
+    case 'open-create':
+      return { mode: 'create' }
+    case 'open-edit':
+      return { mode: 'edit', target: action.target }
+    case 'close':
+      return { mode: 'closed' }
+    default:
+      return state
+  }
+}
+
 export const ProfilesPage: React.FC = () => {
   const { t } = useTranslation()
-  // PSR-G09 (#86): admin status now comes from the JWT roles claim
+  // PSR-G09 (#86): admin status comes from the JWT roles claim
   // (surfaced through AuthProvider.isAdmin) rather than the previous
   // `profiles?.some(p => p.scope === 'system' && !!p.dsn)` heuristic.
-  // The heuristic conflated two unrelated signals: DSN visibility
-  // (which the server uses as a redaction marker for non-admin
-  // viewers) and the admin role (which actually authorises CRUD).
-  // A user with no admin role but who happened to be looking at a
-  // system profile with a leaked DSN would have seen Edit/Delete
-  // buttons that the server would reject; conversely an admin
-  // looking at a profile-list where every system profile had its DSN
-  // redacted (because the server scrubbed them) would see none of
-  // the buttons they were actually authorised to use.
+  // The heuristic conflated DSN visibility (a server-side redaction
+  // marker) with the admin role (which actually authorises CRUD).
   const { isAdmin } = useAuth()
   const [profiles, setProfiles] = useState<ProfileView[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   // PSR-G05 (#82): non-blocking failure surface for the multi-step
-  // setAsDefault dance. We can't fold this into `err` (which gates the
-  // whole-page error UI) because a partial setAsDefault failure leaves
-  // the table contents valid; the user just needs to know that one or
-  // both PATCH calls didn't land and they should retry.
+  // setAsDefault dance. Distinct from `err` (which gates the table
+  // body) because a partial setAsDefault failure leaves the table
+  // contents valid; the user just needs to know the click had no
+  // effect (or only a partial effect) and they should retry.
   const [setDefaultErr, setSetDefaultErr] = useState<string | null>(null)
 
-  const [editorOpen, setEditorOpen] = useState(false)
-  const [editorMode, setEditorMode] = useState<'create' | 'edit'>('create')
-  const [editorProfile, setEditorProfile] = useState<ProfileView | undefined>(
-    undefined
-  )
+  const [editorState, dispatchEditor] = useReducer(editorReducer, {
+    mode: 'closed',
+  })
   const [deleteTarget, setDeleteTarget] = useState<ProfileView | null>(null)
 
   const refresh = useCallback(async () => {
@@ -127,25 +177,23 @@ export const ProfilesPage: React.FC = () => {
     refresh().catch(() => undefined)
   }, [refresh])
 
-  const openCreate = () => {
-    setEditorMode('create')
-    setEditorProfile(undefined)
-    setEditorOpen(true)
-  }
-
-  const openEdit = (p: ProfileView) => {
-    setEditorMode('edit')
-    setEditorProfile(p)
-    setEditorOpen(true)
-  }
+  const openCreate = useCallback(
+    () => dispatchEditor({ type: 'open-create' }),
+    []
+  )
+  const openEdit = useCallback(
+    (p: ProfileView) => dispatchEditor({ type: 'open-edit', target: p }),
+    []
+  )
+  const closeEditor = useCallback(() => dispatchEditor({ type: 'close' }), [])
 
   // PSR-G05 (#82): both PATCH calls in the dance can fail. Pre-fix the
-  // whole function returned a rejected promise that the caller swallowed
-  // (`setAsDefault(p).catch(() => undefined)` in the click handler), so a
-  // 403/network-blip vanished into the void and the user had no idea
-  // their click had no effect. Now we catch in-line and surface the
-  // failure via the `setDefaultErr` banner so the user can retry.
-  const setAsDefault = async (target: ProfileView) => {
+  // whole function returned a rejected promise that the caller
+  // swallowed (`setAsDefault(p).catch(() => undefined)`), so a
+  // 403/network-blip vanished into the void. We catch in-line and
+  // surface the failure via the `setDefaultErr` banner so the user
+  // can retry.
+  const setAsDefault = async (target: ProfileView): Promise<void> => {
     setSetDefaultErr(null)
     const peers = (profiles ?? []).filter(
       (p) =>
@@ -173,65 +221,22 @@ export const ProfilesPage: React.FC = () => {
     }
   }
 
-  if (profiles === null) {
+  // Inline body region (loading / error / empty / table) — replaces
+  // the four pre-refactor full-Page returns. The header + Create
+  // button + setDefaultErr banner + editor modal all render
+  // unconditionally above/below this so a setAsDefault failure on a
+  // newly-empty view still surfaces.
+  const renderBody = (): React.ReactNode => {
+    if (profiles === null) {
+      return <Status>{t('profiles.loading')}</Status>
+    }
+    if (err) {
+      return <ErrorText>{t('profiles.error')}</ErrorText>
+    }
+    if (profiles.length === 0) {
+      return <Status>{t('profiles.empty')}</Status>
+    }
     return (
-      <Page>
-        <Header>
-          <Title>{t('profiles.title')}</Title>
-        </Header>
-        <Status>{t('profiles.loading')}</Status>
-      </Page>
-    )
-  }
-  if (err) {
-    return (
-      <Page>
-        <Header>
-          <Title>{t('profiles.title')}</Title>
-        </Header>
-        <ErrorText>{t('profiles.error')}</ErrorText>
-      </Page>
-    )
-  }
-  if (profiles.length === 0) {
-    return (
-      <Page>
-        <Header>
-          <div>
-            <Title>{t('profiles.title')}</Title>
-            <Description>{t('profiles.description')}</Description>
-          </div>
-          <Button onClick={openCreate}>{t('profiles.actions.create')}</Button>
-        </Header>
-        <Status>{t('profiles.empty')}</Status>
-        <ProfileEditorModal
-          mode={editorMode}
-          open={editorOpen}
-          onClose={() => setEditorOpen(false)}
-          onSaved={() => {
-            refresh().catch(() => undefined)
-          }}
-          isAdmin={isAdmin}
-          profile={editorProfile}
-        />
-      </Page>
-    )
-  }
-
-  return (
-    <Page>
-      <Header>
-        <div>
-          <Title>{t('profiles.title')}</Title>
-          <Description>{t('profiles.description')}</Description>
-        </div>
-        <Button onClick={openCreate}>{t('profiles.actions.create')}</Button>
-      </Header>
-      {setDefaultErr && (
-        <ErrorText role="alert" data-testid="profiles-set-default-error">
-          {setDefaultErr}
-        </ErrorText>
-      )}
       <Table>
         <thead>
           <tr>
@@ -307,15 +312,43 @@ export const ProfilesPage: React.FC = () => {
           ))}
         </tbody>
       </Table>
+    )
+  }
+
+  // Editor mount-once: derive the modal's open/mode/profile props
+  // from the reducer-shaped editorState. This collapses the prior
+  // double-mount (one inside the empty branch, one inside the list
+  // branch) and removes the implicit "if mode==='edit' then
+  // editorProfile is set" invariant.
+  const editorMode: 'create' | 'edit' =
+    editorState.mode === 'edit' ? 'edit' : 'create'
+  const editorTarget: ProfileView | undefined =
+    editorState.mode === 'edit' ? editorState.target : undefined
+
+  return (
+    <Page>
+      <Header>
+        <div>
+          <Title>{t('profiles.title')}</Title>
+          <Description>{t('profiles.description')}</Description>
+        </div>
+        <Button onClick={openCreate}>{t('profiles.actions.create')}</Button>
+      </Header>
+      {setDefaultErr && (
+        <ErrorText role="alert" data-testid="profiles-set-default-error">
+          {setDefaultErr}
+        </ErrorText>
+      )}
+      {renderBody()}
       <ProfileEditorModal
         mode={editorMode}
-        open={editorOpen}
-        onClose={() => setEditorOpen(false)}
+        open={editorState.mode !== 'closed'}
+        onClose={closeEditor}
         onSaved={() => {
           refresh().catch(() => undefined)
         }}
         isAdmin={isAdmin}
-        profile={editorProfile}
+        profile={editorTarget}
       />
       {deleteTarget && (
         <DeleteProfileModal
