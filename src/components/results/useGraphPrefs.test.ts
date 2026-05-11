@@ -25,12 +25,6 @@ import { act, renderHook } from '@testing-library/react'
 // one to adjust — GraphView.test.tsx asserts the user-visible behaviour
 // and must keep passing as-is.
 //
-// The module does not exist yet — that is the expected pre-fix failure
-// (jest reports "Cannot find module './useGraphPrefs'"). The lint
-// suppression below only silences the static-resolution warning so this
-// reproduction test can be committed alongside the rest; it does not
-// weaken any assertion.
-// eslint-disable-next-line import/no-unresolved
 import { useGraphPrefs } from './useGraphPrefs'
 
 beforeEach(() => {

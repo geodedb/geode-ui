@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
 import styled, { useTheme } from 'styled-components'
 import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
+import { DEFAULT_LAYOUT, LayoutName, useGraphPrefs } from './useGraphPrefs'
 import {
   EDGE_TYPE_DEFAULT,
   NODE_LABEL_DEFAULT,
@@ -19,8 +20,8 @@ type Selected = { kind: 'node' | 'edge'; data: Record<string, unknown> }
 // Layouts shipped with cytoscape core (no extra plugin needed). cose
 // is the only force-directed option available without a plugin and is
 // the right default for unknown topologies; the others are useful for
-// known shapes (chains, clusters, time-ordered scans).
-type LayoutName = 'cose' | 'breadthfirst' | 'circle' | 'concentric' | 'grid'
+// known shapes (chains, clusters, time-ordered scans). LayoutName /
+// DEFAULT_LAYOUT live in useGraphPrefs (the sticky-prefs store).
 
 const LAYOUTS: readonly LayoutName[] = [
   'cose',
@@ -29,8 +30,6 @@ const LAYOUTS: readonly LayoutName[] = [
   'concentric',
   'grid',
 ]
-
-const DEFAULT_LAYOUT: LayoutName = 'cose'
 
 // Static dispatch — keeps the validate-translations script happy by
 // using literal graph.layout.* keys instead of a template-literal
@@ -352,16 +351,23 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   // build pass. Surfaced as a banner over the canvas instead of an
   // unhandled console rejection.
   const [error, setError] = useState<string | null>(null)
-  const [nodeLabelPrefs, setNodeLabelPrefs] = useState<Record<string, string>>(
-    {}
-  )
-  const [edgeLabelPrefs, setEdgeLabelPrefs] = useState<Record<string, string>>(
-    {}
-  )
-  const [layout, setLayout] = useState<LayoutName>(DEFAULT_LAYOUT)
+  // Sticky display prefs — layout algorithm, per-bucket label-field
+  // overrides, per-type edge-field overrides, and the hidden-label set.
+  // These live in a localStorage-backed store so they survive a query
+  // re-run (which unmounts/remounts GraphView via QueryPage's
+  // resetRunState) and a full page reload. Everything else in this
+  // component is genuinely result-scoped and stays component-local.
+  const layout = useGraphPrefs((s) => s.layout)
+  const setLayout = useGraphPrefs((s) => s.setLayout)
+  const nodeLabelPrefs = useGraphPrefs((s) => s.nodeLabelPrefs)
+  const setNodeLabelPref = useGraphPrefs((s) => s.setNodePref)
+  const edgeLabelPrefs = useGraphPrefs((s) => s.edgeLabelPrefs)
+  const setEdgeLabelPref = useGraphPrefs((s) => s.setEdgePref)
   // Set of node-label buckets (e.g. 'Movie', 'Person') the user has
   // hidden. Toggled by the visibility checkboxes in the sidebar.
-  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set())
+  const hiddenLabels = useGraphPrefs((s) => s.hiddenLabels)
+  const toggleHiddenLabel = useGraphPrefs((s) => s.toggleHiddenLabel)
+  const setHiddenLabels = useGraphPrefs((s) => s.setHiddenLabels)
   // Live counts surfaced in the toolbar. Reflect what's actually in
   // the Cytoscape core (post-build, post-filter), not the raw resp,
   // so users see the effect of layout/filter changes.
@@ -635,10 +641,10 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   }, [selected, applyEmphasis])
 
   const setNodePref = (label: string, key: string): void => {
-    setNodeLabelPrefs((prev) => ({ ...prev, [label]: key }))
+    setNodeLabelPref(label, key)
   }
   const setEdgePref = (type: string, key: string): void => {
-    setEdgeLabelPrefs((prev) => ({ ...prev, [type]: key }))
+    setEdgeLabelPref(type, key)
   }
 
   // GAP-03: keyboard-only operators can't tap on the canvas. The id
@@ -664,15 +670,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   }
 
   const toggleLabelVisibility = (label: string): void => {
-    setHiddenLabels((prev) => {
-      const next = new Set(prev)
-      if (next.has(label)) {
-        next.delete(label)
-      } else {
-        next.add(label)
-      }
-      return next
-    })
+    toggleHiddenLabel(label)
   }
 
   const onZoomIn = (): void => {

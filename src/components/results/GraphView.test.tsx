@@ -65,6 +65,7 @@ jest.mock('cytoscape', () => ({ __esModule: true, default: cyFactory }))
 
 // Import after the mock is in place.
 import { GraphView } from './GraphView'
+import type { QueryRespLike } from '../../lib/graphResult'
 
 import { testTheme as theme } from '../../test-utils/theme'
 
@@ -315,7 +316,7 @@ describe('graph display options survive a re-run remount', () => {
     const view = render(
       <ThemeProvider theme={theme}>
         <GraphView
-          resp={resp}
+          resp={resp as QueryRespLike & { row_count?: number }}
           query="MATCH (a:Person)-[r:ACTED_IN]->(m:Movie) RETURN a, r, m"
         />
       </ThemeProvider>
@@ -386,7 +387,7 @@ describe('graph display options survive a re-run remount', () => {
     const selects = within(display).getAllByRole(
       'combobox'
     ) as HTMLSelectElement[]
-    const personSelect = selects[0]
+    const personSelect = selects[0]!
     // Options: ['__default__', 'name'] — the first non-default key is the
     // property key 'name'.
     const nonDefault = Array.from(personSelect.options)
