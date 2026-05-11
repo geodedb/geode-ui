@@ -74,32 +74,3 @@ test.describe('login page profile picker', () => {
     await expect(page.getByLabel('Password')).toBeVisible()
   })
 })
-
-test.describe('login page profile picker', () => {
-  test('falls back to free-text Profile input when /profiles/public is unreachable', async ({
-    page,
-  }) => {
-    // Force the public-profile fetch to fail BEFORE the SPA mounts.
-    await page.route('**/api/v1/profiles/public', (route) =>
-      route.fulfill({
-        status: 503,
-        contentType: 'application/json',
-        body: JSON.stringify({ code: 'unavailable' }),
-      })
-    )
-    await page.goto('/login')
-
-    // LoginPage's fallback: when fetchPublicProfiles rejects, it
-    // silently swaps the <ProfileList> button list for a free-text
-    // <Field label='Profile'>...<Input id='login-profile'/></Field>.
-    // The button-shaped picker (role=list, label='Available profiles')
-    // must NOT render; the text input MUST.
-    await expect(page.locator('#login-profile')).toBeVisible({ timeout: 5000 })
-    await expect(
-      page.getByRole('list', { name: /available profiles/i })
-    ).toHaveCount(0)
-    // Form remains usable.
-    await expect(page.getByLabel('Username')).toBeVisible()
-    await expect(page.getByLabel('Password')).toBeVisible()
-  })
-})
