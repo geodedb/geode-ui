@@ -77,3 +77,36 @@ test('useGraphPrefs persists hidden-label toggles across a fresh mount', () => {
   const second = renderHook(() => useGraphPrefs())
   expect(second.result.current.hiddenLabels.has('Person')).toBe(true)
 })
+
+// Reproduction test for the "graph inspector renders raw JSON only" UX gap.
+//
+// The intended fix makes the inspector default to a structured property
+// view with a toggle to the raw-JSON view, and makes that choice sticky
+// by adding an `inspectorView: 'props' | 'json'` field (default 'props')
+// plus a `setInspectorView` setter to this store — included in its
+// partialize/merge so it survives a remount and a page reload.
+//
+// On the current code neither `inspectorView` nor `setInspectorView`
+// exists on the store, so these assertions fail (the field reads back
+// `undefined` and the setter is not a function) — the expected pre-fix
+// failure.
+test('useGraphPrefs.inspectorView defaults to "props"', () => {
+  const { result } = renderHook(() => useGraphPrefs())
+  expect(result.current.inspectorView).toBe('props')
+})
+
+test('useGraphPrefs persists the inspector view choice across a fresh mount', () => {
+  const first = renderHook(() => useGraphPrefs())
+  expect(first.result.current.inspectorView).toBe('props')
+
+  act(() => {
+    first.result.current.setInspectorView('json')
+  })
+  expect(first.result.current.inspectorView).toBe('json')
+
+  // Simulate the GraphView remount: a brand-new hook instance must read
+  // the persisted 'json' back from localStorage.
+  first.unmount()
+  const second = renderHook(() => useGraphPrefs())
+  expect(second.result.current.inspectorView).toBe('json')
+})

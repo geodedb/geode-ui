@@ -414,3 +414,153 @@ describe('graph display options survive a re-run remount', () => {
     ).toBe(nonDefault)
   })
 })
+
+// Reproduction tests for the "graph inspector renders raw JSON only" UX gap.
+//
+// Selecting a node/edge on the graph tab populates the right-hand inspector
+// panel. Today the panel renders the element's data bag as a raw
+// `<pre>{JSON.stringify(selected.data, null, 2)}</pre>` block with no
+// data-testid and no structured view. The desired behaviour:
+//
+//   • The inspector defaults to a STRUCTURED property view — a key/value
+//     <dl>/table of `selected.data.props`, with an identity header showing
+//     `id` plus `labels` (node) / `type` + `source`/`target` (edge).
+//   • A toggle (segmented control, with aria-pressed) switches to a "Raw
+//     JSON" view — the current `<pre>` output — kept as an option, not the
+//     default.
+//   • The chosen view is sticky (persisted via useGraphPrefs.inspectorView).
+//
+// Stable testids the fix is expected to expose (asserted below):
+//   graph-inspector            wrapper of the selected-element block
+//   graph-inspector-view-props "Properties" toggle button (aria-pressed)
+//   graph-inspector-view-json  "Raw JSON" toggle button (aria-pressed)
+//   graph-inspector-props      the property <dl>/table
+//   graph-inspector-json       the raw-JSON <pre>
+//
+// Node selection is driven through the existing keyboard id-picker
+// (`graph-node-id-picker`) — the canvas itself isn't interactive in
+// jsdom, and the picker resolves the typed id back to the element data via
+// GraphView's nodeDataById map (built from extractElements), so this gives
+// a deterministic node selection without poking the cytoscape mock.
+//
+// On the CURRENT code every getByTestId('graph-inspector*') query throws
+// "Unable to find an element by: [data-testid=...]" — that is the expected
+// pre-fix failure.
+describe('graph inspector property view', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  // One node carrying a representative spread of property value types so
+  // the structured view's per-type formatting is exercised: string,
+  // number, boolean, null, array.
+  function makeInspectableResp(): QueryRespLike & { row_count?: number } {
+    return {
+      rows: [],
+      graph_summary: {
+        nodes: [
+          {
+            id: 'n1',
+            labels: ['Person'],
+            properties: {
+              name: 'Alice',
+              age: 30,
+              active: true,
+              nickname: null,
+              tags: ['a', 'b'],
+            },
+          },
+        ],
+      },
+      row_count: 1,
+    } as unknown as QueryRespLike & { row_count?: number }
+  }
+
+  function renderInspectable(): ReturnType<typeof render> {
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView
+          resp={makeInspectableResp()}
+          query="MATCH (n:Person) RETURN n"
+        />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    return view
+  }
+
+  // Drive a deterministic node selection via the keyboard id picker.
+  function selectNode(view: ReturnType<typeof render>, id: string): void {
+    const picker = view.getByTestId('graph-node-id-picker') as HTMLInputElement
+    fireEvent.change(picker, { target: { value: id } })
+  }
+
+  test('inspector defaults to the structured property view (not raw JSON)', () => {
+    const view = renderInspectable()
+    selectNode(view, 'n1')
+
+    expect(view.getByTestId('graph-inspector')).toBeInTheDocument()
+    // Structured view is the default …
+    expect(view.getByTestId('graph-inspector-props')).toBeInTheDocument()
+    // … and the raw-JSON block is not rendered.
+    expect(view.queryByTestId('graph-inspector-json')).toBeNull()
+  })
+
+  test('property view lists prop keys/values and the identity header', () => {
+    const view = renderInspectable()
+    selectNode(view, 'n1')
+
+    const props = view.getByTestId('graph-inspector-props')
+    // Prop keys + values, with per-type formatting.
+    expect(props).toHaveTextContent('name')
+    expect(props).toHaveTextContent('Alice')
+    expect(props).toHaveTextContent('age')
+    expect(props).toHaveTextContent('30')
+    expect(props).toHaveTextContent('active')
+    expect(props).toHaveTextContent('true')
+    expect(props).toHaveTextContent('nickname')
+    expect(props).toHaveTextContent('null')
+    expect(props).toHaveTextContent('tags')
+    // Array rendering — the elements show up somewhere in the view.
+    expect(props.textContent ?? '').toMatch(/a.*b/s)
+
+    // Identity header: node id + label.
+    const inspector = view.getByTestId('graph-inspector')
+    expect(inspector).toHaveTextContent('n1')
+    expect(inspector).toHaveTextContent('Person')
+  })
+
+  test('toggling to "Raw JSON" swaps to the <pre> view and back', () => {
+    const view = renderInspectable()
+    selectNode(view, 'n1')
+
+    const propsBtn = view.getByTestId('graph-inspector-view-props')
+    const jsonBtn = view.getByTestId('graph-inspector-view-json')
+    // Props is the active view to begin with.
+    expect(propsBtn).toHaveAttribute('aria-pressed', 'true')
+    expect(jsonBtn).toHaveAttribute('aria-pressed', 'false')
+
+    // Switch to raw JSON.
+    fireEvent.click(jsonBtn)
+    const json = view.getByTestId('graph-inspector-json')
+    expect(json).toBeInTheDocument()
+    // The <pre> carries the JSON.stringify(selected.data, null, 2) output.
+    expect(json.textContent ?? '').toContain('"id": "n1"')
+    expect(view.queryByTestId('graph-inspector-props')).toBeNull()
+    expect(view.getByTestId('graph-inspector-view-json')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    expect(view.getByTestId('graph-inspector-view-props')).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+
+    // Switch back to the structured view.
+    fireEvent.click(view.getByTestId('graph-inspector-view-props'))
+    expect(view.getByTestId('graph-inspector-props')).toBeInTheDocument()
+    expect(view.queryByTestId('graph-inspector-json')).toBeNull()
+  })
+})
