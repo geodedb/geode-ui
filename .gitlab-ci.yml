@@ -194,6 +194,9 @@ build:
   needs:
     - job: install
     - job: eslint
+    - job: typecheck
+    - job: unit-tests
+    - job: audit-ratchets
   script:
     - npm run build
   artifacts:
