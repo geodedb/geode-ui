@@ -11,12 +11,19 @@
     "limits": {
       "max_header_bytes": 16384,
       "max_body_bytes": 1048576
-    }
+    },
+    "enable_compression": true
   },
   "security": {
     "auth": { "api_key": false, "jwt": true },
     "cors": { "enabled": true, "origins": ["http://localhost:3000"] },
-    "rate_limit": { "global_rps": 2000, "burst": 400 }
+    "rate_limit": {
+      "global_rps": 2000,
+      "burst": 400,
+      "per_ip_rps": 50,
+      "per_ip_burst": 100,
+      "per_ip_source": "remote_addr"
+    }
   },
   "api": [
     {

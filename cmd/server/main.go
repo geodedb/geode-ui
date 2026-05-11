@@ -239,8 +239,9 @@ func main() {
 	//      is open but exchanging nothing.
 	// hcfg.WriteTimeout/ReadTimeout are still listed here because
 	// httpx.WrapHandler's signature takes the full Config, but WrapHandler
-	// only consumes MaxBodyBytes + CORS — the timeouts are applied
-	// explicitly below where the WS exemption can be expressed.
+	// only consumes MaxBodyBytes + CORS + EnableCompression + PerIP* —
+	// the timeouts are applied explicitly below where the WS exemption
+	// can be expressed.
 	const restWriteTimeout = 60 * time.Second
 	hcfg := httpx.Config{
 		ReadHeader:     5 * time.Second,
@@ -249,6 +250,26 @@ func main() {
 		IdleTimeout:    120 * time.Second,
 		MaxHeaderBytes: 16384,
 		MaxBodyBytes:   1 << 20,
+		// PERF-F13 (#57): transparent gzip of text-ish JSON responses
+		// >=1 KiB when the client sends Accept-Encoding: gzip. Skips
+		// already-encoded responses, images/video/audio, and tiny
+		// bodies; adds Vary: Accept-Encoding; pools writers at
+		// BestSpeed. WS upgrades route around this anyway, and the
+		// gzip wrapper passes Hijack through if they didn't.
+		EnableCompression: true,
+		// SEC-N7 (#66): coarse global per-IP token bucket applied to
+		// EVERY route as an abuse ceiling underneath the tighter
+		// per-route limiters (loginlimiter.go: 5 rps/IP on
+		// /auth/login; profilelimiter.go: 30 req/min per JWT subject
+		// on profile CRUD). 50 rps / burst 100 per IP is generous
+		// enough that legitimate SPA traffic never trips it but a
+		// scripted flood from one source is throttled. Keyed on
+		// RemoteAddr — this server is not behind a trusted proxy that
+		// rewrites X-Forwarded-For, so the proxy-header sources would
+		// be forgeable.
+		PerIPRPS:    50,
+		PerIPBurst:  100,
+		PerIPSource: httpx.IPSourceRemoteAddr,
 	}
 	// Per-IP / per-(profile, username) login limiter (SEC-F2 #58, SEC-N7
 	// #66). Mounted around the mux so it observes /api/v1/auth/login

@@ -30,6 +30,16 @@ type Config struct {
 	MaxBodyBytes   int64
 	CORSEnabled    bool
 	CORSOrigins    []string
+	// EnableCompression turns on transparent gzip of text-ish JSON
+	// responses (>=1 KiB; client must send Accept-Encoding: gzip).
+	EnableCompression bool
+	// PerIPRPS / PerIPBurst configure a coarse global token bucket
+	// partitioned by client IP, applied to every route as an abuse
+	// ceiling underneath any tighter per-route limiters. Zero disables.
+	PerIPRPS   float64
+	PerIPBurst float64
+	// PerIPSource selects the key extractor for the per-IP limiter.
+	PerIPSource IPSource
 }
 
 type tokenBucket struct {
@@ -110,8 +120,17 @@ func WrapHandler(cfg Config, h http.Handler) http.Handler {
 	if err := ValidateConfig(cfg); err != nil {
 		panic(err)
 	}
-	hs := headers(h, cfg)
-	return limitBody(cfg.MaxBodyBytes, hs)
+	inner := h
+	if cfg.EnableCompression {
+		inner = Gzip(inner)
+	}
+	hs := headers(inner, cfg)
+	bl := limitBody(cfg.MaxBodyBytes, hs)
+	if cfg.PerIPRPS > 0 && cfg.PerIPBurst > 0 {
+		pl := NewPeerLimiter(cfg.PerIPRPS, cfg.PerIPBurst, cfg.PerIPSource)
+		return pl.Middleware(bl)
+	}
+	return bl
 }
 
 // Serve starts an HTTP server with TLS1.3-only and sane defaults.
@@ -119,10 +138,21 @@ func Serve(ctx context.Context, cfg Config, mux *http.ServeMux) error {
 	if err := ValidateConfig(cfg); err != nil {
 		return err
 	}
-	// Chain: headers (incl CORS) -> body limiter -> request-id logging
-	hs := headers(mux, cfg)
+	// Chain (outermost first): per-IP rate limit -> body limiter ->
+	// headers (incl CORS) -> gzip -> mux, then request-id logging.
+	var inner http.Handler = mux
+	if cfg.EnableCompression {
+		inner = Gzip(inner)
+	}
+	hs := headers(inner, cfg)
 	lh := limitBody(cfg.MaxBodyBytes, hs)
-	logged := obsx.Middleware(lh)
+	outer := lh
+	if cfg.PerIPRPS > 0 && cfg.PerIPBurst > 0 {
+		pl := NewPeerLimiter(cfg.PerIPRPS, cfg.PerIPBurst, cfg.PerIPSource)
+		go func() { <-ctx.Done(); pl.Close() }()
+		outer = pl.Middleware(lh)
+	}
+	logged := obsx.Middleware(outer)
 	ts := &http.Server{
 		Addr:              cfg.Bind,
 		Handler:           logged,

@@ -269,15 +269,19 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 	}
 
 	hcfg := httpx.Config{
-		Bind:           rc.Server.Bind,
-		ReadHeader:     time.Duration(rc.Server.Timeouts.ReadHeaderMS) * time.Millisecond,
-		ReadTimeout:    time.Duration(rc.Server.Timeouts.ReadMS) * time.Millisecond,
-		WriteTimeout:   time.Duration(rc.Server.Timeouts.WriteMS) * time.Millisecond,
-		IdleTimeout:    time.Duration(rc.Server.Timeouts.IdleMS) * time.Millisecond,
-		MaxHeaderBytes: rc.Server.Limits.MaxHeaderBytes,
-		MaxBodyBytes:   rc.Server.Limits.MaxBodyBytes,
-		CORSEnabled:    rc.Security.CORS.Enabled,
-		CORSOrigins:    rc.Security.CORS.Origins,
+		Bind:              rc.Server.Bind,
+		ReadHeader:        time.Duration(rc.Server.Timeouts.ReadHeaderMS) * time.Millisecond,
+		ReadTimeout:       time.Duration(rc.Server.Timeouts.ReadMS) * time.Millisecond,
+		WriteTimeout:      time.Duration(rc.Server.Timeouts.WriteMS) * time.Millisecond,
+		IdleTimeout:       time.Duration(rc.Server.Timeouts.IdleMS) * time.Millisecond,
+		MaxHeaderBytes:    rc.Server.Limits.MaxHeaderBytes,
+		MaxBodyBytes:      rc.Server.Limits.MaxBodyBytes,
+		CORSEnabled:       rc.Security.CORS.Enabled,
+		CORSOrigins:       rc.Security.CORS.Origins,
+		EnableCompression: rc.Server.EnableCompression,
+		PerIPRPS:          rc.Security.RateLimit.PerIPRPS,
+		PerIPBurst:        float64(rc.Security.RateLimit.PerIPBurst),
+		PerIPSource:       httpx.ParseIPSource(rc.Security.RateLimit.PerIPSource),
 	}
 	h := httpx.WrapHandler(hcfg, mux)
 	h = obsx.Middleware(h)
