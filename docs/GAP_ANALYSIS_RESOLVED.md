@@ -327,3 +327,186 @@ Verifier returned SAFE-TO-CLOSE for all 9 commits. Three Security (1 cross-close
 
 - **2026-05-07:** #18, #21, #26, #27, #29, #32, #43, #53, #55, #58, #60, #62, #65 (cross-closed). Genapi follow-ups: `genapi#214`, `genapi#215`. #66 partially closed (open).
 - **2026-05-10 (PSR top-13):** #78, #79 (partial), #80, #84, #85, #92, #93, #94, #97, #106, #110, #111, #114, #115, #119. Follow-up opened: #124. Total: 9 commits, 13 + 2 (#114/#115 batched) issues fully closed, 1 partial.
+- **2026-05-10 (gap-close pass — 16 closed + 5 deferred):** Requirements #6, #7. Quality Q3 (#31), Q6 (#36), Q7 (#37), Q9 (#41), Q10 (#42). Security N1 (#63), N4 (#72), N5 (#74), N10 (#76), F8-sec (#68), F11 (#77), F6+N6 (#67). Performance F7 (#51), F8 (#52). Deferred (tracked at `genapi#215`/`genapi#216`): F3 (#25), F13 (#57), N7-remainder (#66), Q5 (#34), Q8 (#38).
+
+---
+
+### 2026-05-10 closure run -- gap-close pass (16 closed + 5 deferred, 17 commits)
+
+Verifier returned GREEN: `make ci` passes end-to-end; Go: 17 packages OK with `internal/server` coverage 74.5% -> 75.7% (+1.2 pp); Jest 375/375 passing; tsc / golangci-lint / eslint clean; `gosec G115` reports 0 (was >=1 pre-F11). One bookkeeping commit consolidates the doc updates.
+
+#### Requirements (2)
+
+##### GAP-006 (#6): e2e job runtime status in CI not verified [RESOLVED]
+
+- **Issue:** [#6](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/6) (closed)
+- **Domain:** Requirements / CI verification
+- **Severity at close:** Low
+- **Closure commit(s):** `4a7ad51`
+- **Resolution:** Latest `main` pipeline sampled and URL recorded in `docs/GAP_ANALYSIS.md` row (`pipeline #2514181822` on sha `f815d1a`, 2026-05-10).
+- **Evidence:** `docs/GAP_ANALYSIS.md` GAP-006 row + Detailed Gap Records section.
+- **Resolved date:** 2026-05-10
+
+##### GAP-007 (#7): docker-compose stack-up smoke not executed [RESOLVED]
+
+- **Issue:** [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7) (closed)
+- **Domain:** Requirements / Verification
+- **Severity at close:** Low
+- **Closure commit(s):** `ec270f9`
+- **Resolution:** e2e stack smoke executed; `/healthz` -> `200 {"status":"ok","version":"v0.1.0"}`; `/api/v1/profiles/public` -> `200` with one profile. Evidence recorded in `docs/GAP_ANALYSIS.md`.
+- **Evidence:** `docs/GAP_ANALYSIS.md` GAP-007 row.
+- **Resolved date:** 2026-05-10
+
+#### Quality (5)
+
+##### Q3 (#31): Rename `user*` helpers to drop misleading prefix [RESOLVED]
+
+- **Issue:** [#31](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/31) (closed)
+- **Domain:** Quality
+- **Severity at close:** High (PriorityScore 80)
+- **Closure commit(s):** `dfbe67a`
+- **Resolution:** Package-wide rename: `userDB`->`connDB`, `userErr`->`wireErr`, `userResponseErr`->`respondErr`, `userRowToMap`->`rowToMap`. Stable HTTP `code` field `user_admin_error` preserved. `userFromRow` and `userFromContext` intentionally kept (genuinely user-typed). The rename was discovered to be package-wide (touches users / policies / migrations / backups / roles), not file-local as originally framed.
+- **Evidence:** `internal/server/{errors,handlers_users,handlers_backups,handlers_grants,handlers_policies,handlers_migrations,handlers_roles}.go`; `make go-test` and `make go-lint` clean.
+- **Resolved date:** 2026-05-10
+
+##### Q6 (#36): Typed errors for `isWireFeatureMissing` [RESOLVED]
+
+- **Issue:** [#36](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/36) (closed)
+- **Domain:** Quality
+- **Severity at close:** Medium (PriorityScore 48)
+- **Closure commit(s):** `c949e8a`
+- **Resolution:** Three-tier detection: (1) `errWireFeatureMissing` sentinel callers wrap via `%w`, (2) typed `statusClasser.StatusClass()=="42000"` via `errors.As`, (3) pinned-substring fallback. Accepted substrings live in `wireFeatureMissingSubstrings`; new `internal/server/errors_test.go` exhaustively pins each entry.
+- **Evidence:** `internal/server/errors.go:88-172`; `internal/server/errors_test.go`.
+- **Resolved date:** 2026-05-10
+
+##### Q7 (#37): `safeEmitAudit` policy across handler sites [RESOLVED]
+
+- **Issue:** [#37](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/37) (closed)
+- **Domain:** Quality
+- **Severity at close:** Medium (PriorityScore 48)
+- **Closure commit(s):** `3c5c8fe`
+- **Resolution:** Policy chosen: best-effort log+continue. `emitAudit` keeps `void` return; policy sealed inside the helper via `defer recover()` that writes a one-line `AUDIT EMISSION FAILED ...` warning directly to `os.Stderr` (NOT via slog/log -- Go 1.21+ routes both through slog and would re-panic on a broken handler). Test `TestEmitAudit_LogContinuePolicy` proves the policy with an injecting `panicHandler` slog sink.
+- **Evidence:** `internal/server/audit.go`; `TestEmitAudit_LogContinuePolicy`.
+- **Resolved date:** 2026-05-10
+
+##### Q9 (#41): Extract `withConnDBAndIdent` helper [RESOLVED]
+
+- **Issue:** [#41](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/41) (closed)
+- **Domain:** Quality
+- **Severity at close:** Medium (PriorityScore 40)
+- **Closure commit(s):** `1b227da`
+- **Resolution:** `withConnDBAndIdent(ctx, name, fn)` extracted in `handlers_users.go`; the 8 handler sites that pair `connDB` with `quoteIdent` (PostUsers, GetUsername, PatchUsername, DeleteUsername, Password, PostUsernameRoles, Permissions, toggleUser) now route through it. `GetUsers` retains the bare `connDB` call.
+- **Evidence:** `internal/server/handlers_users.go`; `TestWithConnDBAndIdent_TableDriven` (happy, missing-active-connection 502, invalid-identifier 400).
+- **Resolved date:** 2026-05-10
+
+##### Q10 (#42): Add `docs/adr/` skeleton + `internal/server/README.md` [RESOLVED]
+
+- **Issue:** [#42](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/42) (closed)
+- **Domain:** Quality / Docs
+- **Severity at close:** Low (PriorityScore 24)
+- **Closure commit(s):** `bceb198`
+- **Resolution:** ADR meta-record added under `docs/adr/` (Nygard convention, four-section template, supersession protocol documented); `internal/server/README.md` documents per-file layout, audit/rate-limit conventions, generated-code policy, and the `GOEXPERIMENT=jsonv2` build-env requirement.
+- **Evidence:** `docs/adr/0000-record-architecture-decisions.md`; `internal/server/README.md`.
+- **Resolved date:** 2026-05-10
+
+#### Security (8)
+
+##### N1 (#63): Adversarial `quoteString` corpus [RESOLVED]
+
+- **Issue:** [#63](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/63) (closed)
+- **Domain:** Security
+- **Severity at close:** Medium (Risk 24)
+- **Closure commit(s):** `8a4e96d`
+- **Resolution:** New `internal/server/quoting_test.go` adds an adversarial corpus covering classic SQL-injection shapes, the full ASCII control set, unicode lookalikes (RTL-override, smart quote, ZWSP, combining marks), and length stress (64 KiB). Invariant pinned for `quoteString`: every run of consecutive single quotes in the body is even-length. `quoteIdent` invariant: no interior backtick survives. Existing helpers passed every adversarial input without modification -- no escape gap surfaced.
+- **Evidence:** `internal/server/quoting_test.go`.
+- **Resolved date:** 2026-05-10
+
+##### N4 (#72): Server-side password policy (12+ chars) [RESOLVED]
+
+- **Issue:** [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) (closed)
+- **Domain:** Security
+- **Severity at close:** Low (Risk 24)
+- **Closure commit(s):** `6765e64`
+- **Resolution:** `validatePassword(ctx, pw, username, policy)` enforces: (1) `len(pw) >= 12`, (2) reject all-same-char or all-ASCII-digit strings, (3) reject passwords whose lower-cased form contains the lower-cased username when username is >=4 chars, (4) optional HIBP k-anonymity lookup gated behind `Config.PasswordPolicy.HIBPCheck` (default OFF for hermetic tests + air-gap deployments). Stable 400 codes: `password_too_short` / `password_too_weak` / `password_contains_username` / `password_pwned`.
+- **Evidence:** `internal/server/password_policy.go`, `internal/server/password_policy_test.go`.
+- **Resolved date:** 2026-05-10
+
+##### N5 (#74): Reject wildcard CORS at startup [RESOLVED, genapi-paired]
+
+- **Issue:** [#74](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/74) (closed)
+- **Domain:** Security
+- **Severity at close:** Low (Risk 16)
+- **Closure commit(s):** `0fbccc6` (regen) + genapi `df654de`
+- **Resolution:** Genapi adds `httpx.ValidateConfig` and `ErrCORSWildcardWithCredentials`; `WrapHandler` panics and `Serve` returns the error when `CORSEnabled && CORSOrigins` contains `"*"`. CI catches the misconfiguration at startup instead of shipping silent wildcard CORS.
+- **Evidence:** `gen/pkg/httpx/server.go` (regenerated); genapi `df654de`.
+- **Resolved date:** 2026-05-10
+
+##### N10 (#76): Constant-time auth-failure path [RESOLVED]
+
+- **Issue:** [#76](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/76) (closed)
+- **Domain:** Security
+- **Severity at close:** Low (Risk 24)
+- **Closure commit(s):** `502a865`
+- **Resolution:** Three combined defences: (1) `performDummyCompare` runs a SHA-256+constant-time-compare on every failure so a "user not found" path spends comparable CPU to a "wrong password" path; (2) `respectLoginLatencyFloor` waits out a 250 ms minimum-latency window on every failure to absorb upstream timing diffs; (3) `errorBody` struct replaces the `map[string]any` body so Go's map-iteration randomisation can't reorder JSON keys across responses. Audit log still distinguishes `reason=upstream_error` vs `invalid_credentials` for operator diagnostics.
+- **Evidence:** `internal/server/handlers_auth.go`, `internal/server/errors.go`; `TestLogin_FailureBodyIsIdentical_AcrossModes`, `TestLogin_LatencyFloor`.
+- **Resolved date:** 2026-05-10
+
+##### F8-sec (#68): `dompurify` resolves to >= 3.4 via `npm.overrides` [RESOLVED]
+
+- **Issue:** [#68](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/68) (closed)
+- **Domain:** Security / Supply chain
+- **Severity at close:** Medium (Risk 16)
+- **Closure commit(s):** `edbd1d9`
+- **Resolution:** `package.json` declares `"overrides": { "dompurify": "^3.4.0" }`; `npm ls dompurify --all` resolves the transitive (under `monaco-editor@0.55.1`) to `dompurify@3.4.2 overridden`, satisfying the `>= 3.4` floor and closing the 6+ XSS advisories. Cross-closed by S-NEW-8.
+- **Evidence:** `package.json::overrides`.
+- **Resolved date:** 2026-05-10
+
+##### F11 (#77): gosec G115 fixed in genapi [RESOLVED, genapi-paired]
+
+- **Issue:** [#77](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/77) (closed)
+- **Domain:** Security
+- **Severity at close:** Low (Risk 4)
+- **Closure commit(s):** `8336a43` (regen) + genapi `1033c50`
+- **Resolution:** Genapi replaces the `//nolint:gosec` suppression with a real `uint64 > maxWSFrameBytes` bounds check before the int64 cast in `pkg/gqlx/subscription.go:readWSFrame`. Regenerated; `gosec -include=G115 ./gen/...` reports 0 issues (was >=1 pre-fix).
+- **Evidence:** `gen/pkg/gqlx/subscription.go` (regenerated); genapi `1033c50`.
+- **Resolved date:** 2026-05-10
+
+##### F6+N6 (#67): Centralised audit redaction [RESOLVED, genapi-paired]
+
+- **Issue:** [#67](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/67) (closed)
+- **Domain:** Security
+- **Severity at close:** Medium (Risk 36)
+- **Closure commit(s):** `cea4fbd` (regen + audit.go refactor) + genapi `e100aed`
+- **Resolution:** Genapi adds `obsx.RedactSensitiveKeys` + `obsx.DefaultSensitiveKeyFragments`; `obsx.LogAudit` now redacts before emission. `internal/server/audit.go` extends the central list with geode-ui-specific keys (`saved_password`, `tls_client_*`, `tls_server_*`, `tls_password`, `url`, `connection_string`, `access_token`, `refresh_token`, `session_id`) and delegates `isSensitive` to `obsx.IsSensitiveKey`.
+- **Evidence:** `internal/server/audit.go`; `gen/pkg/obsx/log.go` (regenerated); genapi `e100aed`.
+- **Resolved date:** 2026-05-10
+
+#### Performance (2)
+
+##### F7 (#51): `projectColumns` single-pass inference [RESOLVED]
+
+- **Issue:** [#51](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/51) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 medium (PerfScore 48)
+- **Closure commit(s):** `7f371fe`
+- **Resolution:** Collapsed the per-column `discoverPlan` loop (N independent passes over the row set) into a single row-major sweep that updates a `PlanState` for every column in lockstep. Total row visits dropped from N+1 to exactly 2 regardless of column count.
+- **Evidence:** `src/components/results/projectColumns.ts`; `F7 single-pass: each row visited once during inference` (Proxy-based access counter) and `F7 single-pass: declared NODE/EDGE type drives output even for empty rows` regression.
+- **Resolved date:** 2026-05-10
+
+##### F8 (#52): SchemaExplorer AbortController + per-graph cache [RESOLVED]
+
+- **Issue:** [#52](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/52) (closed)
+- **Domain:** Performance
+- **Severity at close:** P3 low (PerfScore 32)
+- **Closure commit(s):** `975cc59`
+- **Resolution:** (1) `AbortController` per active-graph fetch pair stored in a `useRef` so the prior controller's `abort()` is called immediately on graph switch -- late-resolving responses for the prior graph no longer stomp the new selection; (2) `createSchemaExplorerCache(maxEntries=8)` module-level + props-injectable per-graph cache. Cached re-selection serves indexes+constraints synchronously with zero wire calls. LRU eviction promotes hits to most-recent.
+- **Evidence:** `src/components/schema/SchemaExplorer.tsx`; tests for abort-on-switch, cached re-select skips wire, LRU eviction.
+- **Resolved date:** 2026-05-10
+
+---
+
+#### Notes on this run
+
+- **Genapi-paired closures (3):** F11 (`1033c50`), N5 (`df654de`), F6+N6 (`e100aed`). Each is a regen-only commit on the geode-ui side; the substantive fix lives in `~/src/devnw/go/genapi`.
+- **Deferred genapi work (5):** F3 (#25), F13 (#57), N7-remainder (#66), Q5 (#34), Q8 (#38). All require a separate genapi work cycle; rollup commit `77ac64d` marks them Deferred in their tracking files with specific prerequisites. Tracked at `genapi#215` / `genapi#216`.
+- **F8 follow-up:** The generated client doesn't accept an external `signal` so cancellation is enforced at the React-effect layer via `signal.aborted` checks; structural fix (signal propagation through `fetchImpl`) tracked as a follow-up on the genapi side.
