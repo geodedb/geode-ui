@@ -1,4 +1,11 @@
-import React, { Suspense, useEffect, useReducer, useRef, useState } from 'react'
+import React, {
+  Suspense,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
@@ -294,12 +301,27 @@ export const QueryPage: React.FC = () => {
     setBusy(false)
   }
 
-  let activeResp: QueryResp | null
-  if (streamMode) {
-    activeResp = stream.status === 'idle' ? null : streamStateToResp(stream)
-  } else {
-    activeResp = resp
-  }
+  // PERF-2026-05-11-02 (#130): streamStateToResp() allocates a fresh
+  // QueryResp on every call, so calling it inline made `activeResp`'s
+  // identity change on *every* render — busting TableView's
+  // `useMemo(() => projectColumns(resp), [resp, expand])` and JsonView's
+  // memo (so projectColumns re-ran per row, JsonView re-stringified per
+  // render). Memoize it on the structurally-relevant stream fields so
+  // its identity changes ONLY when the underlying data does.
+  // `stream.rows` is the stable mutable array reference (see
+  // queryStreamReducer); `rowsVersion` is what actually moves on append.
+  const streamResp = useMemo<QueryResp | null>(
+    () => (stream.status === 'idle' ? null : streamStateToResp(stream)),
+    [
+      stream.status,
+      stream.columns,
+      stream.rows,
+      stream.rowsVersion,
+      stream.rowCount,
+      stream.elapsedMs,
+    ]
+  )
+  const activeResp: QueryResp | null = streamMode ? streamResp : resp
   const activeErr = streamMode ? stream.error || err : err
 
   // F10 (#54): Suspense fallbacks for the lazy Monaco editor / Cytoscape

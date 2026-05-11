@@ -16,15 +16,22 @@ function base64UrlEncode(value: string): string {
 export type StreamMsg =
   | { kind: 'schema'; columns: { name: string; type: string }[] }
   | { kind: 'row'; row: unknown[] }
+  // PERF-2026-05-11-04 (#137): the server already batches up to
+  // wsRowBatchSize (64) rows into a single WS frame. queryStream now
+  // forwards that whole batch as ONE 'rowBatch' message instead of
+  // exploding it into N per-row callbacks — the reducer appends the
+  // array in a single reduction (one rowsVersion bump per frame), so an
+  // N-frame stream produces O(frames) dispatches, not O(rows).
+  | { kind: 'rowBatch'; rows: unknown[][] }
   | { kind: 'summary'; row_count: number; elapsed_ms: number }
   | { kind: 'error'; code: string; message: string }
   | { kind: 'end' }
 
 // WireMsg is the shape received over the WebSocket. The server batches
 // up to wsRowBatchSize rows into a single {"kind":"rows", rows:[...]}
-// frame for throughput; queryStream demultiplexes those back into
-// individual {kind:"row"} callbacks so existing consumers (QueryPage,
-// queryStream.test.ts) keep their per-row handler contract.
+// frame for throughput; queryStream maps that frame onto a single
+// {kind:"rowBatch", rows:[...]} callback so the whole batch flows
+// through one reducer dispatch.
 type WireMsg = StreamMsg | { kind: 'rows'; rows: unknown[][] }
 
 export type StreamHandle = {
@@ -71,9 +78,9 @@ export function streamQuery(
     try {
       const wire = JSON.parse(ev.data) as WireMsg
       if (wire.kind === 'rows') {
-        // Demultiplex a batched-rows frame into individual row
-        // callbacks so consumers keep the per-row contract.
-        wire.rows.forEach((row) => onMessage({ kind: 'row', row }))
+        // Forward the server's already-batched rows frame as a single
+        // 'rowBatch' message — one dispatch per WS frame.
+        onMessage({ kind: 'rowBatch', rows: wire.rows })
         return
       }
       onMessage(wire)

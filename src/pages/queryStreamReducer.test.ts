@@ -42,6 +42,43 @@ describe('streamReducer', () => {
     expect(s.rowsVersion).toBe(prev.rowsVersion + 1)
   })
 
+  test('rowBatch appends a whole frame in one reduction (single rowsVersion bump per frame)', () => {
+    let s: StreamState = streamReducer(initialStreamState, { type: 'start' })
+    const rowsRef = s.rows
+    // Three server frames, 64/64/32 rows — mirrors the wire batching.
+    const frame = (start: number, n: number): unknown[][] =>
+      Array.from({ length: n }, (_, i) => [start + i])
+    s = streamReducer(s, {
+      type: 'msg',
+      msg: { kind: 'rowBatch', rows: frame(0, 64) },
+    })
+    s = streamReducer(s, {
+      type: 'msg',
+      msg: { kind: 'rowBatch', rows: frame(64, 64) },
+    })
+    s = streamReducer(s, {
+      type: 'msg',
+      msg: { kind: 'rowBatch', rows: frame(128, 32) },
+    })
+    // Stable rows array reference (no spread-copy), all 160 rows present,
+    // and exactly one rowsVersion bump per frame — O(frames), not O(rows).
+    expect(s.rows).toBe(rowsRef)
+    expect(s.rows.length).toBe(160)
+    expect(s.rowsVersion).toBe(3)
+    expect(s.rows[0]).toEqual([0])
+    expect(s.rows[159]).toEqual([159])
+  })
+
+  test('empty rowBatch is a no-op (no state churn, no version bump)', () => {
+    const s0: StreamState = streamReducer(initialStreamState, { type: 'start' })
+    const s1 = streamReducer(s0, {
+      type: 'msg',
+      msg: { kind: 'rowBatch', rows: [] },
+    })
+    expect(s1).toBe(s0)
+    expect(s1.rowsVersion).toBe(0)
+  })
+
   test('schema, summary, error, end branches still work', () => {
     let s: StreamState = streamReducer(initialStreamState, { type: 'start' })
     s = streamReducer(s, {

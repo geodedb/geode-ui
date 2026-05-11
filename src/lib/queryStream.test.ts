@@ -109,15 +109,18 @@ test('legacy fallback: bearer subprotocol attached when backout flag is set', ()
   expect(lastInstance!.url).not.toContain('access_token')
 })
 
-test('demultiplexes batched rows frames into individual row callbacks', () => {
-  // PERF-F2 / issue #21: server batches up to 64 rows per WS frame as
-  // {"kind":"rows","rows":[...]}; queryStream must split those back
-  // into individual {kind:"row"} callbacks so consumers keep the
-  // per-row contract.
+test('forwards a batched rows frame as ONE rowBatch message (no per-row fan-out)', () => {
+  // PERF-2026-05-11-04 / issue #137: the server already batches up to
+  // 64 rows per WS frame as {"kind":"rows","rows":[...]}. queryStream
+  // must forward that whole batch as a single {kind:"rowBatch"}
+  // callback — NOT explode it into N per-row callbacks — so an N-frame
+  // stream produces O(frames) reducer dispatches instead of O(rows).
   const msgs: StreamMsg[] = []
-  streamQuery('MATCH (n) RETURN n', 'social', (m) => msgs.push(m))
+  const onMessage = jest.fn((m: StreamMsg) => msgs.push(m))
+  streamQuery('MATCH (n) RETURN n', 'social', onMessage)
   const ws = lastInstance!
   ws.fire('open')
+  // Two server frames, 3 rows in the first, 2 in the second.
   ws.fire('message', {
     data: JSON.stringify({
       kind: 'rows',
@@ -128,13 +131,30 @@ test('demultiplexes batched rows frames into individual row callbacks', () => {
       ],
     }),
   })
+  ws.fire('message', {
+    data: JSON.stringify({
+      kind: 'rows',
+      rows: [
+        [4, 'dave'],
+        [5, 'erin'],
+      ],
+    }),
+  })
   ws.fire('message', { data: JSON.stringify({ kind: 'end' }) })
-  expect(msgs.map((m) => m.kind)).toEqual(['row', 'row', 'row', 'end'])
-  // Verify per-row payload survived the demux untouched.
-  const rowMsgs = msgs.filter(
-    (m): m is { kind: 'row'; row: unknown[] } => m.kind === 'row'
+  // One dispatch per frame: 2 rowBatch + 1 end == 3 total, NOT 6.
+  expect(msgs.map((m) => m.kind)).toEqual(['rowBatch', 'rowBatch', 'end'])
+  expect(onMessage).toHaveBeenCalledTimes(3)
+  const batches = msgs.filter(
+    (m): m is { kind: 'rowBatch'; rows: unknown[][] } => m.kind === 'rowBatch'
   )
-  expect(rowMsgs).toHaveLength(3)
-  expect(rowMsgs[0]?.row).toEqual([1, 'alice'])
-  expect(rowMsgs[2]?.row).toEqual([3, 'carol'])
+  expect(batches).toHaveLength(2)
+  expect(batches[0]?.rows).toEqual([
+    [1, 'alice'],
+    [2, 'bob'],
+    [3, 'carol'],
+  ])
+  expect(batches[1]?.rows).toEqual([
+    [4, 'dave'],
+    [5, 'erin'],
+  ])
 })

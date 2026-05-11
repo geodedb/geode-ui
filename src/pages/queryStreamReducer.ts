@@ -86,6 +86,17 @@ export function streamReducer(
         state.rows.push(m.row)
         return { ...state, rowsVersion: state.rowsVersion + 1 }
       }
+      if (m.kind === 'rowBatch') {
+        // PERF-2026-05-11-04 (#137): append a whole server-batched
+        // frame (up to 64 rows) in a single reduction. One mutable
+        // push of the array contents, one rowsVersion bump per frame —
+        // so an N-frame stream costs O(frames) reductions, not O(rows).
+        // An empty batch is still a no-op state change (no version bump)
+        // so memoized row derivations don't churn for an empty frame.
+        if (m.rows.length === 0) return state
+        state.rows.push(...m.rows)
+        return { ...state, rowsVersion: state.rowsVersion + 1 }
+      }
       if (m.kind === 'summary') {
         return { ...state, rowCount: m.row_count, elapsedMs: m.elapsed_ms }
       }
