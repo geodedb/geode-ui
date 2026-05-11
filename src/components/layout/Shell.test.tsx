@@ -23,13 +23,15 @@ jest.mock('./AddConnectionModal', () => ({
   },
 }))
 
-const renderShell = () =>
+const renderShell = (initialPath = '/') =>
   render(
     <ThemeProvider theme={theme}>
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
           <Route path="/" element={<Shell />}>
             <Route index element={<div>main</div>} />
+            <Route path="schema" element={<div>schema</div>} />
+            <Route path="admin/*" element={<div>admin</div>} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -60,6 +62,41 @@ test('mobile toggle controls the drawer via aria-expanded', () => {
   fireEvent.click(toggle)
   expect(toggle).toHaveAttribute('aria-expanded', 'true')
   expect(toggle).toHaveAttribute('aria-label', 'Close menu')
+})
+
+test('marks the current view in the nav via aria-current', () => {
+  // Two copies of each nav link exist (desktop bar + mobile drawer);
+  // both should carry aria-current="page" for the active route and
+  // none for the others.
+  renderShell('/schema')
+  const schemaLinks = screen.getAllByRole('link', { name: 'Schema' })
+  expect(schemaLinks.length).toBeGreaterThan(0)
+  schemaLinks.forEach((l) => expect(l).toHaveAttribute('aria-current', 'page'))
+  // The Query link (to="/") must NOT be active on /schema thanks to `end`.
+  screen
+    .getAllByRole('link', { name: 'Query' })
+    .forEach((l) => expect(l).not.toHaveAttribute('aria-current'))
+})
+
+test('Query nav link is active only on the index route, not on nested routes', () => {
+  renderShell('/')
+  screen
+    .getAllByRole('link', { name: 'Query' })
+    .forEach((l) => expect(l).toHaveAttribute('aria-current', 'page'))
+  screen
+    .getAllByRole('link', { name: 'Schema' })
+    .forEach((l) => expect(l).not.toHaveAttribute('aria-current'))
+})
+
+test('a section nav link stays active on its nested routes', () => {
+  renderShell('/admin/users')
+  screen
+    .getAllByRole('link', { name: 'Admin' })
+    .forEach((l) => expect(l).toHaveAttribute('aria-current', 'page'))
+  // And Query (to="/" end) is not active on /admin/users.
+  screen
+    .getAllByRole('link', { name: 'Query' })
+    .forEach((l) => expect(l).not.toHaveAttribute('aria-current'))
 })
 
 test('logout button calls signOut', () => {

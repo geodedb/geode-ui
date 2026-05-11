@@ -1,6 +1,11 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import {
+  Link,
+  NavLink as RouterNavLink,
+  Outlet,
+  useLocation,
+} from 'react-router-dom'
 import styled from 'styled-components'
 
 import { useAuth } from '../../auth/AuthProvider'
@@ -78,7 +83,14 @@ const Body = styled.main`
   `}
 `
 
-const NavLink = styled(Link)`
+// NavLink wraps react-router's NavLink, which (a) sets aria-current="page"
+// on the active route and (b) adds an `active` class to the rendered <a>.
+// We style `&.active` with the primary text colour, the subtle surface
+// background, and a bottom accent bar so the operator always knows which
+// view they're in — both visually and for assistive tech. The `to="/"`
+// links must carry `end` so the Query link isn't flagged active on every
+// nested route (`/` is a prefix of all of them).
+const NavLink = styled(RouterNavLink)`
   color: ${({ theme }) => theme.text.secondary};
   text-decoration: none;
   font-weight: ${({ theme }) => theme.font.weights.medium};
@@ -90,9 +102,24 @@ const NavLink = styled(Link)`
     background: ${({ theme }) => theme.bg.subtle};
   }
 
+  &.active {
+    color: ${({ theme }) => theme.text.primary};
+    background: ${({ theme }) => theme.bg.subtle};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    box-shadow: inset 0 -2px 0 ${({ theme }) => theme.colors.primary};
+  }
+
   &:focus-visible {
     outline: none;
     box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
+
+  /* When the link is both active and focused, keep the focus ring
+     visible but don't drop the active accent — stack both shadows. */
+  &.active:focus-visible {
+    box-shadow:
+      ${({ theme }) => theme.shadows.focus},
+      inset 0 -2px 0 ${({ theme }) => theme.colors.primary};
   }
 `
 
@@ -222,7 +249,9 @@ export const Shell: React.FC = () => {
         </BrandLink>
         <ConnectionSwitcher onAddRequested={() => setAddOpen(true)} />
         <DesktopNav>
-          <NavLink to="/">{t('nav.query')}</NavLink>
+          <NavLink to="/" end>
+            {t('nav.query')}
+          </NavLink>
           <NavLink to="/schema">{t('nav.schema')}</NavLink>
           <NavLink to="/admin">{t('nav.admin')}</NavLink>
           <NavLink to="/ops">{t('nav.ops')}</NavLink>
@@ -247,7 +276,9 @@ export const Shell: React.FC = () => {
         $open={drawerOpen}
         aria-label={t('nav.primaryMobile')}
       >
-        <NavLink to="/">{t('nav.query')}</NavLink>
+        <NavLink to="/" end>
+          {t('nav.query')}
+        </NavLink>
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
         <NavLink to="/admin">{t('nav.admin')}</NavLink>
         <NavLink to="/ops">{t('nav.ops')}</NavLink>
