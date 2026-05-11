@@ -81,29 +81,41 @@ func filterSystemGraphs(names []string) []string {
 // this dialect; SHOW LABELS is also unsupported). The function
 // `labels(n)` returns a LIST<STRING> per node; we flatten in-process.
 // Empty/null lists are skipped so unlabeled nodes don't pollute the
-// result. The schema explorer caches per graph, so the O(N) scan
-// runs at most once per graph switch.
+// result.
+//
+// Server-side cache (PERF-2026-05-11-01 / F1 / #128): the O(N) full-graph
+// scan is memoised per (profile, graph) for schemaCacheTTL behind a
+// singleflight so a busy dashboard re-querying on every graph switch /
+// tab focus doesn't re-pay it. Profile mutations invalidate the cache.
 func (s *GraphServer) Labels(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.LabelList, error) {
-	rows, err := s.queryStringLists(r.Context(), req.Graph,
-		"MATCH (n) RETURN DISTINCT labels(n) AS l")
+	ctx := r.Context()
+	key := schemaCacheKey{profile: profileFromContextOrDefault(ctx), graph: req.Graph, kind: schemaCacheKindLabels}
+	out, err := s.schemaCacheRef().getOrLoad(key, func() ([]string, error) {
+		rows, lerr := s.queryStringLists(ctx, req.Graph,
+			"MATCH (n) RETURN DISTINCT labels(n) AS l")
+		if lerr != nil {
+			return nil, lerr
+		}
+		seen := make(map[string]struct{}, len(rows))
+		labels := make([]string, 0, len(rows))
+		for _, list := range rows {
+			for _, label := range list {
+				if label == "" {
+					continue
+				}
+				if _, ok := seen[label]; ok {
+					continue
+				}
+				seen[label] = struct{}{}
+				labels = append(labels, label)
+			}
+		}
+		sort.Strings(labels)
+		return labels, nil
+	})
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
-	seen := make(map[string]struct{}, len(rows))
-	out := make([]string, 0, len(rows))
-	for _, list := range rows {
-		for _, label := range list {
-			if label == "" {
-				continue
-			}
-			if _, ok := seen[label]; ok {
-				continue
-			}
-			seen[label] = struct{}{}
-			out = append(out, label)
-		}
-	}
-	sort.Strings(out)
 	return &gentypes.LabelList{Labels: out}, nil
 }
 
@@ -113,9 +125,16 @@ func (s *GraphServer) Labels(w http.ResponseWriter, r *http.Request, req *gentyp
 // graph-agnostic and returns the security graph's HAS_ROLE/UNKNOWN
 // regardless of USE GRAPH. Switched to a MATCH-based discovery
 // query that respects the graph scope.
+//
+// Server-side cache (PERF-2026-05-11-01 / F1 / #128): same TTL +
+// singleflight memoisation as Labels (see that doc comment).
 func (s *GraphServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.EdgeTypeList, error) {
-	rows, err := s.queryStrings(r.Context(), req.Graph,
-		"MATCH ()-[r]->() RETURN DISTINCT type(r) AS t ORDER BY t")
+	ctx := r.Context()
+	key := schemaCacheKey{profile: profileFromContextOrDefault(ctx), graph: req.Graph, kind: schemaCacheKindEdgeTypes}
+	rows, err := s.schemaCacheRef().getOrLoad(key, func() ([]string, error) {
+		return s.queryStrings(ctx, req.Graph,
+			"MATCH ()-[r]->() RETURN DISTINCT type(r) AS t ORDER BY t")
+	})
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}

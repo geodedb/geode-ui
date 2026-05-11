@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
@@ -22,6 +23,10 @@ import (
 // a unique name.
 type fakeDriver struct {
 	rows map[string]fakeResult // statement substring → result
+	// queries counts every QueryContext invocation across all conns
+	// opened from this driver — used by the schema-cache tests to assert
+	// that cache hits avoid the upstream round-trip.
+	queries atomic.Int64
 }
 
 type fakeResult struct {
@@ -41,6 +46,7 @@ func (c *fakeConn) Begin() (driver.Tx, error)           { return nil, errors.New
 // QueryerContext is the optional fast path the database/sql package
 // prefers when available. We implement it directly to avoid stmt.
 func (c *fakeConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	c.d.queries.Add(1)
 	for stmt, res := range c.d.rows {
 		if strings.Contains(query, stmt) {
 			if res.err != nil {

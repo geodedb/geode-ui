@@ -130,6 +130,13 @@ type GraphServer struct {
 	reloadGroup    singleflight.Group
 	reloadVersion  atomic.Int64
 	reloadInflight sync.WaitGroup
+
+	// schemaCacheInst caches schema-discovery results (labels / edge
+	// types) with a TTL + singleflight (PERF-2026-05-11-01 / F1 / #128).
+	// Lazily initialised via schemaCacheRef so a struct-literal
+	// GraphServer (tests) still works without an explicit constructor.
+	schemaCacheOnce sync.Once
+	schemaCacheInst *schemaCache
 }
 
 // New constructs a GraphServer with the given Config.

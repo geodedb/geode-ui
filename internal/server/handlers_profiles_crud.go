@@ -79,6 +79,10 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 		"owner", saved.OwnerUserID,
 		"name", saved.Name,
 	)
+	// PERF-2026-05-11-01 / F1 / #128: a profile mutation can change the
+	// connection target, so any cached schema-discovery results may now
+	// point at the wrong upstream graph — drop them.
+	s.invalidateSchemaCache()
 	s.maybeReload(r.Context())
 	g := toGenProfile(saved, true)
 	return &g, nil
@@ -151,6 +155,9 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 		"owner", updated.OwnerUserID,
 		"name", updated.Name,
 	)
+	// PERF-2026-05-11-01 / F1 / #128: invalidate cached schema discovery
+	// — see PostProfiles.
+	s.invalidateSchemaCache()
 	s.maybeReload(r.Context())
 	g := toGenProfile(updated, true)
 	return &g, nil
@@ -184,6 +191,9 @@ func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, re
 		"owner", cur.OwnerUserID,
 		"name", cur.Name,
 	)
+	// PERF-2026-05-11-01 / F1 / #128: invalidate cached schema discovery
+	// — see PostProfiles.
+	s.invalidateSchemaCache()
 	s.maybeReload(r.Context())
 	return &gentypes.Empty{}, nil
 }
