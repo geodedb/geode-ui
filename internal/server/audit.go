@@ -1,7 +1,9 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -161,7 +163,38 @@ var defaultAuditRing = newAuditRing()
 // are redacted to "[REDACTED]" before either destination sees them.
 // Callers should still avoid passing sensitive material in the first
 // place; redaction is a defensive safety net.
+//
+// Emission policy (GAP-Q7 / #37): audit emission is **best-effort,
+// log+continue**. A failure here MUST NOT break the wrapping handler
+// — auditing is observability, not security gating. The wrapping
+// `defer recover()` enforces that policy: if a custom slog handler
+// or the ring buffer panics (bad writer, OOM, etc.), the panic is
+// caught, surfaced as a one-line stderr warning, and the handler
+// proceeds. Callers therefore correctly invoke this as
+// `emitAudit(...)` with no error return — the policy is sealed in
+// the helper rather than duplicated at every call site.
+//
+// (slog.Info does not return an error today and ringBuffer.append is
+// infallible, so the panic guard is the only failure mode left to
+// neutralise. The recovery path writes directly to os.Stderr because
+// log.Default() in Go 1.21+ routes through slog and would re-panic
+// on the same broken handler.)
 func emitAudit(event string, kv ...any) {
+	defer func() {
+		// log+continue: catch any panic from the slog handler chain
+		// or the ring buffer so a misbehaving sink can never escalate
+		// into a 500 from the wrapping HTTP handler. We write
+		// **directly** to os.Stderr rather than re-entering slog or
+		// the standard `log` package — Go 1.21+ rewires log.Default()
+		// to write through slog, so a panicking slog handler would
+		// re-panic on the recovery path and propagate out anyway.
+		// fmt.Fprintf to os.Stderr is the only sink guaranteed to
+		// stay independent of the audit pipeline.
+		if rec := recover(); rec != nil {
+			fmt.Fprintf(os.Stderr,
+				"AUDIT EMISSION FAILED event=%s panic=%v\n", event, rec)
+		}
+	}()
 	args := make([]any, 0, len(kv)+2)
 	args = append(args, "event", event)
 	fields := make(map[string]any, len(kv)/2)

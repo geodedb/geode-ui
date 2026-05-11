@@ -2,10 +2,12 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/v2"
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -250,4 +252,47 @@ func TestAuditEntry_RoundTripJSON(t *testing.T) {
 	if got.Event != e.Event {
 		t.Errorf("event mismatch: %q vs %q", got.Event, e.Event)
 	}
+}
+
+// panicHandler is an slog handler that panics on every Handle call
+// while its `armed` pointer is non-zero. The atomic flag lets the
+// test arm-and-disarm the panic without leaving a poison handler in
+// place — even if t.Cleanup somehow ran out of order, a disarmed
+// instance just no-ops. Used by TestEmitAudit_LogContinuePolicy.
+type panicHandler struct {
+	armed *atomic.Bool
+}
+
+func (h panicHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h panicHandler) Handle(_ context.Context, _ slog.Record) error {
+	if h.armed != nil && h.armed.Load() {
+		panic("simulated audit sink failure")
+	}
+	return nil
+}
+func (h panicHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h panicHandler) WithGroup(_ string) slog.Handler      { return h }
+
+// TestEmitAudit_LogContinuePolicy pins GAP-Q7's policy: emitAudit is
+// best-effort log+continue. A panicking slog handler MUST NOT escape
+// emitAudit — the caller (an HTTP handler returning a 2xx) must keep
+// running. The recovery path writes a one-line stderr warning so
+// observability is not silently lost.
+func TestEmitAudit_LogContinuePolicy(t *testing.T) {
+	armed := &atomic.Bool{}
+	armed.Store(true)
+	prev := slog.Default()
+	slog.SetDefault(slog.New(panicHandler{armed: armed}))
+	t.Cleanup(func() {
+		armed.Store(false) // disarm first so any in-flight goroutine sees no-op
+		slog.SetDefault(prev)
+	})
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("emitAudit propagated panic %v; Q7 policy violated", r)
+		}
+	}()
+	// Calling emitAudit must not panic even when slog.Info panics.
+	emitAudit("user_created", "user", "alice", "target", "bob")
 }
