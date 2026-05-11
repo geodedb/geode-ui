@@ -222,10 +222,30 @@ func main() {
 	// lands the SPA wrapper is the safe, minimal mitigation for SEC-F4.
 	mux.Handle("/", server.WithSPASecurityHeaders(uiHandler))
 
+	// PERF-F12 (#56): the WS streaming surface (/ws/query) must NOT be
+	// killed by a server-wide write timeout — a `MATCH (n) RETURN n` over
+	// a large graph legitimately streams for minutes. So WriteTimeout is
+	// deliberately NOT applied to the *http.Server below; instead the
+	// non-WS (REST + SPA) surface is wrapped in an http.TimeoutHandler
+	// with restWriteTimeout, and the /ws/ prefix routes around it. Two
+	// independent cleanup mechanisms still cover a stuck WS peer:
+	//   1. Per-frame deadlines: gen/ws/ws_handlers.gen.go configures
+	//      wsx.Options{ReadTimeout, WriteTimeout: 30s} for every WS path,
+	//      and wsx.Conn.{ReadMessage,WriteMessage} call
+	//      SetReadDeadline/SetWriteDeadline before each frame — so a
+	//      client that stops ACKing trips the deadline within 30s and
+	//      the handler unwinds.
+	//   2. Idle TCP timeout: httpSrv.IdleTimeout reaps a connection that
+	//      is open but exchanging nothing.
+	// hcfg.WriteTimeout/ReadTimeout are still listed here because
+	// httpx.WrapHandler's signature takes the full Config, but WrapHandler
+	// only consumes MaxBodyBytes + CORS — the timeouts are applied
+	// explicitly below where the WS exemption can be expressed.
+	const restWriteTimeout = 60 * time.Second
 	hcfg := httpx.Config{
 		ReadHeader:     5 * time.Second,
 		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   60 * time.Second,
+		WriteTimeout:   restWriteTimeout,
 		IdleTimeout:    120 * time.Second,
 		MaxHeaderBytes: 16384,
 		MaxBodyBytes:   1 << 20,
@@ -263,10 +283,32 @@ func main() {
 		server.WithAccessTokenDeprecation(httpx.WrapHandler(hcfg, csrfWrapped)),
 	)
 
+	// PERF-F12 (#56): cap REST + SPA responses at restWriteTimeout, but
+	// route WebSocket upgrades around the timeout handler. http.TimeoutHandler
+	// buffers the whole response and does not implement http.Hijacker —
+	// either of which would break a streaming WS connection (the upgrade
+	// hijacks the conn and then streams indefinitely). The /ws/ prefix
+	// therefore reaches `handler` directly; everything else goes through
+	// the timeout-wrapped copy. Both branches dispatch into the same
+	// middleware chain + mux, so routing is unchanged — only the timeout
+	// envelope differs.
+	rootHandler := wsExemptTimeoutHandler(handler, restWriteTimeout)
+
 	httpSrv := &http.Server{
-		Addr:              listen,
-		Handler:           handler,
+		Addr:    listen,
+		Handler: rootHandler,
+		// ReadHeaderTimeout guards against slowloris on the header read.
 		ReadHeaderTimeout: 5 * time.Second,
+		// IdleTimeout reaps idle keep-alive connections — including a WS
+		// connection whose peer has gone silent without sending a close
+		// frame (the per-frame deadlines in wsx handle the in-flight
+		// case; this handles the "open but doing nothing" case).
+		IdleTimeout: hcfg.IdleTimeout,
+		// WriteTimeout is deliberately left at its zero value (no cap):
+		// the /ws/ surface streams for as long as the query runs. The
+		// REST surface's per-request cap is restWriteTimeout, applied
+		// via the http.TimeoutHandler above (which the /ws/ prefix is
+		// routed around). See the PERF-F12 comment block above.
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -283,6 +325,26 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+}
+
+// wsExemptTimeoutHandler wraps next with an http.TimeoutHandler that
+// caps every request at restTimeout — EXCEPT requests whose path starts
+// with "/ws/", which reach next directly. The WS surface streams query
+// results for as long as the query runs (potentially minutes for a
+// large MATCH), and http.TimeoutHandler both buffers the whole response
+// and refuses to expose http.Hijacker — either of which breaks a
+// streaming WebSocket. Per-frame deadlines (wsx.Conn, configured by
+// gen/ws/ws_handlers.gen.go) plus context cancellation handle a stuck
+// WS peer instead. PERF-F12 / #56.
+func wsExemptTimeoutHandler(next http.Handler, restTimeout time.Duration) http.Handler {
+	restTimed := http.TimeoutHandler(next, restTimeout, "request timed out")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/ws/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		restTimed.ServeHTTP(w, r)
+	})
 }
 
 // seedFromJSON populates an empty store with the supplied profiles as

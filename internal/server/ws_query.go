@@ -171,6 +171,21 @@ type queryStreamMsg struct {
 // Method-name note: the generated interface emits "Query" (genapi
 // strips the leading path segment, so /ws/query → Query), which is
 // why this lives on *WSServer rather than *GraphServer.
+//
+// Stuck-client cleanup (PERF-F12 / #56): there is no server-wide write
+// timeout on the /ws/ surface (a large MATCH legitimately streams for
+// minutes — see cmd/server/main.go), so cleanup of a stuck peer relies
+// on two things, both already in place:
+//   - Per-frame deadlines: every conn.WriteMessage / conn.ReadMessage
+//     below calls SetWriteDeadline / SetReadDeadline on the underlying
+//     net.Conn (wsx.Conn does this when wsx.Options carries a non-zero
+//     ReadTimeout/WriteTimeout, which gen/ws/ws_handlers.gen.go sets to
+//     30s for every WS path). A client that stops draining trips that
+//     deadline within 30s and rows.Next()'s next batcher flush returns
+//     an error, unwinding this handler.
+//   - Context cancellation: the cancel-reader goroutine below cancels
+//     ctx on any read error, EOF, close frame, or {kind:"cancel"} — so
+//     db.QueryContext is aborted promptly.
 func (s *WSServer) Query(conn *wsx.Conn) error {
 	if s.cfg.Pool == nil {
 		return writeErr(conn, "internal", "pool not configured")
