@@ -178,6 +178,11 @@ type Props = {
   // structured cell — useful when the operator wants the raw graph
   // shape rather than a flattened table.
   expand?: boolean
+  // fillHeight: when true (set by QueryPage's maximized result overlay)
+  // the virtualized body grows to fill the available viewport instead
+  // of capping at min(60vh, 720px). The cap is the default so the
+  // inline result panel doesn't push the page off the fold.
+  fillHeight?: boolean
 }
 
 function columnName(col: Record<string, unknown>, i: number): string {
@@ -428,7 +433,11 @@ const VirtualRow = ({
   )
 }
 
-export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
+export const TableView: React.FC<Props> = ({
+  resp,
+  expand = true,
+  fillHeight = false,
+}) => {
   const view = useMemo(
     () => (expand ? projectColumns(resp) : resp),
     [resp, expand]
@@ -471,13 +480,24 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
   // Body height tracks the viewport: tall enough to be useful but
   // capped so the data-table doesn't push the rest of the page off
   // the fold. Uses min(60vh, VIRTUAL_BODY_MAX) clamped from below by
-  // VIRTUAL_BODY_MIN so phones still see at least 240 px of body.
+  // VIRTUAL_BODY_MIN so phones still see at least 240 px of body. In
+  // fillHeight mode (the maximized result overlay) the cap is dropped:
+  // the body takes ~the whole viewport minus the overlay chrome (the
+  // tabs row, the table header, the overlay padding).
   useEffect(() => {
     const compute = (): number => {
+      const winH =
+        typeof window === 'undefined' ? 800 : Math.round(window.innerHeight)
+      if (fillHeight) {
+        // Overlay chrome budget: ~160 px (2× lg padding + tabs row +
+        // table header + a little breathing room). Floor so a tiny
+        // viewport still shows a usable body.
+        return Math.max(VIRTUAL_BODY_MIN, winH - 160)
+      }
       const vh =
         typeof window === 'undefined'
           ? VIRTUAL_BODY_DEFAULT
-          : Math.round(window.innerHeight * 0.6)
+          : Math.round(winH * 0.6)
       return Math.min(VIRTUAL_BODY_MAX, Math.max(VIRTUAL_BODY_MIN, vh))
     }
     setBodyHeight(compute())
@@ -485,7 +505,7 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
     const onResize = (): void => setBodyHeight(compute())
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
+  }, [fillHeight])
 
   // Convert the live container width into a per-column character
   // budget. Below the grid's min-width the ScrollArea is scrolling, so

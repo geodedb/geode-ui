@@ -76,6 +76,12 @@ type Props = {
   // NODE/EDGE columns ⇒ empty graph_summary).
   query?: string
   height?: number
+  // fillHeight: when true (set by QueryPage's maximized result overlay)
+  // the canvas grows to fill the available viewport, the sidebar
+  // stacks below the canvas (so the canvas gets the full width), and
+  // the Cytoscape core is resized + re-fitted after the box grows. The
+  // 480 px default + side-by-side layout is kept for the inline view.
+  fillHeight?: boolean
 }
 
 const REBUILD_DEBOUNCE_MS = 250
@@ -90,10 +96,15 @@ const REBUILD_DEBOUNCE_MS = 250
 // always works).
 const ID_PICKER_OPTION_CAP = 1000
 
-const Wrap = styled.div`
+const Wrap = styled.div<{ $fill: boolean }>`
   display: grid;
-  grid-template-columns: 1fr 280px;
+  /* In fill mode the sidebar stacks below the canvas (single column)
+     so the graph canvas claims the full width of the overlay. The
+     side-by-side 1fr/280px layout — and its below-md collapse — is
+     kept for the inline result panel. */
+  grid-template-columns: ${({ $fill }) => ($fill ? '1fr' : '1fr 280px')};
   gap: ${({ theme }) => theme.spacing.sm};
+  ${({ $fill }) => ($fill ? 'height: 100%;' : '')}
 
   @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
     grid-template-columns: 1fr;
@@ -206,8 +217,14 @@ const ErrorBanner = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.sm};
   box-shadow: ${({ theme }) => theme.shadows.sm};
 `
-const Side = styled.aside<{ $height: number }>`
-  height: ${({ $height }) => $height}px;
+const Side = styled.aside<{ $height: number; $fill: boolean }>`
+  /* In fill mode the sidebar is stacked below the (full-width) canvas,
+     so a fixed canvas-tall height would be wasted space — cap it
+     instead and let it scroll. Otherwise it matches the canvas height
+     for the side-by-side layout. */
+  ${({ $height, $fill }) => {
+    return $fill ? 'height: auto; max-height: 40vh;' : `height: ${$height}px;`
+  }}
   overflow: auto;
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
@@ -433,7 +450,8 @@ function nodeLabelOf(data: Record<string, unknown>): string {
 // SelectedInspector renders the selected-element panel: an identity
 // header, a small segmented control to flip between the structured
 // property view (default) and the raw data-bag JSON, and the chosen
-// pane. The `props` pane is a sorted <dl> of `selected.data.props`
+// pane. The `props` pane is an insertion-order <dl> of
+// `selected.data.props` (matching TableView's projectColumns ordering)
 // formatted through the shared formatPropValue; the `json` pane is the
 // historical `<pre>{JSON.stringify(...)}</pre>` output, kept as an
 // option.
@@ -454,7 +472,10 @@ const SelectedInspector: React.FC<{
     data.props && typeof data.props === 'object' && !Array.isArray(data.props)
       ? (data.props as Record<string, unknown>)
       : {}
-  const propKeys = Object.keys(props).sort()
+  // Insertion order — matches how TableView's projectColumns orders the
+  // flattened property columns (first-seen / object key order), so the
+  // inspector and the data table list the same node's props the same way.
+  const propKeys = Object.keys(props)
 
   return (
     <InspectorBlock data-testid="graph-inspector">
@@ -533,11 +554,43 @@ const SelectedInspector: React.FC<{
   )
 }
 
-export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
+// Below the canvas chrome (toolbar) in fill mode this is the px the
+// canvas leaves for itself out of the viewport — the overlay padding,
+// the result tabs row, the graph toolbar, the stacked sidebar's first
+// glimpse. Heuristic; the ResizeObserver / fit pass corrects framing.
+const FILL_CANVAS_CHROME_PX = 320
+
+export const GraphView: React.FC<Props> = ({
+  resp,
+  query,
+  height = 480,
+  fillHeight = false,
+}) => {
   const { t } = useTranslation()
   const theme = useTheme()
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
+  // The pixel height the Canvas / Side render at. In fill mode this
+  // tracks the viewport (minus the overlay chrome); otherwise it's the
+  // caller-provided `height`.
+  const [effectiveHeight, setEffectiveHeight] = useState<number>(
+    fillHeight && typeof window !== 'undefined'
+      ? Math.max(height, Math.round(window.innerHeight) - FILL_CANVAS_CHROME_PX)
+      : height
+  )
+  useEffect(() => {
+    const compute = (): number => {
+      if (!fillHeight) return height
+      const winH =
+        typeof window === 'undefined' ? 800 : Math.round(window.innerHeight)
+      return Math.max(height, winH - FILL_CANVAS_CHROME_PX)
+    }
+    setEffectiveHeight(compute())
+    if (!fillHeight || typeof window === 'undefined') return undefined
+    const onResize = (): void => setEffectiveHeight(compute())
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [fillHeight, height])
   const [selected, setSelected] = useState<Selected | null>(null)
   // GAP-04: errors thrown by extractElements / cytoscape() during the
   // build pass. Surfaced as a banner over the canvas instead of an
@@ -829,6 +882,29 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
     applyVisibility(cy, hiddenLabels)
   }, [hiddenLabels, applyVisibility])
 
+  // When the canvas box changes size (the maximize toggle flips, or the
+  // window resizes in fill mode) Cytoscape needs to recompute its
+  // renderer viewport and re-fit the graph to the new box — otherwise
+  // the graph stays drawn at the old size in the corner of a now-larger
+  // canvas. rAF defers the resize one frame so the DOM has settled to
+  // the new height before Cytoscape measures it.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return undefined
+    const refit = (): void => {
+      cy.resize()
+      cy.fit(undefined, 24)
+    }
+    if (typeof requestAnimationFrame !== 'function') {
+      refit()
+      return undefined
+    }
+    const raf = requestAnimationFrame(refit)
+    return () => {
+      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf)
+    }
+  }, [effectiveHeight])
+
   // Selected element changes — drive the emphasis (1-hop) styling.
   useEffect(() => {
     const cy = cyRef.current
@@ -910,7 +986,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
     labelToColor(label, theme.variant)
 
   return (
-    <Wrap>
+    <Wrap $fill={fillHeight}>
       <CanvasArea>
         <Toolbar data-testid="graph-toolbar" role="toolbar">
           <div className="group">
@@ -973,7 +1049,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
         <div style={{ position: 'relative' }}>
           <Canvas
             ref={ref}
-            $height={height}
+            $height={effectiveHeight}
             role="img"
             aria-label={t('graph.canvasAria')}
           />
@@ -989,7 +1065,7 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
           )}
         </div>
       </CanvasArea>
-      <Side $height={height}>
+      <Side $height={effectiveHeight} $fill={fillHeight}>
         {nodeLabelBuckets.size > 1 && (
           <ControlsBlock data-testid="graph-visibility-controls">
             <h5>{t('graph.visibilityHeading')}</h5>

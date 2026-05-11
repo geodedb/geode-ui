@@ -80,6 +80,8 @@ export const en = {
     tabGraph: 'graph',
     loadingEditor: 'Loading editor…',
     loadingGraph: 'Loading graph view…',
+    maximizeResults: 'Maximize results',
+    exitFullscreen: 'Exit fullscreen',
   },
 
   graph: {

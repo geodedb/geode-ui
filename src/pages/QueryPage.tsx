@@ -1,4 +1,5 @@
 import React, { Suspense, useEffect, useReducer, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
@@ -123,6 +124,50 @@ const ToggleLabel = styled.label`
   user-select: none;
 `
 
+// Maximize toggle in the result-panel toolbar. Styled like the tab
+// buttons (it sits in the same row) but it's a plain button, not a
+// WAI tab — aria-pressed reflects the maximized state.
+const MaximizeBtn = styled.button`
+  margin-left: auto;
+  padding: 6px 12px;
+  background: transparent;
+  color: ${({ theme }) => theme.text.secondary};
+  border: 1px solid ${({ theme }) => theme.border.default};
+  border-radius: ${({ theme }) => theme.radii.md};
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: ${({ theme }) => theme.font.weights.medium};
+  min-height: 32px;
+
+  &:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+    color: ${({ theme }) => theme.text.primary};
+  }
+  &[aria-pressed='true'] {
+    background: ${({ theme }) => theme.bg.subtle};
+    color: ${({ theme }) => theme.text.primary};
+    border-color: ${({ theme }) => theme.border.strong};
+  }
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
+`
+
+// The fullscreen result overlay. Rendered via a portal into
+// document.body so it escapes any stacking context, fixed to the
+// viewport, scrollable, padded. zIndex.modal keeps it above app chrome.
+const ResultOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  z-index: ${({ theme }) => theme.zIndex.modal};
+  background: ${({ theme }) => theme.bg.canvas};
+  overflow: auto;
+  padding: ${({ theme }) => theme.spacing.lg};
+  display: flex;
+  flex-direction: column;
+`
+
 function streamStateToResp(s: StreamState): QueryResp {
   return {
     columns: s.columns as unknown as Array<Record<string, unknown>>,
@@ -141,8 +186,30 @@ export const QueryPage: React.FC = () => {
   const [tab, setTab] = useState<Tab>('table')
   const [streamMode, setStreamMode] = useState(false)
   const [expand, setExpand] = useState(true)
+  // Result panel maximized into a viewport-filling overlay. Session-
+  // local (defaults closed); Esc and the toggle both close it.
+  const [maximized, setMaximized] = useState(false)
+  const maximizeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
+
+  // While maximized, Escape exits fullscreen. Restore focus to the
+  // toggle button on exit so keyboard users land back where they were.
+  useEffect(() => {
+    if (!maximized) return undefined
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setMaximized(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [maximized])
+  const prevMaximizedRef = useRef(maximized)
+  useEffect(() => {
+    if (prevMaximizedRef.current && !maximized) {
+      maximizeBtnRef.current?.focus()
+    }
+    prevMaximizedRef.current = maximized
+  }, [maximized])
 
   // The schema explorer (D1) stages a statement in queryStore and
   // navigates here. Pull it once on mount, copy it into local editor
@@ -244,6 +311,82 @@ export const QueryPage: React.FC = () => {
     <LazyFallback role="status">{t('query.loadingGraph')}</LazyFallback>
   )
 
+  // The result panel — the tabs row (with the maximize toggle) plus the
+  // active tabpanel. `fillHeight={maximized}` is threaded into the
+  // active child so it drops its inline height cap in fullscreen.
+  const resultPanel = activeResp && (
+    <>
+      <Tabs role="tablist" aria-label={t('query.resultViewLabel')}>
+        {(
+          [
+            ['table', t('query.tabTable')],
+            ['json', t('query.tabJson')],
+            ['graph', t('query.tabGraph')],
+          ] as const
+        ).map(([kind, label]) => (
+          <TabBtn
+            key={kind}
+            role="tab"
+            aria-selected={tab === kind}
+            aria-controls={`result-panel-${kind}`}
+            tabIndex={tab === kind ? 0 : -1}
+            $active={tab === kind}
+            onClick={() => setTab(kind)}
+          >
+            {label}
+          </TabBtn>
+        ))}
+        <MaximizeBtn
+          ref={maximizeBtnRef}
+          type="button"
+          data-testid="result-fullscreen-toggle"
+          aria-pressed={maximized}
+          aria-label={
+            maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
+          }
+          title={
+            maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
+          }
+          onClick={() => setMaximized((m) => !m)}
+        >
+          {maximized ? '⤡' : '⤢'}
+        </MaximizeBtn>
+      </Tabs>
+      <div
+        id={`result-panel-${tab}`}
+        role="tabpanel"
+        aria-labelledby={`result-panel-${tab}`}
+      >
+        {tab === 'table' && (
+          <TableView resp={activeResp} expand={expand} fillHeight={maximized} />
+        )}
+        {tab === 'json' && (
+          <JsonView data={activeResp} fillHeight={maximized} />
+        )}
+        {tab === 'graph' && (
+          <Suspense fallback={graphFallback}>
+            <GraphView resp={activeResp} query={stmt} fillHeight={maximized} />
+          </Suspense>
+        )}
+      </div>
+    </>
+  )
+
+  // When maximized, portal the panel into document.body as a fixed
+  // inset:0 overlay so it escapes any stacking context and fills the
+  // viewport; otherwise render it inline below the editor toolbar.
+  const overlayEl = (
+    <ResultOverlay data-testid="result-fullscreen-overlay">
+      {resultPanel}
+    </ResultOverlay>
+  )
+  let resultRegion: React.ReactNode = null
+  if (resultPanel) {
+    resultRegion = maximized
+      ? createPortal(overlayEl, document.body)
+      : resultPanel
+  }
+
   return (
     <div>
       <Suspense fallback={editorFallback}>
@@ -287,44 +430,7 @@ export const QueryPage: React.FC = () => {
         )}
         {activeErr && <Err>{activeErr}</Err>}
       </Bar>
-      {activeResp && (
-        <>
-          <Tabs role="tablist" aria-label={t('query.resultViewLabel')}>
-            {(
-              [
-                ['table', t('query.tabTable')],
-                ['json', t('query.tabJson')],
-                ['graph', t('query.tabGraph')],
-              ] as const
-            ).map(([kind, label]) => (
-              <TabBtn
-                key={kind}
-                role="tab"
-                aria-selected={tab === kind}
-                aria-controls={`result-panel-${kind}`}
-                tabIndex={tab === kind ? 0 : -1}
-                $active={tab === kind}
-                onClick={() => setTab(kind)}
-              >
-                {label}
-              </TabBtn>
-            ))}
-          </Tabs>
-          <div
-            id={`result-panel-${tab}`}
-            role="tabpanel"
-            aria-labelledby={`result-panel-${tab}`}
-          >
-            {tab === 'table' && <TableView resp={activeResp} expand={expand} />}
-            {tab === 'json' && <JsonView data={activeResp} />}
-            {tab === 'graph' && (
-              <Suspense fallback={graphFallback}>
-                <GraphView resp={activeResp} query={stmt} />
-              </Suspense>
-            )}
-          </div>
-        </>
-      )}
+      {resultRegion}
     </div>
   )
 }
