@@ -101,19 +101,59 @@ func toGenProfile(p conn.Profile, reveal bool) gentypes.Profile {
 	return out
 }
 
+// tlsWire / poolOverridesWire are the on-the-wire shapes for the opaque
+// `tls` / `pool_overrides` JSON properties (the genapi schema has no
+// per-field $ref yet, so we hand-marshal these here).
+type tlsWire struct {
+	CAPEM         string `json:"ca_pem,omitempty"`
+	ClientCertPEM string `json:"client_cert_pem,omitempty"`
+	ClientKeyPEM  string `json:"client_key_pem,omitempty"`
+}
+
+type poolOverridesWire struct {
+	MaxOpenConns      int   `json:"max_open_conns,omitempty"`
+	MaxIdleConns      int   `json:"max_idle_conns,omitempty"`
+	ConnMaxLifetimeMs int64 `json:"conn_max_lifetime_ms,omitempty"`
+	ConnMaxIdleMs     int64 `json:"conn_max_idle_ms,omitempty"`
+}
+
+// PSR-F15 / #112 micro-opt: GET /profiles marshals one `tls` and one
+// `pool_overrides` JSON object per *revealed* profile (every row for an
+// admin). The vast majority of profiles carry neither custom TLS nor
+// pool overrides, so the input is the zero value and the JSON output is
+// a fixed byte string. Precompute those two strings once at init so the
+// list path skips a json.Marshal (and its scratch-buffer allocation)
+// per zero-valued profile. The bytes are treated as read-only by every
+// caller (they flow straight into the response codec, which only reads
+// jsontext.Value), so sharing a single backing array is safe.
+var (
+	zeroTLSWire = mustMarshalWire(tlsWire{})
+	zeroPOWire  = mustMarshalWire(poolOverridesWire{})
+)
+
+func mustMarshalWire(v any) jsontext.Value {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		// Both wire structs are plain field-only structs; Marshal cannot
+		// fail. Panic at init rather than ship a corrupt encoding.
+		panic("server: marshal zero-value profile wire shape: " + err.Error())
+	}
+	return jsontext.Value(raw)
+}
+
 // marshalTLS encodes a conn.TLSMaterial as a jsontext.Value matching
-// the wire schema { ca_pem, client_cert_pem, client_key_pem }.
+// the wire schema { ca_pem, client_cert_pem, client_key_pem }. The
+// all-empty input — the common case — returns the precomputed zero
+// encoding without touching the JSON encoder.
 func marshalTLS(t conn.TLSMaterial) (jsontext.Value, error) {
-	wire := struct {
-		CAPEM         string `json:"ca_pem,omitempty"`
-		ClientCertPEM string `json:"client_cert_pem,omitempty"`
-		ClientKeyPEM  string `json:"client_key_pem,omitempty"`
-	}{
+	if t == (conn.TLSMaterial{}) {
+		return zeroTLSWire, nil
+	}
+	raw, err := json.Marshal(tlsWire{
 		CAPEM:         t.CAPEM,
 		ClientCertPEM: t.ClientCertPEM,
 		ClientKeyPEM:  t.ClientKeyPEM,
-	}
-	raw, err := json.Marshal(wire)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -122,20 +162,18 @@ func marshalTLS(t conn.TLSMaterial) (jsontext.Value, error) {
 
 // marshalPoolOverrides encodes a conn.PoolOverrides as a jsontext.Value
 // matching the wire schema. ConnMaxLifetime / ConnMaxIdleTime are
-// converted from time.Duration to milliseconds for the wire.
+// converted from time.Duration to milliseconds for the wire. The zero
+// input — the common case — returns the precomputed zero encoding.
 func marshalPoolOverrides(o conn.PoolOverrides) (jsontext.Value, error) {
-	wire := struct {
-		MaxOpenConns      int   `json:"max_open_conns,omitempty"`
-		MaxIdleConns      int   `json:"max_idle_conns,omitempty"`
-		ConnMaxLifetimeMs int64 `json:"conn_max_lifetime_ms,omitempty"`
-		ConnMaxIdleMs     int64 `json:"conn_max_idle_ms,omitempty"`
-	}{
+	if o == (conn.PoolOverrides{}) {
+		return zeroPOWire, nil
+	}
+	raw, err := json.Marshal(poolOverridesWire{
 		MaxOpenConns:      o.MaxOpenConns,
 		MaxIdleConns:      o.MaxIdleConns,
 		ConnMaxLifetimeMs: int64(o.ConnMaxLifetime / 1_000_000),
 		ConnMaxIdleMs:     int64(o.ConnMaxIdleTime / 1_000_000),
-	}
-	raw, err := json.Marshal(wire)
+	})
 	if err != nil {
 		return nil, err
 	}

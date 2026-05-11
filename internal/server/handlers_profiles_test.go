@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/internal/conn"
@@ -160,3 +163,71 @@ func (s *countingVisibilityStore) Patch(_ context.Context, _ string, _ profilest
 }
 func (s *countingVisibilityStore) Delete(_ context.Context, _ string) error { return nil }
 func (s *countingVisibilityStore) Close() error                             { return nil }
+
+// TestMarshalProfileWire_ZeroFastPath pins the PSR-F15 micro-opt:
+// marshalTLS / marshalPoolOverrides return the precomputed zero
+// encoding (same backing array, no per-call json.Marshal) for the
+// zero input, AND that encoding is byte-identical to a fresh marshal
+// of the corresponding wire struct — i.e. the optimisation changes no
+// observable output. Non-zero inputs still go through the encoder and
+// reflect their fields.
+func TestMarshalProfileWire_ZeroFastPath(t *testing.T) {
+	// --- TLS ---
+	zTLS, err := marshalTLS(conn.TLSMaterial{})
+	if err != nil {
+		t.Fatalf("marshalTLS(zero): %v", err)
+	}
+	// Pointer identity with the package-level constant: no allocation.
+	if &zTLS[0] != &zeroTLSWire[0] {
+		t.Errorf("marshalTLS(zero) did not return the shared zeroTLSWire backing array")
+	}
+	wantTLS, _ := json.Marshal(tlsWire{})
+	if !bytes.Equal(zTLS, wantTLS) {
+		t.Errorf("marshalTLS(zero) = %q, want %q (must match a fresh marshal)", zTLS, wantTLS)
+	}
+
+	nzTLS, err := marshalTLS(conn.TLSMaterial{CAPEM: "PEM-CA", ClientCertPEM: "PEM-CERT"})
+	if err != nil {
+		t.Fatalf("marshalTLS(non-zero): %v", err)
+	}
+	wantNZTLS, _ := json.Marshal(tlsWire{CAPEM: "PEM-CA", ClientCertPEM: "PEM-CERT"})
+	if !bytes.Equal(nzTLS, wantNZTLS) {
+		t.Errorf("marshalTLS(non-zero) = %q, want %q", nzTLS, wantNZTLS)
+	}
+	// A non-zero result must not alias the shared constant.
+	if len(nzTLS) > 0 && len(zeroTLSWire) > 0 && &nzTLS[0] == &zeroTLSWire[0] {
+		t.Errorf("marshalTLS(non-zero) aliased the shared zero constant")
+	}
+
+	// --- PoolOverrides ---
+	zPO, err := marshalPoolOverrides(conn.PoolOverrides{})
+	if err != nil {
+		t.Fatalf("marshalPoolOverrides(zero): %v", err)
+	}
+	if &zPO[0] != &zeroPOWire[0] {
+		t.Errorf("marshalPoolOverrides(zero) did not return the shared zeroPOWire backing array")
+	}
+	wantPO, _ := json.Marshal(poolOverridesWire{})
+	if !bytes.Equal(zPO, wantPO) {
+		t.Errorf("marshalPoolOverrides(zero) = %q, want %q (must match a fresh marshal)", zPO, wantPO)
+	}
+
+	nzPO, err := marshalPoolOverrides(conn.PoolOverrides{
+		MaxOpenConns:    32,
+		MaxIdleConns:    8,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 25 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("marshalPoolOverrides(non-zero): %v", err)
+	}
+	wantNZPO, _ := json.Marshal(poolOverridesWire{
+		MaxOpenConns:      32,
+		MaxIdleConns:      8,
+		ConnMaxLifetimeMs: int64(5 * time.Minute / time.Millisecond),
+		ConnMaxIdleMs:     int64(25 * time.Second / time.Millisecond),
+	})
+	if !bytes.Equal(nzPO, wantNZPO) {
+		t.Errorf("marshalPoolOverrides(non-zero) = %q, want %q", nzPO, wantNZPO)
+	}
+}
