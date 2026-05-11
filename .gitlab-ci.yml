@@ -236,7 +236,7 @@ pages:
   image: golang:1.26-alpine
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.26.2
+    GOTOOLCHAIN: go1.26.3
     CGO_ENABLED: "0"
   before_script: []
   cache: []

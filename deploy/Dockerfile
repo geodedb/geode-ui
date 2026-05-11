@@ -42,7 +42,7 @@ RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
 FROM golang:1.26-alpine AS gobuild
-ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.2
+ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3
 RUN apk add --no-cache git
 WORKDIR /work
 # Sibling driver source needed because of the local replace directive.
