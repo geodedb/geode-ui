@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
@@ -7,6 +7,57 @@ import type { Theme } from '../../theme'
 import { below } from '../../theme'
 import { LabelList } from './LabelList'
 import { EdgeTypeList } from './EdgeTypeList'
+
+// PERF-F8 (#52): per-graph cache for the index+constraint pair so
+// re-selecting a graph the user has already viewed during this
+// session is instant — no second wire round-trip. Capped at
+// schemaCacheMaxEntries to avoid unbounded growth in long-lived
+// sessions; eviction is FIFO via insertion-order iteration over the
+// Map keys, which is well-defined per ECMAScript spec.
+type SchemaCacheEntry = {
+  indexes: Array<Record<string, unknown>>
+  constraints: Array<Record<string, unknown>>
+}
+const schemaCacheMaxEntries = 8
+
+// SchemaExplorerCache is exported as a small interface so tests can
+// inject a fresh cache (one per test) without having to reset
+// module-level state.
+export interface SchemaExplorerCacheLike {
+  get(graph: string): SchemaCacheEntry | undefined
+  put(graph: string, entry: SchemaCacheEntry): void
+  size(): number
+}
+
+export function createSchemaExplorerCache(
+  maxEntries: number = schemaCacheMaxEntries
+): SchemaExplorerCacheLike {
+  const map = new Map<string, SchemaCacheEntry>()
+  return {
+    get(graph) {
+      return map.get(graph)
+    },
+    put(graph, entry) {
+      // Reset insertion order to make re-hit promote to most-recent.
+      if (map.has(graph)) map.delete(graph)
+      map.set(graph, entry)
+      // Evict oldest while over capacity.
+      while (map.size > maxEntries) {
+        const firstKey = map.keys().next().value
+        if (firstKey === undefined) break
+        map.delete(firstKey)
+      }
+    },
+    size() {
+      return map.size
+    },
+  }
+}
+
+// Module-level default cache. Lives across component remounts so a
+// user navigating away and back gets the cached result. Tests should
+// inject a fresh cache via the optional `cache` prop.
+const defaultSchemaCache = createSchemaExplorerCache()
 
 interface ActiveProps {
   theme: Theme
@@ -125,7 +176,14 @@ const ErrText = styled.p`
   color: ${({ theme }) => theme.text.danger};
 `
 
-export const SchemaExplorer: React.FC = () => {
+// SchemaExplorerProps lets tests inject a fresh cache instance per
+// run; production callers omit the prop and inherit the module-level
+// defaultSchemaCache.
+export type SchemaExplorerProps = {
+  cache?: SchemaExplorerCacheLike
+}
+
+export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
   const { t } = useTranslation()
   const [graphs, setGraphs] = useState<string[]>([])
   const [active, setActive] = useState<string>('')
@@ -134,6 +192,14 @@ export const SchemaExplorer: React.FC = () => {
   const [constraints, setConstraints] = useState<
     Array<Record<string, unknown>>
   >([])
+
+  // PERF-F8 (#52): keep the AbortController across renders so a
+  // pending fetch from the prior `active` graph can be aborted when
+  // the user switches graphs faster than the network responds.
+  // useRef so we don't trigger an extra render on each .current
+  // mutation.
+  const inflightAbort = useRef<AbortController | null>(null)
+  const effectiveCache = cache ?? defaultSchemaCache
 
   // Initial graph fetch. Empty deps -- runs once on mount. The first
   // returned graph becomes active so the right-hand panes have data.
@@ -157,31 +223,78 @@ export const SchemaExplorer: React.FC = () => {
   }, [])
 
   // Re-fetch indexes & constraints whenever the active graph changes.
-  // The genapi client returns ConstraintList / IndexList where each
-  // entry is `Record<string, unknown>`, which we render as JSON.
+  // PERF-F8: cache check first (instant on re-select), then a single
+  // AbortController arms cancellation on the next switch. The generated
+  // client does not currently accept a signal so we still gate the
+  // setState calls on `signal.aborted` for cancellation correctness;
+  // the AbortController also serves as the unambiguous signal that
+  // tests assert on (abort() called when graph changes).
   useEffect(() => {
     if (!active) return undefined
-    let cancelled = false
+
+    // Cache hit: return instantly with no wire I/O.
+    const hit = effectiveCache.get(active)
+    if (hit) {
+      setIndexes(hit.indexes)
+      setConstraints(hit.constraints)
+      return undefined
+    }
+
+    // Cache miss: cancel any prior in-flight request, then issue
+    // fresh fetches.
+    if (inflightAbort.current) {
+      inflightAbort.current.abort()
+    }
+    const controller = new AbortController()
+    inflightAbort.current = controller
+    const { signal } = controller
+
+    let nextIndexes: Array<Record<string, unknown>> | null = null
+    let nextConstraints: Array<Record<string, unknown>> | null = null
+    const cachePut = (): void => {
+      // Only cache once BOTH requests have settled with a value —
+      // a partial result would surface a "ghost half" on the next
+      // re-selection.
+      if (nextIndexes !== null && nextConstraints !== null && !signal.aborted) {
+        effectiveCache.put(active, {
+          indexes: nextIndexes,
+          constraints: nextConstraints,
+        })
+      }
+    }
+
     client
       .indexes({ graph: active })
       .then((r) => {
-        if (!cancelled) setIndexes(r.indexes ?? [])
+        if (signal.aborted) return
+        nextIndexes = r.indexes ?? []
+        setIndexes(nextIndexes)
+        cachePut()
       })
       .catch(() => {
-        if (!cancelled) setIndexes([])
+        if (signal.aborted) return
+        nextIndexes = []
+        setIndexes(nextIndexes)
+        cachePut()
       })
     client
       .constraints({ graph: active })
       .then((r) => {
-        if (!cancelled) setConstraints(r.constraints ?? [])
+        if (signal.aborted) return
+        nextConstraints = r.constraints ?? []
+        setConstraints(nextConstraints)
+        cachePut()
       })
       .catch(() => {
-        if (!cancelled) setConstraints([])
+        if (signal.aborted) return
+        nextConstraints = []
+        setConstraints(nextConstraints)
+        cachePut()
       })
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [active])
+  }, [active, effectiveCache])
 
   return (
     <Layout>
