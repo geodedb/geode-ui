@@ -22,6 +22,25 @@ var ErrNotImplemented = errors.New("not implemented")
 
 // ServerInterface defines the business logic contract for generated HTTP endpoints.
 // Embed UnimplementedServer and override only the methods you need.
+//
+// Streaming endpoints (route declared "streaming": true in the genapi config)
+// use a different method contract: func(http.ResponseWriter, *http.Request,
+// *ReqType) error. For those the generated wrapper still performs every
+// pre-handler concern -- auth/role/scope checks, rate limiting, body size
+// limits, request parsing and validation, the standard JSON error envelope
+// for *pre-handler* failures -- and then hands control to the user handler,
+// which owns the entire 200 response: it must write its own status line,
+// Content-Type, and body, flushing as it goes via http.Flusher.
+//
+// Streaming-handler error contract: if the handler returns a non-nil error
+// *before writing any bytes*, the wrapper emits the standard error envelope
+// (500, or 501 for ErrNotImplemented). If the handler has *already written
+// bytes* and then returns an error, the response headers are already on the
+// wire -- the wrapper logs the error (http_handler_err audit event) but
+// cannot change the status; the handler is responsible for signalling the
+// failure in-band (e.g. truncating the stream / writing an error chunk).
+// The cleanest discipline is: a streaming handler never returns an error
+// after it has written anything.
 type ServerInterface interface {
 	Audit(w http.ResponseWriter, r *http.Request, req *types.AuditQuery) (*types.AuditList, error)
 	Login(w http.ResponseWriter, r *http.Request, req *types.LoginReq) (*types.LoginResp, error)
@@ -53,7 +72,7 @@ type ServerInterface interface {
 	DeleteProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error)
 	GetProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error)
 	PatchProfileid(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error)
-	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error)
+	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) error
 	Restore(w http.ResponseWriter, r *http.Request, req *types.RestoreReq) (*types.Empty, error)
 	GetRoles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.RoleList, error)
 	PostApiRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error)
@@ -200,8 +219,8 @@ func (UnimplementedServer) PatchProfileid(_ http.ResponseWriter, _ *http.Request
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) Query(_ http.ResponseWriter, _ *http.Request, _ *types.QueryReq) (*types.QueryResp, error) {
-	return nil, ErrNotImplemented
+func (UnimplementedServer) Query(_ http.ResponseWriter, _ *http.Request, _ *types.QueryReq) error {
+	return ErrNotImplemented
 }
 
 func (UnimplementedServer) Restore(_ http.ResponseWriter, _ *http.Request, _ *types.RestoreReq) (*types.Empty, error) {
@@ -342,6 +361,25 @@ func callCatchAll[T any](handler CatchAllServerInterface, w http.ResponseWriter,
 		return zero, fmt.Errorf("catch-all handler for %s %s returned %T, want %T", route.Method, route.Path, resp, zero)
 	}
 	return typed, nil
+}
+
+// callCatchAllStream adapts a catch-all handler to a streaming route. The
+// catch-all handler is expected to write the response body to w directly
+// (and return a nil response, nil error). Any returned error is propagated
+// to the generated wrapper, which only emits an error envelope if nothing
+// has been written yet (see ServerInterface docs).
+func callCatchAllStream(handler CatchAllServerInterface, w http.ResponseWriter, r *http.Request, route RouteInfo, req any) error {
+	if handler == nil {
+		return ErrNilCatchAllHandler
+	}
+	resp, err := handler.HandleRoute(w, r, route, req)
+	if err != nil {
+		return err
+	}
+	if resp != nil {
+		return fmt.Errorf("catch-all handler for streaming route %s %s returned a non-nil response %T; streaming handlers must write to the ResponseWriter", route.Method, route.Path, resp)
+	}
+	return nil
 }
 
 func (s catchAllServer) Audit(w http.ResponseWriter, r *http.Request, req *types.AuditQuery) (*types.AuditList, error) {
@@ -1064,8 +1102,8 @@ func (s catchAllServer) PatchProfileid(w http.ResponseWriter, r *http.Request, r
 	}, req)
 }
 
-func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error) {
-	return callCatchAll[*types.QueryResp](s.handler, w, r, RouteInfo{
+func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) error {
+	return callCatchAllStream(s.handler, w, r, RouteInfo{
 		Method:             "POST",
 		Path:               "/api/v1/query",
 		MuxPattern:         "POST /api/v1/query",
@@ -3664,20 +3702,23 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		var req types.QueryReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.Query(w, r, &req)
+		err := srv.Query(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
+			// Streaming route: the handler owns the response body. If it
+			// returns an error after writing bytes the headers are already
+			// on the wire and writeJSONError's WriteHeader is a no-op; we
+			// still emit the envelope so a pre-write failure is reported.
 			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
 			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 			writeJSONError(w, "internal server error", 500); return
 		}
 		_span.SetStatus(codes.Ok, "")
 		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if resp != nil {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
-		}
+		// Streaming route: response body was written by the handler. Flush
+		// any buffered bytes so the client sees end-of-stream promptly.
+		if f, ok := w.(http.Flusher); ok { f.Flush() }
 	})
 	var bkt_post_Restore *securex.Bucket
 	if (5) > 0 && opts.GlobalBurst > 0 { bkt_post_Restore = securex.NewBucket(5, opts.GlobalBurst) }

@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bufio"
 	"database/sql"
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
+	"strconv"
 	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
@@ -24,6 +28,158 @@ type queryRowScanner interface {
 	Err() error
 }
 
+// queryColumnDescs builds the per-column {name,type} JSON descriptors for a
+// result set. Pulled out of scanQueryResult so the streaming HTTP handler
+// (PERF-F3) can inspect columns *before* it commits to a 200 — a failure
+// here still surfaces as a clean 500 because nothing has been written yet.
+// Returns the marshalled descriptors and the raw column-name slice (the
+// caller needs len(cols) to size its scan buffers).
+func queryColumnDescs(rows queryRowScanner) ([]jsontext.Value, []string, error) {
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, nil, fmt.Errorf("columns: %w", err)
+	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("column types: %w", err)
+	}
+	colDescs := make([]jsontext.Value, len(cols))
+	for i, name := range cols {
+		raw, mErr := json.Marshal(struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}{Name: name, Type: colTypes[i].DatabaseTypeName()})
+		if mErr != nil {
+			return nil, nil, fmt.Errorf("marshal column desc: %w", mErr)
+		}
+		colDescs[i] = jsontext.Value(raw)
+	}
+	return colDescs, cols, nil
+}
+
+// streamFlushEvery is the row interval at which streamQueryResult flushes
+// the buffered writer + http.Flusher so a slow consumer sees rows arrive
+// incrementally rather than in one big chunk at end-of-stream. Small enough
+// that latency stays low on a trickle of rows, large enough that a tight
+// row loop isn't dominated by flush syscalls.
+const streamFlushEvery = 64
+
+// streamQueryResult writes a *gentypes.QueryResp-shaped JSON document to w
+// incrementally: the {"columns":[...],"rows":[ head (then an immediate
+// flush so TTFB == first-rows-arrive, not all-rows-collected), each row as
+// a JSON array element (flushing every streamFlushEvery rows), then the
+// "row_count" / "elapsed_ms" / "graph_summary" trailer that closes the
+// object. The graph summary is folded inline as rows are scanned, exactly
+// like scanQueryResult — no second pass, no [][]any buffer.
+//
+// Contract: caller must NOT have written anything to w yet (this function
+// owns the status line / Content-Type / body). On a mid-stream driver error
+// (rows.Scan or rows.Err) the head is already on the wire, so we return the
+// error with the JSON document left intentionally truncated (unclosed); the
+// caller's generated wrapper logs it but cannot change the 200 status. On
+// success returns the row count and a nil error.
+func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []string, colDescs []jsontext.Value, start time.Time) (int64, error) {
+	bw := bufio.NewWriter(w)
+	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		_ = bw.Flush()
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	// 200 is implied on the first Write; set it explicitly so the
+	// status is unambiguous even for an empty result set.
+	w.WriteHeader(http.StatusOK)
+
+	if _, err := io.WriteString(bw, `{"columns":[`); err != nil {
+		return 0, fmt.Errorf("write head: %w", err)
+	}
+	for i, cd := range colDescs {
+		if i > 0 {
+			if err := bw.WriteByte(','); err != nil {
+				return 0, fmt.Errorf("write head: %w", err)
+			}
+		}
+		if _, err := bw.Write(cd); err != nil {
+			return 0, fmt.Errorf("write head: %w", err)
+		}
+	}
+	if _, err := io.WriteString(bw, `],"rows":[`); err != nil {
+		return 0, fmt.Errorf("write head: %w", err)
+	}
+	flush() // TTFB: client sees the document open before any rows are fetched.
+
+	summary := newGraphSummaryAccum()
+	row := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range row {
+		ptrs[i] = &row[i]
+	}
+	rowCount := int64(0)
+	for rows.Next() {
+		// Reset before each Scan — driver may leave previous values in
+		// place for null/skipped columns otherwise.
+		for i := range row {
+			row[i] = nil
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			// Head already on the wire — abort with a truncated body.
+			return rowCount, fmt.Errorf("scan: %w", err)
+		}
+		summary.visitRow(row)
+		raw, mErr := json.Marshal(row)
+		if mErr != nil {
+			return rowCount, fmt.Errorf("marshal row: %w", mErr)
+		}
+		if rowCount > 0 {
+			if err := bw.WriteByte(','); err != nil {
+				return rowCount, fmt.Errorf("write row: %w", err)
+			}
+		}
+		if _, err := bw.Write(raw); err != nil {
+			return rowCount, fmt.Errorf("write row: %w", err)
+		}
+		rowCount++
+		if rowCount%streamFlushEvery == 0 {
+			flush()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return rowCount, err
+	}
+
+	if _, err := io.WriteString(bw, `],"row_count":`); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	if _, err := io.WriteString(bw, strconv.FormatInt(rowCount, 10)); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	if _, err := io.WriteString(bw, `,"elapsed_ms":`); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	if _, err := io.WriteString(bw, strconv.FormatInt(time.Since(start).Milliseconds(), 10)); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	graphSummary := summary.finish()
+	summaryJSON, mErr := json.Marshal(graphSummary)
+	if mErr != nil {
+		return rowCount, fmt.Errorf("marshal graph summary: %w", mErr)
+	}
+	if _, err := io.WriteString(bw, `,"graph_summary":`); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	if _, err := bw.Write(summaryJSON); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	if err := bw.WriteByte('}'); err != nil {
+		return rowCount, fmt.Errorf("write trailer: %w", err)
+	}
+	flush()
+	return rowCount, nil
+}
+
 // scanQueryResult drains rows into a *gentypes.QueryResp using the same
 // shape Query exposes: per-column descriptors, per-row JSON arrays, a
 // graph summary, and elapsed_ms measured from start. Both the synchronous
@@ -36,24 +192,9 @@ type queryRowScanner interface {
 // [][]any slice and walked it again in extractGraphSummary -- two full
 // passes plus an extra row-sized allocation per result.
 func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp, error) {
-	cols, err := rows.Columns()
+	colDescs, cols, err := queryColumnDescs(rows)
 	if err != nil {
-		return nil, fmt.Errorf("columns: %w", err)
-	}
-	colTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return nil, fmt.Errorf("column types: %w", err)
-	}
-	colDescs := make([]jsontext.Value, len(cols))
-	for i, name := range cols {
-		raw, mErr := json.Marshal(struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-		}{Name: name, Type: colTypes[i].DatabaseTypeName()})
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal column desc: %w", mErr)
-		}
-		colDescs[i] = jsontext.Value(raw)
+		return nil, err
 	}
 
 	// Single-pass row drain: scan -> fold into summary -> marshal -> append.

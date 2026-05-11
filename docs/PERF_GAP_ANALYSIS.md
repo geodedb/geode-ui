@@ -34,10 +34,10 @@ These assumptions are the basis for sizing recommendations (e.g., F11 pool sizin
 | PerfSeverity | Count | Open | Closed | Quick-win combined |
 |---|---|---|---|---|
 | P0 (critical) | 2 issues (F4+F5+F6 umbrella, F9) | 0 | 2 (#26, #53) | 2 |
-| P1 (high) | 5 (F1, F2, F3, F11, F12) | 1 (F3 deferred) | 4 (#18, #21, #55, #56) | 2 (F11 + F12 closed) |
+| P1 (high) | 5 (F1, F2, F3, F11, F12) | 0 | 5 (#18, #21, #25, #55, #56) | 2 (F11 + F12 closed) |
 | P2 (medium) | 2 (F7, F10) | 0 | 2 (#51, #54) | 0 |
 | P3 / Info (low) | 4 (F8, F13, F15, F18) | 0 | 4 (F8, F13, F15 closed; F18 won't-do) | 0 |
-| **Total** | **13 GitLab issues** | 6 | 7 | 5 issues across 3 plays |
+| **Total** | **13 GitLab issues** | 0 | 13 (12 fixed + F18 won't-do) | 5 issues across 3 plays |
 
 ### Closure run 2026-05-07
 
@@ -58,7 +58,73 @@ Five P0/P1 perf issues closed in this run:
 
 ### Closure run 2026-05-11
 
-Two medium/high perf issues closed in this run:
+Three perf issues closed in this run (F3, F10, F12):
+
+- **F3 (#25)** — stream the `/api/v1/query` response (TTFB ≪ TTLB).
+  The blocker was upstream: the genapi handler template emitted a single
+  buffered `json.MarshalWrite(w, resp)` after the user handler had already
+  computed the entire `resp`, so TTFB == TTLB structurally. **genapi side**
+  (`devnw.dev/genapi` commit `38c3c1e`, branch `main`): added a per-route
+  `"streaming": true` config flag. When set, the generated handler's
+  contract changes — the user handler becomes
+  `func(http.ResponseWriter, *http.Request, *ReqType) error` and owns the
+  entire 200 response body (status, `Content-Type`, body, flushing via
+  `http.Flusher`); the generated wrapper still runs every pre-handler
+  concern (auth/role/scope, rate limiting, body-size limit, request
+  parsing/validation) and emits the standard `{error,error_description}`
+  envelope for any *pre-handler* failure, then flushes after the handler
+  returns. Streaming-handler error contract: a non-nil error returned
+  *before any bytes are written* gets the standard envelope (500, or 501
+  for `ErrNotImplemented`); an error returned *after* bytes are on the wire
+  is logged (`http_handler_err`) but cannot change the status — the handler
+  signals the failure in-band. `catchAllServer` adapters route streaming
+  endpoints through a new `callCatchAllStream` helper; the generated-tests
+  data picks a non-streaming route for the `NotImplemented`/`Validators`
+  probes; non-streaming routes are byte-identical (only additive comments +
+  the helper land in `gen/`). The genapi commit also fixed the long-standing
+  pre-existing `TestGenerated_UsesJSONV2Imports` failure by switching the
+  generated `pkg/httpx/peerlimit_test.go` to import `encoding/json/v2`.
+  **geode-ui side**: `geode.json` marks `/api/v1/query` `"streaming": true`
+  (conservatively — just that one route); `make generate` flips the `Query`
+  signature in `gen/api/handlers_gen.go` to the streaming form.
+  `internal/server/handlers_query.go` rewrites the `Query` method to:
+  (1) run every pre-write step — pool check, profile selection, params
+  parse, statement submission, column inspection — and on any such failure
+  write the structured envelope via `respondErr` and return nil (a wrapped
+  non-endpoint error here still surfaces as a clean 500, since nothing is
+  on the wire); (2) once the column descriptors are in hand, write the
+  `{"columns":[...],"rows":[` head and **flush** — TTFB is now the time
+  for the driver to produce the first rows, not to collect every row;
+  (3) stream each row from the driver cursor as a JSON array element,
+  flushing every 64 rows (`streamFlushEvery`), folding the graph summary
+  inline exactly like the buffered codec, then close the document with the
+  `row_count`/`elapsed_ms`/`graph_summary` trailer. A mid-stream
+  `rows.Scan`/`rows.Err` failure returns the error with the body left
+  intentionally truncated. The buffered codepath (`handleQuery`, used by
+  the MCP `query` tool) is unchanged — both share a new `runQuery` helper
+  for the setup. **Wire shape unchanged**: still a JSON object with keys
+  `columns`, `rows`, `row_count`, `elapsed_ms`, `graph_summary`; the
+  generated/SPA clients consume it via `res.json()` (key-order-insensitive),
+  so the only observable change is that bytes start arriving sooner — the
+  response is now chunked (no `Content-Length`). No SPA change needed.
+  Tests: `internal/server/result_codec_stream_test.go` —
+  `TestStreamQueryResult_WireShape` (200 + `application/json`, ≥1 Flush,
+  body parses to the QueryResp keys, each streamed row decodes to the same
+  value the buffered codec produced, graph summary matches),
+  `TestStreamQueryResult_EmptyResult` (zero rows still produces a valid
+  closed document), `TestStreamQueryResult_MidStreamError` (head already on
+  the wire ⇒ status stays 200, body is truncated/unparseable, error
+  returned). The genapi template change is pinned upstream by
+  `cmd/genapi/streaming_template_test.go`
+  (`TestStreamingRoute_GeneratesStreamingSignature`,
+  `TestStreamingRoute_DefaultsOff`). E2E: the geode-ui e2e docker image was
+  rebuilt (`docker compose -f deploy/docker-compose.test.yml up -d --build
+  geode-ui`) and the three query specs (`03-query-sync`, `04-query-stream`,
+  `12-multi-request`) all pass against the streaming handler — 8/8 green —
+  confirming the wire shape is unchanged end-to-end (including the JSON-tab
+  parse). geode-ui closure commit pairs with genapi `38c3c1e`.
+
+- **F10 (#54)** — Monaco + Cytoscape lazy code-split.
 
 - **F10 (#54)** — Monaco + Cytoscape lazy code-split.
   `src/pages/QueryPage.tsx` now imports `GqlEditor` (Monaco) and
@@ -143,7 +209,7 @@ Two medium/high perf issues closed in this run:
 
 | Hot path | Grade | Dominant cost | Action items |
 |---|---|---|---|
-| Query REST (`POST /api/v1/query`) | C | triple-pass codec + sync handler | F1, F3 |
+| Query REST (`POST /api/v1/query`) | C → B+ | ~~triple-pass codec + sync handler~~ — F1 (single-pass codec) + F3 (streaming response, TTFB = first-rows-arrive) both closed 2026-05-11 | ~~F1~~, ~~F3~~ (closed; F3 pairs with genapi `38c3c1e`) |
 | Query WS (`/ws/query`) | C- | per-row Marshal + 1 frame/row + (formerly) 60s WriteTimeout cap | F2, F12 |
 | Table render (`TableView`) | D | no virtualization, projectColumns per render, O(N²) reducer | F4, F5, F6, F7 |
 | Graph render (`GraphView`) | D | full Cytoscape rebuild + `cose` layout per streamed row | F9 |
@@ -160,7 +226,7 @@ Two medium/high perf issues closed in this run:
 | 4 | F11 | conn.Pool: defaults 16/4 too small for 2000 rps | P1 high | **80** (4×5×4) | [#55](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/55) | `internal/conn/pool.go:25-29` | Yes | **Closed** 2026-05-07 (`3f23235`) |
 | 5 | F9 | GraphView: Cytoscape rebuild + cose layout per row | P0 critical | **80** (5×4×4) | [#53](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/53) | `src/components/results/GraphView.tsx:39-62` | Yes | **Closed** 2026-05-07 (`82e1216`) |
 | 6 | F12 | WriteTimeout=60s caps WS streams; per-route override | P1 high | **64** (4×4×4) | [#56](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/56) | `cmd/server/main.go`, `internal/server/ws_query.go` | Yes | **Closed (resolved 2026-05-11)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f12-56-uncap-ws-writetimeout-and-document-per-frame-deadlines-resolved) and [closure run 2026-05-11](#closure-run-2026-05-11) below. Closure commit `13b7d5c`. The server-wide `WriteTimeout` was never actually applied (the hand-rolled `*http.Server` in `cmd/server/main.go` only set `ReadHeaderTimeout`, and `httpx.WrapHandler` consumes only `MaxBodyBytes`/CORS from its `Config`), so WS streams were not in fact being killed at 60s — but the dead `hcfg.WriteTimeout: 60s` was a footgun. Closure: a 60s `http.TimeoutHandler` now wraps the REST + SPA surface explicitly (`wsExemptTimeoutHandler`), and the `/ws/` prefix is routed *around* it (TimeoutHandler buffers + drops `http.Hijacker`, both fatal for a streaming upgrade); `httpSrv.WriteTimeout` is left at 0 with a comment; `httpSrv.IdleTimeout` is wired so an idle WS conn is still reaped. Per-frame deadlines for a stuck WS peer were *already* in place — `wsx.Conn.{ReadMessage,WriteMessage}` call `SetReadDeadline`/`SetWriteDeadline` before every frame using the 30s `wsx.Options` that `gen/ws/ws_handlers.gen.go` sets per WS path — and that contract is now documented in `ws_query.go` and pinned by a registration regression test. Tests `TestWSExemptTimeoutHandler_RESTIsCappedWSIsNot`, `TestWSExemptTimeoutHandler_FastRequestPassesThrough`, `TestWSQueryHasPerFrameWriteDeadline` (`cmd/server/main_test.go`). |
-| 7 | F3 | handlers_query: fully sync, TTFB == TTLB | P1 high | **60** (3×5×4) | [#25](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/25) | `internal/server/handlers_query.go:73` | — | **Deferred** 2026-05-10 — requires a separate genapi work cycle: the handler template emits a single buffered marshal step, so streaming JSON needs a redesign of `cmd/genapi/templates/api.go.tmpl` (chunked Marshal + WriteHeader-then-stream) plus a contract change so callers opt into streaming per-endpoint. Tracked at genapi#216 (filed alongside the F11/N5/F6+N6 rollup). |
+| 7 | F3 | handlers_query: fully sync, TTFB == TTLB | P1 high | **60** (3×5×4) | [#25](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/25) | `internal/server/handlers_query.go`, `internal/server/result_codec.go` | — | **Closed (resolved 2026-05-11)** — see [closure run 2026-05-11](#closure-run-2026-05-11) above. Pairs with genapi `38c3c1e` (per-endpoint `"streaming": true` support — the handler template now emits a `func(http.ResponseWriter,*http.Request,*ReqType) error` contract for streaming routes that owns the response body; the wrapper keeps doing auth/authz/rate-limit/parse/validate then flushes). `/api/v1/query` is now streaming: the `Query` handler runs every pre-write step (pool/profile/params/submit/columns) and writes the structured error envelope itself on failure, then writes the `{"columns":[...],"rows":[` head and flushes (TTFB = first-rows-arrive), streams each row as it arrives from the driver cursor (flush every 64 rows, graph summary folded inline), and closes with the `row_count`/`elapsed_ms`/`graph_summary` trailer. **Wire shape unchanged** (`{columns,rows,row_count,elapsed_ms,graph_summary}` JSON, now chunked); SPA consumes via `res.json()`, no change. Buffered `handleQuery` (MCP `query` tool) unchanged — shares a new `runQuery` setup helper. Tests `TestStreamQueryResult_{WireShape,EmptyResult,MidStreamError}` (`internal/server/result_codec_stream_test.go`); genapi side pinned by `TestStreamingRoute_{GeneratesStreamingSignature,DefaultsOff}`. E2E: e2e image rebuilt, query specs 03/04/12 all pass (8/8) against the streaming handler. |
 | 8 | F7 | projectColumns: O(C×N) multi-pass column inference | P2 medium | **48** (3×4×4) | [#51](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/51) | `src/components/results/projectColumns.ts` | — | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f7-51-projectcolumns-single-pass-inference-resolved). Closure commit `7f371fe`. Collapsed the per-column `discoverPlan` loop (N independent passes over the row set) into a single row-major sweep that updates a `PlanState` for every column in lockstep. Total row visits dropped from N+1 (one per node/edge column plus materialisation) to exactly 2 regardless of column count. Tests `F7 single-pass: each row visited once during inference` (Proxy-based access counter pins the invariant) and `F7 single-pass: declared NODE/EDGE type drives output even for empty rows` regression. |
 | 9 | F10 | Monaco + Cytoscape eagerly imported, no code-splitting | P2 medium | **48** (3×4×4) | [#54](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/54) | `src/index.tsx`, `src/pages/QueryPage.tsx`, `webpack.common.js`, `webpack.prod.js` | — | **Closed (resolved 2026-05-11)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f10-54-monaco-and-cytoscape-lazy-code-split-resolved) and [closure run 2026-05-11](#closure-run-2026-05-11) below. Closure commit `130e413`. `GqlEditor` (Monaco) and `GraphView` (Cytoscape) are now `React.lazy(() => import(...))` behind `<Suspense>` boundaries in `QueryPage.tsx`; the `import './monaco-bootstrap'` side-effect moved out of `src/index.tsx` into `GqlEditor.tsx` so it rides the lazy editor chunk. `webpack.common.js` scopes the `vendors` cacheGroup to `chunks: 'initial'` so async-only vendor code (monaco/cytoscape) stays inside the async chunk instead of being hoisted into the synchronous `vendors.js`. `webpack.prod.js` re-tightened: `hints: 'error'`, `maxAssetSize: 1 MiB`, `maxEntrypointSize: 1.5 MiB` (with the async code-split chunks + monaco workers excluded from the entrypoint accounting). **Result:** `vendors.js` 12.5 MiB → ~290 KiB; `main.js` ~163 KiB; total entrypoint **454 KiB** (was 12.8 MiB), well under the 1.5 MiB cap; monaco/cytoscape split into ~6.7 MiB + ~3.8 MiB on-demand async chunks. Tests in `src/pages/QueryPage.test.tsx` (Suspense fallback shows then the lazy editor mounts; QueryPage source has no static editor/graph import; `src/index.tsx` no longer imports `monaco-bootstrap`). |
 | 10 | F13 | No gzip, no pprof, no sync.Pool for jsontext | P3 low | **36** (3×3×4) | [#57](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/57) | `cmd/server/main.go`, `gen/pkg/httpx/compress.go` | — | **Closed (resolved 2026-05-11)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f13-57-gzip-middleware-in-genapi-httpx-resolved-genapi-paired). Closure commit `58b285f` (pairs with genapi `fd31bbc`) — genapi `pkg/httpx.Gzip` middleware: transparent gzip of text-ish JSON ≥ 1 KiB when the client sends `Accept-Encoding: gzip`; skips already-`Content-Encoding`'d responses, images/video/audio, and tiny bodies; adds `Vary: Accept-Encoding`; drops the stale `Content-Length`; pools `*gzip.Writer` at `BestSpeed`; passes `Hijack` through so WS upgrades survive. Wired via `httpx.Config{EnableCompression: true, ...}` in `cmd/server/main.go` + `server.enable_compression: true` in `geode.json`. pprof was *already* gated behind `Observability.EnableDebug` with an `authSurface` gate in the generated server template (no change needed). The jsontext encode path writes directly to the `ResponseWriter` via `json.MarshalWrite` — no intermediate buffer to pool without restructuring; that sub-item is dropped (noted in the genapi commit). Tests: `gen/pkg/httpx/compress_test.go`. |
@@ -188,7 +254,7 @@ Two medium/high perf issues closed in this run:
 
 - **F1 (#18)** — `result_codec` triple-pass + double-buffer.
 - **F2 (#21)** — `ws_query` per-row Marshal + WriteMessage.
-- **F3 (#25)** — `handlers_query` fully synchronous (TTFB == TTLB).
+- **F3 (#25)** — **Closed 2026-05-11** (pairs with genapi `38c3c1e`). genapi gained a per-route `"streaming": true` flag — the handler template emits a `func(http.ResponseWriter,*http.Request,*ReqType) error` contract for streaming routes (handler owns the body; wrapper keeps auth/authz/rate-limit/parse/validate then flushes). `/api/v1/query` is now streaming: `handlers_query.Query` writes the structured error envelope itself for any pre-write failure, then writes the `{"columns":[...],"rows":[` head + flush (TTFB = first-rows-arrive), streams each row from the driver cursor (flush every 64, graph summary folded inline), closes with the `row_count`/`elapsed_ms`/`graph_summary` trailer. Wire shape unchanged (now chunked); buffered `handleQuery` (MCP) unchanged via a shared `runQuery` helper.
 - **F12 (#56)** — **Closed 2026-05-11.** The server-wide `WriteTimeout` was actually dead config (the hand-rolled `*http.Server` never set it; `httpx.WrapHandler` ignores it); the footgun is closed by an explicit 60s `http.TimeoutHandler` on the REST/SPA surface that `/ws/` is routed around (`wsExemptTimeoutHandler`), with `httpSrv.WriteTimeout` left 0 + `IdleTimeout` wired. Per-frame WS deadlines were already in place via `wsx.Conn` + the 30s `wsx.Options` set by `gen/ws/ws_handlers.gen.go`; now documented in `ws_query.go`.
 - **F13 (#57)** — **Closed 2026-05-11** (pairs with genapi `fd31bbc`). genapi `pkg/httpx.Gzip` middleware now transparently gzips text-ish JSON ≥ 1 KiB when the client sends `Accept-Encoding: gzip` (skips already-encoded, images/video/audio, tiny bodies; adds `Vary`; pools writers at `BestSpeed`; passes `Hijack` through). Wired via `httpx.Config{EnableCompression: true}` in `cmd/server/main.go` + `server.enable_compression` in `geode.json`. pprof was already gated behind `Observability.EnableDebug` + an `authSurface` gate (no change). jsontext pool sub-item dropped — `json.MarshalWrite` writes directly to the `ResponseWriter`, nothing poolable without restructuring.
 
@@ -223,15 +289,15 @@ Together these three plays clear all P0 findings and the highest-impact P1 findi
 | Bucket | Effort | Findings | Notes |
 |---|---|---|---|
 | Quick wins | < 1 day each | ~~F4+F5+F6 (#26)~~, ~~F9 (#53)~~, ~~F11+F12 (#55,#56)~~ (F12 closed 2026-05-11), ~~F15 (#59)~~, ~~F8 (#52)~~ | All closed. Low-risk, scoped to single files or single config bumps. |
-| Medium | 1-5 days | ~~F1 (#18)~~, ~~F2 (#21)~~, F3 (#25) (deferred — genapi), ~~F7 (#51)~~, ~~F10 (#54)~~ (closed 2026-05-11), ~~F13 (#57)~~ (closed 2026-05-11 — genapi `fd31bbc`) | F1/F2/F7/F10/F13 closed; F3 still deferred to the genapi streaming-template cycle. |
-| Strategic | > 5 days | ~~F18 (#61)~~ — closed won't-do 2026-05-11 (benchmark refuted the premise; see findings table); CI perf gate (not yet ticketed); document SLOs (not yet ticketed) | Requires upstream coordination (genapi for F3 streaming codec) or new infrastructure (CI bench harness, SLO doc). |
+| Medium | 1-5 days | ~~F1 (#18)~~, ~~F2 (#21)~~, ~~F3 (#25)~~ (closed 2026-05-11 — genapi `38c3c1e`), ~~F7 (#51)~~, ~~F10 (#54)~~ (closed 2026-05-11), ~~F13 (#57)~~ (closed 2026-05-11 — genapi `fd31bbc`) | All closed. |
+| Strategic | > 5 days | ~~F18 (#61)~~ — closed won't-do 2026-05-11 (benchmark refuted the premise; see findings table); CI perf gate (not yet ticketed); document SLOs (not yet ticketed) | Remaining items need new infrastructure (CI bench harness, SLO doc). |
 
 ## Notable absences
 
 The following capabilities are NOT present in the repo as of this audit. Each is a structural gap, not a single bug:
 
 - **No virtualization** anywhere in the result UI — `TableView` mounts every TR (F5).
-- **No streaming JSON** in the REST query handler — entire body buffered before first byte (F3).
+- ~~**No streaming JSON** in the REST query handler — entire body buffered before first byte (F3).~~ **Closed 2026-05-11** — genapi `38c3c1e` adds per-route `"streaming": true`; `/api/v1/query` now writes the `columns`/`rows[` head + flushes, streams rows from the driver cursor, then closes with the trailer. Wire shape unchanged (chunked).
 - **No `sync.Pool`** for jsontext buffers, scratch row slices, or marshal byte buffers (F13, partly F1/F2).
 - **No HTTP compression** (gzip/zstd) on JSON responses (F13).
 - **No `net/http/pprof`** mount on any port; live diagnostics require a custom build (F13).

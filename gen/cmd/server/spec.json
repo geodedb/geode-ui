@@ -51,7 +51,8 @@
       "responseSchema": "QueryResp",
       "auth": "jwt",
       "rateLimit": 200,
-      "maxBodyBytes": 524288
+      "maxBodyBytes": 524288,
+      "streaming": true
     },
     {
       "method": "GET",
