@@ -378,5 +378,162 @@ func LogWS(event string, fields map[string]any) { fields["ws_event"] = event; lo
 // LogMCP emits a JSON log entry for MCP events.
 func LogMCP(event string, fields map[string]any) { fields["mcp_event"] = event; logFn(fields) }
 
-// LogAudit emits a generic audit log with consistent key.
-func LogAudit(event string, fields map[string]any) { fields["audit_event"] = event; logFn(fields) }
+// DefaultSensitiveKeyFragments is the case-insensitive substring list used
+// by [RedactSensitiveKeys] and [LogAudit] to identify map keys whose values
+// must be replaced with [RedactedValue] before emission. Generators and
+// applications can extend this list at init time, or supply their own list
+// to [RedactSensitiveKeys] directly.
+//
+// The list is intentionally conservative: false positives (over-redaction)
+// are far cheaper than false negatives (leaking a secret to an audit
+// channel). All matches are case-insensitive substring matches: a key
+// "user_password_hash" matches both "password" and "hash".
+//
+// Adding to this slice from package code at init time is safe; mutating
+// it concurrently with [LogAudit] / [RedactSensitiveKeys] calls is not.
+var DefaultSensitiveKeyFragments = []string{
+	"authorization",
+	"bearer",
+	"ca_pem",
+	"cert_pem",
+	"cipher",
+	"code_challenge",
+	"code_verifier",
+	"dsn",
+	"encryption",
+	"hash",
+	"jwt",
+	"key_pem",
+	"password",
+	"pem",
+	"private_key",
+	"salt",
+	"secret",
+	"token",
+}
+
+// RedactedValue is the sentinel substituted for any map value whose key
+// matched the sensitive-key list. Exported so tests and downstream tooling
+// can compare against it without re-declaring the string.
+const RedactedValue = "[REDACTED]"
+
+// RedactSensitiveKeys returns a copy of fields with any value whose key
+// (case-insensitive) contains a substring in fragments replaced by
+// [RedactedValue]. When fragments is nil the function uses
+// [DefaultSensitiveKeyFragments]. When fields is nil the function returns
+// nil. The returned map is always a fresh allocation -- callers can safely
+// store it without aliasing the caller's map.
+//
+// This is the single centralised redaction helper used by [LogAudit] and
+// by application code (see geode-ui internal/server/audit.go). Keeping it
+// in one place ensures every channel that emits audit-style records uses
+// the same redaction rules.
+func RedactSensitiveKeys(fields map[string]any, fragments []string) map[string]any {
+	if fields == nil {
+		return nil
+	}
+	if fragments == nil {
+		fragments = DefaultSensitiveKeyFragments
+	}
+	out := make(map[string]any, len(fields))
+	for k, v := range fields {
+		if IsSensitiveKey(k, fragments) {
+			out[k] = RedactedValue
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// IsSensitiveKey reports whether the lower-cased form of key contains any
+// substring from fragments. fragments must already be lower-cased; this is
+// the same convention [DefaultSensitiveKeyFragments] enforces.
+func IsSensitiveKey(key string, fragments []string) bool {
+	if key == "" {
+		return false
+	}
+	lk := toLowerASCII(key)
+	for _, f := range fragments {
+		if f == "" {
+			continue
+		}
+		if containsASCII(lk, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// toLowerASCII lower-cases an ASCII string without allocating when no
+// upper-case bytes are present. obsx avoids importing strings to keep the
+// log path's dependency surface minimal -- the audit-log redaction layer
+// runs on every emission and is a hot-ish path.
+func toLowerASCII(s string) string {
+	hasUpper := false
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c >= 'A' && c <= 'Z' {
+			hasUpper = true
+			break
+		}
+	}
+	if !hasUpper {
+		return s
+	}
+	b := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[i] = c
+	}
+	return string(b)
+}
+
+// containsASCII is a tiny strings.Contains stand-in to avoid pulling the
+// strings package into this file. needle must already be lower-cased; the
+// caller passes a lower-cased haystack.
+func containsASCII(haystack, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	if len(needle) > len(haystack) {
+		return false
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j := 0; j < len(needle); j++ {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// LogAudit emits a JSON audit log entry. The audit event identifier is
+// written under the "audit_event" key, and the rest of fields is emitted
+// alongside. Before emission, every value whose key (case-insensitive)
+// contains a substring from [DefaultSensitiveKeyFragments] is replaced
+// with [RedactedValue]. This guards against accidental secret leaks from
+// call sites that forget to scrub credentials, JWTs, TLS keys, etc.
+// before logging.
+//
+// Callers that need a custom redaction list (e.g. to add app-specific
+// secret-key prefixes) should call [RedactSensitiveKeys] explicitly and
+// then call LogAudit with the redacted map; LogAudit always re-applies
+// the default list on top, so an app-specific list is a strict superset
+// of the defaults.
+func LogAudit(event string, fields map[string]any) {
+	red := RedactSensitiveKeys(fields, nil)
+	if red == nil {
+		red = make(map[string]any, 1)
+	}
+	red["audit_event"] = event
+	logFn(red)
+}

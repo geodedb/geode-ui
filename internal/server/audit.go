@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"time"
+
+	"geodedb.com/geode-ui/gen/pkg/obsx"
 )
 
 // Audit-log surface mirrors ~/src/devnw/go/oidc/audit.go: single-line
@@ -57,32 +58,32 @@ const (
 )
 
 // sensitiveKeys are case-insensitive substrings that, when found in an
-// audit field's key name, force the value to be redacted. The list is
-// intentionally conservative: false positives (over-redaction) are far
-// cheaper than false negatives (leaking a secret to the audit channel).
-var sensitiveKeys = []string{
-	"authorization",
-	"bearer",
-	"ca_pem",
-	"cert_pem",
-	"cipher",
-	"code_verifier",
-	"code_challenge",
-	"dsn",
-	"encryption",
-	"hash",
-	"jwt",
-	"key_pem",
-	"password",
-	"pem",
-	"private_key",
-	"salt",
-	"secret",
-	"tls_ca_pem",
-	"tls_cert_pem",
-	"tls_key_pem",
-	"token",
-}
+// audit field's key name, force the value to be redacted. We extend the
+// centralised obsx.DefaultSensitiveKeyFragments list (which already covers
+// generic credential fragments like password/jwt/bearer/token/etc) with
+// geode-ui-specific keys that surface in profile and connection records:
+// saved_password (the on-disk password column), tls_client_* fields
+// emitted by the profile editor, and the raw `dsn` style "url" key the
+// connection form uses interchangeably with `dsn`. Keep both the central
+// list and these locals together so a single isSensitive() call covers
+// the full surface. False positives (over-redaction) are far cheaper
+// than false negatives (leaking a secret to the audit channel).
+var sensitiveKeys = append(append([]string{}, obsx.DefaultSensitiveKeyFragments...),
+	// geode-ui-specific additions on top of obsx defaults.
+	"saved_password",    // profilestore on-disk password field
+	"tls_ca_pem",        // already covered by ca_pem, kept for grep affinity
+	"tls_client_cert",   // any tls_client_cert_pem / tls_client_cert_path
+	"tls_client_key",    // any tls_client_key_pem / tls_client_key_path
+	"tls_client_pem",    // legacy single-cert+key bundle
+	"tls_server_cert",   // server cert path / pem
+	"tls_server_key",    // server key path / pem
+	"tls_password",      // private-key passphrase
+	"url",               // connection forms sometimes use "url" for full DSN
+	"connection_string", // alt naming used by Snowflake/SQL Server adapters
+	"session_id",        // opaque session handles MAY include creds in some backends
+	"refresh_token",     // already covered by token, kept explicit
+	"access_token",      // already covered by token, kept explicit
+)
 
 // AuditEntry is one record retained in the in-memory ring buffer for
 // the /api/v1/audit endpoint. Event is the identifier from the
@@ -218,13 +219,10 @@ func emitAudit(event string, kv ...any) {
 }
 
 // isSensitive reports whether key (case-insensitive) contains any
-// auditSensitiveFragments substring.
+// fragment from sensitiveKeys. This is a thin wrapper around
+// obsx.IsSensitiveKey so call sites in this package read clearly while
+// the actual substring-match implementation lives next to the canonical
+// redaction helper in obsx (SEC-F6+N6: centralised redaction).
 func isSensitive(key string) bool {
-	k := strings.ToLower(key)
-	for _, s := range sensitiveKeys {
-		if strings.Contains(k, s) {
-			return true
-		}
-	}
-	return false
+	return obsx.IsSensitiveKey(key, sensitiveKeys)
 }

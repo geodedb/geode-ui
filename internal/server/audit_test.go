@@ -173,6 +173,26 @@ func TestIsSensitive(t *testing.T) {
 		{"key_pem", true},
 		{"client_pem", true},
 		{"connection_dsn", true},
+		// SEC-F6+N6 closure: confirm the expanded geode-ui-specific
+		// sensitive-key list. Each of these MUST redact even though
+		// the obsx default list does not include the full local name.
+		{"saved_password", true},
+		{"tls_client_cert_pem", true},
+		{"tls_client_cert_path", true},
+		{"tls_client_key_pem", true},
+		{"tls_client_key_path", true},
+		{"tls_client_pem", true},
+		{"tls_server_cert_pem", true},
+		{"tls_server_key_pem", true},
+		{"tls_password", true},
+		{"url", true},
+		{"connection_string", true},
+		{"refresh_token", true},
+		{"access_token", true},
+		{"session_id", true},
+		// Plain "profile" stays non-sensitive; we don't want to
+		// over-redact metadata keys that document the audit subject.
+		{"profile_id", false},
 	}
 	for _, c := range cases {
 		if got := isSensitive(c.key); got != c.want {
