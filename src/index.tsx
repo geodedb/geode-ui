@@ -1,6 +1,10 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
-import './monaco-bootstrap'
+// F10 (#54): `import './monaco-bootstrap'` used to live here, which
+// pulled all of monaco-editor into the entry chunk on every route. The
+// bootstrap side-effect now rides inside the lazy GqlEditor chunk
+// (src/components/editor/GqlEditor.tsx imports it), so monaco is only
+// downloaded when the query editor mounts.
 import './assets/fonts/fonts.css'
 import App from './App'
 import type { ConnectionState } from './api/connections'

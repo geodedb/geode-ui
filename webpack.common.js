@@ -150,10 +150,21 @@ module.exports = {
     splitChunks: {
       chunks: 'all',
       cacheGroups: {
+        // F10 (#54): the `vendors` cacheGroup is scoped to `chunks:
+        // 'initial'` so it only hoists node_modules code that is
+        // reachable from the *entry* chunk into `vendors.js`. Vendor
+        // code reachable ONLY through a dynamic `import()` (Monaco via
+        // the lazy GqlEditor chunk, Cytoscape via the lazy GraphView
+        // chunk) is left inside that async chunk by webpack's default
+        // chunking — so it is downloaded on demand, not on first paint.
+        // Before this change the cacheGroup used `chunks: 'all'`, which
+        // pulled monaco + cytoscape (~12.5 MiB) into the synchronous
+        // `vendors.js` regardless of how they were imported, defeating
+        // the React.lazy split.
         vendor: {
           test: /[\\/]node_modules[\\/]/,
           name: 'vendors',
-          chunks: 'all',
+          chunks: 'initial',
         },
       },
     },

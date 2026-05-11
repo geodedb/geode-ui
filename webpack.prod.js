@@ -1,49 +1,55 @@
 const { merge } = require('webpack-merge')
 const common = require('./webpack.common.js')
 
-// Q-NEW-T2 — bundle-size budget. Today's snapshot (post-i18n + theme +
-// brand fonts + Cytoscape + Monaco worker split):
-//   • main.js                  ~ 100 KB
-//   • vendors.js               ~ 12.4 MiB unzipped (large because of
-//     monaco + cytoscape + react-window + i18next)
-//   • main.css                 ~ 1 KB
-//   • brand fonts (6×woff2)    ~ 107 KB combined
+// Bundle-size budget — re-tightened by F10 (#54) once Monaco and
+// Cytoscape became React.lazy'd async chunks at the QueryPage call
+// site (src/pages/QueryPage.tsx). With those two libraries split out:
+//   • main.js (entry)          — small React/router/i18n shell
+//   • vendors.js (sync vendor) — no longer carries monaco/cytoscape
+//   • <hash>.js (async chunks) — the lazy editor + graph chunks; these
+//     are loaded on demand by the Suspense boundaries, so they are
+//     intentionally excluded from the entrypoint budget (counting them
+//     against the entry double-counts cost that the split removed).
+//   • *.worker.js (monaco)     — independently loaded by the editor
+//     chunk via MonacoEnvironment.getWorker; also excluded.
 //
-// We're not trying to fit Monaco + Cytoscape + the workers under 512 KB;
-// the realistic budget for this app is the *initial* JS chunk that
-// runs before any code-split work. Webpack's default
-// maxEntrypointSize/maxAssetSize errors are too coarse — they fire on
-// the vendors.js chunk which already represents a deliberate bundling
-// decision. Bump to 1 MiB per asset and 1.5 MiB per entrypoint as a
-// regression alarm; tighten further once F10 (Monaco/Cytoscape
-// code-split) lands.
+// `hints: 'error'` makes a regression past the cap fail `npm run build`
+// (and therefore CI), rather than emitting a warning that scrolls off.
+// Caps: 1 MiB per (non-excluded) asset, 1.5 MiB per entrypoint. If a
+// future change pushes the sync bundle back over 1 MiB — e.g. a heavy
+// dependency added to the critical path, or a regression that re-pulls
+// monaco/cytoscape into the entry — the build fails and the offending
+// asset is named in the error.
 module.exports = merge(common, {
   mode: 'production',
   devtool: 'source-map',
   performance: {
-    // Regression alarm, not a hard gate. The current production bundle
-    // is dominated by Monaco + Cytoscape (~12.5 MiB of vendors.js),
-    // tracked separately as F10 (#54) for code-splitting. Until that
-    // lands, the realistic budget is "do not regress past current
-    // size + 10% headroom"; flipping `hints: 'error'` would also
-    // require the F10 closure to land in the same PR.
-    //
-    // When F10 ships, drop these to 1024/1536 KiB and flip to
-    // 'error'; the comment block on src/index.tsx mentions the
-    // pinned worker chunks that escape this entrypoint accounting.
-    hints: 'warning',
-    maxAssetSize: 16 * 1024 * 1024, // 16 MiB (current ~12.5 MiB)
-    maxEntrypointSize: 16 * 1024 * 1024,
+    hints: 'error',
+    maxAssetSize: 1024 * 1024, // 1 MiB
+    maxEntrypointSize: 1536 * 1024, // 1.5 MiB
     assetFilter(assetFilename) {
-      // Skip source maps, font assets, and the monaco editor workers
-      // (the workers are independently loaded; counting them against
-      // the entrypoint budget double-counts the cost).
+      // Source maps — never shipped to clients on the hot path.
       if (/\.map$/.test(assetFilename)) return false
+      // Fonts / images / icons — loaded independently, not part of the
+      // JS entrypoint accounting.
       if (
         /\.(woff2?|ttf|eot|otf|png|jpg|jpeg|gif|svg|ico)$/.test(assetFilename)
       )
         return false
+      // Monaco editor workers — independently loaded by the (already
+      // lazy) editor chunk; counting them double-counts.
       if (/worker\.js$/.test(assetFilename)) return false
+      // Async code-split chunks emitted by React.lazy() — webpack names
+      // these `<id>.<contenthash>.js` (no `main`/`vendors` prefix). The
+      // Monaco + Cytoscape chunks land here; they are fetched on demand
+      // behind a Suspense boundary, not part of the initial download,
+      // so they don't count against the budget. The entry (`main.js`)
+      // and sync vendor (`vendors.js`) chunks are still gated.
+      if (
+        /\.js$/.test(assetFilename) &&
+        !/^(main|vendors)\./.test(assetFilename)
+      )
+        return false
       return true
     },
   },

@@ -1,12 +1,10 @@
-import React, { useEffect, useReducer, useRef, useState } from 'react'
+import React, { Suspense, useEffect, useReducer, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
-import { GqlEditor } from '../components/editor/GqlEditor'
 import { TableView } from '../components/results/TableView'
 import { JsonView } from '../components/results/JsonView'
-import { GraphView } from '../components/results/GraphView'
 import { Button } from '../components/ui'
 import type { Theme } from '../theme'
 import { client } from '../api/client'
@@ -17,6 +15,23 @@ import {
   initialStreamState,
   streamReducer,
 } from './queryStreamReducer'
+
+// F10 (#54): Monaco (~MiB-scale) and Cytoscape (~hundreds of KiB) were
+// eagerly imported on every route via the static GqlEditor / GraphView
+// imports. They are now React.lazy'd here so webpack emits them as
+// separate async chunks that are only fetched when the query editor /
+// graph tab mounts. The monaco-bootstrap side-effect rides inside the
+// GqlEditor module, so it falls into the lazy editor chunk too.
+const GqlEditor = React.lazy(() =>
+  import('../components/editor/GqlEditor').then((m) => ({
+    default: m.GqlEditor,
+  }))
+)
+const GraphView = React.lazy(() =>
+  import('../components/results/GraphView').then((m) => ({
+    default: m.GraphView,
+  }))
+)
 
 interface TabProps {
   theme: Theme
@@ -76,6 +91,21 @@ const TabBtn = styled.button<{ $active: boolean }>`
 
 const Err = styled.span`
   color: ${({ theme }) => theme.text.danger};
+`
+
+// Suspense fallback shown while the lazy Monaco editor / Cytoscape
+// graph chunks download (F10 / #54). Sized to roughly the editor's
+// default height so the layout doesn't jump when the real component
+// resolves. role=status keeps it announced to assistive tech.
+const LazyFallback = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  color: ${({ theme }) => theme.text.secondary};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
 `
 
 const Tabs = styled.div`
@@ -204,9 +234,21 @@ export const QueryPage: React.FC = () => {
   }
   const activeErr = streamMode ? stream.error || err : err
 
+  // F10 (#54): Suspense fallbacks for the lazy Monaco editor / Cytoscape
+  // graph chunks. Held as locals so the multiline JSX doesn't run into
+  // the airbnb/prettier disagreement on parenthesising JSX in props.
+  const editorFallback = (
+    <LazyFallback role="status">{t('query.loadingEditor')}</LazyFallback>
+  )
+  const graphFallback = (
+    <LazyFallback role="status">{t('query.loadingGraph')}</LazyFallback>
+  )
+
   return (
     <div>
-      <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
+      <Suspense fallback={editorFallback}>
+        <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
+      </Suspense>
       <Bar>
         <Button onClick={run} loading={busy}>
           {t('query.runHotkey')}
@@ -275,7 +317,11 @@ export const QueryPage: React.FC = () => {
           >
             {tab === 'table' && <TableView resp={activeResp} expand={expand} />}
             {tab === 'json' && <JsonView data={activeResp} />}
-            {tab === 'graph' && <GraphView resp={activeResp} query={stmt} />}
+            {tab === 'graph' && (
+              <Suspense fallback={graphFallback}>
+                <GraphView resp={activeResp} query={stmt} />
+              </Suspense>
+            )}
           </div>
         </>
       )}

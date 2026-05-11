@@ -34,10 +34,10 @@ These assumptions are the basis for sizing recommendations (e.g., F11 pool sizin
 | PerfSeverity | Count | Open | Closed | Quick-win combined |
 |---|---|---|---|---|
 | P0 (critical) | 2 issues (F4+F5+F6 umbrella, F9) | 0 | 2 (#26, #53) | 2 |
-| P1 (high) | 5 (F1, F2, F3, F11, F12) | 2 (F3, F12) | 3 (#18, #21, #55) | 2 (F11 closed; F12 open) |
-| P2 (medium) | 2 (F7, F10) | 2 | 0 | 0 |
+| P1 (high) | 5 (F1, F2, F3, F11, F12) | 1 (F3 deferred) | 4 (#18, #21, #55, #56) | 2 (F11 + F12 closed) |
+| P2 (medium) | 2 (F7, F10) | 0 | 2 (#51, #54) | 0 |
 | P3 / Info (low) | 4 (F8, F13, F15, F18) | 1 (F13 deferred) | 3 (F8, F15 closed; F18 won't-do) | 0 |
-| **Total** | **13 GitLab issues** | 8 | 5 | 5 issues across 3 plays |
+| **Total** | **13 GitLab issues** | 6 | 7 | 5 issues across 3 plays |
 
 ### Closure run 2026-05-07
 
@@ -56,16 +56,87 @@ Five P0/P1 perf issues closed in this run:
   refetches while `document.visibilityState === 'hidden'` and resumes
   on the `visibilitychange` listener. Marked closed in this round.
 
+### Closure run 2026-05-11
+
+Two medium/high perf issues closed in this run:
+
+- **F10 (#54)** — Monaco + Cytoscape lazy code-split.
+  `src/pages/QueryPage.tsx` now imports `GqlEditor` (Monaco) and
+  `GraphView` (Cytoscape) via `React.lazy(() => import(...))` behind
+  `<Suspense>` fallbacks (`query.loadingEditor` / `query.loadingGraph`
+  i18n keys). The `import './monaco-bootstrap'` side-effect was lifted
+  out of `src/index.tsx` (where it pulled all of `monaco-editor` into
+  the entry chunk on every route) into `src/components/editor/GqlEditor.tsx`,
+  so it now rides the lazy editor chunk. `webpack.common.js` scopes the
+  `vendors` cacheGroup to `chunks: 'initial'` — vendor code reachable
+  only through a dynamic `import()` (monaco via the lazy editor chunk,
+  cytoscape via the lazy graph chunk) is no longer hoisted into the
+  synchronous `vendors.js`. `webpack.prod.js` re-tightened the budget:
+  `hints: 'error'`, `maxAssetSize: 1 MiB`, `maxEntrypointSize: 1.5 MiB`
+  (source maps, fonts/icons, monaco workers, and async code-split
+  chunks excluded from the accounting — they are loaded independently /
+  on demand). **Measured (production `webpack --config webpack.prod.js`):**
+
+  | asset | before | after |
+  |---|---|---|
+  | `vendors.js` (sync vendor) | ~12.5 MiB | **~290 KiB** |
+  | `main.js` (entry) | ~160 KiB | ~163 KiB |
+  | entrypoint `main` total | ~12.8 MiB | **454 KiB** |
+  | monaco/cytoscape | (inside `vendors.js`) | ~6.7 MiB + ~3.8 MiB on-demand async chunks |
+
+  The build now passes the `hints: 'error'` budget. Tests:
+  `src/pages/QueryPage.test.tsx` — (a) the editor `role="status"`
+  loading fallback is on screen synchronously then the lazily-imported
+  editor mounts; (b) `QueryPage.tsx` source contains no static import
+  of `GqlEditor`/`GraphView` and both are `React.lazy`'d via a dynamic
+  `import()`; (c) `src/index.tsx` no longer statically imports
+  `./monaco-bootstrap`. P-NEW-3 (synchronous i18n init) was the
+  cross-cut here; i18n itself is still synchronous — splitting it would
+  add a Suspense boundary cost without recovering a comparably large
+  eager import, so it is left as-is now that the dominant Monaco +
+  Cytoscape weight is off the critical path. The `webpack.prod.js`
+  budget claim that `docs/QUALITY_GAP_ANALYSIS.md` (Q-NEW-T2) recorded
+  on 2026-05-08 was aspirational (the file still said `hints: 'warning'`
+  with 16 MiB caps); it is now actually wired by this F10 closure, and
+  the Q-NEW-T2 row is corrected to say so.
+
+- **F12 (#56)** — uncap WS WriteTimeout + per-frame deadlines.
+  Investigation found the server-wide `WriteTimeout` was never actually
+  applied: `cmd/server/main.go` builds its own `*http.Server` and only
+  set `ReadHeaderTimeout`, and `httpx.WrapHandler` consumes only
+  `MaxBodyBytes`/CORS from the `httpx.Config` it is handed — so the
+  `hcfg.WriteTimeout: 60s` line was dead config, and WS streams >60s
+  were not in fact being killed. The footgun is now closed explicitly:
+  a new `wsExemptTimeoutHandler` wraps the REST + SPA surface in a 60s
+  `http.TimeoutHandler` and routes requests under `/ws/` *around* it
+  (`http.TimeoutHandler` buffers the whole response and does not expose
+  `http.Hijacker` — either of which breaks a streaming WS upgrade);
+  `httpSrv.WriteTimeout` is left at 0 with a comment, and
+  `httpSrv.IdleTimeout` is wired from `hcfg.IdleTimeout` so an idle WS
+  connection is still reaped. The per-frame deadline half of the AC was
+  *already* satisfied — `wsx.Conn.{ReadMessage,WriteMessage}` call
+  `SetReadDeadline`/`SetWriteDeadline` before every frame using the
+  per-path 30s `wsx.Options` that `gen/ws/ws_handlers.gen.go` sets — so
+  a stuck client trips the deadline within 30s and the handler unwinds;
+  that contract is now documented in `internal/server/ws_query.go`'s
+  `Query` doc comment and pinned by a registration regression test.
+  Tests: `cmd/server/main_test.go` — `TestWSExemptTimeoutHandler_RESTIsCappedWSIsNot`
+  (REST 503 after timeout, `/ws/query` runs to completion, a path that
+  merely contains "ws" is still capped), `TestWSExemptTimeoutHandler_FastRequestPassesThrough`,
+  `TestWSQueryHasPerFrameWriteDeadline` (the `/ws/query` route is
+  registered — a regression that drops it would disable per-frame
+  cleanup).
+
 ## New findings — 2026-05-08 audit pass
 
 | ID | Title | Severity | PerfScore | Status | File:Line | Action / Closure |
 |----|-------|----------|-----------|--------|-----------|------------------|
 | P-NEW-1 | `estimateRowHeight` closure invalidates react-window cache per stream batch | P1 | 64 | **Closed** 2026-05-08 | `src/components/results/TableView.tsx:377-388` | Closure now reads through `rowsRef` (mutable) and `useMemo([])` keeps stable identity for the lifetime of the component. Streaming appends no longer invalidate react-window's row-position cache. Preserves the F5/F6 win. |
 | P-NEW-2 | Datalist option flooding for graph results | P2 | 32 | **Closed** 2026-05-08 (cross-closed via Q-NEW-3) | `src/components/results/GraphView.tsx:402-417,421-436` | Capped at `ID_PICKER_OPTION_CAP = 1000` per picker. Lookup Maps remain uncapped — typing an id beyond the cap still resolves. |
-| P-NEW-3 | i18n init is synchronous on the critical path | P1 | 48 | Deferred (cross-cuts F10) | `src/services/i18n/config.ts:25-50`, `src/App.tsx:20` | **Unblock condition:** rolled into the F10 (#54) Monaco + Cytoscape code-split work. Splitting i18n alone would still pay the Suspense boundary cost without recovering the larger eager-import wins. |
+| P-NEW-3 | i18n init is synchronous on the critical path | P1 | 48 | **Accepted-as-is** 2026-05-11 (cross-cut by F10) | `src/services/i18n/config.ts:25-50`, `src/App.tsx:20` | F10 (#54) closed 2026-05-11; the dominant Monaco + Cytoscape eager-import weight is now off the critical path (entrypoint 12.8 MiB → 454 KiB). i18n init is still synchronous, but splitting it alone would add a Suspense boundary cost without recovering a comparably large eager import — re-evaluate only if a future profile shows i18n init on the cold-start critical path at material cost. |
 | P-NEW-4 | ThemeProvider re-renders entire styled-components tree on system-theme flip | P2 | 32 | **Closed** 2026-05-08 | `src/theme/ThemeContext.tsx` | Split into `ThemeStateContext` + `ThemeActionsContext`; the actions context carries only the stable `setVariant` setter, so a button that triggers a flip never re-renders when the flip occurs. The state context still triggers the styled-components reflow on actual theme change (unavoidable when themes differ by reference). New `useThemeActions()` hook exposed. |
 | P-NEW-5 | GraphView duplicates `extractElements` work | P2 | 24 | **Closed** 2026-05-08 | `src/components/results/GraphView.tsx:elementsRef` | Build effect now reads through `elementsRef.current` (mutable, populated by the same useMemo that drives the option/id Maps) instead of re-walking `extractElements(respRef.current, queryRef.current)` per rebuild. One walk per resp change, not two. |
-| P-NEW-6 | Logo SVGs not code-split | P3 | 12 | Accepted-as-is | `src/components/ui/Logo.tsx:4-5` | Both variants total ~20 KB unzipped / ~6 KB gzipped — negligible relative to the ~12 MiB vendors.js dominated by Monaco + Cytoscape. Lazy-loading 6 KB through a Suspense boundary costs more in code complexity than it saves in bytes. Revisit if F10 lands and the budget tightens. |
+| P-NEW-6 | Logo SVGs not code-split | P3 | 12 | Accepted-as-is | `src/components/ui/Logo.tsx:4-5` | Both variants total ~20 KB unzipped / ~6 KB gzipped — negligible relative to the ~12 MiB vendors.js dominated by Monaco + Cytoscape. Lazy-loading 6 KB through a Suspense boundary costs more in code complexity than it saves in bytes. F10 landed 2026-05-11 (entrypoint now 454 KiB, `vendors.js` ~290 KiB) and the 6 KB of logo SVGs are still negligible against that — kept as-is. |
 | P-NEW-7 | Electron `geode://` asset handler has no in-memory cache | P3 | 12 | **Closed** 2026-05-08 | `electron/lib/cache.ts` (new, +9 tests) + `electron/main.ts:assetCache` | LRU cache (default 64 entries / 32 MiB; tunable via `GEODE_ELECTRON_CACHE_*` env). Pure data-structure in `electron/lib/cache.ts` so it's testable without `electron` in deps. Asset handler reads through cache; first miss reads from disk and populates, subsequent requests for the same path are O(1). |
 
 ## Hot-path grades (from Phase 3)
@@ -73,7 +144,7 @@ Five P0/P1 perf issues closed in this run:
 | Hot path | Grade | Dominant cost | Action items |
 |---|---|---|---|
 | Query REST (`POST /api/v1/query`) | C | triple-pass codec + sync handler | F1, F3 |
-| Query WS (`/ws/query`) | C- | per-row Marshal + 1 frame/row + 60s WriteTimeout cap | F2, F12 |
+| Query WS (`/ws/query`) | C- | per-row Marshal + 1 frame/row + (formerly) 60s WriteTimeout cap | F2, F12 |
 | Table render (`TableView`) | D | no virtualization, projectColumns per render, O(N²) reducer | F4, F5, F6, F7 |
 | Graph render (`GraphView`) | D | full Cytoscape rebuild + `cose` layout per streamed row | F9 |
 | Schema explorer | B- | 4-fan-out per graph switch, no abort/cache | F8 |
@@ -88,10 +159,10 @@ Five P0/P1 perf issues closed in this run:
 | 3 | F1 | result_codec: triple-pass + double-buffer per query | P1 high | **80** (4×5×4) | [#18](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/18) | `internal/server/result_codec.go:53-87` | — | **Closed** 2026-05-07 (`7ac1a43`) |
 | 4 | F11 | conn.Pool: defaults 16/4 too small for 2000 rps | P1 high | **80** (4×5×4) | [#55](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/55) | `internal/conn/pool.go:25-29` | Yes | **Closed** 2026-05-07 (`3f23235`) |
 | 5 | F9 | GraphView: Cytoscape rebuild + cose layout per row | P0 critical | **80** (5×4×4) | [#53](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/53) | `src/components/results/GraphView.tsx:39-62` | Yes | **Closed** 2026-05-07 (`82e1216`) |
-| 6 | F12 | WriteTimeout=60s caps WS streams; per-route override | P1 high | **64** (4×4×4) | [#56](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/56) | `cmd/server/main.go:153` | Yes | Open |
+| 6 | F12 | WriteTimeout=60s caps WS streams; per-route override | P1 high | **64** (4×4×4) | [#56](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/56) | `cmd/server/main.go`, `internal/server/ws_query.go` | Yes | **Closed** 2026-05-11 — see [closure run 2026-05-11](#closure-run-2026-05-11) below. The server-wide `WriteTimeout` was never actually applied (the hand-rolled `*http.Server` in `cmd/server/main.go` only set `ReadHeaderTimeout`, and `httpx.WrapHandler` consumes only `MaxBodyBytes`/CORS from its `Config`), so WS streams were not in fact being killed at 60s — but the dead `hcfg.WriteTimeout: 60s` was a footgun. Closure: a 60s `http.TimeoutHandler` now wraps the REST + SPA surface explicitly (`wsExemptTimeoutHandler`), and the `/ws/` prefix is routed *around* it (TimeoutHandler buffers + drops `http.Hijacker`, both fatal for a streaming upgrade); `httpSrv.WriteTimeout` is left at 0 with a comment; `httpSrv.IdleTimeout` is wired so an idle WS conn is still reaped. Per-frame deadlines for a stuck WS peer were *already* in place — `wsx.Conn.{ReadMessage,WriteMessage}` call `SetReadDeadline`/`SetWriteDeadline` before every frame using the 30s `wsx.Options` that `gen/ws/ws_handlers.gen.go` sets per WS path — and that contract is now documented in `ws_query.go` and pinned by a registration regression test. Tests `TestWSExemptTimeoutHandler_RESTIsCappedWSIsNot`, `TestWSExemptTimeoutHandler_FastRequestPassesThrough`, `TestWSQueryHasPerFrameWriteDeadline` (`cmd/server/main_test.go`). |
 | 7 | F3 | handlers_query: fully sync, TTFB == TTLB | P1 high | **60** (3×5×4) | [#25](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/25) | `internal/server/handlers_query.go:73` | — | **Deferred** 2026-05-10 — requires a separate genapi work cycle: the handler template emits a single buffered marshal step, so streaming JSON needs a redesign of `cmd/genapi/templates/api.go.tmpl` (chunked Marshal + WriteHeader-then-stream) plus a contract change so callers opt into streaming per-endpoint. Tracked at genapi#216 (filed alongside the F11/N5/F6+N6 rollup). |
 | 8 | F7 | projectColumns: O(C×N) multi-pass column inference | P2 medium | **48** (3×4×4) | [#51](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/51) | `src/components/results/projectColumns.ts` | — | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f7-51-projectcolumns-single-pass-inference-resolved). Closure commit `7f371fe`. Collapsed the per-column `discoverPlan` loop (N independent passes over the row set) into a single row-major sweep that updates a `PlanState` for every column in lockstep. Total row visits dropped from N+1 (one per node/edge column plus materialisation) to exactly 2 regardless of column count. Tests `F7 single-pass: each row visited once during inference` (Proxy-based access counter pins the invariant) and `F7 single-pass: declared NODE/EDGE type drives output even for empty rows` regression. |
-| 9 | F10 | Monaco + Cytoscape eagerly imported, no code-splitting | P2 medium | **48** (3×4×4) | [#54](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/54) | `src/index.tsx`, `src/App.tsx` | — | Open |
+| 9 | F10 | Monaco + Cytoscape eagerly imported, no code-splitting | P2 medium | **48** (3×4×4) | [#54](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/54) | `src/index.tsx`, `src/pages/QueryPage.tsx`, `webpack.common.js`, `webpack.prod.js` | — | **Closed** 2026-05-11 — see [closure run 2026-05-11](#closure-run-2026-05-11) below. `GqlEditor` (Monaco) and `GraphView` (Cytoscape) are now `React.lazy(() => import(...))` behind `<Suspense>` boundaries in `QueryPage.tsx`; the `import './monaco-bootstrap'` side-effect moved out of `src/index.tsx` into `GqlEditor.tsx` so it rides the lazy editor chunk. `webpack.common.js` scopes the `vendors` cacheGroup to `chunks: 'initial'` so async-only vendor code (monaco/cytoscape) stays inside the async chunk instead of being hoisted into the synchronous `vendors.js`. `webpack.prod.js` re-tightened: `hints: 'error'`, `maxAssetSize: 1 MiB`, `maxEntrypointSize: 1.5 MiB` (with the async code-split chunks + monaco workers excluded from the entrypoint accounting). **Result:** `vendors.js` 12.5 MiB → ~290 KiB; `main.js` ~163 KiB; total entrypoint **454 KiB** (was 12.8 MiB), well under the 1.5 MiB cap; monaco/cytoscape split into ~6.7 MiB + ~3.8 MiB on-demand async chunks. Tests in `src/pages/QueryPage.test.tsx` (Suspense fallback shows then the lazy editor mounts; QueryPage source has no static editor/graph import; `src/index.tsx` no longer imports `monaco-bootstrap`). |
 | 10 | F13 | No gzip, no pprof, no sync.Pool for jsontext | P3 low | **36** (3×3×4) | [#57](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/57) | `cmd/server/main.go:140-180` | — | **Deferred** 2026-05-10 — requires a separate genapi work cycle: gzip + pprof + jsontext sync.Pool are three distinct middlewares on the genapi-side `pkg/httpx` chain, and pprof must gate behind the existing `Observability.EnableDebug` schema flag so we don't ship a live profiler unauthenticated. Tracked at genapi#216. |
 | 11 | F8 | SchemaExplorer: 4-fan-out per switch, no abort/cache | P3 low | **32** (2×4×4) | [#52](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/52) | `src/components/schema/SchemaExplorer.tsx` | — | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f8-52-schemaexplorer-abortcontroller--per-graph-cache-resolved). Closure commit `975cc59`. (1) `AbortController` per active-graph fetch pair, stored in a `useRef` so the prior controller's `abort()` is called immediately on graph switch — late-resolving responses for the prior graph no longer stomp the new selection; (2) `createSchemaExplorerCache(maxEntries=8)` module-level + props-injectable per-graph cache. A cached re-selection serves indexes+constraints synchronously with zero wire calls. LRU eviction promotes hits to most-recent. Tests `F8: aborts the prior graph fetch when active graph changes mid-flight`, `F8: cached graphs do not refetch on re-select`, `F8: cache LRU eviction respects maxEntries`. Note: the generated client doesn't accept an external `signal` so cancellation is enforced at the React-effect layer via `signal.aborted` checks; structural fix (signal propagation through fetchImpl) tracked as a follow-up on the genapi side. |
 | 12 | F15 | AuditLogPage: 5s setInterval, no visibility gate | P3 low | **24** (2×3×4) | [#59](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/59) | `src/components/ops/AuditLogPage.tsx` | — | **Closed** 2026-05-07 (cross-closed via Q2 / `2b28b85`) — poll skips while `document.visibilityState === 'hidden'` and resumes on the visibilitychange listener. |
@@ -104,7 +175,7 @@ Five P0/P1 perf issues closed in this run:
 - **F4 + F5 + F6 (#26)** — Table render umbrella. O(N²) reducer + no virtualization + per-render projectColumns. Top P0.
 - **F7 (#51)** — `projectColumns` inner-loop multi-pass. Stacks with F6.
 - **F9 (#53)** — Cytoscape full rebuild + cose layout per streamed row. P0.
-- **F10 (#54)** — Monaco + Cytoscape eagerly imported across all routes; no code-splitting.
+- **F10 (#54)** — **Closed 2026-05-11.** Monaco + Cytoscape now `React.lazy`'d behind `<Suspense>` in `QueryPage.tsx`; `monaco-bootstrap` moved out of the entry chunk; `webpack.common.js` vendor cacheGroup scoped to `chunks: 'initial'`; `webpack.prod.js` budget re-tightened to `hints: 'error'` / 1 MiB asset / 1.5 MiB entrypoint. Entrypoint 12.8 MiB → 454 KiB; `vendors.js` 12.5 MiB → ~290 KiB.
 - **F8 (#52)** — Schema explorer fan-out without abort or cache.
 - **F15 (#59)** — Audit log polls every 5s regardless of tab visibility.
 
@@ -118,7 +189,7 @@ Five P0/P1 perf issues closed in this run:
 - **F1 (#18)** — `result_codec` triple-pass + double-buffer.
 - **F2 (#21)** — `ws_query` per-row Marshal + WriteMessage.
 - **F3 (#25)** — `handlers_query` fully synchronous (TTFB == TTLB).
-- **F12 (#56)** — Server-wide WriteTimeout=60s caps WS streams.
+- **F12 (#56)** — **Closed 2026-05-11.** The server-wide `WriteTimeout` was actually dead config (the hand-rolled `*http.Server` never set it; `httpx.WrapHandler` ignores it); the footgun is closed by an explicit 60s `http.TimeoutHandler` on the REST/SPA surface that `/ws/` is routed around (`wsExemptTimeoutHandler`), with `httpSrv.WriteTimeout` left 0 + `IdleTimeout` wired. Per-frame WS deadlines were already in place via `wsx.Conn` + the 30s `wsx.Options` set by `gen/ws/ws_handlers.gen.go`; now documented in `ws_query.go`.
 - **F13 (#57)** — No gzip, no pprof, no sync.Pool for jsontext.
 
 ### ci
@@ -134,10 +205,11 @@ The three quick-win plays bundle related findings into single PRs to amortize re
    - **Expected gain**: 1000-row render goes from ~2s + tab freeze to <250 ms first paint; p99 frame time <16 ms during 5k-row stream.
    - Touches: `src/pages/QueryPage.tsx`, `src/components/results/TableView.tsx`. New dep: `react-window` (~6 KB gz).
 
-2. **Server config quick-win (#55 + #56)** — `F11 + F12` in one ops/config PR.
-   - Bump pool to 64/16 with env override + remove WriteTimeout on `/ws/*` (per-route) + add per-frame WS deadlines.
-   - **Expected gain**: p99 latency reduction at 2000 rps (no pool queueing); WS streams >60s no longer killed; same-burst throughput uncapped.
-   - Touches: `internal/conn/pool.go`, `cmd/server/main.go`, `internal/server/ws_query.go`.
+2. **Server config quick-win (#55 + #56)** — `F11 + F12` (both closed: F11 `3f23235` 2026-05-07, F12 2026-05-11).
+   - F11: pool bumped to 64/16 with `GEODE_POOL_*` env override.
+   - F12: REST/SPA wrapped in a 60s `http.TimeoutHandler` that `/ws/` is routed around; `http.Server.WriteTimeout` left 0; per-frame WS deadlines already supplied by `wsx.Conn` + the 30s `wsx.Options` from `gen/ws/ws_handlers.gen.go`.
+   - **Realized**: no pool queueing at 2000 rps; WS streams of arbitrary length no longer at risk from a server write timeout.
+   - Touched: `internal/conn/pool.go`, `cmd/server/main.go`, `internal/server/ws_query.go`.
 
 3. **Graph render quick-win (#53)** — `F9` standalone but small.
    - Gate Cytoscape rebuild on `resp.status === 'done'` (or `resp.row_count` change at done time).
@@ -150,8 +222,8 @@ Together these three plays clear all P0 findings and the highest-impact P1 findi
 
 | Bucket | Effort | Findings | Notes |
 |---|---|---|---|
-| Quick wins | < 1 day each | F4+F5+F6 (#26), F9 (#53), F11+F12 (#55,#56), F15 (#59), F8 (#52) | Low-risk, scoped to single files or single config bumps. |
-| Medium | 1-5 days | F1 (#18), F2 (#21), F3 (#25), F7 (#51), F10 (#54), F13 (#57) | Touches multiple files or wire protocol; needs benchmarking before/after. |
+| Quick wins | < 1 day each | ~~F4+F5+F6 (#26)~~, ~~F9 (#53)~~, ~~F11+F12 (#55,#56)~~ (F12 closed 2026-05-11), ~~F15 (#59)~~, ~~F8 (#52)~~ | All closed. Low-risk, scoped to single files or single config bumps. |
+| Medium | 1-5 days | ~~F1 (#18)~~, ~~F2 (#21)~~, F3 (#25) (deferred — genapi), ~~F7 (#51)~~, ~~F10 (#54)~~ (closed 2026-05-11), F13 (#57) (deferred — genapi) | F1/F2/F7/F10 closed; F3/F13 deferred to the genapi work cycle. |
 | Strategic | > 5 days | ~~F18 (#61)~~ — closed won't-do 2026-05-11 (benchmark refuted the premise; see findings table); CI perf gate (not yet ticketed); document SLOs (not yet ticketed) | Requires upstream coordination (genapi for F3 streaming codec) or new infrastructure (CI bench harness, SLO doc). |
 
 ## Notable absences

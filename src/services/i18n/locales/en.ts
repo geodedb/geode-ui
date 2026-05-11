@@ -78,6 +78,8 @@ export const en = {
     tabTable: 'table',
     tabJson: 'json',
     tabGraph: 'graph',
+    loadingEditor: 'Loading editor…',
+    loadingGraph: 'Loading graph view…',
   },
 
   graph: {
