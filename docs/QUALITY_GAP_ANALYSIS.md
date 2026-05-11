@@ -35,13 +35,13 @@ their own GAP files.
 |-----|----------------------------------------------------------------------|----------|-------|--------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
 | Q1  | Split util.go (318 LOC, 6 concerns) into focused files               | High     |    80 | [#27](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/27)              | `internal/server/util.go` (whole file)                                                                          | **Closed** 2026-05-07 (`55b5e69`) -- split into context.go / quoting.go / sqlexec.go / coerce.go (errors_test pinning kept). |
 | Q2  | Extract shared `useApiResource` hook with AbortController **[CLOSED]** | High   |    80 | [#29](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/29)              | `src/hooks/useApiResource.ts` (new); migrated `UsersPage.tsx`, `RolesPage.tsx`, `PoliciesPage.tsx`, `BackupPage.tsx`, `MigrationsPage.tsx`, `AuditLogPage.tsx` (6 pages; `RestorePage.tsx` had no on-mount fetch to migrate) | **Closed** 2026-05-07 (`2b28b85`) -- hook owns AbortController + mounted/aborted guards; pages call `refetch()` after mutations. AuditLogPage poll gated on `document.visibilityState`. |
-| Q3  | Rename `userDB`/`userErr`/`userResponseErr`/`userRowToMap`           | High     |    80 | [#31](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/31)              | `internal/server/handlers_backups.go:62, :135, :162, :189, :212`                                                | Rename to db()/responseErr()/rowToMap() or move to handlers_common.go           |
+| Q3  | Rename `userDB`/`userErr`/`userResponseErr`/`userRowToMap`           | High     |    80 | [#31](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/31)              | `internal/server/{errors,handlers_users,handlers_backups,handlers_grants,handlers_policies,handlers_migrations,handlers_roles}.go` | **Closed** 2026-05-10 — package-wide rename: `userDB`→`connDB` (per-request `*sql.DB` for any wire-level handler), `userErr`→`wireErr` (driver-level wrap with 422/501 split), `userResponseErr`→`respondErr` (inline-write + return-nil), `userRowToMap`→`rowToMap` (open-shape SHOW-row projection used by users / policies / migrations / backups / roles). Stable HTTP `code` field `user_admin_error` preserved for client-API compatibility. Doc comments updated; `userFromRow` (genuinely user-typed) and `userFromContext` (actual current-user accessor) intentionally kept. `make go-test` and `make go-lint` clean. |
 | Q4  | `PatchUsername` runs 3 statements without a transaction              | High     |    80 | [#32](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/32)              | `internal/server/handlers_users.go:154-171`                                                                      | **Closed** 2026-05-07 (`af74e47`) -- Email/Password/Roles wrapped in BEGIN/COMMIT with rollback-on-error; tests cover partial-failure paths. |
 | Q5  | MigrationsPage raw fetch bypasses typed `@api` client                | Medium   |    48 | [#34](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/34)              | `src/components/ops/MigrationsPage.tsx:305-318`                                                                  | Add typed multipart endpoint to genapi config; remove raw fetch                  |
 | Q6  | `isWireFeatureMissing` substring sniffing of driver messages         | Medium   |    48 | [#36](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/36)              | `internal/server/util.go:144-162`                                                                                | Prefer typed errors; pin substring fallbacks in `errors_test.go`                |
 | Q7  | `emitAudit` errors swallowed at 8 call sites                         | Medium   |    48 | [#37](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/37)              | `internal/server/handlers_users.go:107, :188, :238, :265` and `handlers_backups.go:119, :177, :203, :235`        | Log+continue or fail-hard; pick one policy and apply consistently               |
 | Q8  | Inconsistent contract: typed `User`/`Permission` vs `[]jsontext.Value` | Medium |    48 | [#38](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/38)              | `internal/server/handlers_users.go:53-302`                                                                       | Pick one shape (typed) and migrate all list responses                           |
-| Q9  | DRY: 9 user handlers repeat `userDB`+`quoteIdent` preamble           | Medium   |    40 | [#41](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/41)              | `internal/server/handlers_users.go` (9 sites)                                                                    | Extract `withUserDBAndIdent(ctx, name, fn)`                                     |
+| Q9  | DRY: 9 user handlers repeat `connDB`+`quoteIdent` preamble           | Medium   |    40 | [#41](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/41)              | `internal/server/handlers_users.go` (9 sites)                                                                    | Extract `withConnDBAndIdent(ctx, name, fn)` (post-Q3 rename: `userDB`→`connDB`).|
 | Q11 | Drop `@types/cytoscape` — blocks `make web-build`                    | Medium   |    40 | [#43](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/43)              | `package.json` devDependencies                                                                                    | **Closed** 2026-05-07 (`1fda90a`, `0e22763`) -- stub removed; tsc errors uncovered by removal fixed in follow-up commit; `make web-build` now succeeds. |
 | Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | `.pre-commit-config.yaml:130` runs `scripts/run-go.sh tool-golangci` at pre-push | **Closed** — `golangci-lint` already wired into the pre-push hook gauntlet. Output is enforced (commits/pushes are blocked on findings; QF1001/QF1008/unused already burned down). |
 | Q14 | Wire coverage gates (Go ~68.7% floor, Jest threshold)                | Low      |    32 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48)              | (repo root) CI + Jest config                                                                                      | Enforce floors; ratchet up monthly                                              |
@@ -51,7 +51,7 @@ their own GAP files.
 
 ### Counts by Severity
 
-- High: 4 (1 closed, 3 open: Q3, plus Q1/Q2/Q4 already closed in 2026-05-07 run)
+- High: 4 (4 closed: Q1, Q2, Q3 (2026-05-10), Q4)
 - Medium: 6 (1 closed: Q11; 5 open: Q5, Q6, Q7, Q8, Q9)
 - Low: 5 (3 closed: Q13, Q15 + Q12 deferred-not-tracked-as-bug; 2 open: Q14, Q10)
 
@@ -84,7 +84,7 @@ their own GAP files.
 
 ### Counts after 2026-05-08 audit pass
 
-- High: 5 (1 closed this session: Q-NEW-1; pre-existing 4 closed: Q1, Q2, Q4)
+- High: 5 (Q-NEW-1 + Q1, Q2, Q3, Q4 — all closed)
 - Medium: 7 (3 closed: Q11, Q-NEW-2, Q-NEW-3; 4 open: Q5, Q6, Q7, Q8, Q9 + tooling T1/T2)
 - Low: 9 (4 closed: Q10, Q13, Q14 deferred-CI, Q15; 5 open: Q-NEW-4 through Q-NEW-T4)
 
@@ -121,7 +121,7 @@ Standard hygiene. Each is small alone; together they upgrade the floor of every 
 - Q11 — drop `@types/cytoscape` (unblocks `make web-build`).
 - Q12 — delete `package-lock.json`.
 - Q15 — pin Node toolchain.
-- Q3 — rename `user*` helpers (mechanical s/// + test).
+- ~~Q3 — rename `user*` helpers (mechanical s/// + test).~~ **Closed 2026-05-10.**
 - ~~Q10 — create `docs/adr/` + `internal/server/README.md` skeleton.~~ **Closed 2026-05-10.**
 
 ### Medium (1-5 days each)
@@ -131,7 +131,7 @@ Standard hygiene. Each is small alone; together they upgrade the floor of every 
 - Q4 — wrap `PatchUsername` in a transaction (incl. tests for partial-failure paths).
 - Q6 — typed-error path + `errors_test.go` pinning.
 - Q7 — pick audit-failure policy and apply across 8 sites.
-- Q9 — extract `withUserDBAndIdent` (depends on Q3 rename direction).
+- Q9 — extract `withConnDBAndIdent` (depends on Q3 rename — closed; helper is now `connDB`).
 - Q13 — wire `golangci-lint` and burn down initial findings.
 - Q14 — wire coverage gates.
 

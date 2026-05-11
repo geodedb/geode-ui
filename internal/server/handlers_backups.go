@@ -60,20 +60,20 @@ import (
 
 // GetBackups implements GET /api/v1/backups (list backups).
 func (s *GraphServer) GetBackups(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.BackupList, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW BACKUPS")
 	if err != nil {
 		if isWireFeatureMissing(err) {
 			return &gentypes.BackupList{Backups: []jsontext.Value{}}, nil
 		}
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
-		obj := userRowToMap(cols, row)
+		obj := rowToMap(cols, row)
 		raw, mErr := json.Marshal(obj)
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal backup row: %w", mErr)
@@ -90,28 +90,28 @@ func (s *GraphServer) GetBackups(w http.ResponseWriter, r *http.Request, _ *gent
 // returns the first row of the BACKUP CREATE result set as a typed
 // BackupRef.
 func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *gentypes.BackupCreateReq) (*gentypes.BackupRef, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	stmt := "BACKUP CREATE"
 	if req.Graph != "" {
 		gname, qErr := quoteIdent(req.Graph)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_graph", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_graph", qErr.Error()))
 		}
 		stmt += " GRAPH " + gname
 	}
 	if req.Output != "" {
 		out, qErr := quoteString(req.Output)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_output", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_output", qErr.Error()))
 		}
 		stmt += " OUTPUT " + out
 	}
 	rows, cols, err := runQuery(r.Context(), db, stmt)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	if len(rows) == 0 {
 		// No row returned — surface an empty BackupRef rather than 500
@@ -133,23 +133,23 @@ func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *g
 
 // GetFile implements GET /api/v1/backups/{file} (backup info).
 func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam) (*gentypes.BackupInfo, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
 	}
 	fname, err := quoteIdent(req.File)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW BACKUP "+fname)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	if len(rows) == 0 {
-		return nil, userResponseErr(w, &endpointError{
+		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
 			code:        "backup_not_found",
 			description: "backup " + req.File + " does not exist",
@@ -160,19 +160,19 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 
 // DeleteFile implements DELETE /api/v1/backups/{file} (drop backup).
 func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
 	}
 	fname, err := quoteIdent(req.File)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP BACKUP "+fname); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventBackupDeleted,
 		"user", userFromContext(r.Context()),
@@ -187,13 +187,13 @@ func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *ge
 // BACKUP CLEANUP result set. Driver-emitted columns expected:
 // `removed`, `freed_bytes`.
 func (s *GraphServer) Cleanup(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.BackupCleanupResp, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "BACKUP CLEANUP")
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	if len(rows) == 0 {
 		emitAudit(auditEventBackupCleanup, "user", userFromContext(r.Context()))
@@ -210,27 +210,27 @@ func (s *GraphServer) Cleanup(w http.ResponseWriter, r *http.Request, _ *gentype
 
 // Restore implements POST /api/v1/restore (restore from a backup).
 func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *gentypes.RestoreReq) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
 	}
 	fname, err := quoteIdent(req.File)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
 	}
 	stmt := "RESTORE " + fname
 	if req.TargetTime != "" {
 		tt, qErr := quoteString(req.TargetTime)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_target_time", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_target_time", qErr.Error()))
 		}
 		stmt += " AT " + tt
 	}
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventBackupRestored,
 		"user", userFromContext(r.Context()),

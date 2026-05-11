@@ -37,14 +37,14 @@ import (
 func (s *GraphServer) Grants(w http.ResponseWriter, r *http.Request, req *gentypes.GrantReq) (*gentypes.Empty, error) {
 	stmt, err := buildGrant(req, "GRANT", "TO")
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventGrantApplied,
 		"user", userFromContext(r.Context()),
@@ -60,14 +60,14 @@ func (s *GraphServer) Grants(w http.ResponseWriter, r *http.Request, req *gentyp
 func (s *GraphServer) Revoke(w http.ResponseWriter, r *http.Request, req *gentypes.GrantReq) (*gentypes.Empty, error) {
 	stmt, err := buildGrant(req, "REVOKE", "FROM")
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventGrantRevoked,
 		"user", userFromContext(r.Context()),
@@ -85,7 +85,7 @@ func (s *GraphServer) Revoke(w http.ResponseWriter, r *http.Request, req *gentyp
 // emitted SQL keeps the natural verb/preposition pairing readable.
 //
 // The returned error is already an endpointError when validation
-// fails, so callers should pass it straight to userResponseErr.
+// fails, so callers should pass it straight to respondErr.
 func buildGrant(req *gentypes.GrantReq, verb, preposition string) (string, error) {
 	perm, err := quoteIdent(req.Permission)
 	if err != nil {

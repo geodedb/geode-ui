@@ -32,20 +32,20 @@ import (
 
 // GetPolicies implements GET /api/v1/policies (list policies).
 func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.PolicyList, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW POLICIES")
 	if err != nil {
 		if isWireFeatureMissing(err) {
 			return &gentypes.PolicyList{Policies: []jsontext.Value{}}, nil
 		}
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
-		obj := userRowToMap(cols, row)
+		obj := rowToMap(cols, row)
 		raw, mErr := json.Marshal(obj)
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal policy row: %w", mErr)
@@ -57,29 +57,29 @@ func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gen
 
 // PostPolicies implements POST /api/v1/policies (create policy).
 func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyCreateReq) (*gentypes.Policy, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	pname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_policy_name", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_policy_name", err.Error()))
 	}
 	expr, err := quoteString(req.Expression)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_expression", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_expression", err.Error()))
 	}
 	stmt := "CREATE POLICY " + pname
 	if req.Resource != "" {
 		res, qErr := quoteIdent(req.Resource)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_resource", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_resource", qErr.Error()))
 		}
 		stmt += " ON " + res
 	}
 	stmt += " AS " + expr
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventPolicyCreated,
 		"user", userFromContext(r.Context()),
@@ -95,20 +95,20 @@ func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *
 
 // GetName implements GET /api/v1/policies/{name}.
 func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyParam) (*gentypes.Policy, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	pname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_policy_name", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_policy_name", err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW POLICY "+pname)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	if len(rows) == 0 {
-		return nil, userResponseErr(w, &endpointError{
+		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
 			code:        "policy_not_found",
 			description: "policy " + req.Name + " does not exist",
@@ -119,16 +119,16 @@ func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *genty
 
 // DeleteName implements DELETE /api/v1/policies/{name}.
 func (s *GraphServer) DeleteName(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyParam) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	pname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_policy_name", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_policy_name", err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP POLICY "+pname); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventPolicyDeleted,
 		"user", userFromContext(r.Context()),

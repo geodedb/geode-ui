@@ -122,11 +122,15 @@ func badRequest(code, desc string) error {
 	return &endpointError{status: http.StatusBadRequest, code: code, description: desc}
 }
 
-// userResponseErr is the user-handlers analogue of schemaResponseErr —
-// inline-writes endpoint errors and returns nil so the wrapper does not
-// emit a second body, and passes through non-endpoint errors as-is so
-// they surface as 500.
-func userResponseErr(w http.ResponseWriter, err error) error {
+// respondErr is the catch-all wire-handlers analogue of
+// schemaResponseErr — inline-writes endpoint errors and returns nil so
+// the wrapper does not emit a second body, and passes through
+// non-endpoint errors as-is so they surface as 500.
+//
+// Used by every wire-level handler family (users, roles, policies,
+// grants, backups, migrations) — the legacy `userResponseErr` name
+// was a misnomer once the helper landed outside the user-admin path.
+func respondErr(w http.ResponseWriter, err error) error {
 	if ep := asEndpointError(err); ep != nil {
 		writeEndpointError(w, ep)
 		return nil
@@ -134,9 +138,10 @@ func userResponseErr(w http.ResponseWriter, err error) error {
 	return err
 }
 
-// userErr wraps a driver-level error from a user-management statement
-// as a 422 endpointError with code=user_admin_error so the client gets a
-// stable code distinct from auth/transport failures.
+// wireErr wraps a driver-level error from any wire-level admin
+// statement (users / roles / policies / grants / backups / migrations)
+// as a 422 endpointError with code=user_admin_error so the client gets
+// a stable code distinct from auth/transport failures.
 //
 // When the upstream returns the canonical "engine doesn't recognize
 // this verb" signal (status_class=42000 + parse-error tokens), upgrade
@@ -144,7 +149,11 @@ func userResponseErr(w http.ResponseWriter, err error) error {
 // That tells the SPA "this operation cannot be performed on this Geode
 // version" — distinct from "your input was bad" — and lets it surface
 // a friendlier message than raw "geode: 42000: parse error".
-func userErr(err error) error {
+//
+// The stable response `code` (`user_admin_error`) is preserved across
+// the rename for client-API compatibility; it is a body field, not a
+// helper name.
+func wireErr(err error) error {
 	if err == nil {
 		return nil
 	}

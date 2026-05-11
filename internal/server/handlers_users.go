@@ -52,20 +52,20 @@ import (
 
 // GetUsers implements GET /api/v1/users (list users).
 func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.UserList, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW USERS")
 	if err != nil {
 		if isWireFeatureMissing(err) {
 			return &gentypes.UserList{Users: []jsontext.Value{}}, nil
 		}
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
-		obj := userRowToMap(cols, row)
+		obj := rowToMap(cols, row)
 		raw, mErr := json.Marshal(obj)
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal user row: %w", mErr)
@@ -77,32 +77,32 @@ func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentyp
 
 // PostUsers implements POST /api/v1/users (create user).
 func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gentypes.UserCreateReq) (*gentypes.User, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	email, err := quoteString(req.Email)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_email", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_email", err.Error()))
 	}
 	stmt := "CREATE USER " + uname + " WITH EMAIL " + email
 	if req.Password != "" {
 		pw, err := quoteString(req.Password)
 		if err != nil {
-			return nil, userResponseErr(w, badRequest("invalid_password", err.Error()))
+			return nil, respondErr(w, badRequest("invalid_password", err.Error()))
 		}
 		stmt += " PASSWORD " + pw
 	}
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	for _, role := range req.Roles {
 		if err := assignRole(r.Context(), db, uname, role); err != nil {
-			return nil, userResponseErr(w, err)
+			return nil, respondErr(w, err)
 		}
 	}
 	emitAudit(auditEventUserCreated,
@@ -115,20 +115,20 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 
 // GetUsername implements GET /api/v1/users/{username}.
 func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.User, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW USER "+uname)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	if len(rows) == 0 {
-		return nil, userResponseErr(w, &endpointError{
+		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
 			code:        "user_not_found",
 			description: "user " + req.Username + " does not exist",
@@ -150,13 +150,13 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 // empty body. quoteIdent runs unconditionally so a malformed username
 // is rejected with 400 before any driver work.
 func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UserUpdateReq) (*gentypes.User, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	// Pre-validate every quoted literal before opening the tx so a 400
 	// from a bad input does not leave a dangling open transaction.
@@ -165,7 +165,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		var qErr error
 		email, qErr = quoteString(req.Email)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_email", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_email", qErr.Error()))
 		}
 	}
 	var pw string
@@ -173,7 +173,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		var qErr error
 		pw, qErr = quoteString(req.Password)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_password", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_password", qErr.Error()))
 		}
 	}
 
@@ -184,7 +184,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 
 	tx, err := db.BeginTx(r.Context(), nil)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	// rollbackErr lets us surface the original failure even when the
 	// driver's Rollback returns a non-nil error of its own. The handler
@@ -198,26 +198,26 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 
 	if email != "" {
 		if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
-			return nil, userResponseErr(w, userErr(execErr))
+			return nil, respondErr(w, wireErr(execErr))
 		}
 	}
 	if pw != "" {
 		if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
-			return nil, userResponseErr(w, userErr(execErr))
+			return nil, respondErr(w, wireErr(execErr))
 		}
 	}
 	for _, role := range req.Roles {
 		roleIdent, qErr := quoteIdent(role)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_role", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_role", qErr.Error()))
 		}
 		if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO USER "+uname); execErr != nil {
-			return nil, userResponseErr(w, userErr(execErr))
+			return nil, respondErr(w, wireErr(execErr))
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	commit = true
 
@@ -226,16 +226,16 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 
 // DeleteUsername implements DELETE /api/v1/users/{username}.
 func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP USER "+uname); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventUserDeleted,
 		"user", userFromContext(r.Context()),
@@ -270,20 +270,20 @@ func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentyp
 
 // Password implements POST /api/v1/users/{username}/password.
 func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gentypes.PasswordChangeReq) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	pw, err := quoteString(req.NewPassword)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_password", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_password", err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	// Note: never log the password value itself; sensitiveKeys would
 	// redact it anyway but we omit it entirely to leave no trace.
@@ -303,16 +303,16 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 // onto PostUsernameRoles (the URI-prefix fallback because both the
 // terminal segment `roles` and `Roles` collide with /api/v1/roles).
 func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, req *gentypes.AssignRoleReq) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	if err := assignRole(r.Context(), db, uname, req.Role); err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	emitAudit(auditEventRoleAssigned,
 		"user", userFromContext(r.Context()),
@@ -324,17 +324,17 @@ func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, 
 
 // Permissions implements GET /api/v1/users/{username}/permissions.
 func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.PermissionList, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(req.Username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW PERMISSIONS FOR USER "+uname)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
@@ -356,16 +356,16 @@ func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *g
 // toggleUser is the shared body of Disable/Enable. action is "DISABLE"
 // or "ENABLE" — the literal verb embedded into the GQL statement.
 func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, username, action string) (*gentypes.Empty, error) {
-	db, err := s.userDB(ctx)
+	db, err := s.connDB(ctx)
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	uname, err := quoteIdent(username)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_username", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
 	}
 	if _, err := runStatement(ctx, db, "ALTER USER "+uname+" "+action); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	return &gentypes.Empty{}, nil
 }
@@ -380,13 +380,16 @@ func assignRole(ctx context.Context, db *sql.DB, uname, role string) error {
 		return badRequest("invalid_role", err.Error())
 	}
 	if _, err := runStatement(ctx, db, "GRANT ROLE "+roleIdent+" TO USER "+uname); err != nil {
-		return userErr(err)
+		return wireErr(err)
 	}
 	return nil
 }
 
-// userDB resolves the *sql.DB for the current connection profile.
-func (s *GraphServer) userDB(ctx context.Context) (*sql.DB, error) {
+// connDB resolves the *sql.DB for the current request's connection
+// profile (taken from the request context, falling back to the default
+// profile). Used by every wire-level handler family — users, roles,
+// policies, grants, backups, migrations — not just user admin.
+func (s *GraphServer) connDB(ctx context.Context) (*sql.DB, error) {
 	if s.cfg.Pool == nil {
 		return nil, errors.New("server: pool not configured")
 	}
@@ -401,10 +404,11 @@ func (s *GraphServer) userDB(ctx context.Context) (*sql.DB, error) {
 	return db, nil
 }
 
-// userRowToMap turns a driver row into a plain map[string]any keyed by
-// column name. Used for SHOW USERS where the row shape is open and the
+// rowToMap turns a driver row into a plain map[string]any keyed by
+// column name. Used by the SHOW-* read paths (USERS, POLICIES,
+// MIGRATIONS, BACKUPS, ROLES) where the row shape is open and the
 // UI consumes whatever columns Geode emits today.
-func userRowToMap(cols []string, row []any) map[string]any {
+func rowToMap(cols []string, row []any) map[string]any {
 	obj := make(map[string]any, len(cols))
 	for i, c := range cols {
 		if i < len(row) {

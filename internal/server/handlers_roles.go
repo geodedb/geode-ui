@@ -33,20 +33,20 @@ import (
 
 // GetRoles implements GET /api/v1/roles (list roles).
 func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.RoleList, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW ROLES")
 	if err != nil {
 		if isWireFeatureMissing(err) {
 			return &gentypes.RoleList{Roles: []jsontext.Value{}}, nil
 		}
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
-		obj := userRowToMap(cols, row)
+		obj := rowToMap(cols, row)
 		raw, mErr := json.Marshal(obj)
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal role row: %w", mErr)
@@ -58,31 +58,31 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 
 // PostApiRoles implements POST /api/v1/roles (create role).
 func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *gentypes.RoleCreateReq) (*gentypes.Role, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_role", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_role", err.Error()))
 	}
 	stmt := "CREATE ROLE " + rname
 	if req.Description != "" {
 		desc, qErr := quoteString(req.Description)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_description", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_description", qErr.Error()))
 		}
 		stmt += " DESCRIPTION " + desc
 	}
 	if len(req.Permissions) > 0 {
 		permList, qErr := joinPermissions(req.Permissions)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_permission", qErr.Error()))
+			return nil, respondErr(w, badRequest("invalid_permission", qErr.Error()))
 		}
 		stmt += " WITH PERMISSIONS [" + permList + "]"
 	}
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventRoleCreated,
 		"user", userFromContext(r.Context()),
@@ -98,20 +98,20 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 
 // GetRole implements GET /api/v1/roles/{role}.
 func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *gentypes.RoleParam) (*gentypes.Role, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rname, err := quoteIdent(req.Role)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_role", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_role", err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW ROLE "+rname)
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	if len(rows) == 0 {
-		return nil, userResponseErr(w, &endpointError{
+		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
 			code:        "role_not_found",
 			description: "role " + req.Role + " does not exist",
@@ -122,16 +122,16 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 
 // DeleteRole implements DELETE /api/v1/roles/{role}.
 func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *gentypes.RoleParam) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rname, err := quoteIdent(req.Role)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_role", err.Error()))
+		return nil, respondErr(w, badRequest("invalid_role", err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP ROLE "+rname); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventRoleDeleted,
 		"user", userFromContext(r.Context()),
