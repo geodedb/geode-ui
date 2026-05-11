@@ -38,7 +38,7 @@ No release-blocking gaps. 4 of 7 are blocked on upstream Geode v0.6+; 2 CI verif
 | GAP-004 | e2e-20 ops audit spec skips when `/api/v1/audit` returns 403 | Open (upstream-blocked) | Low | [#4](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/4) | `e2e/specs/09-ops.spec.ts:37-47` | Track upstream Geode audit-role fix. |
 | GAP-005 | e2e-21 MCP `tools/list` skip on jsonrpc error | Open (upstream-blocked) | Low | [#5](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/5) | `e2e/specs/10-mcp-endpoint.spec.ts:124-127` | Monitor MCP server response shape. |
 | GAP-006 | e2e job runtime status in CI not verified | **Closed** 2026-05-10 | Low | [#6](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/6) | `.gitlab-ci.yml` declares e2e job; latest `main` pipeline [#2514181822](https://gitlab.com/devnw/codepros/geode/geode-ui/-/pipelines/2514181822) sampled on sha `f815d1a` (2026-05-10). | Pipeline URL recorded; runtime visibility re-established. Pipeline status itself (failed/passed) is tracked separately in the pipelines view; this gap was a *verification* gap (no recent sample) and is closed by the act of sampling. |
-| GAP-007 | docker-compose stack-up smoke not executed | Open (verification) | Low | [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7) | Requirement e2e-7 / T6 rebuild-and-push | One-shot `docker compose up` smoke; record outcome. |
+| GAP-007 | docker-compose stack-up smoke not executed | **Closed** 2026-05-10 | Low | [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7) | Requirement e2e-7 / T6 rebuild-and-push. e2e stack live smoke 2026-05-10: `curl http://localhost:8080/healthz` -> `200 {"status":"ok","version":"v0.1.0"}`; `curl http://localhost:8080/api/v1/profiles/public` -> `200` with one profile. | Stack-up smoke executed against `deploy/docker-compose.test.yml`; both endpoints 2xx. |
 | GAP-008 | Pre-commit ratchets (lint:hardcoded-styles, lint:contrast, verify:translations, detect:hardcoded-strings) missing from CI | **Closed** 2026-05-08 | Medium | — | `.gitlab-ci.yml:audit-ratchets` job added | New `audit-ratchets` lint-stage job runs all four scripts on MR + main. |
 | GAP-009 | `electron:tsc/build/package` scripts not in CI | **Closed** 2026-05-08 | Medium | — | `.gitlab-ci.yml:electron-typecheck` job added | Type-checks `electron/main.ts` + `electron/preload.ts`; `allow_failure: true` until electron deps land. |
 | GAP-010 | CSP behavior under Electron `geode://` origin not documented | **Closed** 2026-05-08 | Low | — | `docs/ELECTRON.md` (new "Content-Security-Policy under the `geode://` origin" section) | Each CSP directive's behaviour under `geode://app` documented; `connect-src` flagged as the only operator-configuration concern. |
@@ -162,17 +162,19 @@ focused PR scoped to that work.
 - **Status:** Closed. The verification action (sample latest `main` pipeline + record the URL) has been performed. Pipeline run-status tracking (red vs green) is an ongoing operational concern, not the substance of this gap.
 - **Acceptance criteria met:** Latest `main` pipeline URL recorded in this row.
 
-### GAP-007: docker-compose stack-up smoke not executed
+### GAP-007: docker-compose stack-up smoke not executed — **Closed 2026-05-10**
 
 - **Issue:** [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7)
 - **Category:** Verification / Test
 - **Severity:** Low
 - **Requirement source:** e2e-7 / T6 stack-up smoke
-- **Current state (evidence):** Out-of-scope for static Phase 3 audit; not executed.
-- **Why this is a gap:** Stack-up smoke not run during the audit pass.
-- **Impact/Risk:** Compose file may work; we have not validated it during the audit.
-- **Recommended fix:** `docker compose up`, hit baseline health endpoint, capture output, close with evidence.
-- **Acceptance criteria:** Compose stack reaches ready state; at least one endpoint returns 2xx; evidence recorded.
+- **Current state (evidence):**
+  - `deploy/docker-compose.test.yml` stack live; live smoke 2026-05-10:
+    - `curl -fsS http://localhost:8080/healthz` -> `200 {"status":"ok","version":"v0.1.0"}`
+    - `curl -fsS http://localhost:8080/api/v1/profiles/public` -> `200` with one profile in the body.
+- **Why this was a gap:** Stack-up smoke not run during the audit pass.
+- **Status:** Closed. Both endpoints returned 2xx with the expected JSON shapes.
+- **Acceptance criteria met:** Compose stack reaches ready state; at least one endpoint returns 2xx; evidence recorded.
 
 ## Reclassifications from Phase 2
 
