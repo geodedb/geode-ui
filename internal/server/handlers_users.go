@@ -227,6 +227,14 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		}
 		commit = true
 
+		// SEC-N2 (#64): a password change invalidates every existing
+		// session for that user — revoke all of the target's currently-
+		// valid tokens (iat-based per-user revoke). A new login with the
+		// new password mints a token with a later iat and is unaffected.
+		if pw != "" && s.cfg.JWT != nil {
+			s.cfg.JWT.Revocation().RevokeUser(req.Username)
+		}
+
 		resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}
 		return nil
 	})
@@ -293,6 +301,13 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 		}
 		if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
 			return wireErr(err)
+		}
+		// SEC-N2 (#64): invalidate every existing session for this user —
+		// a password change must not leave old tokens valid. A subsequent
+		// login with the new password mints a token with a later iat and
+		// is unaffected by the per-user revoke.
+		if s.cfg.JWT != nil {
+			s.cfg.JWT.Revocation().RevokeUser(req.Username)
 		}
 		// Note: never log the password value itself; sensitiveKeys would
 		// redact it anyway but we omit it entirely to leave no trace.

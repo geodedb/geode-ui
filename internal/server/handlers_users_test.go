@@ -257,6 +257,115 @@ func TestUsers_ChangePassword(t *testing.T) {
 	}
 }
 
+// TestUsers_ChangePassword_RevokesExistingTokens pins SEC-N2 (#64): a
+// successful POST /users/{u}/password revokes every currently-valid
+// token for that user (a token issued before the change fails
+// validation; one issued after passes; another user's token is
+// unaffected).
+func TestUsers_ChangePassword_RevokesExistingTokens(t *testing.T) {
+	d := &userDriver{}
+	iss := newTestIssuer(t)
+	if _, loaded := registerOnce.LoadOrStore("users_chpw_revoke", struct{}{}); !loaded {
+		sql.Register("users_chpw_revoke", d)
+	}
+	db, err := sql.Open("users_chpw_revoke", "")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := New(Config{Version: "test", Pool: &stubPool{db: db}, JWT: iss})
+
+	// Token for the target user, minted before the password change.
+	tokAlice, _, err := iss.Issue("alice", "default", []string{"reader"}, "")
+	if err != nil {
+		t.Fatalf("Issue alice: %v", err)
+	}
+	// Token for an unrelated user.
+	tokBob, _, err := iss.Issue("bob", "default", []string{"reader"}, "")
+	if err != nil {
+		t.Fatalf("Issue bob: %v", err)
+	}
+	// Both validate before the change.
+	if _, err := iss.Parse(tokAlice); err != nil {
+		t.Fatalf("alice token valid before change: %v", err)
+	}
+	if _, err := iss.Parse(tokBob); err != nil {
+		t.Fatalf("bob token valid before change: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	if _, err := s.Password(rec, req, &gentypes.PasswordChangeReq{
+		Username:    "alice",
+		NewPassword: "fresh-secret-1",
+	}); err != nil {
+		t.Fatalf("Password: %v", err)
+	}
+
+	// alice's pre-change token is now revoked; bob's is untouched.
+	if _, err := iss.Parse(tokAlice); err == nil {
+		t.Fatal("alice's pre-change token should be revoked after password change")
+	}
+	if _, err := iss.Parse(tokBob); err != nil {
+		t.Fatalf("bob's token must be unaffected by alice's password change: %v", err)
+	}
+}
+
+// TestUsers_PatchPassword_RevokesExistingTokens pins the same SEC-N2
+// behaviour for the PATCH /users/{u} path when it carries a password
+// field — and confirms a PATCH that does NOT touch the password does
+// not revoke anything. Uses the BeginTx-capable userTxDriver because
+// PatchUsername wraps its sub-updates in a transaction.
+func TestUsers_PatchPassword_RevokesExistingTokens(t *testing.T) {
+	d := &userTxDriver{}
+	iss := newTestIssuer(t)
+	if _, loaded := registerOnce.LoadOrStore("users_patchpw_revoke", struct{}{}); !loaded {
+		sql.Register("users_patchpw_revoke", d)
+	}
+	db, err := sql.Open("users_patchpw_revoke", "")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := New(Config{Version: "test", Pool: &stubPool{db: db}, JWT: iss})
+
+	tok1, _, err := iss.Issue("carol", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	// PATCH with only an email change — must NOT revoke carol's token.
+	rec := httptest.NewRecorder()
+	if _, err := s.PatchUsername(rec, httptest.NewRequest(http.MethodPatch, "/api/v1/users/carol", nil), &gentypes.UserUpdateReq{
+		Username: "carol",
+		Email:    "carol@new.example.com",
+	}); err != nil {
+		t.Fatalf("PatchUsername (email only): %v", err)
+	}
+	if rec.Code != http.StatusOK && rec.Code != 0 {
+		t.Fatalf("email-only PATCH unexpected status %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := iss.Parse(tok1); err != nil {
+		t.Fatalf("email-only PATCH should not revoke tokens: %v", err)
+	}
+
+	// PATCH with a password change — must revoke carol's token.
+	rec = httptest.NewRecorder()
+	if _, err := s.PatchUsername(rec, httptest.NewRequest(http.MethodPatch, "/api/v1/users/carol", nil), &gentypes.UserUpdateReq{
+		Username: "carol",
+		// GAP-N4 policy: >= 12 chars, not a weak pattern.
+		Password: "another-fresh-secret",
+	}); err != nil {
+		t.Fatalf("PatchUsername (password): %v", err)
+	}
+	if rec.Code != http.StatusOK && rec.Code != 0 {
+		t.Fatalf("password PATCH unexpected status %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := iss.Parse(tok1); err == nil {
+		t.Fatal("carol's pre-change token should be revoked after a password PATCH")
+	}
+}
+
 // TestUsers_DisableEnable confirms the toggle handler emits the
 // DISABLE/ENABLE verbs against the correctly-quoted identifier.
 func TestUsers_DisableEnable(t *testing.T) {

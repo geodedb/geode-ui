@@ -314,6 +314,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// SEC-N2 (#64): periodically prune the in-memory JWT revocation set
+	// so dead jti entries (past their token expiry) and stale
+	// password-changed markers (older than the TTL ceiling, hence no
+	// longer referenced by any still-valid token) don't accumulate. A
+	// 10-minute cadence is plenty given the 1m..24h TTL window; the
+	// maxTokenAge is the issuer's TTL so the sweep never drops a marker
+	// a live token could still reference.
+	issuer.Revocation().StartSweeper(ctx, 10*time.Minute, issuer.TTL())
+
 	go func() {
 		slog.Info("listening", "addr", listen)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
