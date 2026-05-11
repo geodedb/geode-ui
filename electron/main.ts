@@ -406,12 +406,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   'geode:store-saved-password',
-  async (
-    _evt,
-    profileName: unknown,
-    username: unknown,
-    password: unknown
-  ) => {
+  async (_evt, profileName: unknown, username: unknown, password: unknown) => {
     // S8 (#121): validate the triple as a single object so the helper
     // can enforce per-field caps and the no-null-byte invariant
     // around the pwKey separator.

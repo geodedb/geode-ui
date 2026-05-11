@@ -13,9 +13,7 @@ test.describe('connection switcher', () => {
     await page.goto('/')
     // The fixture seeds an active connection on profile 'default', so
     // the switcher trigger button should display that name.
-    await expect(
-      page.getByRole('button', { name: /default/i })
-    ).toBeVisible()
+    await expect(page.getByRole('button', { name: /default/i })).toBeVisible()
   })
 
   test('opening the dropdown reveals the connection row + add affordance', async ({

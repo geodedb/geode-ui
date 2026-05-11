@@ -22,9 +22,7 @@ test.describe('auth', () => {
     // (Plan C). The first profile auto-selects on mount and the seed has
     // 'default' as the only system profile, so we just confirm the
     // picker is showing and proceed.
-    await expect(
-      page.getByRole('button', { name: /^default$/i })
-    ).toBeVisible()
+    await expect(page.getByRole('button', { name: /^default$/i })).toBeVisible()
     await sel.loginUsername(page).fill(USER)
     await sel.loginPassword(page).fill(PASS)
     await sel.loginSubmit(page).click()

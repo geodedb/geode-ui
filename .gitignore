@@ -61,3 +61,14 @@ coverage.txt
 
 # GoReleaser output (already covered by /dist/ above; mirror for clarity)
 /dist/
+
+# Playwright writes to ./test-results when run with --config=e2e/playwright.config.ts
+# from the repo root (the /e2e/test-results entry above only covers the e2e/ cwd case)
+/test-results/
+
+# Claude Code per-project config / memory
+/.claude/
+
+# Stray build artifacts (a `go build` without -o bin/, an accidental pnpm install)
+/server
+/pnpm-lock.yaml

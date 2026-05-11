@@ -152,7 +152,10 @@ dy4i8S1EfvR6fPo=
         got.tls === null ||
         got.tls === undefined ||
         Object.values(got.tls ?? {}).every(isEmptyOrZero)
-      expect(tlsCleared, `tls not cleared: ${JSON.stringify(got.tls)}`).toBeTruthy()
+      expect(
+        tlsCleared,
+        `tls not cleared: ${JSON.stringify(got.tls)}`
+      ).toBeTruthy()
       const poolCleared =
         got.pool_overrides === null ||
         got.pool_overrides === undefined ||
