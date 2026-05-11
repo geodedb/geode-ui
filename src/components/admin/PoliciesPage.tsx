@@ -10,6 +10,11 @@ import {
 import { useApiResource } from '../../hooks/useApiResource'
 import { useCapabilities } from '../../hooks/useCapabilities'
 import {
+  RBAC_RESOURCES,
+  RLS_OPERATIONS,
+  type RlsOperation,
+} from '../../lib/rbacVocab'
+import {
   Button,
   ConfirmModal,
   DataTable,
@@ -17,6 +22,7 @@ import {
   Field,
   Input,
   Modal,
+  Select,
   Stack,
   TableScroll,
   Textarea,
@@ -190,11 +196,32 @@ export const PoliciesPage: React.FC = () => {
   )
 }
 
+// Compose Geode's structured RowLevelPolicy fields into the wire
+// `expression` string the server carries verbatim into
+// `CREATE POLICY <name> [ON <resource>] AS '<expression>'`. The shape
+// mirrors SQL-ish row-level-security syntax: `FOR <op> USING (<pred>)`
+// with an optional `WITH CHECK (<pred>)`. The structured `table` field
+// maps onto the existing `resource` wire field.
+function composePolicyExpression(
+  operation: RlsOperation,
+  using: string,
+  check: string
+): string {
+  let expr = `FOR ${operation} USING (${using.trim()})`
+  const c = check.trim()
+  if (c.length > 0) {
+    expr += ` WITH CHECK (${c})`
+  }
+  return expr
+}
+
 const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { t } = useTranslation()
   const [name, setName] = useState('')
-  const [resource, setResource] = useState('')
-  const [expression, setExpression] = useState('')
+  const [operation, setOperation] = useState<RlsOperation>('all')
+  const [table, setTable] = useState('')
+  const [usingClause, setUsingClause] = useState('')
+  const [checkClause, setCheckClause] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -203,7 +230,12 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     setBusy(true)
     setErr(null)
     try {
-      await client.postPolicies({ name, resource, expression })
+      const expression = composePolicyExpression(
+        operation,
+        usingClause,
+        checkClause
+      )
+      await client.postPolicies({ name, resource: table, expression })
       onClose()
     } catch (e2: unknown) {
       if (isWireFeatureMissingError(e2)) {
@@ -250,28 +282,64 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             autoFocus
           />
         </Field>
-        <Field
-          label={t('policies.fieldResource')}
-          htmlFor="cp-resource"
-          hint={t('policies.resourceHint')}
-        >
-          <Input
-            id="cp-resource"
-            value={resource}
-            onChange={(e) => setResource(e.target.value)}
-          />
+        <Field label={t('policies.operationLabel')} htmlFor="cp-operation">
+          <Select
+            id="cp-operation"
+            data-testid="policy-operation-select"
+            value={operation}
+            onChange={(e) => setOperation(e.target.value as RlsOperation)}
+          >
+            {RLS_OPERATIONS.map((op) => (
+              <option key={op} value={op}>
+                {op}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field
-          label={t('policies.fieldExpression')}
-          htmlFor="cp-expression"
+          label={t('policies.tableLabel')}
+          htmlFor="cp-table"
+          hint={t('policies.tableHint')}
+        >
+          <Input
+            id="cp-table"
+            data-testid="policy-table-input"
+            list="policy-table-suggestions"
+            value={table}
+            onChange={(e) => setTable(e.target.value)}
+          />
+          <datalist id="policy-table-suggestions">
+            {RBAC_RESOURCES.map((r) => (
+              <option key={r} value={r} label={r} />
+            ))}
+          </datalist>
+        </Field>
+        <Field
+          label={t('policies.usingLabel')}
+          htmlFor="cp-using"
+          hint={t('policies.usingHint')}
           required
         >
           <Textarea
-            id="cp-expression"
-            value={expression}
-            onChange={(e) => setExpression(e.target.value)}
-            rows={3}
+            id="cp-using"
+            data-testid="policy-using-textarea"
+            value={usingClause}
+            onChange={(e) => setUsingClause(e.target.value)}
+            rows={2}
             required
+          />
+        </Field>
+        <Field
+          label={t('policies.checkLabel')}
+          htmlFor="cp-check"
+          hint={t('policies.checkHint')}
+        >
+          <Textarea
+            id="cp-check"
+            data-testid="policy-check-textarea"
+            value={checkClause}
+            onChange={(e) => setCheckClause(e.target.value)}
+            rows={2}
           />
         </Field>
         {err && <ErrorBanner role="alert">{err}</ErrorBanner>}

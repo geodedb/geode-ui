@@ -184,7 +184,10 @@ export const en = {
     fieldName: 'Name',
     fieldDescription: 'Description',
     fieldPermissions: 'Permissions',
-    permissionsHint: 'Comma-separated identifiers (e.g. read,write,admin).',
+    permissionsHint:
+      'Type a permission and press Enter to add it. Suggestions follow the <action>:<resource> convention (e.g. read:graph); free text is accepted.',
+    permissionsPlaceholder: 'e.g. read:graph',
+    removePermission: 'Remove permission {{permission}}',
     unsupportedNote:
       'Creating roles is not supported on the connected Geode build.',
     unsupportedTooltip:
@@ -204,10 +207,16 @@ export const en = {
     empty: 'No policies.',
     createTitle: 'New policy',
     fieldName: 'Name',
-    fieldResource: 'Resource',
-    resourceHint:
-      'The graph or namespace this policy guards (e.g. graph:default).',
-    fieldExpression: 'Expression',
+    operationLabel: 'Operation',
+    tableLabel: 'Table',
+    tableHint:
+      'The table or resource this policy guards (e.g. node); free text is accepted.',
+    usingLabel: 'USING clause',
+    usingHint:
+      'A boolean predicate evaluated per row, e.g. owner_id = current_user().',
+    checkLabel: 'WITH CHECK clause',
+    checkHint:
+      'WITH CHECK clause (optional) — predicate new or updated rows must satisfy.',
     unsupportedNote:
       'Creating policies is not supported on the connected Geode build.',
     unsupportedTooltip:
@@ -219,9 +228,13 @@ export const en = {
   grants: {
     title: 'Grants',
     fieldPermission: 'Permission',
-    permissionHint: 'The action being granted (e.g. read, write, admin).',
+    permissionHint:
+      'The permission being granted — typically <action>:<resource> (e.g. read:graph) or a bare action; free text is accepted.',
+    permissionPlaceholder: 'e.g. read:graph',
     fieldResource: 'Resource',
-    resourceHint: 'The resource the grant applies to (e.g. graph:default).',
+    resourceHint:
+      'The resource the grant applies to (e.g. graph or graph:default); free text is accepted.',
+    resourcePlaceholder: 'e.g. graph',
     fieldGrantee: 'Grantee',
     granteePlaceholder: 'username or role name',
     fieldGranteeKind: 'Grantee kind',

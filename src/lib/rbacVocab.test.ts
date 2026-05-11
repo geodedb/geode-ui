@@ -16,7 +16,6 @@ import {
   RBAC_GRANTEE_KINDS,
   RLS_OPERATIONS,
   permissionSuggestions,
-  // eslint-disable-next-line import/no-unresolved -- module lands with the Phase-2 fix
 } from './rbacVocab'
 
 test('RBAC_ACTIONS mirrors geode_auth_lib.Action', () => {

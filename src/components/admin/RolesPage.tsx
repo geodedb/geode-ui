@@ -9,6 +9,7 @@ import {
 } from '../../api/capabilities'
 import { useApiResource } from '../../hooks/useApiResource'
 import { useCapabilities } from '../../hooks/useCapabilities'
+import { permissionSuggestions } from '../../lib/rbacVocab'
 import {
   Button,
   ConfirmModal,
@@ -20,6 +21,50 @@ import {
   Stack,
   TableScroll,
 } from '../ui'
+
+// Inlined chip/tag input for the role Permissions field — small enough
+// not to warrant a shared primitive. Backed by a native <datalist> so
+// the browser autocompletes from `permissionSuggestions()`; free text is
+// still accepted (Geode persists the string verbatim).
+const ChipList = styled.ul`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px 0;
+  padding: 0;
+  list-style: none;
+`
+
+const Chip = styled.li`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  background: ${({ theme }) => theme.bg.subtle};
+  border: 1px solid ${({ theme }) => theme.border.default};
+  border-radius: ${({ theme }) => theme.radii.md};
+  color: ${({ theme }) => theme.text.primary};
+`
+
+const ChipRemove = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: ${({ theme }) => theme.text.muted};
+  cursor: pointer;
+  border-radius: ${({ theme }) => theme.radii.sm};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  line-height: 1;
+
+  &:hover:not(:disabled) {
+    color: ${({ theme }) => theme.text.danger};
+  }
+`
 
 // RolesPage drives the /admin/roles tab (Geode B5 endpoints):
 //
@@ -187,21 +232,44 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { t } = useTranslation()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [permissions, setPermissions] = useState('')
+  const [permissions, setPermissions] = useState<string[]>([])
+  const [permDraft, setPermDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const suggestions = React.useMemo(() => permissionSuggestions(), [])
+
+  const addChip = (raw: string): void => {
+    const v = raw.trim()
+    if (v.length === 0) return
+    setPermissions((prev) => (prev.includes(v) ? prev : [...prev, v]))
+    setPermDraft('')
+  }
+
+  const removeChip = (v: string): void => {
+    setPermissions((prev) => prev.filter((p) => p !== v))
+  }
+
+  const onPermKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      addChip(permDraft)
+    } else if (e.key === 'Backspace' && permDraft.length === 0) {
+      setPermissions((prev) => prev.slice(0, -1))
+    }
+  }
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      // permissions field is a comma-separated string in the form;
-      // split + trim + drop empties before sending.
-      const perms = permissions
-        .split(',')
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0)
+      // Fold any in-progress draft into the chip set before sending so a
+      // value typed but not yet committed isn't silently dropped.
+      const draft = permDraft.trim()
+      const perms =
+        draft.length > 0 && !permissions.includes(draft)
+          ? [...permissions, draft]
+          : permissions
       await client.postApiRoles({ name, description, permissions: perms })
       onClose()
     } catch (e2: unknown) {
@@ -258,14 +326,40 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         </Field>
         <Field
           label={t('roles.fieldPermissions')}
-          htmlFor="cr-permissions"
+          htmlFor="role-permissions-input"
           hint={t('roles.permissionsHint')}
         >
+          {permissions.length > 0 && (
+            <ChipList>
+              {permissions.map((p) => (
+                <Chip key={p}>
+                  <span>{p}</span>
+                  <ChipRemove
+                    type="button"
+                    aria-label={t('roles.removePermission', { permission: p })}
+                    onClick={() => removeChip(p)}
+                  >
+                    ×
+                  </ChipRemove>
+                </Chip>
+              ))}
+            </ChipList>
+          )}
           <Input
-            id="cr-permissions"
-            value={permissions}
-            onChange={(e) => setPermissions(e.target.value)}
+            id="role-permissions-input"
+            data-testid="role-permissions-input"
+            list="role-permission-suggestions"
+            value={permDraft}
+            placeholder={t('roles.permissionsPlaceholder')}
+            onChange={(e) => setPermDraft(e.target.value)}
+            onKeyDown={onPermKeyDown}
+            onBlur={() => addChip(permDraft)}
           />
+          <datalist id="role-permission-suggestions">
+            {suggestions.map((s) => (
+              <option key={s} value={s} label={s} />
+            ))}
+          </datalist>
         </Field>
         {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       </form>

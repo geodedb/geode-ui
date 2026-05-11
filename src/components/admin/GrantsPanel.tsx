@@ -8,6 +8,12 @@ import {
   wireFeatureMissingDescription,
 } from '../../api/capabilities'
 import { useCapabilities } from '../../hooks/useCapabilities'
+import {
+  RBAC_GRANTEE_KINDS,
+  RBAC_RESOURCES,
+  permissionSuggestions,
+  type RbacGranteeKind,
+} from '../../lib/rbacVocab'
 import type { Theme } from '../../theme'
 import { Button, Field, Inline, Input, Select, Stack } from '../ui'
 
@@ -71,10 +77,11 @@ export const GrantsPanel: React.FC = () => {
   const [permission, setPermission] = useState('')
   const [resource, setResource] = useState('')
   const [grantee, setGrantee] = useState('')
-  const [granteeKind, setGranteeKind] = useState<'user' | 'role'>('user')
+  const [granteeKind, setGranteeKind] = useState<RbacGranteeKind>('user')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
+  const permSuggestions = React.useMemo(() => permissionSuggestions(), [])
 
   const send = async (mode: 'apply' | 'revoke'): Promise<void> => {
     setBusy(true)
@@ -119,10 +126,18 @@ export const GrantsPanel: React.FC = () => {
         >
           <Input
             id="gp-permission"
+            data-testid="grant-permission-input"
+            list="grant-permission-suggestions"
+            placeholder={t('grants.permissionPlaceholder')}
             value={permission}
             onChange={(e) => setPermission(e.target.value)}
             required
           />
+          <datalist id="grant-permission-suggestions">
+            {permSuggestions.map((s) => (
+              <option key={s} value={s} label={s} />
+            ))}
+          </datalist>
         </Field>
         <Field
           label={t('grants.fieldResource')}
@@ -131,9 +146,17 @@ export const GrantsPanel: React.FC = () => {
         >
           <Input
             id="gp-resource"
+            data-testid="grant-resource-input"
+            list="grant-resource-suggestions"
+            placeholder={t('grants.resourcePlaceholder')}
             value={resource}
             onChange={(e) => setResource(e.target.value)}
           />
+          <datalist id="grant-resource-suggestions">
+            {RBAC_RESOURCES.map((r) => (
+              <option key={r} value={r} label={r} />
+            ))}
+          </datalist>
         </Field>
         <Field label={t('grants.fieldGrantee')} htmlFor="gp-grantee" required>
           <Input
@@ -147,11 +170,17 @@ export const GrantsPanel: React.FC = () => {
         <Field label={t('grants.fieldGranteeKind')} htmlFor="gp-grantee-kind">
           <Select
             id="gp-grantee-kind"
+            data-testid="grant-grantee-kind-select"
             value={granteeKind}
-            onChange={(e) => setGranteeKind(e.target.value as 'user' | 'role')}
+            onChange={(e) => setGranteeKind(e.target.value as RbacGranteeKind)}
           >
-            <option value="user">{t('grants.granteeKindUser')}</option>
-            <option value="role">{t('grants.granteeKindRole')}</option>
+            {RBAC_GRANTEE_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {k === 'user'
+                  ? t('grants.granteeKindUser')
+                  : t('grants.granteeKindRole')}
+              </option>
+            ))}
           </Select>
         </Field>
         {gateWrite && (
