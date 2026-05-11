@@ -274,6 +274,61 @@ test('GraphView exposes a keyboard-accessible node id picker', () => {
   expect(picker).not.toBeNull()
 })
 
+// The sidebar (inspector + controls) can be collapsed via a toolbar
+// toggle so the canvas claims the full width — most useful in the
+// maximized result overlay but available in the inline view too. When
+// collapsed the <Side> (and therefore every control block inside it) is
+// removed from the DOM; toggling again brings it back.
+test('GraphView sidebar-collapse toggle hides and restores the sidebar', () => {
+  window.localStorage.clear()
+  // Two distinct node-label buckets so the visibility-controls block
+  // (gated on nodeLabelBuckets.size > 1) renders inside the sidebar.
+  const resp = {
+    rows: [],
+    graph_summary: {
+      nodes: [
+        { id: 'n1', labels: ['Person'], properties: { name: 'Alice' } },
+        { id: 'n2', labels: ['Movie'], properties: { title: 'The Matrix' } },
+      ],
+    },
+    row_count: 2,
+  } as unknown as QueryRespLike & { row_count?: number }
+  const view = render(
+    <ThemeProvider theme={theme}>
+      <GraphView resp={resp} query="MATCH (n) RETURN n" />
+    </ThemeProvider>
+  )
+  act(() => {
+    jest.advanceTimersByTime(300)
+  })
+
+  // Sidebar is expanded by default — the control blocks are present.
+  const toggle = view.getByTestId('graph-sidebar-toggle')
+  expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  expect(view.queryByTestId('graph-visibility-controls')).not.toBeNull()
+  expect(view.queryByTestId('graph-display-controls')).not.toBeNull()
+
+  // Collapse — the whole sidebar (and its control blocks) is gone.
+  fireEvent.click(toggle)
+  expect(view.getByTestId('graph-sidebar-toggle')).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  expect(view.queryByTestId('graph-visibility-controls')).toBeNull()
+  expect(view.queryByTestId('graph-display-controls')).toBeNull()
+  // The toolbar (which hosts the toggle) is still there.
+  expect(view.queryByTestId('graph-toolbar')).not.toBeNull()
+
+  // Expand again — the sidebar and its blocks come back.
+  fireEvent.click(view.getByTestId('graph-sidebar-toggle'))
+  expect(view.getByTestId('graph-sidebar-toggle')).toHaveAttribute(
+    'aria-pressed',
+    'false'
+  )
+  expect(view.queryByTestId('graph-visibility-controls')).not.toBeNull()
+  expect(view.queryByTestId('graph-display-controls')).not.toBeNull()
+})
+
 // Reproduction tests for the "graph display options reset on re-run" bug.
 //
 // When the user clicks "Run" on the Query page, QueryPage.resetRunState()

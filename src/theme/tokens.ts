@@ -87,6 +87,10 @@ export const zIndex = {
   dropdown: 100,
   sticky: 200,
   overlay: 1000,
+  // The maximized result-panel overlay sits just BELOW `modal` so a modal
+  // (e.g. AddConnectionModal) opened while results are maximized still
+  // layers on top of them rather than being trapped underneath.
+  fullscreen: 1050,
   modal: 1100,
   popover: 1200,
   toast: 1300,

@@ -156,11 +156,12 @@ const MaximizeBtn = styled.button`
 
 // The fullscreen result overlay. Rendered via a portal into
 // document.body so it escapes any stacking context, fixed to the
-// viewport, scrollable, padded. zIndex.modal keeps it above app chrome.
+// viewport, scrollable, padded. zIndex.fullscreen keeps it above app
+// chrome but below `modal`, so a modal opened while maximized wins.
 const ResultOverlay = styled.div`
   position: fixed;
   inset: 0;
-  z-index: ${({ theme }) => theme.zIndex.modal};
+  z-index: ${({ theme }) => theme.zIndex.fullscreen};
   background: ${({ theme }) => theme.bg.canvas};
   overflow: auto;
   padding: ${({ theme }) => theme.spacing.lg};

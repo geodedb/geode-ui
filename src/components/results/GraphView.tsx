@@ -96,13 +96,17 @@ const REBUILD_DEBOUNCE_MS = 250
 // always works).
 const ID_PICKER_OPTION_CAP = 1000
 
-const Wrap = styled.div<{ $fill: boolean }>`
+const Wrap = styled.div<{ $fill: boolean; $sidebarCollapsed: boolean }>`
   display: grid;
   /* In fill mode the sidebar stacks below the canvas (single column)
      so the graph canvas claims the full width of the overlay. The
      side-by-side 1fr/280px layout — and its below-md collapse — is
-     kept for the inline result panel. */
-  grid-template-columns: ${({ $fill }) => ($fill ? '1fr' : '1fr 280px')};
+     kept for the inline result panel. When the sidebar is collapsed
+     the grid is a single 1fr column regardless of mode (the Side isn't
+     rendered) so the canvas takes the whole width. */
+  grid-template-columns: ${({ $fill, $sidebarCollapsed }) => {
+    return $sidebarCollapsed || $fill ? '1fr' : '1fr 280px'
+  }};
   gap: ${({ theme }) => theme.spacing.sm};
   ${({ $fill }) => ($fill ? 'height: 100%;' : '')}
 
@@ -592,6 +596,13 @@ export const GraphView: React.FC<Props> = ({
     return () => window.removeEventListener('resize', onResize)
   }, [fillHeight, height])
   const [selected, setSelected] = useState<Selected | null>(null)
+  // Whether the inspector/controls sidebar is collapsed. Session-local
+  // (defaults expanded); not persisted. Useful in both layouts but most
+  // impactful in fill mode where it lets the canvas claim the full
+  // width of the overlay. When collapsed the <Side> isn't rendered and
+  // the Wrap grid becomes a single 1fr column — the canvas grows, which
+  // the ResizeObserver below catches to re-fit Cytoscape.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   // GAP-04: errors thrown by extractElements / cytoscape() during the
   // build pass. Surfaced as a banner over the canvas instead of an
   // unhandled console rejection.
@@ -882,28 +893,48 @@ export const GraphView: React.FC<Props> = ({
     applyVisibility(cy, hiddenLabels)
   }, [hiddenLabels, applyVisibility])
 
-  // When the canvas box changes size (the maximize toggle flips, or the
-  // window resizes in fill mode) Cytoscape needs to recompute its
-  // renderer viewport and re-fit the graph to the new box — otherwise
+  // When the canvas box changes size — the maximize toggle flips, the
+  // window resizes, the sidebar collapses/expands, or the container
+  // reflows for any other reason — Cytoscape needs to recompute its
+  // renderer viewport and re-fit the graph to the new box; otherwise
   // the graph stays drawn at the old size in the corner of a now-larger
-  // canvas. rAF defers the resize one frame so the DOM has settled to
-  // the new height before Cytoscape measures it.
+  // (or clipped in a now-smaller) canvas. A ResizeObserver on the
+  // Canvas element catches *all* of those, not just the discrete
+  // `effectiveHeight`-prop changes the previous height-keyed effect
+  // saw. The callback is rAF-debounced so a burst of resize entries
+  // collapses to a single resize()+fit(). Guarded for jsdom (the unit
+  // tests get a no-op ResizeObserver stub from polyfills.js, so the
+  // observer simply never fires there — those tests assert on markup,
+  // not on cy.fit calls).
   useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return undefined
+    const el = ref.current
+    if (!el) return undefined
+    if (typeof ResizeObserver === 'undefined') return undefined
+    let raf = 0
     const refit = (): void => {
+      raf = 0
+      const cy = cyRef.current
+      if (!cy) return
       cy.resize()
       cy.fit(undefined, 24)
     }
-    if (typeof requestAnimationFrame !== 'function') {
-      refit()
-      return undefined
+    const schedule = (): void => {
+      if (typeof requestAnimationFrame !== 'function') {
+        refit()
+        return
+      }
+      if (raf) return
+      raf = requestAnimationFrame(refit)
     }
-    const raf = requestAnimationFrame(refit)
+    const ro = new ResizeObserver(schedule)
+    ro.observe(el)
     return () => {
-      if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf)
+      ro.disconnect()
+      if (raf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(raf)
+      }
     }
-  }, [effectiveHeight])
+  }, [])
 
   // Selected element changes — drive the emphasis (1-hop) styling.
   useEffect(() => {
@@ -986,9 +1017,29 @@ export const GraphView: React.FC<Props> = ({
     labelToColor(label, theme.variant)
 
   return (
-    <Wrap $fill={fillHeight}>
+    <Wrap $fill={fillHeight} $sidebarCollapsed={sidebarCollapsed}>
       <CanvasArea>
         <Toolbar data-testid="graph-toolbar" role="toolbar">
+          <div className="group">
+            <button
+              type="button"
+              data-testid="graph-sidebar-toggle"
+              aria-pressed={sidebarCollapsed}
+              aria-label={
+                sidebarCollapsed
+                  ? t('graph.expandSidebar')
+                  : t('graph.collapseSidebar')
+              }
+              title={
+                sidebarCollapsed
+                  ? t('graph.expandSidebar')
+                  : t('graph.collapseSidebar')
+              }
+              onClick={() => setSidebarCollapsed((c) => !c)}
+            >
+              {sidebarCollapsed ? '⮜' : '⮞'}
+            </button>
+          </div>
           <div className="group">
             <span className="label">{t('graph.layoutLabel')}</span>
             <select
@@ -1065,140 +1116,142 @@ export const GraphView: React.FC<Props> = ({
           )}
         </div>
       </CanvasArea>
-      <Side $height={effectiveHeight} $fill={fillHeight}>
-        {nodeLabelBuckets.size > 1 && (
-          <ControlsBlock data-testid="graph-visibility-controls">
-            <h5>{t('graph.visibilityHeading')}</h5>
-            {Array.from(nodeLabelBuckets.entries())
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([label, count]) => {
-                const id = `gv-vis-${label || 'unlabeled'}`
-                return (
-                  <label
-                    key={label || 'unlabeled'}
-                    className="toggle-row"
-                    htmlFor={id}
-                  >
-                    <input
-                      id={id}
-                      type="checkbox"
-                      checked={!hiddenLabels.has(label)}
-                      onChange={() => toggleLabelVisibility(label)}
-                    />
-                    <span
-                      className="swatch"
-                      style={{ background: swatchFor(label) }}
-                      aria-hidden="true"
-                    />
-                    <span className="toggle-label">
-                      {label || `(${t('graph.unlabeledNode')})`}
-                    </span>
-                    <span className="empty">{count}</span>
-                  </label>
-                )
-              })}
-          </ControlsBlock>
-        )}
-        {(nodeIds.length > 0 || edgeIds.length > 0) && (
-          <ControlsBlock data-testid="graph-selection-controls">
-            <h5>{t('graph.selectionHeading')}</h5>
-            {nodeIds.length > 0 && (
-              <div className="row">
-                <span>{t('graph.selectNodeById')}</span>
-                <input
-                  list="graph-node-ids"
-                  data-testid="graph-node-id-picker"
-                  aria-label={t('graph.selectNodeById')}
-                  placeholder={t('graph.nodeIdPlaceholder')}
-                  onChange={(e) => onPickNodeId(e.target.value)}
-                />
-                <datalist id="graph-node-ids">
-                  {nodeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </datalist>
-              </div>
-            )}
-            {edgeIds.length > 0 && (
-              <div className="row">
-                <span>{t('graph.selectEdgeById')}</span>
-                <input
-                  list="graph-edge-ids"
-                  data-testid="graph-edge-id-picker"
-                  aria-label={t('graph.selectEdgeById')}
-                  placeholder={t('graph.edgeIdPlaceholder')}
-                  onChange={(e) => onPickEdgeId(e.target.value)}
-                />
-                <datalist id="graph-edge-ids">
-                  {edgeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </datalist>
-              </div>
-            )}
-          </ControlsBlock>
-        )}
-        <ControlsBlock data-testid="graph-display-controls">
-          <h5>{t('graph.displayHeading')}</h5>
-          {nodeOptions.size === 0 ? (
-            <p className="empty">{t('graph.noNodesToConfigure')}</p>
-          ) : (
-            Array.from(nodeOptions.entries()).map(([label, opts]) => (
-              <div className="row" key={`n-${label}`}>
-                <span>{label || `(${t('graph.unlabeledNode')})`}</span>
-                <select
-                  aria-label={t('graph.nodeFieldLabel', {
-                    label: label || t('graph.unlabeledNode'),
-                  })}
-                  value={nodeLabelPrefs[label] ?? NODE_LABEL_DEFAULT}
-                  onChange={(e) => setNodePref(label, e.target.value)}
-                >
-                  {opts.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt === NODE_LABEL_DEFAULT
-                        ? `(${t('graph.optionLabelName')})`
-                        : opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))
+      {!sidebarCollapsed && (
+        <Side $height={effectiveHeight} $fill={fillHeight}>
+          {nodeLabelBuckets.size > 1 && (
+            <ControlsBlock data-testid="graph-visibility-controls">
+              <h5>{t('graph.visibilityHeading')}</h5>
+              {Array.from(nodeLabelBuckets.entries())
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([label, count]) => {
+                  const id = `gv-vis-${label || 'unlabeled'}`
+                  return (
+                    <label
+                      key={label || 'unlabeled'}
+                      className="toggle-row"
+                      htmlFor={id}
+                    >
+                      <input
+                        id={id}
+                        type="checkbox"
+                        checked={!hiddenLabels.has(label)}
+                        onChange={() => toggleLabelVisibility(label)}
+                      />
+                      <span
+                        className="swatch"
+                        style={{ background: swatchFor(label) }}
+                        aria-hidden="true"
+                      />
+                      <span className="toggle-label">
+                        {label || `(${t('graph.unlabeledNode')})`}
+                      </span>
+                      <span className="empty">{count}</span>
+                    </label>
+                  )
+                })}
+            </ControlsBlock>
           )}
-          {edgeOptions.size > 0 &&
-            Array.from(edgeOptions.entries()).map(([type, opts]) => (
-              <div className="row" key={`e-${type}`}>
-                <span>{type}</span>
-                <select
-                  aria-label={t('graph.edgeFieldLabel', { type })}
-                  value={edgeLabelPrefs[type] ?? EDGE_TYPE_DEFAULT}
-                  onChange={(e) => setEdgePref(type, e.target.value)}
-                >
-                  {opts.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt === EDGE_TYPE_DEFAULT
-                        ? `(${t('graph.optionType')})`
-                        : opt}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
-        </ControlsBlock>
-        {selected ? (
-          <SelectedInspector
-            selected={selected}
-            view={inspectorView}
-            onSetView={setInspectorView}
-            t={t}
-          />
-        ) : (
-          <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
-        )}
-      </Side>
+          {(nodeIds.length > 0 || edgeIds.length > 0) && (
+            <ControlsBlock data-testid="graph-selection-controls">
+              <h5>{t('graph.selectionHeading')}</h5>
+              {nodeIds.length > 0 && (
+                <div className="row">
+                  <span>{t('graph.selectNodeById')}</span>
+                  <input
+                    list="graph-node-ids"
+                    data-testid="graph-node-id-picker"
+                    aria-label={t('graph.selectNodeById')}
+                    placeholder={t('graph.nodeIdPlaceholder')}
+                    onChange={(e) => onPickNodeId(e.target.value)}
+                  />
+                  <datalist id="graph-node-ids">
+                    {nodeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+              )}
+              {edgeIds.length > 0 && (
+                <div className="row">
+                  <span>{t('graph.selectEdgeById')}</span>
+                  <input
+                    list="graph-edge-ids"
+                    data-testid="graph-edge-id-picker"
+                    aria-label={t('graph.selectEdgeById')}
+                    placeholder={t('graph.edgeIdPlaceholder')}
+                    onChange={(e) => onPickEdgeId(e.target.value)}
+                  />
+                  <datalist id="graph-edge-ids">
+                    {edgeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+              )}
+            </ControlsBlock>
+          )}
+          <ControlsBlock data-testid="graph-display-controls">
+            <h5>{t('graph.displayHeading')}</h5>
+            {nodeOptions.size === 0 ? (
+              <p className="empty">{t('graph.noNodesToConfigure')}</p>
+            ) : (
+              Array.from(nodeOptions.entries()).map(([label, opts]) => (
+                <div className="row" key={`n-${label}`}>
+                  <span>{label || `(${t('graph.unlabeledNode')})`}</span>
+                  <select
+                    aria-label={t('graph.nodeFieldLabel', {
+                      label: label || t('graph.unlabeledNode'),
+                    })}
+                    value={nodeLabelPrefs[label] ?? NODE_LABEL_DEFAULT}
+                    onChange={(e) => setNodePref(label, e.target.value)}
+                  >
+                    {opts.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt === NODE_LABEL_DEFAULT
+                          ? `(${t('graph.optionLabelName')})`
+                          : opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))
+            )}
+            {edgeOptions.size > 0 &&
+              Array.from(edgeOptions.entries()).map(([type, opts]) => (
+                <div className="row" key={`e-${type}`}>
+                  <span>{type}</span>
+                  <select
+                    aria-label={t('graph.edgeFieldLabel', { type })}
+                    value={edgeLabelPrefs[type] ?? EDGE_TYPE_DEFAULT}
+                    onChange={(e) => setEdgePref(type, e.target.value)}
+                  >
+                    {opts.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt === EDGE_TYPE_DEFAULT
+                          ? `(${t('graph.optionType')})`
+                          : opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+          </ControlsBlock>
+          {selected ? (
+            <SelectedInspector
+              selected={selected}
+              view={inspectorView}
+              onSetView={setInspectorView}
+              t={t}
+            />
+          ) : (
+            <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
+          )}
+        </Side>
+      )}
     </Wrap>
   )
 }

@@ -126,6 +126,8 @@ export const en = {
     resetView: 'Reset',
     stats: '{{nodes}} nodes · {{edges}} edges',
     visibilityHeading: 'Visibility',
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
   },
 
   schema: {

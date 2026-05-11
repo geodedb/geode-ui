@@ -25,6 +25,41 @@ test.describe('query (graph view)', () => {
     ).toBeVisible()
   })
 
+  test('graph sidebar collapse toggle hides and restores the controls', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/')
+    await page.locator('.monaco-editor').first().click()
+    await page.keyboard.press('ControlOrMeta+A')
+    await page.keyboard.type(
+      `USE GRAPH ${seed.graph}; MATCH (a:Person)-[r:ACTED_IN]->(m:Movie) RETURN a, r, m LIMIT 10`
+    )
+    await sel.queryRunBtn(page).click()
+    await expect(page.getByText(/(10|9) rows/)).toBeVisible()
+
+    await sel.queryTabGraph(page).click()
+    await expect(sel.graphCanvas(page).first()).toBeVisible()
+
+    // Sidebar is expanded by default — the display-controls block shows.
+    await expect(page.getByTestId('graph-display-controls')).toBeVisible()
+    const toggle = page.getByTestId('graph-sidebar-toggle')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+
+    // Collapse — the sidebar and its control blocks are removed.
+    await toggle.click()
+    await expect(page.getByTestId('graph-sidebar-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await expect(page.getByTestId('graph-display-controls')).toHaveCount(0)
+    // The canvas is still mounted.
+    await expect(sel.graphCanvas(page).first()).toBeVisible()
+
+    // Expand again — the controls come back.
+    await page.getByTestId('graph-sidebar-toggle').click()
+    await expect(page.getByTestId('graph-display-controls')).toBeVisible()
+  })
+
   test('graph tab does not render when no rows', async ({
     authedPage: page,
   }) => {

@@ -163,6 +163,7 @@ export interface Theme {
     dropdown: number
     sticky: number
     overlay: number
+    fullscreen: number
     modal: number
     popover: number
     toast: number
