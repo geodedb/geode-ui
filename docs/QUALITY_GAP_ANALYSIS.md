@@ -45,7 +45,7 @@ their own GAP files.
 | Q11 | Drop `@types/cytoscape` — blocks `make web-build`                    | Medium   |    40 | [#43](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/43)              | `package.json` devDependencies                                                                                    | **Closed** 2026-05-07 (`1fda90a`, `0e22763`) -- stub removed; tsc errors uncovered by removal fixed in follow-up commit; `make web-build` now succeeds. |
 | Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | `.pre-commit-config.yaml:130` runs `scripts/run-go.sh tool-golangci` at pre-push | **Closed** — `golangci-lint` already wired into the pre-push hook gauntlet. Output is enforced (commits/pushes are blocked on findings; QF1001/QF1008/unused already burned down). |
 | Q14 | Wire coverage gates (Go ~68.7% floor, Jest threshold)                | Low      |    32 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48)              | (repo root) CI + Jest config                                                                                      | Enforce floors; ratchet up monthly                                              |
-| Q10 | Missing `docs/adr/` + `internal/server/README.md`                    | Low      |    24 | [#42](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/42)              | `docs/adr/` (missing), `internal/server/README.md` (missing)                                                      | Create ADR dir + package README; collapse per-file 30-line preambles            |
+| Q10 | Missing `docs/adr/` + `internal/server/README.md`                    | Low      |    24 | [#42](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/42)              | `docs/adr/0000-record-architecture-decisions.md` (new), `internal/server/README.md` (new)                         | **Closed** 2026-05-10 — ADR meta-record added under `docs/adr/` (Nygard convention, four-section template, supersession protocol documented); `internal/server/README.md` documents per-file layout, audit/rate-limit conventions, generated-code policy, and the `GOEXPERIMENT=jsonv2` build-env requirement. |
 | Q12 | Two lockfiles committed (`package-lock.json` + `pnpm-lock.yaml`)     | Low      |    24 | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44)              | `package-lock.json`, `pnpm-lock.yaml`                                                                              | Delete `package-lock.json`; gitignore                                            |
 | Q15 | Pin Node toolchain (`.tool-versions`/`.nvmrc` + `packageManager`)    | Low      |    24 | [#49](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/49)              | `.tool-versions`, `.nvmrc`, `package.json:packageManager`                                                            | **Closed** 2026-05-08 — `.nvmrc` pinned to `22.14.0` (matching `engines.node`); `.tool-versions` adds `nodejs 22.14.0` for asdf/mise users; `package.json` declares `"packageManager": "npm@10.9.0"` so corepack picks the same client every time. |
 
@@ -86,7 +86,7 @@ their own GAP files.
 
 - High: 5 (1 closed this session: Q-NEW-1; pre-existing 4 closed: Q1, Q2, Q4)
 - Medium: 7 (3 closed: Q11, Q-NEW-2, Q-NEW-3; 4 open: Q5, Q6, Q7, Q8, Q9 + tooling T1/T2)
-- Low: 9 (3 closed: Q13, Q14 deferred-CI, Q15; 6 open: Q-NEW-4 through Q-NEW-T4 + Q10)
+- Low: 9 (4 closed: Q10, Q13, Q14 deferred-CI, Q15; 5 open: Q-NEW-4 through Q-NEW-T4)
 
 ## Findings by Category
 
@@ -122,7 +122,7 @@ Standard hygiene. Each is small alone; together they upgrade the floor of every 
 - Q12 — delete `package-lock.json`.
 - Q15 — pin Node toolchain.
 - Q3 — rename `user*` helpers (mechanical s/// + test).
-- Q10 — create `docs/adr/` + `internal/server/README.md` skeleton.
+- ~~Q10 — create `docs/adr/` + `internal/server/README.md` skeleton.~~ **Closed 2026-05-10.**
 
 ### Medium (1-5 days each)
 
