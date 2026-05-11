@@ -74,3 +74,36 @@ test.describe('login page profile picker', () => {
     await expect(page.getByLabel('Password')).toBeVisible()
   })
 })
+
+test.describe('SPA static asset fallback (f6d1bc7)', () => {
+  test('asset-shaped 404s return 404 with non-HTML Content-Type', async ({
+    request,
+  }) => {
+    const res = await request.get('/static/js/does-not-exist.abc123.js')
+    expect(res.status()).toBe(404)
+    const ct = (res.headers()['content-type'] ?? '').toLowerCase()
+    expect(ct.includes('text/html')).toBeFalsy()
+  })
+
+  test('unknown SPA route falls through to index.html (200)', async ({
+    request,
+  }) => {
+    // The SPA route /not-a-real-route is unknown to the server but the
+    // fallback intentionally serves index.html so client-side routing
+    // can take over. We assert the OPPOSITE shape from the test above:
+    // 200 + text/html.
+    const res = await request.get('/not-a-real-route')
+    expect(res.status()).toBe(200)
+    const ct = (res.headers()['content-type'] ?? '').toLowerCase()
+    expect(ct.includes('text/html')).toBeTruthy()
+  })
+
+  test('asset-shaped paths under nested dirs also 404', async ({ request }) => {
+    // Catches the regression where the file-suffix heuristic only fired
+    // on the top-level path. Hashed bundle names live under /static/.
+    const css = await request.get('/static/css/does-not-exist.deadbeef.css')
+    expect(css.status()).toBe(404)
+    const map = await request.get('/static/js/missing.bundle.js.map')
+    expect(map.status()).toBe(404)
+  })
+})
