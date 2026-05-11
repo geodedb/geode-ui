@@ -2,6 +2,8 @@ package jwt
 
 import (
 	"context"
+	"database/sql"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -23,12 +25,20 @@ import (
 //     generation" counter can't be persisted; the in-memory
 //     passwordChangedAt map is the pragmatic equivalent.
 //
-// IMPORTANT — in-memory caveat: a process restart resets both maps, so a
-// token revoked before the restart validates again afterward (until its
-// natural TTL expiry). Given the short JWT TTL (1m..24h, 8h default) the
-// residual exposure window is bounded. A durable revocation store (e.g.
-// a row in the SQLite profile store, or Redis) would close this; that is
-// out of scope for the in-memory decision recorded for SEC-N2.
+// Durability (SEC-N2 follow-up): when AttachSQLite is called, the two
+// sync.Maps become an in-memory READ-THROUGH CACHE over a SQLite table
+// pair in the profile-store DB. SQLite is the durable source of truth;
+// the cache is loaded from it at startup and kept in sync write-through
+// on every Revoke/RevokeUser (SQLite first, then the cache). The hot
+// path — IsRevoked — reads the cache ONLY and never issues a SQL query.
+// A process restart re-hydrates the cache from SQLite, so a token
+// revoked before the restart stays revoked afterward.
+//
+// When AttachSQLite has NOT been called (the default, e.g. unit tests
+// that build a bare RevocationSet), the maps are simply the in-memory
+// store with no durability — identical to the pre-N2-follow-up
+// behaviour. The short JWT TTL (1m..24h, 8h default) bounds the residual
+// exposure window in that mode.
 //
 // RevocationSet is safe for concurrent use.
 type RevocationSet struct {
@@ -41,13 +51,55 @@ type RevocationSet struct {
 	// subject are rejected if their iat predates it.
 	passwordChangedAt sync.Map // map[string]time.Time
 
+	// backend is the durable layer. nil ⇒ pure in-memory. When non-nil,
+	// Revoke/RevokeUser write to it before updating the maps, Sweep
+	// prunes it alongside the maps, and AttachSQLite hydrates the maps
+	// from it at startup.
+	backend *sqliteRevocationBackend
+
 	// nowFn is overridable in tests; defaults to time.Now.
 	nowFn func() time.Time
 }
 
-// NewRevocationSet returns an empty RevocationSet.
+// NewRevocationSet returns an empty in-memory RevocationSet (no
+// durability). Call AttachSQLite to back it with the profile-store DB.
 func NewRevocationSet() *RevocationSet {
 	return &RevocationSet{nowFn: time.Now}
+}
+
+// AttachSQLite makes this RevocationSet durable, backed by the supplied
+// *sql.DB (intended to be the profile store's handle — a NEW table pair
+// in the existing file, not a second DB). It:
+//
+//  1. runs CREATE TABLE IF NOT EXISTS migrations,
+//  2. SELECTs every still-relevant row into the in-memory cache
+//     (skipping already-expired jti rows),
+//  3. DELETEs the stale revoked_jti rows so the table stays bounded.
+//
+// After this returns, the existing cache contents (if AttachSQLite is
+// called on a RevocationSet that already had in-memory entries) are
+// preserved AND the loaded rows are merged in — but the intended use is
+// to call it on a fresh set during startup. Idempotent-ish: calling it
+// twice re-runs the load (harmless) but replaces the backend, so don't.
+//
+// db must not be nil.
+func (rs *RevocationSet) AttachSQLite(db *sql.DB) error {
+	be, err := newSQLiteRevocationBackend(db)
+	if err != nil {
+		return err
+	}
+	jtis, users, err := be.load(rs.now())
+	if err != nil {
+		return err
+	}
+	for jti, exp := range jtis {
+		rs.revoked.Store(jti, exp)
+	}
+	for username, changedAt := range users {
+		rs.passwordChangedAt.Store(username, changedAt)
+	}
+	rs.backend = be
+	return nil
 }
 
 func (rs *RevocationSet) now() time.Time {
@@ -64,6 +116,17 @@ func (rs *RevocationSet) now() time.Time {
 func (rs *RevocationSet) Revoke(jti string, exp time.Time) {
 	if jti == "" {
 		return
+	}
+	// Write-through: durable layer first so a crash between the two
+	// stores leaves the *more* restrictive state (revoked-in-SQLite,
+	// not-yet-in-cache rehydrates as revoked on next start). A SQLite
+	// write failure is logged but not fatal — the in-memory revoke
+	// still takes effect for the current process lifetime, which is no
+	// worse than the pre-durability behaviour.
+	if rs.backend != nil {
+		if err := rs.backend.putJTI(jti, exp); err != nil {
+			slog.Error("jwt: persist token revocation", "jti", jti, "err", err)
+		}
 	}
 	rs.revoked.Store(jti, exp)
 }
@@ -83,17 +146,35 @@ func (rs *RevocationSet) RevokeUser(username string) {
 	for {
 		prev, loaded := rs.passwordChangedAt.LoadOrStore(username, now)
 		if !loaded {
+			rs.persistUser(username, now)
 			return
 		}
 		if prevT, ok := prev.(time.Time); ok && !now.After(prevT) {
 			// An existing entry is already at or ahead of `now`; nothing
-			// to do (clock skew or a rapid double-change).
+			// to do (clock skew or a rapid double-change). The durable
+			// row is already at-or-ahead too, so don't touch it.
 			return
 		}
 		if rs.passwordChangedAt.CompareAndSwap(username, prev, now) {
+			rs.persistUser(username, now)
 			return
 		}
 		// Lost a race; retry with the latest value.
+	}
+}
+
+// persistUser write-throughs a password_changed_at row. now is always
+// strictly newer than any previously-persisted instant for username
+// (the caller only reaches here after winning the monotonic-advance
+// check), so an INSERT OR REPLACE can never move the durable marker
+// backward. A SQLite failure is logged, not fatal — the in-memory
+// marker is already updated and takes effect for this process.
+func (rs *RevocationSet) persistUser(username string, now time.Time) {
+	if rs.backend == nil {
+		return
+	}
+	if err := rs.backend.putUser(username, now); err != nil {
+		slog.Error("jwt: persist user revocation", "user", username, "err", err)
 	}
 }
 
@@ -143,6 +224,16 @@ func (rs *RevocationSet) IsRevoked(c *Claims) bool {
 // periodically — e.g. from StartSweeper — to keep the maps bounded.
 func (rs *RevocationSet) Sweep(maxTokenAge time.Duration) {
 	now := rs.now()
+	// Durable layer first (one or two DELETEs), then the cache. Order
+	// doesn't matter for correctness here — both ends are converging on
+	// "drop the stale rows" — but doing SQLite first keeps the pattern
+	// consistent with the write-through path. A SQLite failure is
+	// logged, not fatal: the cache prune below still bounds memory.
+	if rs.backend != nil {
+		if err := rs.backend.sweep(now, maxTokenAge); err != nil {
+			slog.Error("jwt: sweep durable revocation store", "err", err)
+		}
+	}
 	rs.revoked.Range(func(k, v any) bool {
 		if exp, ok := v.(time.Time); ok && !now.Before(exp) {
 			rs.revoked.Delete(k)

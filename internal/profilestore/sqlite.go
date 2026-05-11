@@ -141,6 +141,31 @@ func (s *sqliteStore) unsealBytes(raw []byte) (string, error) {
 
 func (s *sqliteStore) Close() error { return s.db.Close() }
 
+// DBHandle exposes the underlying *sql.DB so adjacent subsystems can
+// reuse the SAME SQLite file (a new table pair in the existing DB)
+// rather than opening a second file. The JWT revocation store
+// (internal/jwt) uses this to persist revoked-jti and
+// password-changed-at rows alongside the profiles table — see
+// cmd/server/main.go wiring and jwt.RevocationSet.AttachSQLite.
+//
+// Callers MUST NOT call Close on the returned handle (the profile store
+// owns its lifecycle) and MUST respect the SetMaxOpenConns(1)
+// single-flight model — every statement they issue is serialized with
+// the profile store's own statements through the one driver pipeline.
+//
+// DBHandle is intentionally NOT on the profilestore.Store interface:
+// the in-memory fakes used by handler tests don't have a *sql.DB, and
+// only the production binary needs this. Callers type-assert for the
+// DBHandleProvider optional interface.
+func (s *sqliteStore) DBHandle() *sql.DB { return s.db }
+
+// DBHandleProvider is the optional interface implemented by Store
+// backends that are SQLite-file-backed. cmd/server type-asserts for it
+// to hand the *sql.DB to jwt.RevocationSet.AttachSQLite.
+type DBHandleProvider interface {
+	DBHandle() *sql.DB
+}
+
 // List returns profiles matching the supplied Filter.
 //
 // PSR-F3 (#99): the prior implementation was an unbounded full table
