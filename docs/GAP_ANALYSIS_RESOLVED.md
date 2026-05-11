@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-10
+- **Last updated:** 2026-05-11
 - **Sibling docs:** [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) (open requirement gaps), [PERF_GAP_ANALYSIS.md](./PERF_GAP_ANALYSIS.md), [QUALITY_GAP_ANALYSIS.md](./QUALITY_GAP_ANALYSIS.md), [SECURITY_GAP_ANALYSIS.md](./SECURITY_GAP_ANALYSIS.md)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors closed issues across the perf / quality / security tracking files.
 
@@ -328,6 +328,7 @@ Verifier returned SAFE-TO-CLOSE for all 9 commits. Three Security (1 cross-close
 - **2026-05-07:** #18, #21, #26, #27, #29, #32, #43, #53, #55, #58, #60, #62, #65 (cross-closed). Genapi follow-ups: `genapi#214`, `genapi#215`. #66 partially closed (open).
 - **2026-05-10 (PSR top-13):** #78, #79 (partial), #80, #84, #85, #92, #93, #94, #97, #106, #110, #111, #114, #115, #119. Follow-up opened: #124. Total: 9 commits, 13 + 2 (#114/#115 batched) issues fully closed, 1 partial.
 - **2026-05-10 (gap-close pass — 16 closed + 5 deferred):** Requirements #6, #7. Quality Q3 (#31), Q6 (#36), Q7 (#37), Q9 (#41), Q10 (#42). Security N1 (#63), N4 (#72), N5 (#74), N10 (#76), F8-sec (#68), F11 (#77), F6+N6 (#67). Performance F7 (#51), F8 (#52). Deferred (tracked at `genapi#215`/`genapi#216`): F3 (#25), F13 (#57), N7-remainder (#66), Q5 (#34), Q8 (#38).
+- **2026-05-11 (follow-up batch — 9 closed + 1 won't-do):** Performance F10 (#54), F12 (#56), F13 (#57, genapi `fd31bbc`), PSR-F5 (#103), PSR-F15 (#112). Quality Q5 (#34), Q8 (#38). Security N2 (#64), N7-remainder (#66, genapi `fd31bbc`). Won't-do: F18 (#61). 9 geode-ui commits + 3 genapi commits (`fd31bbc`, `5dd5f61`, `7eaf8a1`; genapi pushed to origin). Still deferred (not moved): F3 (#25), tracked at `genapi#216`.
 
 ---
 
@@ -510,3 +511,127 @@ Verifier returned GREEN: `make ci` passes end-to-end; Go: 17 packages OK with `i
 - **Genapi-paired closures (3):** F11 (`1033c50`), N5 (`df654de`), F6+N6 (`e100aed`). Each is a regen-only commit on the geode-ui side; the substantive fix lives in `~/src/devnw/go/genapi`.
 - **Deferred genapi work (5):** F3 (#25), F13 (#57), N7-remainder (#66), Q5 (#34), Q8 (#38). All require a separate genapi work cycle; rollup commit `77ac64d` marks them Deferred in their tracking files with specific prerequisites. Tracked at `genapi#215` / `genapi#216`.
 - **F8 follow-up:** The generated client doesn't accept an external `signal` so cancellation is enforced at the React-effect layer via `signal.aborted` checks; structural fix (signal propagation through `fetchImpl`) tracked as a follow-up on the genapi side.
+
+---
+
+### 2026-05-11 closure run -- follow-up batch (9 closed + 1 won't-do, 9 geode-ui commits + 3 genapi commits)
+
+Follow-up to the 2026-05-10 run; cleared four of the five items that were deferred-to-genapi in that pass (F13 #57, N7-remainder #66, Q5 #34, Q8 #38) plus five standalone perf/quality/security items, and closed F18 (#61) won't-do after a benchmark refuted its premise. Verifier returned GREEN: `make build` (webpack entrypoint **454 KiB**, was 12.8 MiB), `make go-test` (`internal/server` 77.2%, `internal/jwt` 88.1%, `gen/pkg/httpx` 67.6%, `internal/conn` 83.2%, `internal/ui` 86.1%), Jest 378/378, tsc / golangci-lint / eslint clean, `gosec G120` cleared. genapi was pushed to origin (the 2026-05-10 commits `1033c50` / `df654de` / `e100aed` are now pushed too). The remaining deferral — F3 (#25), the streaming-response template work — is **not** moved here; it stays in `docs/PERF_GAP_ANALYSIS.md` tracked at `genapi#216`. One bookkeeping commit consolidates these doc updates.
+
+#### Performance (4)
+
+##### F10 (#54): Monaco and Cytoscape lazy code-split [RESOLVED]
+
+- **Issue:** [#54](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/54) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 medium (PerfScore 48)
+- **Closure commit(s):** `130e413`
+- **Resolution:** `GqlEditor` (Monaco) and `GraphView` (Cytoscape) are now `React.lazy(() => import(...))` behind `<Suspense>` boundaries in `QueryPage.tsx`; the `import './monaco-bootstrap'` side-effect moved out of `src/index.tsx` into `src/components/editor/GqlEditor.tsx` so it rides the lazy editor chunk. `webpack.common.js` scopes the `vendors` cacheGroup to `chunks: 'initial'` so async-only vendor code (monaco/cytoscape) stays inside the async chunk. `webpack.prod.js` re-tightened: `hints: 'error'`, `maxAssetSize: 1 MiB`, `maxEntrypointSize: 1.5 MiB` (source maps, fonts/icons, monaco workers, and async code-split chunks excluded from the accounting). Also corrected the `docs/QUALITY_GAP_ANALYSIS.md` Q-NEW-T2 row, which since 2026-05-08 falsely claimed the budget was already wired (the file still carried `hints: 'warning'` + 16 MiB caps until this commit).
+- **Evidence:** webpack entrypoint `main` total 12.8 MiB → **454 KiB**; `vendors.js` ~12.5 MiB → ~290 KiB; monaco/cytoscape now ~6.7 MiB + ~3.8 MiB on-demand async chunks; build passes the `hints: 'error'` budget. `src/pages/QueryPage.test.tsx` — Suspense fallback shows then the lazy editor mounts; QueryPage source has no static editor/graph import; `src/index.tsx` no longer imports `monaco-bootstrap`.
+- **Resolved date:** 2026-05-11
+
+##### F12 (#56): uncap WS WriteTimeout and document per-frame deadlines [RESOLVED]
+
+- **Issue:** [#56](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/56) (closed)
+- **Domain:** Performance
+- **Severity at close:** P1 high (PerfScore 64)
+- **Closure commit(s):** `13b7d5c`
+- **Resolution:** Investigation found the server-wide `WriteTimeout` was *dead config* — `cmd/server/main.go` builds its own `*http.Server` and only set `ReadHeaderTimeout`, and `httpx.WrapHandler` consumes only `MaxBodyBytes`/CORS from its `Config` — so WS streams >60s were not in fact being killed. The footgun is closed: a new `wsExemptTimeoutHandler` wraps the REST + SPA surface in a 60s `http.TimeoutHandler` and routes requests under `/ws/` *around* it (`http.TimeoutHandler` buffers the whole response and drops `http.Hijacker`, both fatal for a streaming upgrade); `httpSrv.WriteTimeout` is left at 0 with a comment, `httpSrv.IdleTimeout` is wired so an idle WS conn is still reaped. Per-frame deadlines were *already* enforced — `wsx.Conn.{ReadMessage,WriteMessage}` call `SetReadDeadline`/`SetWriteDeadline` before every frame using the per-path 30s `wsx.Options` set by `gen/ws/ws_handlers.gen.go` — and that contract is now documented in `internal/server/ws_query.go`'s `Query` doc comment and pinned by a registration regression test.
+- **Evidence:** `cmd/server/main_test.go` — `TestWSExemptTimeoutHandler_RESTIsCappedWSIsNot` (REST 503 after timeout, `/ws/query` runs to completion, a path that merely contains "ws" is still capped), `TestWSExemptTimeoutHandler_FastRequestPassesThrough`, `TestWSQueryHasPerFrameWriteDeadline`.
+- **Resolved date:** 2026-05-11
+
+##### F13 (#57): gzip middleware in genapi httpx [RESOLVED genapi-paired]
+
+- **Issue:** [#57](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/57) (closed)
+- **Domain:** Performance
+- **Severity at close:** P3 low (PerfScore 36)
+- **Closure commit(s):** `58b285f` (geode-ui wiring) + genapi `fd31bbc`
+- **Resolution:** genapi adds `pkg/httpx.Gzip` middleware — transparent gzip of text-ish JSON ≥ 1 KiB when the client sends `Accept-Encoding: gzip`; skips already-`Content-Encoding`'d responses, images/video/audio, and tiny bodies; adds `Vary: Accept-Encoding`; drops the stale `Content-Length`; pools `*gzip.Writer` at `BestSpeed`; passes `Hijack` through so WS upgrades survive. Wired via `httpx.Config{EnableCompression: true, ...}` in `cmd/server/main.go` + `server.enable_compression: true` in `geode.json`. pprof was *already* gated behind `Observability.EnableDebug` with an `authSurface` gate in the generated server template (no change needed). The jsontext encode path writes directly to the `ResponseWriter` via `json.MarshalWrite` — no intermediate buffer to pool without restructuring; that sub-item is dropped (noted in the genapi commit).
+- **Evidence:** `gen/pkg/httpx/compress_test.go`; genapi `fd31bbc`.
+- **Resolved date:** 2026-05-11
+
+##### PSR-F5 (#103): on-the-fly gzip for embedded SPA assets [RESOLVED]
+
+- **Issue:** [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/103) (closed)
+- **Domain:** Performance
+- **Severity at close:** PerfScore +3
+- **Closure commit(s):** `d5126ad`
+- **Resolution:** `ui.Handler()` now gzip-compresses compressible text bundles (.js/.css/.map/.svg/.html/.json/.webmanifest/.txt) ≥ 1 KiB on the fly when the client advertises `Accept-Encoding: gzip`; the response carries `Content-Encoding: gzip` + `Vary: Accept-Encoding` and the uncompressed `Content-Length` is dropped so net/http streams chunked. `gzip.Writer`s are recycled via a `sync.Pool` (BestSpeed — bundles are already minified) so there is no allocation churn on the hot path. Already-compressed binary types (images except SVG, fonts, video/audio, wasm, zip/gzip) and tiny files are served verbatim; HEAD and 304/204/4xx never get a gzip body. The existing `index.html` no-cache vs hashed-asset-immutable behaviour is preserved.
+- **Evidence:** `internal/ui/embed.go`; `TestHandlerGzipsLargeJSAsset` (decompressed body byte-matches the embedded asset, no stale Content-Length), `TestHandlerNoGzipWithoutAcceptEncoding`, `TestHandlerNoGzipForBinaryAsset`, `TestAcceptsGzip`. internal/ui coverage 86.1%.
+- **Resolved date:** 2026-05-11
+
+##### PSR-F15 (#112): precompute zero-value tls and pool_overrides wire encodings [RESOLVED]
+
+- **Issue:** [#112](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/112) (closed)
+- **Domain:** Performance
+- **Severity at close:** PerfScore +2
+- **Closure commit(s):** `7e611a2`
+- **Resolution:** `GetProfiles` marshals one `tls` + one `pool_overrides` JSON object per revealed profile (every row for an admin). The wire shapes for the zero `conn.TLSMaterial` / `conn.PoolOverrides` — the common case, since most profiles carry neither — are now precomputed once at package init (`zeroTLSWire`, `zeroPOWire`) and returned directly, skipping a `json.Marshal` (and its scratch-buffer allocation) per zero-valued profile on the list path. The precomputed bytes are byte-identical to a fresh marshal, so the wire output is unchanged; they are read-only for all callers (they flow straight into the response codec).
+- **Evidence:** `internal/server/handlers_profiles.go` (`toGenProfile` → `marshalTLS`/`marshalPoolOverrides`); `TestMarshalProfileWire_ZeroFastPath` (shared backing array via pointer identity; `bytes.Equal` vs a fresh marshal; non-zero path still encoder-driven, no aliasing of the shared constant).
+- **Resolved date:** 2026-05-11
+
+#### Quality (2)
+
+##### Q5 (#34): typed multipart upload endpoints [RESOLVED]
+
+- **Issue:** [#34](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/34) (closed)
+- **Domain:** Quality
+- **Severity at close:** Medium (PriorityScore 48)
+- **Closure commit(s):** `2046289` — no genapi change needed (existing multipart `"type": "file"` support)
+- **Resolution:** Declared `POST /api/v1/backups/upload` + `POST /api/v1/migrations/upload` in `geode.json` with `BackupUploadReq` / `MigrationUploadReq` (`{"file": {"type": "file", "maxSize": 67108864}}`) → `UploadResp`, using genapi's existing multipart support (React client emits a `FormData` builder + `multipart` bodyMode; the Go handler template wires `r.ParseMultipartForm` + `r.FormFile` + the per-file `maxSize` check upstream of the typed handler). The hand-rolled `mux.HandleFunc` calls are gone from `cmd/server/main.go`; `internal/server/handlers_uploads.go` implements the generated `BackupUpload` / `MigrationUpload` methods (JWT auth + admin-role + 64 MiB cap + multipart parsing now come from the genapi wrapper; the handler owns only filename sanitisation, atomic write, the 503-when-no-upload-dir, and the audit event). `MigrationsPage.tsx` / `RestorePage.tsx` call `client.migrationUpload({file: {blob, filename, contentType}})` / `client.backupUpload(...)` instead of raw `fetch`/`FormData`. Orphaned `errors.uploadFailed` locale key removed.
+- **Evidence:** `internal/server/handlers_uploads_test.go` (rewritten to drive the typed handlers); `e2e/specs/09-ops.spec.ts` exercises the upload flow over the same HTTP path.
+- **Resolved date:** 2026-05-11
+
+##### Q8 (#38): typed User and Permission list responses [RESOLVED]
+
+- **Issue:** [#38](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/38) (closed)
+- **Domain:** Quality
+- **Severity at close:** Medium (PriorityScore 48)
+- **Closure commit(s):** `2046289` — no genapi change needed (existing `"items": {"$ref": "Schema"}` typed-list support)
+- **Resolution:** `geode.json` now declares `UserList.users` as `array<User>` and adds a `Permission` schema (`permission`/`resource`/`scope`) with `PermissionList.permissions` as `array<Permission>` — so `gen/types/types.gen.go` emits `UserList.Users []User` / `PermissionList.Permissions []Permission` and the React client gets typed `User[]` / `Permission[]`. `GetUsers` / `Permissions` in `handlers_users.go` build the typed slices via `userFromRow` / new `permissionFromRow`, which project the runtime-discovered `SHOW USERS` / `SHOW PERMISSIONS FOR USER` columns onto the known fields and drop unknowns with a once-per-process `warnRowDrift` log. `src/components/admin/UsersPage.tsx` imports `User` from `@api` instead of re-declaring a structural shadow + casting `Array<unknown>`.
+- **Evidence:** `internal/server/handlers_users_test.go` (typed list happy-path, drift-drops-unknown-column, typed Permissions).
+- **Resolved date:** 2026-05-11
+
+#### Security (2)
+
+##### N2 (#64): JWT revocation and session invalidation on password change [RESOLVED]
+
+- **Issue:** [#64](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/64) (closed)
+- **Domain:** Security
+- **Severity at close:** Medium (Risk 36)
+- **Closure commit(s):** `ed9e69c`
+- **Resolution:** In-memory implementation (per the decision recorded for this item). (1) Every issued JWT now carries a `jti` (RFC 7519 `ID` claim) — 128 bits from `crypto/rand`, hex-encoded — set in `jwt.Issuer.Issue`. (2) New `internal/jwt/revocation.go` adds a `*RevocationSet` (one per `Issuer`, via `Issuer.Revocation()`): a `sync.Map[jti]→expiry` for per-token `Revoke`, a `sync.Map[username]→passwordChangedAt` for per-user `RevokeUser` (geode-ui has no user-attribute store of its own — users live upstream in Geode — so the in-memory "password-changed instant" map is the pragmatic equivalent of a per-user token-generation counter), `IsRevoked(*Claims)` checking both, a `Sweep(maxTokenAge)`, and `StartSweeper(ctx, interval, maxTokenAge)` (wired in `cmd/server/main.go` on a 10-minute cadence). `Issuer.Parse` consults the set after signature + standard-claim validation and returns the new sentinel `jwt.ErrRevoked`; because `internal/server/auth.go` validates via `Issuer.Parse`, revocation is enforced on every REST and WS request. (3) On a successful password change — `POST /users/{u}/password` and `PATCH /users/{u}` with a `password` field — the handler calls `s.cfg.JWT.Revocation().RevokeUser(<targetUsername>)`. Clears `gosec G120`. **In-memory caveat:** revocation state is lost on process restart, after which a token revoked before the restart validates again until its natural TTL — acceptable given the short JWT TTL (1m..24h, 8h default); a durable store (SQLite row / Redis) is the upgrade path.
+- **Evidence:** `internal/jwt/revocation_test.go` (jti present + distinct, baseline validate, per-jti revoke fails / other token unaffected, expired-revoke-entry harmless + pruned, RevokeUser revokes prior tokens / not the post-change one / not other subjects, monotonic RevokeUser, Sweep prunes the right entries, sweeper stops on ctx cancel, nil-safe); `internal/server/handlers_users_test.go` (`TestUsers_ChangePassword_RevokesExistingTokens`, `TestUsers_PatchPassword_RevokesExistingTokens` incl. the email-only-PATCH-does-not-revoke regression). internal/jwt coverage 88.1%.
+- **Resolved date:** 2026-05-11
+
+##### N7-remainder (#66): global per-IP rate limiter in genapi httpx [RESOLVED genapi-paired]
+
+- **Issue:** [#66](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/66) (closed) — supersedes the 2026-05-07 `8e9f5d2` partial
+- **Domain:** Security
+- **Severity at close:** Medium (Risk 32)
+- **Closure commit(s):** `bc10708` (geode-ui wiring) + genapi `fd31bbc`
+- **Resolution:** genapi adds `pkg/httpx.PeerLimiter` — a token bucket partitioned by client IP, applied to *every* route as a coarse abuse ceiling underneath the tighter per-route limiters (`loginlimiter.go` 5 rps/IP on `/auth/login`; `profilelimiter.go` 30 req/min per JWT subject on profile CRUD). Idle buckets are swept periodically so a flood of unique source addresses cannot pin memory. Key source is configurable via `security.rate_limit.per_ip_source` (`remote_addr` default / `x-forwarded-for` / `x-real-ip` / `tls-subject`); `per_ip_rps` of `0` disables it. 429 responses carry `Retry-After` + a `{code,description,reason}` body matching the per-route limiters. Wired via `httpx.Config{PerIPRPS: 50, PerIPBurst: 100, PerIPSource: httpx.IPSourceRemoteAddr}` in `cmd/server/main.go` + `security.rate_limit.per_ip_rps/per_ip_burst/per_ip_source` in `geode.json` (keyed on `RemoteAddr` — this server is not behind a trusted proxy that rewrites `X-Forwarded-For`).
+- **Evidence:** `gen/pkg/httpx/peerlimit_test.go`; genapi `fd31bbc`. gen/pkg/httpx coverage 67.6%.
+- **Resolved date:** 2026-05-11
+
+#### Won't-do (1)
+
+##### F18 (#61): driver re-parse stmt cache [WONT DO]
+
+- **Issue:** [#61](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/61) (closed — won't-do)
+- **Domain:** Performance
+- **Severity at close:** P3 low (PerfScore 24)
+- **Closure commit(s):** `06e98f1` (benchmark + doc update)
+- **Reason:** Hypothesis was that the driver re-parses identical parameterised statements, so an LRU `*sql.Stmt` cache in `pool.go` would amortise that parse. Benchmark `internal/conn/pool_bench_test.go` (`BenchmarkParseVsExecute`, `BenchmarkParseFraction`) refutes the premise: (1) parse is ~10% of a modelled round-trip — under the ~20% threshold the AC set for landing the cache; and (2) more decisively, the geode driver has **no server-side prepared statements** — `geode.Conn.PrepareContext` does no round-trip and just stashes the query text, and `geode.Stmt.QueryContext` re-sends that text via `conn.QueryContext(ctx, s.query, args)`, i.e. the server re-parses on every call regardless of whether a `*sql.Stmt` was used. A stmt cache has nothing to amortise. Bench numbers: `PerQueryContext` ≈ 85–107 µs/op vs `PreparedStmtReuse` ≈ 96–107 µs/op (within noise; `PreparedStmtReuse` carries 2 extra allocs/op from the `database/sql` Stmt machinery). Re-open only if the geode driver gains real server-side prepare/parse-cache support.
+- **Resolved date:** 2026-05-11
+
+---
+
+#### Notes on this run
+
+- **Genapi-paired closures (2):** F13 (#57) and N7-remainder (#66), both via genapi `fd31bbc` (`pkg/httpx.Gzip` + `pkg/httpx.PeerLimiter`); the geode-ui side is config wiring + regen (`58b285f`, `bc10708`). genapi also got `5dd5f61` (plugin docs/commands/hooks refresh + sample-output regen — pre-existing in-progress work) and `7eaf8a1` (sample-output regen for the gzip + per-IP changes). genapi was **pushed to origin** (the 2026-05-10 commits `1033c50` / `df654de` / `e100aed` are now pushed too).
+- **No genapi change for Q5 / Q8:** both turned out to need only `geode.json` config — multipart `"type": "file"` request schemas and `"items": {"$ref": "Schema"}` typed list items already exist upstream.
+- **F12 was a footgun, not a live bug:** the server-wide `WriteTimeout` was dead config and never killed WS streams; the closure removes the dead config and adds an explicit `wsExemptTimeoutHandler` that caps REST/SPA at 60s while routing `/ws/` around it. Per-frame WS deadlines were already enforced via `wsx.Conn` + the 30s `wsx.Options`.
+- **F10 entrypoint dropped 96%:** 12.8 MiB → 454 KiB. The closure also corrected the `docs/QUALITY_GAP_ANALYSIS.md` Q-NEW-T2 row, which had falsely claimed the webpack budget was already wired since 2026-05-08.
+- **Still deferred (not moved here):** F3 (#25) — the streaming-response template work, the heaviest of the five 2026-05-10 deferrals (per-endpoint streaming-template design: schema flag + changed handler signature + flush wiring in `api.go.tmpl` + adapting `handlers_query.go`); design notes intact in `docs/PERF_GAP_ANALYSIS.md`, tracked at `genapi#216`.
+- **Backlog status after this run:** PERF — only F3 left (deferred). QUALITY — clean (all Q-series closed; Q-NEW-T1/T3/T4 are adoption-decision-blocked tooling gaps, not engineering gaps). SECURITY — clean (all N-series closed; S-NEW-1/6 are release-eng/ops-blocked).
