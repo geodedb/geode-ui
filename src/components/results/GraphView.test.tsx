@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react'
-import { act, render } from '@testing-library/react'
+import { act, fireEvent, render, within } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 
 // Capture the constructor calls from cytoscape so we can assert that
@@ -11,21 +11,53 @@ const cyConstructorCalls: unknown[] = []
 const destroyMock = jest.fn()
 const onMock = jest.fn()
 
+// A no-op chainable collection: every method returns the collection so
+// `.removeClass(...).removeClass(...)` and friends don't blow up. forEach
+// is a real no-op so per-element callbacks (which touch methods this stub
+// doesn't model) are never invoked.
+const makeColl = (): Record<string, unknown> => {
+  const coll: Record<string, unknown> = {
+    forEach: jest.fn(),
+    remove: jest.fn(),
+    length: 0,
+    empty: () => true,
+  }
+  const chain = (): Record<string, unknown> => coll
+  coll.addClass = chain
+  coll.removeClass = chain
+  coll.difference = chain
+  coll.union = chain
+  coll.connectedNodes = chain
+  coll.closedNeighborhood = chain
+  coll.select = chain
+  return coll
+}
+
 // jest.fn-backed factory so individual tests can override behavior
-// (e.g. force a throw) via mockImplementationOnce.
+// (e.g. force a throw) via mockImplementationOnce. The stub honours
+// every Core method GraphView reaches — including the ones the
+// layout-change / visibility / fit effects call (fit, zoom, width,
+// height, style().update()) — so changing a display option after the
+// debounced build doesn't crash the (mocked) render tree.
 const cyFactory = jest.fn((opts: unknown) => {
   cyConstructorCalls.push(opts)
+  const style = { update: jest.fn() }
   return {
     on: onMock,
     destroy: destroyMock,
     add: jest.fn(),
     remove: jest.fn(),
     batch: (fn: () => void) => fn(),
-    elements: () => ({ remove: jest.fn() }),
+    elements: () => makeColl(),
     layout: () => ({ run: jest.fn() }),
-    nodes: () => ({ forEach: jest.fn() }),
-    edges: () => ({ forEach: jest.fn() }),
-    $id: () => ({ select: jest.fn() }),
+    nodes: () => makeColl(),
+    edges: () => makeColl(),
+    $id: () => makeColl(),
+    fit: jest.fn(),
+    zoom: jest.fn(() => 1),
+    width: jest.fn(() => 400),
+    height: jest.fn(() => 300),
+    style: jest.fn(() => style),
   }
 })
 
@@ -239,4 +271,145 @@ test('GraphView exposes a keyboard-accessible node id picker', () => {
   })
   const picker = container.querySelector('[data-testid="graph-node-id-picker"]')
   expect(picker).not.toBeNull()
+})
+
+// Reproduction tests for the "graph display options reset on re-run" bug.
+//
+// When the user clicks "Run" on the Query page, QueryPage.resetRunState()
+// sets activeResp to null, which collapses the {activeResp && <GraphView/>}
+// subtree and *unmounts* GraphView. When the new response arrives GraphView
+// remounts fresh, so every component-local useState (layout, hiddenLabels,
+// nodeLabelPrefs, edgeLabelPrefs) re-initialises to its default — the user
+// loses their display configuration on every re-run, even when the re-run
+// returns the same or similar data.
+//
+// These tests simulate that exact sequence: render GraphView with a resp,
+// change a display option, unmount GraphView, then mount it again with a
+// fresh-but-equivalent resp (a new object, same shape/data — what
+// resetRunState + the new response produce). The expected post-fix
+// behaviour is that the display option is still applied after the remount.
+// On the current code (state owned by GraphView's useState) these
+// assertions FAIL because the remount resets everything to defaults.
+// Build a graph response with two distinct node-label buckets so the
+// visibility-controls block (gated on nodeLabelBuckets.size > 1) and the
+// per-label display selects both render. Each call returns a brand-new
+// object — mirroring what QueryPage produces when a re-run resolves.
+function makeGraphResp(): Record<string, unknown> {
+  return {
+    rows: [],
+    graph_summary: {
+      nodes: [
+        { id: 1, labels: ['Person'], properties: { name: 'Alice' } },
+        { id: 2, labels: ['Movie'], properties: { title: 'The Matrix' } },
+      ],
+      edges: [
+        { id: 1, start_node: 1, end_node: 2, type: 'ACTED_IN', properties: {} },
+      ],
+    },
+    row_count: 2,
+  }
+}
+
+describe('graph display options survive a re-run remount', () => {
+  function renderGraph(resp: unknown): ReturnType<typeof render> {
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView
+          resp={resp}
+          query="MATCH (a:Person)-[r:ACTED_IN]->(m:Movie) RETURN a, r, m"
+        />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    return view
+  }
+
+  beforeEach(() => {
+    // Display prefs are expected to be persisted (the intended fix uses a
+    // localStorage-backed store); clear it so each test starts clean.
+    window.localStorage.clear()
+  })
+
+  test('layout-algorithm choice persists across an unmount/remount', () => {
+    const first = renderGraph(makeGraphResp())
+    const picker = first.getByTestId('graph-layout-picker') as HTMLSelectElement
+    expect(picker.value).toBe('cose') // default
+
+    fireEvent.change(picker, { target: { value: 'grid' } })
+    expect(
+      (first.getByTestId('graph-layout-picker') as HTMLSelectElement).value
+    ).toBe('grid')
+
+    // Simulate resetRunState() + the new response: unmount, then mount
+    // a fresh GraphView with a brand-new (equivalent) resp object.
+    first.unmount()
+    const second = renderGraph(makeGraphResp())
+    expect(
+      (second.getByTestId('graph-layout-picker') as HTMLSelectElement).value
+    ).toBe('grid')
+  })
+
+  test('node-label visibility toggle persists across an unmount/remount', () => {
+    const first = renderGraph(makeGraphResp())
+    const controls = first.getByTestId('graph-visibility-controls')
+    // The "Person" bucket checkbox is checked (= visible) by default.
+    const personToggle = within(controls).getByLabelText(
+      /Person/
+    ) as HTMLInputElement
+    expect(personToggle.checked).toBe(true)
+
+    // Hide the Person bucket.
+    fireEvent.click(personToggle)
+    expect(
+      (
+        within(first.getByTestId('graph-visibility-controls')).getByLabelText(
+          /Person/
+        ) as HTMLInputElement
+      ).checked
+    ).toBe(false)
+
+    first.unmount()
+    const second = renderGraph(makeGraphResp())
+    const personToggleAfter = within(
+      second.getByTestId('graph-visibility-controls')
+    ).getByLabelText(/Person/) as HTMLInputElement
+    expect(personToggleAfter.checked).toBe(false)
+  })
+
+  test('node label-field preference persists across an unmount/remount', () => {
+    const first = renderGraph(makeGraphResp())
+    const display = first.getByTestId('graph-display-controls')
+    // First combobox in the display block is the per-label field picker
+    // for the first node bucket ("Person"). Pick its non-default option.
+    const selects = within(display).getAllByRole(
+      'combobox'
+    ) as HTMLSelectElement[]
+    const personSelect = selects[0]
+    // Options: ['__default__', 'name'] — the first non-default key is the
+    // property key 'name'.
+    const nonDefault = Array.from(personSelect.options)
+      .map((o) => o.value)
+      .find((v) => v && v !== personSelect.value)
+    expect(nonDefault).toBeTruthy()
+    fireEvent.change(personSelect, { target: { value: nonDefault } })
+    expect(
+      (
+        within(first.getByTestId('graph-display-controls')).getAllByRole(
+          'combobox'
+        )[0] as HTMLSelectElement
+      ).value
+    ).toBe(nonDefault)
+
+    first.unmount()
+    const second = renderGraph(makeGraphResp())
+    expect(
+      (
+        within(second.getByTestId('graph-display-controls')).getAllByRole(
+          'combobox'
+        )[0] as HTMLSelectElement
+      ).value
+    ).toBe(nonDefault)
+  })
 })

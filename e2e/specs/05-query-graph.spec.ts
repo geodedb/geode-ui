@@ -42,4 +42,49 @@ test.describe('query (graph view)', () => {
       page.getByText('Click a node or edge to inspect properties.')
     ).toBeVisible()
   })
+
+  // Reproduction test for the "graph display options reset on re-run" bug.
+  //
+  // The layout-algorithm picker on the graph tab lives in GraphView's
+  // component-local useState. Clicking "Run" calls QueryPage.resetRunState()
+  // which sets activeResp to null → the {activeResp && <GraphView/>} subtree
+  // collapses → GraphView unmounts. When the new (identical) response
+  // arrives GraphView remounts and `layout` re-initialises to its 'cose'
+  // default — the operator's chosen layout is silently lost on every
+  // re-run. The fix lifts that state out of GraphView (into a
+  // localStorage-backed store) so it survives the remount.
+  //
+  // NOTE: the running stack currently serves the OLD build (it gets
+  // rebuilt as part of the fix), so this test FAILS today for the right
+  // reason — the layout picker reads 'cose' again after the re-run.
+  test('graph layout choice survives a query re-run', async ({
+    authedPage: page,
+  }) => {
+    const q = `USE GRAPH ${seed.graph}; MATCH (a:Person)-[r:ACTED_IN]->(m:Movie) RETURN a, r, m LIMIT 10`
+
+    await page.goto('/')
+    await page.locator('.monaco-editor').first().click()
+    await page.keyboard.press('ControlOrMeta+A')
+    await page.keyboard.type(q)
+    await sel.queryRunBtn(page).click()
+    await expect(page.getByText(/(10|9) rows/)).toBeVisible()
+
+    await sel.queryTabGraph(page).click()
+    const layoutPicker = page.getByTestId('graph-layout-picker')
+    await expect(layoutPicker).toBeVisible()
+    await expect(layoutPicker).toHaveValue('cose')
+
+    // Pick a non-default layout.
+    await layoutPicker.selectOption('grid')
+    await expect(layoutPicker).toHaveValue('grid')
+
+    // Re-run the same query. resetRunState() unmounts GraphView; the
+    // identical response remounts it.
+    await sel.queryRunBtn(page).click()
+    await expect(page.getByText(/(10|9) rows/)).toBeVisible()
+    await sel.queryTabGraph(page).click()
+
+    // The previously-selected layout must still be in effect.
+    await expect(page.getByTestId('graph-layout-picker')).toHaveValue('grid')
+  })
 })
