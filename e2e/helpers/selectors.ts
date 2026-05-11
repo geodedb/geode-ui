@@ -132,8 +132,12 @@ export const sel = {
     p.getByTestId('add-connection-public-profile-warning'),
   addConnectionAuthedProfileWarning: (p: Page): Locator =>
     p.getByTestId('add-connection-authed-profile-warning'),
+  // The modal's submit button reuses the i18n key `auth.signInButton`
+  // ("Sign in"), shared with LoginPage. Dialog-scoped so it doesn't
+  // collide with the LoginPage button if both are reachable from the
+  // same render tree.
   addConnectionSubmit: (p: Page): Locator =>
-    p.getByRole('button', { name: /^connect$/i }),
+    p.getByRole('dialog').getByRole('button', { name: /^sign in$/i }),
 
   // ConnectionSwitcher (ConnectionSwitcher.tsx)
   // Disconnect buttons are aria-labeled "Disconnect: <profileName>".
