@@ -175,4 +175,36 @@ dy4i8S1EfvR6fPo=
       await deleteProfileViaApi(request, authToken, seeded.id)
     }
   })
+
+  test('POST rejects an obviously-malformed CA PEM (GAP-S10)', async ({
+    authToken,
+    request,
+  }) => {
+    const res = await request.post('/api/v1/profiles', {
+      headers: {
+        authorization: `Bearer ${authToken}`,
+        'content-type': 'application/json',
+      },
+      data: {
+        name: makeProfileName('pem-bad'),
+        scope: 'personal',
+        dsn: 'bolt://localhost:7687',
+        is_default: false,
+        tls: { ca_pem: 'not a real PEM block at all, just garbage bytes' },
+      },
+    })
+
+    expect(
+      res.status(),
+      `expected 4xx for malformed PEM, got ${res.status()}`
+    ).toBeGreaterThanOrEqual(400)
+    expect(res.status()).toBeLessThan(500)
+
+    const body = await res.json().catch(() => ({}) as Record<string, unknown>)
+    // pemvalidate.go uses error sentinels "invalid CA PEM" /
+    // "invalid client cert PEM" / "invalid client key PEM". The
+    // genapi error envelope wraps them in {code, description}.
+    const text = JSON.stringify(body).toLowerCase()
+    expect(text).toMatch(/invalid.*pem|pem.*invalid|ca.*invalid/)
+  })
 })
