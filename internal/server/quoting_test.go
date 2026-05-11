@@ -21,12 +21,22 @@ import (
 // (and round-trip safely) or reject (and produce no quoted output).
 
 // quoteStringRoundTrips returns true if `quoted` is the canonical
-// single-quoted form of `raw` with internal single quotes doubled.
-// We rebuild the expected representation locally so the test does
-// not depend on the helper's own escape pass.
+// single-quoted form of `raw`: backslashes escaped FIRST (\ -> \\),
+// then internal single quotes doubled (a single quote -> two single
+// quotes). We rebuild the expected representation locally so the test
+// does not depend on the helper's own escape pass. The backslash-first
+// ordering mirrors the authoritative geode-client-go gqlStringEscaper
+// (conn.go): GQL supports both doubled-quote and backslash-quote
+// escaping, so a literal backslash must be neutralised before any
+// quote-doubling pass runs.
+func canonicalQuoteString(raw string) string {
+	s := strings.ReplaceAll(raw, `\`, `\\`)
+	s = strings.ReplaceAll(s, "'", "''")
+	return "'" + s + "'"
+}
+
 func quoteStringRoundTrips(raw, quoted string) bool {
-	expected := "'" + strings.ReplaceAll(raw, "'", "''") + "'"
-	return quoted == expected
+	return quoted == canonicalQuoteString(raw)
 }
 
 // TestQuoteString_Adversarial enumerates payloads that have, at some
@@ -124,6 +134,56 @@ func TestQuoteString_Adversarial(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestQuoteString_BackslashEscape (F-INPUT-1, #140): GQL accepts both
+// a doubled single quote and a backslash-escaped single quote inside a
+// single-quoted literal. A naive quoter that only doubles single quotes
+// leaves a literal backslash untouched, so a payload of backslash+quote
+// becomes quote, backslash, quote, quote -- which the GQL parser reads
+// as a backslash-escaped quote followed by an UNescaped quote, breaking
+// out of the literal. The fix escapes the backslash FIRST (\ -> \\)
+// then doubles single quotes, matching the authoritative geode-client-go
+// gqlStringEscaper.
+func TestQuoteString_BackslashEscape(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"single_backslash_in_middle", `a\b`, `'a\\b'`},
+		{"backslash_quote", `\'`, `'\\'''`},
+		{"double_backslash", `\\`, `'\\\\'`},
+		{"trailing_backslash", `abc\`, `'abc\\'`},
+		{"leading_backslash", `\abc`, `'\\abc'`},
+		{"backslash_then_doubled_quote_payload", `alice\' OR 1=1 --`, `'alice\\'' OR 1=1 --'`},
+		{"only_backslashes", `\\\`, `'\\\\\\'`},
+		{"backslash_n_literal_not_control", `a\nb`, `'a\\nb'`}, // literal backslash + 'n', NOT a newline byte
+		{"no_backslash_unchanged", `alice'`, `'alice'''`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := quoteString(tc.in)
+			if err != nil {
+				t.Fatalf("quoteString(%q): unexpected err %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Fatalf("quoteString(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+			// Consistency with the canonical (client-go-mirrored) escaper.
+			if got != canonicalQuoteString(tc.in) {
+				t.Fatalf("quoteString(%q) = %q; canonical = %q (escaper drift)", tc.in, got, canonicalQuoteString(tc.in))
+			}
+		})
+	}
+
+	// Control chars containing a backslash byte are still rejected
+	// outright (the backslash escape runs only on the accepted path).
+	for _, in := range []string{"a\\\nb", "\\\x00", "\\\t"} {
+		if got, err := quoteString(in); err == nil {
+			t.Fatalf("quoteString(%q) = %q, nil; want non-nil err (control char)", in, got)
+		}
 	}
 }
 

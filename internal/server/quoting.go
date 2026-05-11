@@ -54,15 +54,28 @@ func quoteIdent(name string) (string, error) {
 	return "`" + name + "`", nil
 }
 
-// quoteString returns s wrapped in single quotes with internal single
-// quotes doubled (the standard SQL/GQL escape). It rejects any ASCII
-// control character so a value like "foo\nDROP TABLE" cannot smuggle a
-// newline into the quoted literal.
+// quoteString returns s wrapped in single quotes, safe for inlining
+// into a GQL single-quoted string literal. It rejects any ASCII
+// control character first (so a value like "foo\nDROP TABLE" cannot
+// smuggle a newline into the literal), then escapes the value.
+//
+// Escape order is load-bearing. GQL accepts BOTH a doubled single
+// quote and a backslash-escaped single quote inside a single-quoted
+// literal, so a literal backslash must be doubled (\ -> \\) BEFORE
+// single quotes are doubled (' -> two single quotes). Doing it the
+// other way round would let a payload of backslash+quote produce
+// literal-quote, backslash, quote, quote -- which the parser reads as
+// a backslash-escaped quote followed by an unescaped quote, breaking
+// out of the literal. This mirrors the authoritative geode-client-go
+// gqlStringEscaper (conn.go).
 func quoteString(s string) (string, error) {
 	for _, r := range s {
 		if r < 0x20 || r == 0x7f {
 			return "", errInvalidString
 		}
 	}
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'", nil
+	// Backslash FIRST, then single quotes. Order is critical -- see doc.
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "'", "''")
+	return "'" + s + "'", nil
 }
