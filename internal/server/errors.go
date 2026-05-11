@@ -85,6 +85,30 @@ func asEndpointError(err error) *endpointError {
 	return nil
 }
 
+// errWireFeatureMissing is the sentinel that callers can wrap (via
+// fmt.Errorf("...: %w", errWireFeatureMissing)) to flag a wire-level
+// "this verb isn't recognized by the server" condition explicitly.
+// `isWireFeatureMissing` checks for it first via errors.Is, before
+// falling back to interface- and substring-based detection on
+// driver-emitted errors.
+//
+// GAP-Q6 (#36): introduced so call sites that *know* they should
+// degrade gracefully can do so unambiguously without relying on the
+// driver's free-form text.
+var errWireFeatureMissing = errors.New("server: wire feature not implemented on this geode build")
+
+// wireFeatureMissingSubstrings is the pinned list of accepted
+// fallback substrings used by isWireFeatureMissing when no typed
+// signal is available. Tests in errors_test.go pin every entry so
+// the wire-degradation behaviour cannot drift silently when a
+// driver upstream changes its error wording. Adding a new entry
+// requires both a code change here AND an explicit test row.
+var wireFeatureMissingSubstrings = []string{
+	"parse error",
+	"expected token",
+	"expected identifier",
+}
+
 // isWireFeatureMissing reports whether err looks like a parse error from
 // the upstream Geode — i.e. the engine doesn't recognize the GQL syntax
 // at all on this version of the wire. Several admin reads (SHOW USERS /
@@ -93,26 +117,45 @@ func asEndpointError(err error) *endpointError {
 // use this to degrade gracefully to an empty list (HTTP 200) rather
 // than surfacing a 422 to the UI on every page load.
 //
-// Mirrors the isAuthError shape: prefer typed StatusClass() if available,
-// fall back to substring match on the wrapped error text.
+// Detection order (post-Q6 / #36):
+//  1. errors.Is(err, errWireFeatureMissing) — explicit sentinel wrap.
+//  2. errors.As against the statusClasser interface — drivers that
+//     expose a typed StatusClass() return "42000" for parse errors.
+//  3. Substring fallback — older drivers wrap the wire status class
+//     into the bare error text. Accepted substrings are PINNED in
+//     `wireFeatureMissingSubstrings` and exercised by errors_test.go
+//     so a silent driver-message drift cannot widen the predicate.
 func isWireFeatureMissing(err error) bool {
 	if err == nil {
 		return false
 	}
-	// First: prefer typed StatusClass if available.
+	// 1: explicit sentinel — handlers that already know the upstream
+	// returned "verb not implemented" can wrap with %w to short-circuit
+	// the substring guess work.
+	if errors.Is(err, errWireFeatureMissing) {
+		return true
+	}
+	// 2: typed StatusClass — driver-supplied 42000 reading.
 	type statusClasser interface{ StatusClass() string }
 	var sc statusClasser
 	if errors.As(err, &sc) && sc.StatusClass() == "42000" {
 		return true
 	}
-	// Fall through to substring detection — drivers that don't expose
-	// StatusClass() (or that wrap the err in a way that loses it) still
-	// embed the canonical `<class>: <message>` shape in the error text.
+	// 3: substring fallback — drivers that don't expose StatusClass()
+	// (or wrap the err in a way that loses it) still embed the
+	// canonical `<class>: <message>` shape in the error text. Both
+	// signals (42000 + a message-shape substring) must be present so
+	// an unrelated 42000-mentioning string cannot accidentally trigger.
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "42000") &&
-		(strings.Contains(msg, "parse error") ||
-			strings.Contains(msg, "expected token") ||
-			strings.Contains(msg, "expected identifier"))
+	if !strings.Contains(msg, "42000") {
+		return false
+	}
+	for _, sub := range wireFeatureMissingSubstrings {
+		if strings.Contains(msg, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // badRequest is a small helper for 400 endpointErrors emitted from
