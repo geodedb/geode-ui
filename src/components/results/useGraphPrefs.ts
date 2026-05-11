@@ -26,6 +26,14 @@ export type LayoutName =
 
 export const DEFAULT_LAYOUT: LayoutName = 'cose'
 
+// The selected-element inspector on the graph tab can render the picked
+// node/edge either as a structured key/value property view ('props',
+// the default) or as the raw data-bag JSON ('json'). The choice is
+// sticky so it survives a re-run remount and a page reload.
+export type InspectorView = 'props' | 'json'
+
+export const DEFAULT_INSPECTOR_VIEW: InspectorView = 'props'
+
 const STORAGE_KEY = 'geode-ui.graph-prefs'
 
 type GraphPrefsState = {
@@ -37,11 +45,14 @@ type GraphPrefsState = {
   nodeLabelPrefs: Record<string, string>
   // Per-type override of which property to render as the edge label.
   edgeLabelPrefs: Record<string, string>
+  // Which inspector view the operator last picked ('props' | 'json').
+  inspectorView: InspectorView
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
   setNodePref: (label: string, key: string) => void
   setEdgePref: (type: string, key: string) => void
+  setInspectorView: (v: InspectorView) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -51,6 +62,11 @@ type PersistedShape = {
   hiddenLabels: string[]
   nodeLabelPrefs: Record<string, string>
   edgeLabelPrefs: Record<string, string>
+  inspectorView: InspectorView
+}
+
+function coerceInspectorView(v: unknown): InspectorView {
+  return v === 'json' ? 'json' : DEFAULT_INSPECTOR_VIEW
 }
 
 export const useGraphPrefs = create<GraphPrefsState>()(
@@ -60,6 +76,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       hiddenLabels: new Set<string>(),
       nodeLabelPrefs: {},
       edgeLabelPrefs: {},
+      inspectorView: DEFAULT_INSPECTOR_VIEW,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -76,6 +93,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         set((s) => ({ nodeLabelPrefs: { ...s.nodeLabelPrefs, [label]: key } })),
       setEdgePref: (type, key) =>
         set((s) => ({ edgeLabelPrefs: { ...s.edgeLabelPrefs, [type]: key } })),
+      setInspectorView: (v) => set({ inspectorView: v }),
     }),
     {
       name: STORAGE_KEY,
@@ -85,9 +103,11 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         hiddenLabels: Array.from(s.hiddenLabels),
         nodeLabelPrefs: s.nodeLabelPrefs,
         edgeLabelPrefs: s.edgeLabelPrefs,
+        inspectorView: s.inspectorView,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
-      // always see a Set regardless of where the value came from.
+      // always see a Set regardless of where the value came from. A
+      // missing or garbage inspectorView coerces back to the default.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<PersistedShape>
         return {
@@ -96,6 +116,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           hiddenLabels: new Set(p.hiddenLabels ?? []),
           nodeLabelPrefs: p.nodeLabelPrefs ?? current.nodeLabelPrefs,
           edgeLabelPrefs: p.edgeLabelPrefs ?? current.edgeLabelPrefs,
+          inspectorView: coerceInspectorView(p.inspectorView),
         }
       },
     }

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import styled from 'styled-components'
 import { List, RowComponentProps } from 'react-window'
 import { projectColumns } from './projectColumns'
+import { formatPropValue } from './propFormat'
 
 // PERF-F5 + PERF-F6 (issue #26):
 //
@@ -218,23 +219,9 @@ function isPath(o: AnyRecord): boolean {
   return Array.isArray(o.nodes) && Array.isArray(o.edges)
 }
 
-// formatPropValue renders a single property value in the cypher-style
-// summary. Strings are single-quoted (so 'Alice' vs Alice numeric is
-// unambiguous); arrays/objects fall through to JSON.stringify so the
-// representation stays compact but lossless. Nullish reads as the
-// literal "null" / "undefined" — same convention as Cypher's text
-// rendering of those values.
-function formatPropValue(v: unknown): string {
-  if (v === null) return 'null'
-  if (v === undefined) return 'undefined'
-  if (typeof v === 'string') return `'${v}'`
-  if (Array.isArray(v) || (typeof v === 'object' && v !== null)) {
-    return JSON.stringify(v)
-  }
-  return String(v)
-}
-
-// summarizeProps renders ALL keys of a node/edge property bag in a
+// formatPropValue (cypher-style single-value formatter) lives in
+// ./propFormat so the graph inspector's structured property view can
+// share it. summarizeProps renders ALL keys of a node/edge property bag in a
 // cypher-like " {k: v, ...}" form. We deliberately do NOT truncate —
 // the previous "first 2 props + …" form was unhelpful for admin views
 // where the interesting fields (username, email, roles) routinely

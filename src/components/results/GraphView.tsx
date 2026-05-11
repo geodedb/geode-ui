@@ -3,7 +3,13 @@ import { useTranslation } from 'react-i18next'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
 import styled, { useTheme } from 'styled-components'
 import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
-import { DEFAULT_LAYOUT, LayoutName, useGraphPrefs } from './useGraphPrefs'
+import {
+  DEFAULT_LAYOUT,
+  InspectorView,
+  LayoutName,
+  useGraphPrefs,
+} from './useGraphPrefs'
+import { formatPropValue } from './propFormat'
 import {
   EDGE_TYPE_DEFAULT,
   NODE_LABEL_DEFAULT,
@@ -288,6 +294,89 @@ const ControlsBlock = styled.section`
   }
 `
 
+// Inspector block — the selected-element panel at the bottom of the
+// sidebar. It carries an identity header, a small segmented control to
+// switch between the structured property view (default) and the raw
+// data-bag JSON, and the chosen pane.
+const InspectorBlock = styled.section`
+  h4 {
+    margin: 0 0 ${({ theme }) => theme.spacing.xs};
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.sm};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
+    word-break: break-all;
+  }
+`
+const InspectorToggle = styled.div`
+  display: inline-flex;
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
+  border: 1px solid ${({ theme }) => theme.border.default};
+  border-radius: ${({ theme }) => theme.radii.sm};
+  overflow: hidden;
+
+  button {
+    font-family: inherit;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    padding: 2px 8px;
+    border: none;
+    background: ${({ theme }) => theme.bg.surface};
+    color: ${({ theme }) => theme.text.secondary};
+    cursor: pointer;
+  }
+  button + button {
+    border-left: 1px solid ${({ theme }) => theme.border.default};
+  }
+  button[aria-pressed='true'] {
+    background: ${({ theme }) => theme.bg.subtle};
+    color: ${({ theme }) => theme.text.primary};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+  }
+  button:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
+`
+const IdentityHeader = styled.div`
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  color: ${({ theme }) => theme.text.secondary};
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
+  word-break: break-all;
+
+  code {
+    font-family: ${({ theme }) => theme.font.family.mono};
+    color: ${({ theme }) => theme.text.primary};
+  }
+  .badge {
+    display: inline-block;
+    margin-left: ${({ theme }) => theme.spacing.xxs};
+    padding: 0 6px;
+    border-radius: ${({ theme }) => theme.radii.pill};
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    background: ${({ theme }) => theme.bg.subtle};
+    border: 1px solid ${({ theme }) => theme.border.subtle};
+  }
+`
+const InspectorProps = styled.dl`
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+
+  dt {
+    color: ${({ theme }) => theme.text.secondary};
+    font-weight: ${({ theme }) => theme.font.weights.medium};
+    word-break: break-word;
+  }
+  dd {
+    margin: 0;
+    color: ${({ theme }) => theme.text.primary};
+    word-break: break-word;
+  }
+`
+
 function respSignature(resp: QueryRespLike & { row_count?: number }): number {
   // Stream messages do NOT include row_count until the summary frame; for
   // the streaming case we fall back to rows.length so the signature
@@ -341,6 +430,109 @@ function nodeLabelOf(data: Record<string, unknown>): string {
   return ''
 }
 
+// SelectedInspector renders the selected-element panel: an identity
+// header, a small segmented control to flip between the structured
+// property view (default) and the raw data-bag JSON, and the chosen
+// pane. The `props` pane is a sorted <dl> of `selected.data.props`
+// formatted through the shared formatPropValue; the `json` pane is the
+// historical `<pre>{JSON.stringify(...)}</pre>` output, kept as an
+// option.
+const SelectedInspector: React.FC<{
+  selected: Selected
+  view: InspectorView
+  onSetView: (v: InspectorView) => void
+  t: (key: string, opts?: Record<string, unknown>) => string
+}> = ({ selected, view, onSetView, t }) => {
+  const { kind, data } = selected
+  const id = String(data.id ?? '')
+  const labels: string[] = Array.isArray(data.labels)
+    ? (data.labels.filter((l) => typeof l === 'string') as string[])
+    : []
+  const labelStr = labels.map((l) => `:${l}`).join('')
+  const isStub = Boolean(data.placeholder) || Boolean(data.synthesised)
+  const props =
+    data.props && typeof data.props === 'object' && !Array.isArray(data.props)
+      ? (data.props as Record<string, unknown>)
+      : {}
+  const propKeys = Object.keys(props).sort()
+
+  return (
+    <InspectorBlock data-testid="graph-inspector">
+      <h4>
+        {kind === 'node'
+          ? t('graph.selectedNode', { id })
+          : t('graph.selectedEdge', { id })}
+      </h4>
+      <InspectorToggle role="group" aria-label={t('graph.inspectorViewGroup')}>
+        <button
+          type="button"
+          data-testid="graph-inspector-view-props"
+          aria-pressed={view === 'props'}
+          onClick={() => onSetView('props')}
+        >
+          {t('graph.inspectorViewProps')}
+        </button>
+        <button
+          type="button"
+          data-testid="graph-inspector-view-json"
+          aria-pressed={view === 'json'}
+          onClick={() => onSetView('json')}
+        >
+          {t('graph.inspectorViewJson')}
+        </button>
+      </InspectorToggle>
+      {view === 'props' ? (
+        <div data-testid="graph-inspector-props">
+          <IdentityHeader>
+            <div>
+              {t('graph.inspectorId')}: <code>{id}</code>
+              {isStub && (
+                <span className="badge">{t('graph.inspectorStub')}</span>
+              )}
+            </div>
+            {kind === 'node' ? (
+              labelStr && (
+                <div>
+                  {t('graph.inspectorLabels')}: <code>{labelStr}</code>
+                </div>
+              )
+            ) : (
+              <>
+                <div>
+                  {t('graph.inspectorType')}:{' '}
+                  <code>:{String(data.type ?? '')}</code>
+                </div>
+                <div>
+                  <code>{String(data.source ?? '')}</code> →{' '}
+                  <code>{String(data.target ?? '')}</code>
+                </div>
+              </>
+            )}
+          </IdentityHeader>
+          {propKeys.length === 0 ? (
+            <p className="empty" style={{ opacity: 0.6 }}>
+              {t('graph.inspectorNoProps')}
+            </p>
+          ) : (
+            <InspectorProps>
+              {propKeys.map((k) => (
+                <React.Fragment key={k}>
+                  <dt>{k}</dt>
+                  <dd>{formatPropValue(props[k])}</dd>
+                </React.Fragment>
+              ))}
+            </InspectorProps>
+          )}
+        </div>
+      ) : (
+        <pre data-testid="graph-inspector-json">
+          {JSON.stringify(data, null, 2)}
+        </pre>
+      )}
+    </InspectorBlock>
+  )
+}
+
 export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const { t } = useTranslation()
   const theme = useTheme()
@@ -368,6 +560,10 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
   const hiddenLabels = useGraphPrefs((s) => s.hiddenLabels)
   const toggleHiddenLabel = useGraphPrefs((s) => s.toggleHiddenLabel)
   const setHiddenLabels = useGraphPrefs((s) => s.setHiddenLabels)
+  // Which selected-element inspector view ('props' | 'json') the
+  // operator last picked. Sticky so it outlives a re-run remount.
+  const inspectorView = useGraphPrefs((s) => s.inspectorView)
+  const setInspectorView = useGraphPrefs((s) => s.setInspectorView)
   // Live counts surfaced in the toolbar. Reflect what's actually in
   // the Cytoscape core (post-build, post-filter), not the raw resp,
   // so users see the effect of layout/filter changes.
@@ -917,14 +1113,12 @@ export const GraphView: React.FC<Props> = ({ resp, query, height = 480 }) => {
             ))}
         </ControlsBlock>
         {selected ? (
-          <>
-            <h4>
-              {selected.kind === 'node'
-                ? t('graph.selectedNode', { id: String(selected.data.id) })
-                : t('graph.selectedEdge', { id: String(selected.data.id) })}
-            </h4>
-            <pre>{JSON.stringify(selected.data, null, 2)}</pre>
-          </>
+          <SelectedInspector
+            selected={selected}
+            view={inspectorView}
+            onSetView={setInspectorView}
+            t={t}
+          />
         ) : (
           <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
         )}

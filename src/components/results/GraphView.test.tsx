@@ -524,7 +524,7 @@ describe('graph inspector property view', () => {
     expect(props).toHaveTextContent('null')
     expect(props).toHaveTextContent('tags')
     // Array rendering — the elements show up somewhere in the view.
-    expect(props.textContent ?? '').toMatch(/a.*b/s)
+    expect(props.textContent ?? '').toMatch(/a[\s\S]*b/)
 
     // Identity header: node id + label.
     const inspector = view.getByTestId('graph-inspector')
