@@ -208,3 +208,104 @@ dy4i8S1EfvR6fPo=
     expect(text).toMatch(/invalid.*pem|pem.*invalid|ca.*invalid/)
   })
 })
+
+test.describe.configure({ mode: 'serial' })
+test.describe('profile API rate limit (GAP-S7)', () => {
+  // The rate-limit probe is intentionally serial: it drives the
+  // per-actor bucket to exhaustion and back, which would interfere
+  // with concurrent profile-CRUD tests if we ran in parallel.
+  // Block-level eslint-disable mirrors helpers/globalSetup.ts — the
+  // sequential awaits + setTimeout polls are part of the contract
+  // the test exercises (rate-limit timing).
+  /* eslint-disable no-plusplus, no-await-in-loop, no-unsafe-finally */
+  test('exhausting the burst returns 429 + Retry-After', async ({
+    authToken,
+    request,
+  }) => {
+    // ProfileLimiterDefaults: 0.5 req/s steady, burst 10. Fire up to
+    // 25 POSTs back-to-back; the first ~10 succeed (burst), then the
+    // remainder must 429 with Retry-After. Each successful POST is a
+    // real row — collect ids and clean up via retry-on-429 below.
+    const created: string[] = []
+    let saw429 = false
+    let retryAfter: string | null = null
+    let burstError: Error | null = null
+
+    for (let i = 0; i < 25; i++) {
+      const res = await request.post('/api/v1/profiles', {
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          'content-type': 'application/json',
+        },
+        data: {
+          name: makeProfileName(`burst-${i}`),
+          scope: 'personal',
+          dsn: 'bolt://localhost:7687',
+          is_default: false,
+        },
+      })
+      if (res.status() === 429) {
+        saw429 = true
+        retryAfter = res.headers()['retry-after'] ?? null
+        // Body shape from rejectProfileCRUD():
+        // { code: 'rate_limited', description, reason: 'actor_rate_limited' }
+        const body = (await res.json()) as { code?: string; reason?: string }
+        expect(body.code).toBe('rate_limited')
+        expect(body.reason).toBe('actor_rate_limited')
+        break
+      }
+      if (res.ok()) {
+        const json = (await res.json()) as { id: string }
+        created.push(json.id)
+      } else {
+        const body = await res.text()
+        burstError = new Error(
+          `unexpected status ${res.status()} during burst: ${body}`
+        )
+        break
+      }
+    }
+
+    try {
+      if (burstError) throw burstError
+      expect(
+        saw429,
+        'never observed a 429 in 25 POSTs — bucket is wider than expected'
+      ).toBeTruthy()
+      expect(retryAfter, 'Retry-After header missing on 429').toBeTruthy()
+      expect(Number(retryAfter)).toBeGreaterThanOrEqual(1)
+    } finally {
+      // Cleanup DELETEs also count against the per-actor bucket, which
+      // is now empty. ProfileLimiterDefaults refills at 0.5 tokens/sec,
+      // so deleting N profiles takes ~2*N seconds in the worst case.
+      // Retry each DELETE on 429 with the server's Retry-After hint
+      // rather than blocking up-front and hoping we waited enough.
+      let cleanupError: Error | null = null
+      for (let i = 0; i < created.length; i++) {
+        const id = created[i]
+        let done = false
+        while (!done) {
+          const del = await request.delete(`/api/v1/profiles/${id}`, {
+            headers: { authorization: `Bearer ${authToken}` },
+          })
+          if (del.ok() || del.status() === 404) {
+            done = true
+          } else if (del.status() === 429) {
+            const ra = Number(del.headers()['retry-after'] ?? '1')
+            await new Promise<void>((r) => {
+              setTimeout(r, Math.max(1, ra) * 1000 + 200)
+            })
+          } else {
+            cleanupError = new Error(
+              `cleanup DELETE(${id}) failed: ${del.status()} ${await del.text()}`
+            )
+            done = true
+          }
+        }
+        if (cleanupError) break
+      }
+      if (cleanupError) throw cleanupError
+    }
+  })
+  /* eslint-enable no-plusplus, no-await-in-loop, no-unsafe-finally */
+})
