@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json/v2"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -66,15 +67,58 @@ func (t *tokenBucket) snapshot() (limit int, remaining int, reset time.Time) {
 	return limit, remaining, reset
 }
 
+// ErrCORSWildcardWithCredentials is returned by ValidateConfig when CORS is
+// enabled and any configured origin is the literal "*". Allowing a wildcard
+// origin while a server also accepts credentials (cookies, Authorization
+// headers, mTLS client certs) is forbidden by the CORS spec
+// (https://fetch.spec.whatwg.org/#cors-protocol-and-credentials) and is a
+// well-known misconfiguration that nullifies the same-origin protection of
+// any session cookie or bearer token the server issues. We refuse the
+// configuration at startup so the misconfiguration is discoverable in CI
+// instead of silently shipping to production. Disable CORS or list explicit
+// origins instead.
+var ErrCORSWildcardWithCredentials = errors.New("httpx: CORS wildcard origin \"*\" is forbidden when CORS is enabled; list explicit origins or disable CORS")
+
+// ValidateConfig returns a non-nil error if cfg encodes a CORS configuration
+// that would let cross-origin callers from any host read responses while the
+// server also presents auth-bearing handlers (the common case in this
+// generator's output: JWT, API-key, and mTLS auth all attach credentials to
+// requests that CORS can replay). Callers should invoke this before passing
+// cfg to WrapHandler or Serve. WrapHandler and Serve both call it internally
+// as a hard guard; ValidateConfig is exported so it can also be invoked from
+// configuration loaders and tests.
+func ValidateConfig(cfg Config) error {
+	if !cfg.CORSEnabled {
+		return nil
+	}
+	for _, o := range cfg.CORSOrigins {
+		if o == "*" {
+			return ErrCORSWildcardWithCredentials
+		}
+	}
+	return nil
+}
+
 // WrapHandler wraps h with security headers, CORS, and body size limiting per cfg.
 // Use this when managing the http.Server directly instead of calling Serve.
+//
+// WrapHandler panics if cfg fails ValidateConfig. CORS misconfiguration is a
+// startup-only condition; we choose to fail loud at startup so CI catches
+// the regression rather than silently shipping a CORS policy that defeats
+// the purpose of the rest of the security stack.
 func WrapHandler(cfg Config, h http.Handler) http.Handler {
+	if err := ValidateConfig(cfg); err != nil {
+		panic(err)
+	}
 	hs := headers(h, cfg)
 	return limitBody(cfg.MaxBodyBytes, hs)
 }
 
 // Serve starts an HTTP server with TLS1.3-only and sane defaults.
 func Serve(ctx context.Context, cfg Config, mux *http.ServeMux) error {
+	if err := ValidateConfig(cfg); err != nil {
+		return err
+	}
 	// Chain: headers (incl CORS) -> body limiter -> request-id logging
 	hs := headers(mux, cfg)
 	lh := limitBody(cfg.MaxBodyBytes, hs)
