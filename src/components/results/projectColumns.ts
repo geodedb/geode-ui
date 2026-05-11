@@ -12,14 +12,18 @@
 // Returns the original shape verbatim if no row contains a node or
 // edge — projection only fires when there's something to project.
 //
-// PERF-F6 (issue #26): the previous implementation made three passes
-// over `rows` for every node/edge column (kindOf + orderedKeys + the
-// final cell projection). For a 1000-row response with several node
-// columns that's O(rows*cols*3). The current implementation walks the
-// rows exactly once per node/edge column to discover its kind + the
-// union of property keys, then walks the rows once more to materialize
-// the output table. Net effect: 2x rows*cols of work instead of
-// 4x (3 discovery passes + 1 build).
+// PERF history:
+//
+//   F6 (#26): previous impl made 3 separate passes per node/edge
+//   column (kindOf + orderedKeys + final project). Replaced with a
+//   2-pass shape: discoverPlan per column, then a single materialise
+//   walk. Total work: ~2 * rows * cols.
+//
+//   F7 (#51): collapse the per-column discovery walks into a single
+//   row-major sweep so we visit each row exactly once during
+//   inference. Materialisation still walks once. Total walks over
+//   the input row set drops from N+1 (one per node/edge column, plus
+//   the materialise walk) to exactly 2 regardless of column count.
 
 export type Col = { name: string; type: string }
 export type ProjResp = { columns: Col[]; rows: unknown[][] }
@@ -55,56 +59,17 @@ type Plan =
   | { kind: 'other'; name: string; type: string }
   | { kind: 'node' | 'edge'; name: string; type: string; keys: string[] }
 
-// discoverPlan walks the rows once per column, decides the column kind
-// (using the declared type when present, else the first non-null cell's
-// shape), and accumulates the first-seen-property-key order. This
-// fuses what used to be the kindOf and orderedKeys passes into a
-// single sweep so we only walk the row set once per column instead of
-// three times.
-function discoverPlan(
-  rows: unknown[][],
-  colIdx: number,
-  declaredType: string,
+// PlanState is the per-column accumulator used during the single row
+// sweep. It carries the running kind (resolved from declared type or
+// the first non-null cell shape) plus the first-seen-property-key
+// order. Once every row has been visited we freeze each accumulator
+// into a Plan.
+type PlanState = {
   name: string
-): Plan {
-  let kind: Kind | null = null
-  if (declaredType && declaredType.toUpperCase() === 'NODE') kind = 'node'
-  else if (declaredType && declaredType.toUpperCase() === 'EDGE') kind = 'edge'
-
-  const seen = new Set<string>()
-  const keys: string[] = []
-
-  for (let i = 0; i < rows.length; i += 1) {
-    const row = rows[i]
-    const cell = row ? row[colIdx] : null
-    if (cell != null) {
-      if (kind === null) {
-        if (isNode(cell)) kind = 'node'
-        else if (isEdge(cell)) kind = 'edge'
-        else kind = 'other'
-      }
-
-      if (kind !== 'node' && kind !== 'edge') break
-
-      if (typeof cell === 'object') {
-        const props = (cell as AnyRecord).properties as AnyRecord | undefined
-        if (props) {
-          const propKeys = Object.keys(props)
-          for (let k = 0; k < propKeys.length; k += 1) {
-            const key = propKeys[k] as string
-            if (!seen.has(key)) {
-              seen.add(key)
-              keys.push(key)
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if (kind === null) kind = 'other'
-  if (kind === 'other') return { kind: 'other', name, type: declaredType }
-  return { kind, name, type: declaredType, keys }
+  declaredType: string
+  kind: Kind | null
+  seen: Set<string>
+  keys: string[]
 }
 
 export function projectColumns(resp: {
@@ -119,9 +84,76 @@ export function projectColumns(resp: {
     }
   })
 
-  const plan: Plan[] = cols.map((c, i) =>
-    discoverPlan(resp.rows, i, c.type, c.name)
-  )
+  // Seed each column's PlanState. Declared NODE/EDGE types win
+  // immediately so an empty row set still emits the structural
+  // column (`{name}._labels` / `{name}._type`).
+  const states: PlanState[] = new Array(cols.length)
+  for (let i = 0; i < cols.length; i += 1) {
+    const col = cols[i] as Col
+    const declared = col.type ? col.type.toUpperCase() : ''
+    let kind: Kind | null = null
+    if (declared === 'NODE') kind = 'node'
+    else if (declared === 'EDGE') kind = 'edge'
+    states[i] = {
+      name: col.name,
+      declaredType: col.type,
+      kind,
+      seen: new Set<string>(),
+      keys: [],
+    }
+  }
+
+  // F7 single-pass inference: ONE row-major sweep updates every
+  // column's PlanState in lockstep. Columns whose kind has resolved
+  // to 'other' early-exit per cell so we don't pay the property-key
+  // discovery cost on pure scalar columns.
+  for (let r = 0; r < resp.rows.length; r += 1) {
+    const row = resp.rows[r]
+    if (row) {
+      for (let i = 0; i < states.length; i += 1) {
+        const st = states[i] as PlanState
+        if (st.kind !== 'other') {
+          const cell = row[i]
+          if (cell != null) {
+            if (st.kind === null) {
+              if (isNode(cell)) st.kind = 'node'
+              else if (isEdge(cell)) st.kind = 'edge'
+              else st.kind = 'other'
+            }
+            if (st.kind === 'node' || st.kind === 'edge') {
+              const props = (cell as AnyRecord).properties as
+                | AnyRecord
+                | undefined
+              if (props) {
+                const propKeys = Object.keys(props)
+                for (let k = 0; k < propKeys.length; k += 1) {
+                  const key = propKeys[k] as string
+                  if (!st.seen.has(key)) {
+                    st.seen.add(key)
+                    st.keys.push(key)
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Freeze each PlanState into the immutable Plan shape the
+  // materialiser consumes. An unresolved kind (no non-null cell
+  // ever seen) collapses to 'other'.
+  const plan: Plan[] = new Array(states.length)
+  for (let i = 0; i < states.length; i += 1) {
+    const st = states[i] as PlanState
+    const kind = st.kind ?? 'other'
+    if (kind === 'other') {
+      plan[i] = { kind: 'other', name: st.name, type: st.declaredType }
+    } else {
+      plan[i] = { kind, name: st.name, type: st.declaredType, keys: st.keys }
+    }
+  }
 
   if (plan.every((p) => p.kind === 'other')) {
     return { columns: cols, rows: resp.rows }

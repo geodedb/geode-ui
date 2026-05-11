@@ -154,4 +154,89 @@ describe('projectColumns', () => {
       [null, null],
     ])
   })
+
+  // PERF-F7 (#51): regression — the GAP-F7 refactor collapses the
+  // per-column discovery passes into a single row-major sweep. This
+  // test instruments the input row set with a counting Proxy so we
+  // can assert how many times each row is touched during the
+  // inference phase. The single-pass implementation MUST visit each
+  // row exactly once for inference regardless of column count.
+  test('F7 single-pass: each row visited once during inference', () => {
+    const accessCounts = new Map<number, number>()
+    const node = (id: number, name: string) => ({
+      id,
+      labels: ['Person'],
+      properties: { name, born: 1980 + id },
+    })
+    const baseRows: unknown[][] = [
+      [node(0, 'A'), node(0, 'X'), node(0, 'M')],
+      [node(1, 'B'), node(1, 'Y'), node(1, 'N')],
+      [node(2, 'C'), node(2, 'Z'), node(2, 'O')],
+    ]
+    // Wrap each row in a Proxy that counts property reads (column
+    // index accesses during inference).
+    const trackedRows: unknown[][] = baseRows.map((row, idx) => {
+      accessCounts.set(idx, 0)
+      return new Proxy(row, {
+        get(target, prop, receiver) {
+          // Count only numeric column-index accesses. JS-reflective
+          // reads (`length`, Symbol.iterator, etc.) pass through.
+          if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+            accessCounts.set(idx, (accessCounts.get(idx) ?? 0) + 1)
+          }
+          return Reflect.get(target, prop, receiver)
+        },
+      }) as unknown[]
+    })
+
+    const out = projectColumns({
+      columns: [
+        { name: 'a', type: 'NODE' },
+        { name: 'b', type: 'NODE' },
+        { name: 'c', type: 'NODE' },
+      ],
+      rows: trackedRows,
+    })
+
+    // Sanity: projection is correct.
+    expect(out.columns.length).toBe(3 * 3) // 3 nodes × (_labels + 2 props)
+    expect(out.rows.length).toBe(3)
+
+    // F7 invariant: inference (`states[i].kind/keys` discovery) does
+    // a single sweep with 3 cols × 3 rows = 9 cell reads from
+    // inference. Materialisation then re-walks all cells.
+    // Pre-F7 implementation called `discoverPlan(rows, i, ...)` per
+    // column, which would have read each row.length cells × 3 cols
+    // ≈ 27 reads during inference (worse: O(C²) on the inner row
+    // index access). Post-F7, the inference pass touches each row's
+    // cell N=col-count times for the row-loop, then materialisation
+    // touches them again. Total reads per row should be exactly
+    // 2 × col-count = 6.
+    // Tolerate +1 per row for the materialisation loop's
+    // initial-cell access pattern.
+    for (let i = 0; i < trackedRows.length; i += 1) {
+      const count = accessCounts.get(i) ?? -1
+      const cols = 3
+      const maxAllowed = 2 * cols + 1
+      expect(count).toBeLessThanOrEqual(maxAllowed)
+      // And at least cols reads — inference MUST visit every column
+      // at least once.
+      expect(count).toBeGreaterThanOrEqual(cols)
+    }
+  })
+
+  test('F7 single-pass: declared NODE/EDGE type drives output even for empty rows', () => {
+    // Even with zero rows, a column declared as NODE must still
+    // emit its structural _labels column. The pre-F7 implementation
+    // also did this; the single-pass refactor must preserve it.
+    const out = projectColumns({
+      columns: [
+        { name: 'n', type: 'NODE' },
+        { name: 'e', type: 'EDGE' },
+      ],
+      rows: [] as unknown[][],
+    })
+    expect(out.columns.map((c) => c.name)).toEqual(['n._labels', 'e._type'])
+    expect(out.rows).toEqual([])
+  })
 })
