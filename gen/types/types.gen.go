@@ -4,6 +4,8 @@ package types
 import (
 	"errors"
 	"encoding/json/jsontext"
+
+	"geodedb.com/geode-ui/gen/pkg/gen"
 )
 
 // AssignRoleReq generated from config schema
@@ -121,6 +123,16 @@ func (v BackupRef) Valid() error {
 	if len(v.File) > 256 { return errors.New("file: too long") }
 	if len(v.Path) > 1024 { return errors.New("path: too long") }
 	if v.SizeBytes < 0 { return errors.New("size_bytes: too small") }
+	return nil
+}
+
+// BackupUploadReq generated from config schema
+type BackupUploadReq struct {
+	File *gen.FileUpload `json:"-" genapi:"file"`
+}
+
+// Valid validates BackupUploadReq fields against schema constraints.
+func (v BackupUploadReq) Valid() error {
 	return nil
 }
 
@@ -362,6 +374,16 @@ func (v MigrationStatus) Valid() error {
 	return nil
 }
 
+// MigrationUploadReq generated from config schema
+type MigrationUploadReq struct {
+	File *gen.FileUpload `json:"-" genapi:"file"`
+}
+
+// Valid validates MigrationUploadReq fields against schema constraints.
+func (v MigrationUploadReq) Valid() error {
+	return nil
+}
+
 // PasswordChangeReq generated from config schema
 type PasswordChangeReq struct {
 	NewPassword string `json:"new_password" genapi:"new_password"`
@@ -375,9 +397,21 @@ func (v PasswordChangeReq) Valid() error {
 	return nil
 }
 
+// Permission generated from config schema
+type Permission struct {
+	Permission string `json:"permission" genapi:"permission"`
+	Resource string `json:"resource" genapi:"resource"`
+	Scope string `json:"scope" genapi:"scope"`
+}
+
+// Valid validates Permission fields against schema constraints.
+func (v Permission) Valid() error {
+	return nil
+}
+
 // PermissionList generated from config schema
 type PermissionList struct {
-	Permissions []jsontext.Value `json:"permissions" genapi:"permissions"`
+	Permissions []Permission `json:"permissions" genapi:"permissions"`
 }
 
 // Valid validates PermissionList fields against schema constraints.
@@ -763,6 +797,26 @@ func (v UpdateProfileReq) Valid() error {
 	return nil
 }
 
+// UploadResp generated from config schema
+type UploadResp struct {
+	File string `json:"file" genapi:"file"`
+	Path string `json:"path" genapi:"path"`
+	SizeBytes int64 `json:"size_bytes" genapi:"size_bytes"`
+	UploadedAt string `json:"uploaded_at" genapi:"uploaded_at"`
+}
+
+// Valid validates UploadResp fields against schema constraints.
+func (v UploadResp) Valid() error {
+	if len(v.File) < 1 { return errors.New("file: too short") }
+	if len(v.File) > 256 { return errors.New("file: too long") }
+	if len(v.Path) < 1 { return errors.New("path: too short") }
+	if len(v.Path) > 4096 { return errors.New("path: too long") }
+	if v.SizeBytes < 0 { return errors.New("size_bytes: too small") }
+	if len(v.UploadedAt) < 1 { return errors.New("uploaded_at: too short") }
+	if len(v.UploadedAt) > 64 { return errors.New("uploaded_at: too long") }
+	return nil
+}
+
 // User generated from config schema
 type User struct {
 	Disabled bool `json:"disabled" genapi:"disabled"`
@@ -797,7 +851,7 @@ func (v UserCreateReq) Valid() error {
 
 // UserList generated from config schema
 type UserList struct {
-	Users []jsontext.Value `json:"users" genapi:"users"`
+	Users []User `json:"users" genapi:"users"`
 }
 
 // Valid validates UserList fields against schema constraints.

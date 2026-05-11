@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -10,150 +9,105 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	gen "geodedb.com/geode-ui/gen/pkg/gen"
+	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
-// Hand-rolled multipart upload endpoints — outside the genapi surface.
+// Multipart upload endpoints — declared in geode.json and emitted by
+// genapi as proper typed routes (GAP-Q5 #34):
 //
-//   POST /api/v1/backups/upload    -> HandleBackupUpload
-//   POST /api/v1/migrations/upload -> HandleMigrationUpload
+//   POST /api/v1/backups/upload    -> BackupUpload    (BackupUploadReq    -> UploadResp)
+//   POST /api/v1/migrations/upload -> MigrationUpload (MigrationUploadReq -> UploadResp)
 //
-// Wire dialect quirks aside, these endpoints stage files on local disk so
-// the operator can later reference them by name from RestorePage /
-// MigrationsPage. v0.5.11 doesn't actually accept RESTORE / CREATE
-// MIGRATION over the wire — the existing handlers translate that to a
-// 501 wire_feature_missing — but staging the files now means a future
-// Geode that does accept these verbs becomes a one-line plumbing change.
+// The genapi-emitted wrapper (gen/api/handlers_gen.go) already does the
+// heavy lifting before these handlers run:
+//   - JWT auth (auth: "jwt") + admin-role enforcement (required_roles:
+//     ["admin"]) — same gate as the rest of the /api/v1/backups and
+//     /api/v1/migrations surface.
+//   - 64 MiB request body cap (maxBodyBytes: 67108864) via
+//     http.MaxBytesReader before multipart parsing.
+//   - r.ParseMultipartForm + r.FormFile("file") + the per-file maxSize
+//     check, handing us req.File as an open *gen.FileUpload, and a
+//     defer that calls r.MultipartForm.RemoveAll() after we return.
 //
-// Both handlers share:
-//   - JWT auth (via AuthJWT) and admin-role enforcement (claims.Roles
-//     must contain "admin" — same gate genapi puts on the rest of the
-//     /api/v1/backups and /api/v1/migrations surface).
-//   - 64 MiB request body cap (configurable via maxUploadBytes).
-//   - Filename sanitisation: only [A-Za-z0-9._-] survive, anything else
-//     including path separators and NULs is rejected with 400. Empty
-//     filenames after stripping are also rejected. This keeps an attacker
-//     from writing outside UploadDir via "../../etc/passwd" style names.
+// So these handlers only own the disk-side concerns:
+//   - Filename sanitisation: only [A-Za-z0-9._-] survive; path
+//     separators, NULs, and "."/".." are rejected with 400. This keeps
+//     an attacker from writing outside UploadDir via "../../etc/passwd"
+//     style names.
 //   - Atomic write: file lands as <name>.tmp first, then os.Rename'd
 //     onto the final path, so a partial upload never leaves a half-
 //     written file with a real-looking name.
-
-// maxUploadBytes is the hard cap on total request size for an upload.
-// Geode backup files are typically a few hundred MiB at most for the
-// graphs we expect to host through this admin SPA; 64 MiB is small but
-// matches what the admin tooling uploads in practice for the v0.5.x
-// branch. Bump in main.go via -upload-dir-max if a real deployment
-// needs larger files.
-const maxUploadBytes = 64 << 20 // 64 MiB
+//   - The 503 when the server was started without -upload-dir.
+//
+// Wire dialect note: v0.5.x doesn't accept RESTORE / CREATE MIGRATION
+// over the wire, so these endpoints just stage files on local disk for
+// an operator to pick up — a future Geode that grows those verbs makes
+// the postBackups / postMigrations plumbing a one-line change.
 
 // safeNameRE pins what characters are allowed in an uploaded filename.
-// This is intentionally stricter than POSIX filename rules — we reject
-// spaces and Unicode to keep audit logs greppable and to avoid surprises
-// with shell-quoting in operator workflows.
+// Intentionally stricter than POSIX filename rules — we reject spaces
+// and Unicode to keep audit logs greppable and to avoid surprises with
+// shell-quoting in operator workflows.
 var safeNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// uploadResponse is the JSON shape returned on a successful upload.
-type uploadResponse struct {
-	File       string `json:"file"`        // sanitised filename used on disk
-	SizeBytes  int64  `json:"size_bytes"`  // bytes actually written
-	Path       string `json:"path"`        // absolute path on the server
-	UploadedAt string `json:"uploaded_at"` // RFC3339, server clock
+// BackupUpload stages an uploaded backup file under <UploadDir>/backups/.
+// Generated route: POST /api/v1/backups/upload.
+func (s *GraphServer) BackupUpload(w http.ResponseWriter, r *http.Request, req *gentypes.BackupUploadReq) (*gentypes.UploadResp, error) {
+	var f *gen.FileUpload
+	if req != nil {
+		f = req.File
+	}
+	return s.stageUpload(w, r, f, "backups", auditEventBackupCreated)
 }
 
-// HandleBackupUpload is the HTTP entry for POST /api/v1/backups/upload.
-// Files land under <UploadDir>/backups/<filename>.
-func (s *GraphServer) HandleBackupUpload(w http.ResponseWriter, r *http.Request) {
-	s.handleUpload(w, r, "backups", auditEventBackupCreated)
+// MigrationUpload stages an uploaded migration file under
+// <UploadDir>/migrations/. Generated route: POST /api/v1/migrations/upload.
+func (s *GraphServer) MigrationUpload(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationUploadReq) (*gentypes.UploadResp, error) {
+	var f *gen.FileUpload
+	if req != nil {
+		f = req.File
+	}
+	return s.stageUpload(w, r, f, "migrations", auditEventMigrationCreated)
 }
 
-// HandleMigrationUpload is the HTTP entry for POST /api/v1/migrations/upload.
-// Files land under <UploadDir>/migrations/<filename>.
-func (s *GraphServer) HandleMigrationUpload(w http.ResponseWriter, r *http.Request) {
-	s.handleUpload(w, r, "migrations", auditEventMigrationCreated)
-}
-
-// handleUpload is the shared body for both upload endpoints. subdir is
+// stageUpload is the shared body for both upload endpoints. subdir is
 // the per-kind subdirectory ("backups" or "migrations"); auditEvent is
 // emitted on success so the audit log shows the operator who staged the
-// file alongside the backup_created / migration_created events that
+// file alongside the backup_created / migration_created events the
 // genapi-emitted creation handlers will eventually produce.
-func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdir, auditEvent string) {
-	if r.Method != http.MethodPost {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusMethodNotAllowed,
-			code:        "method_not_allowed",
-			description: "upload requires POST",
-		})
-		return
-	}
+//
+// On a fine-grained client/server error it writes the response via w
+// (the genapi wrapper only maps a non-nil error to 500/501) and returns
+// (nil, nil) so the wrapper writes nothing further. On success it
+// returns the typed UploadResp and the wrapper marshals it (200).
+func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *gen.FileUpload, subdir, auditEvent string) (*gentypes.UploadResp, error) {
 	if s.cfg.UploadDir == "" {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusServiceUnavailable,
 			code:        "upload_disabled",
 			description: "server started without -upload-dir; uploads disabled",
 		})
-		return
+		return nil, nil
 	}
-	if err := s.AuthJWT(r); err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusUnauthorized,
-			code:        "unauthenticated",
-			description: err.Error(),
-		})
-		return
-	}
-	if !hasAdminRole(rolesFromContext(r.Context())) {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusForbidden,
-			code:        "insufficient_role",
-			description: "admin role required for uploads",
-		})
-		return
-	}
-
-	// MaxBytesReader caps the request body before we touch multipart
-	// parsing, so an attacker sending an enormous Content-Length cannot
-	// fill the disk via a single request.
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
-		// http.MaxBytesError lands here as well; the description below
-		// is intentionally generic so the body cap implementation is
-		// not part of the public surface.
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeEndpointError(w, &endpointError{
-				status:      http.StatusRequestEntityTooLarge,
-				code:        "upload_too_large",
-				description: "upload exceeds 64 MiB cap",
-			})
-			return
-		}
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusBadRequest,
-			code:        "bad_multipart",
-			description: "could not parse multipart body: " + err.Error(),
-		})
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
+	if file == nil || file.Reader == nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadRequest,
 			code:        "missing_file",
 			description: `multipart field "file" is required`,
 		})
-		return
+		return nil, nil
 	}
-	defer func() { _ = file.Close() }()
 
-	name, err := sanitiseUploadName(header.Filename)
+	name, err := sanitiseUploadName(file.Filename)
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadRequest,
 			code:        "invalid_filename",
 			description: err.Error(),
 		})
-		return
+		return nil, nil
 	}
 
 	dir := filepath.Join(s.cfg.UploadDir, subdir)
@@ -163,7 +117,7 @@ func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdi
 			code:        "upload_dir_failed",
 			description: "could not create upload dir: " + err.Error(),
 		})
-		return
+		return nil, nil
 	}
 
 	finalPath := filepath.Join(dir, name)
@@ -175,9 +129,9 @@ func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdi
 			code:        "upload_open_failed",
 			description: "could not open destination: " + err.Error(),
 		})
-		return
+		return nil, nil
 	}
-	n, copyErr := io.Copy(out, file)
+	n, copyErr := io.Copy(out, file.Reader)
 	closeErr := out.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmpPath)
@@ -186,7 +140,7 @@ func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdi
 			code:        "upload_write_failed",
 			description: "could not write file: " + copyErr.Error(),
 		})
-		return
+		return nil, nil
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmpPath)
@@ -195,7 +149,7 @@ func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdi
 			code:        "upload_close_failed",
 			description: "could not close file: " + closeErr.Error(),
 		})
-		return
+		return nil, nil
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
@@ -204,7 +158,7 @@ func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdi
 			code:        "upload_rename_failed",
 			description: "could not finalise upload: " + err.Error(),
 		})
-		return
+		return nil, nil
 	}
 
 	emitAudit(auditEvent,
@@ -215,24 +169,20 @@ func (s *GraphServer) handleUpload(w http.ResponseWriter, r *http.Request, subdi
 		"source", "upload",
 	)
 
-	resp := uploadResponse{
+	return &gentypes.UploadResp{
 		File:       name,
 		SizeBytes:  n,
 		Path:       finalPath,
 		UploadedAt: timeNow().UTC().Format(time.RFC3339),
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.MarshalWrite(w, resp)
+	}, nil
 }
 
-// sanitiseUploadName verifies the multipart-supplied filename is a
-// pure basename matching safeNameRE. Names that already contain path
-// separators ("/", "\") or directory traversal markers (".", "..") are
+// sanitiseUploadName verifies the multipart-supplied filename is a pure
+// basename matching safeNameRE. Names that already contain path
+// separators ("/", "\") or directory-traversal markers (".", "..") are
 // rejected outright rather than silently collapsed via filepath.Base —
-// silently dropping path components hides the caller's intent (was it
-// a buggy client or an attack?) and audit logs lose the original
-// filename anyway.
+// silently dropping path components hides the caller's intent (buggy
+// client or attack?) and audit logs lose the original filename anyway.
 func sanitiseUploadName(name string) (string, error) {
 	if name == "" || name == "." || name == ".." {
 		return "", errInvalidUploadName
@@ -251,18 +201,6 @@ func sanitiseUploadName(name string) (string, error) {
 		return "", errInvalidUploadName
 	}
 	return name, nil
-}
-
-// hasAdminRole reports whether roles contains "admin" (case-insensitive,
-// matching the JWT.Issue/securex.RoleFromString convention used elsewhere
-// in the package).
-func hasAdminRole(roles []string) bool {
-	for _, r := range roles {
-		if strings.EqualFold(r, "admin") {
-			return true
-		}
-	}
-	return false
 }
 
 // errInvalidUploadName surfaces when a multipart filename contains

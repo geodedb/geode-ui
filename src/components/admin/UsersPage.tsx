@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
+import type { User } from '@api'
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
 import {
@@ -25,17 +26,11 @@ import {
 //   disable POST   /api/v1/users/{name}/disable -> client.disable
 //   enable  POST   /api/v1/users/{name}/enable  -> client.enable
 //
-// `UserList.users` is `Array<unknown>` in the genapi-emitted spec
-// (the server returns an array of arbitrary records); UsersPage casts
-// each entry to a structural User shape because the runtime payload is
-// stable and the rendering code only touches well-known fields.
-type User = {
-  username: string
-  email: string
-  roles?: string[]
-  disabled?: boolean
-  mfa_enrolled?: boolean
-}
+// GAP-Q8 (#38): `UserList.users` is now the typed `User[]` in the
+// genapi-emitted spec (the server projects the runtime-discovered
+// `SHOW USERS` columns onto the typed struct), so this page imports
+// `User` from `@api` instead of re-declaring a structural shadow and
+// casting `Array<unknown>`.
 
 const ToolBar = styled.header`
   display: flex;
@@ -86,9 +81,9 @@ export const UsersPage: React.FC = () => {
     refetch,
   } = useApiResource(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async (_signal) => {
+    async (_signal): Promise<User[]> => {
       const r = await client.getUsers({})
-      return ((r.users ?? []) as User[]) ?? []
+      return r.users ?? []
     },
     []
   )

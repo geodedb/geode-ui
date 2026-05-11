@@ -3,12 +3,10 @@ package server
 import (
 	"context"
 	"database/sql"
-	"encoding/json/v2"
 	"errors"
-	"fmt"
+	"log/slog"
 	"net/http"
-
-	"encoding/json/jsontext"
+	"sync"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
@@ -51,6 +49,16 @@ import (
 // statements stay injection-safe.
 
 // GetUsers implements GET /api/v1/users (list users).
+//
+// GAP-Q8 (#38): the response is now the typed `[]gentypes.User`
+// (UserList.users is `array<User>` in geode.json) instead of
+// `[]jsontext.Value`. The underlying `SHOW USERS` columns are
+// runtime-discovered, so each driver row is funnelled through
+// userFromRow, which projects the columns geode-ui knows about
+// (username/name, email, roles, disabled, mfa_enrolled) onto the
+// typed struct and drops unknowns (with a one-line drift warning so a
+// future Geode column addition is visible in logs without a wire-shape
+// regression).
 func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.UserList, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
@@ -59,18 +67,13 @@ func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentyp
 	rows, cols, err := runQuery(r.Context(), db, "SHOW USERS")
 	if err != nil {
 		if isWireFeatureMissing(err) {
-			return &gentypes.UserList{Users: []jsontext.Value{}}, nil
+			return &gentypes.UserList{Users: []gentypes.User{}}, nil
 		}
 		return nil, respondErr(w, wireErr(err))
 	}
-	out := make([]jsontext.Value, 0, len(rows))
+	out := make([]gentypes.User, 0, len(rows))
 	for _, row := range rows {
-		obj := rowToMap(cols, row)
-		raw, mErr := json.Marshal(obj)
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal user row: %w", mErr)
-		}
-		out = append(out, jsontext.Value(raw))
+		out = append(out, *userFromRow(cols, row))
 	}
 	return &gentypes.UserList{Users: out}, nil
 }
@@ -350,6 +353,12 @@ func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, 
 }
 
 // Permissions implements GET /api/v1/users/{username}/permissions.
+//
+// GAP-Q8 (#38): returns the typed `[]gentypes.Permission` (the
+// PermissionList.permissions schema is `array<Permission>`) projected
+// from the runtime-discovered `SHOW PERMISSIONS FOR USER` columns via
+// permissionFromRow (known columns: permission, resource, scope;
+// unknowns dropped with a drift warning).
 func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.PermissionList, error) {
 	var resp *gentypes.PermissionList
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
@@ -357,19 +366,9 @@ func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *g
 		if qErr != nil {
 			return wireErr(qErr)
 		}
-		out := make([]jsontext.Value, 0, len(rows))
+		out := make([]gentypes.Permission, 0, len(rows))
 		for _, row := range rows {
-			obj := make(map[string]any, len(cols))
-			for i, c := range cols {
-				if i < len(row) {
-					obj[c] = row[i]
-				}
-			}
-			raw, mErr := json.Marshal(obj)
-			if mErr != nil {
-				return fmt.Errorf("marshal permission row: %w", mErr)
-			}
-			out = append(out, jsontext.Value(raw))
+			out = append(out, permissionFromRow(cols, row))
 		}
 		resp = &gentypes.PermissionList{Permissions: out}
 		return nil
@@ -467,7 +466,10 @@ func rowToMap(cols []string, row []any) map[string]any {
 
 // userFromRow projects a driver row onto the typed User schema. Columns
 // the driver does not emit are left at the zero value, matching the
-// schema's optional-field semantics.
+// schema's optional-field semantics; columns we do not recognise are
+// dropped (with a one-line drift warning so a future Geode column
+// addition surfaces in logs rather than being silently lost — see
+// GAP-Q8 #38).
 func userFromRow(cols []string, row []any) *gentypes.User {
 	u := &gentypes.User{}
 	for i, c := range cols {
@@ -485,7 +487,57 @@ func userFromRow(cols []string, row []any) *gentypes.User {
 			u.Disabled = asBool(row[i])
 		case "mfa_enrolled":
 			u.MfaEnrolled = asBool(row[i])
+		default:
+			warnRowDrift("SHOW USERS", c)
 		}
 	}
 	return u
+}
+
+// permissionFromRow projects a driver row from `SHOW PERMISSIONS FOR
+// USER` onto the typed Permission schema. Known columns: permission,
+// resource, scope. Unknown columns are dropped with a drift warning.
+func permissionFromRow(cols []string, row []any) gentypes.Permission {
+	var p gentypes.Permission
+	for i, c := range cols {
+		if i >= len(row) {
+			break
+		}
+		switch c {
+		case "permission", "privilege":
+			p.Permission = asStr(row[i])
+		case "resource", "object":
+			p.Resource = asStr(row[i])
+		case "scope", "graph":
+			p.Scope = asStr(row[i])
+		default:
+			warnRowDrift("SHOW PERMISSIONS", c)
+		}
+	}
+	return p
+}
+
+// driftSeen deduplicates the per-(statement,column) drift warning so a
+// large result set does not spam the log with one line per row.
+var driftSeen = struct {
+	mu  sync.Mutex
+	set map[string]struct{}
+}{set: map[string]struct{}{}}
+
+// warnRowDrift logs (once per process per statement+column) that a
+// SHOW-catalogue query returned a column the row-projection helper does
+// not map. The data for that column is dropped from the typed response;
+// the warning is the signal to extend the projection (and the geode.json
+// schema) when the upstream Geode catalogue grows.
+func warnRowDrift(stmt, col string) {
+	key := stmt + "\x00" + col
+	driftSeen.mu.Lock()
+	if _, ok := driftSeen.set[key]; ok {
+		driftSeen.mu.Unlock()
+		return
+	}
+	driftSeen.set[key] = struct{}{}
+	driftSeen.mu.Unlock()
+	slog.Warn("row-projection drift: unmapped column dropped from typed response",
+		"statement", stmt, "column", col)
 }

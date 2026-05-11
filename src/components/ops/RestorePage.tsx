@@ -4,8 +4,6 @@ import { useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
-import { auth } from '../../api/auth'
-import { getCsrfToken } from '../../api/csrf'
 import type { Theme } from '../../theme'
 import { Button, Field, Input, Stack } from '../ui'
 
@@ -88,11 +86,14 @@ export const RestorePage: React.FC = () => {
     }
   }
 
-  // onUpload posts the selected file to the hand-rolled multipart
-  // endpoint /api/v1/backups/upload. Server validates filename
-  // (alphanumeric+._- only), enforces 64 MiB cap, and returns the
-  // stored filename. We populate the `file` field with the result so
-  // the operator can immediately submit Restore against it.
+  // onUpload posts the selected file via the typed multipart endpoint
+  // (GAP-Q5 #34: `client.backupUpload` is generated from the
+  // `"type": "file"` request schema in geode.json — it builds the
+  // FormData and POSTs `multipart/form-data`; the shared fetch wrapper
+  // in api/client.ts attaches cookie/CSRF/bearer auth). Server
+  // validates the filename (alphanumeric+._- only), enforces the
+  // 64 MiB cap, and returns the stored filename + size; we populate
+  // the `file` field so the operator can submit Restore against it.
   const onUpload = async (
     e: React.ChangeEvent<HTMLInputElement>
   ): Promise<void> => {
@@ -102,37 +103,13 @@ export const RestorePage: React.FC = () => {
     setErr(null)
     setOkMsg(null)
     try {
-      const form = new FormData()
-      form.append('file', f)
-      // SEC-F7 (#62 S3c): cookie carries the JWT (credentials:
-      // 'same-origin'); CSRF header must accompany state-changing
-      // requests. The legacy bearer path is retained for the backout
-      // flag escape hatch.
-      const tok = auth.getToken() ?? ''
-      const csrf = getCsrfToken()
-      const headers: Record<string, string> = {}
-      if (tok) headers.Authorization = `Bearer ${tok}`
-      if (csrf) headers['X-CSRF-Token'] = csrf
-      const res = await fetch('/api/v1/backups/upload', {
-        method: 'POST',
-        headers,
-        body: form,
-        credentials: 'same-origin',
+      const resp = await client.backupUpload({
+        file: { blob: f, filename: f.name, contentType: f.type || undefined },
       })
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as {
-          error_description?: string
-          error?: string
-        }
-        throw new Error(
-          j.error_description ||
-            j.error ||
-            t('errors.uploadFailed', { status: res.status })
-        )
-      }
-      const j = (await res.json()) as { file: string; size_bytes: number }
-      setFile(j.file)
-      setOkMsg(t('restore.uploaded', { name: j.file, size: j.size_bytes }))
+      setFile(resp.file)
+      setOkMsg(
+        t('restore.uploaded', { name: resp.file, size: resp.size_bytes })
+      )
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
     } finally {

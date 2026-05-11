@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json/v2"
 	"errors"
 	"io"
 	"net/http"
@@ -103,7 +102,8 @@ func newUserStubServer(t *testing.T, name string, d *userDriver) *GraphServer {
 }
 
 // TestUsers_List_HappyPath fakes a SHOW USERS row set and asserts the
-// response materialises into the open-schema UserList.
+// response materialises into the typed UserList (GAP-Q8: User entries,
+// not []jsontext.Value).
 func TestUsers_List_HappyPath(t *testing.T) {
 	d := &userDriver{
 		cols: []string{"username", "email", "disabled", "mfa_enrolled"},
@@ -127,12 +127,69 @@ func TestUsers_List_HappyPath(t *testing.T) {
 	if len(stmts) != 1 || stmts[0] != "SHOW USERS" {
 		t.Fatalf("stmts=%v want [SHOW USERS]", stmts)
 	}
-	var first map[string]any
-	if err := json.Unmarshal(resp.Users[0], &first); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	first := resp.Users[0]
+	if first.Username != "alice" || first.Email != "alice@example.com" {
+		t.Fatalf("first row=%+v missing expected fields", first)
 	}
-	if first["username"] != "alice" || first["email"] != "alice@example.com" {
-		t.Fatalf("first row=%v missing expected fields", first)
+	if first.Disabled != false || first.MfaEnrolled != true {
+		t.Fatalf("first row flags wrong: %+v", first)
+	}
+	if resp.Users[1].Username != "bob" || resp.Users[1].Disabled != true {
+		t.Fatalf("second row=%+v", resp.Users[1])
+	}
+}
+
+// TestUsers_List_TypedProjectionDropsUnknownColumns confirms a SHOW
+// USERS row carrying an unrecognised column is projected onto the typed
+// User without panic and the unknown column is dropped (GAP-Q8 drift
+// handling — the data loss is intentional and logged once).
+func TestUsers_List_TypedProjectionDropsUnknownColumns(t *testing.T) {
+	d := &userDriver{
+		cols: []string{"username", "email", "future_column"},
+		rows: [][]driver.Value{
+			{"carol", "carol@example.com", "surprise"},
+		},
+	}
+	s := newUserStubServer(t, "users_list_drift", d)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users", nil)
+	resp, err := s.GetUsers(rec, req, &gentypes.Empty{})
+	if err != nil {
+		t.Fatalf("GetUsers: %v", err)
+	}
+	if len(resp.Users) != 1 || resp.Users[0].Username != "carol" || resp.Users[0].Email != "carol@example.com" {
+		t.Fatalf("unexpected projection: %+v", resp.Users)
+	}
+}
+
+// TestUsers_Permissions_Typed fakes a SHOW PERMISSIONS FOR USER row
+// set and asserts the typed PermissionList projection (GAP-Q8).
+func TestUsers_Permissions_Typed(t *testing.T) {
+	d := &userDriver{
+		cols: []string{"permission", "resource", "scope"},
+		rows: [][]driver.Value{
+			{"READ", "graph:demo", "node"},
+			{"WRITE", "graph:demo", "edge"},
+		},
+	}
+	s := newUserStubServer(t, "users_perms_typed", d)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/alice/permissions", nil)
+	resp, err := s.Permissions(rec, req, &gentypes.UsernameParam{Username: "alice"})
+	if err != nil {
+		t.Fatalf("Permissions: %v", err)
+	}
+	if len(resp.Permissions) != 2 {
+		t.Fatalf("len(Permissions)=%d want 2", len(resp.Permissions))
+	}
+	if resp.Permissions[0].Permission != "READ" || resp.Permissions[0].Resource != "graph:demo" || resp.Permissions[0].Scope != "node" {
+		t.Fatalf("first permission=%+v", resp.Permissions[0])
+	}
+	stmts := d.seen()
+	if len(stmts) != 1 || stmts[0] != "SHOW PERMISSIONS FOR USER `alice`" {
+		t.Fatalf("stmts=%v want [SHOW PERMISSIONS FOR USER `alice`]", stmts)
 	}
 }
 

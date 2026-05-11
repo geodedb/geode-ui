@@ -3,8 +3,6 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
-import { auth } from '../../api/auth'
-import { getCsrfToken } from '../../api/csrf'
 import { useApiResource } from '../../hooks/useApiResource'
 import {
   Button,
@@ -260,7 +258,11 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
   const [err, setErr] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Stage the migration content via the multipart endpoint. Server
+  // Stage the migration content via the typed multipart endpoint
+  // (GAP-Q5 #34: `client.migrationUpload` is generated from the
+  // `"type": "file"` request schema in geode.json — it builds the
+  // FormData and POSTs `multipart/form-data`; the shared fetch wrapper
+  // in api/client.ts attaches the cookie/CSRF/bearer auth). Server
   // returns the canonical filename; we record it locally so the
   // subsequent postMigrations call can reference it once Geode's wire
   // dialect grows a "CREATE MIGRATION FROM FILE" form. Today the file
@@ -273,42 +275,14 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
     setUploading(true)
     setErr(null)
     try {
-      const form = new FormData()
-      form.append('file', f)
-      // SEC-F7 (#62 S3c): cookie-mode auth carries the JWT via the
-      // browser-managed geode-ui-auth cookie on credentials:'same-origin'.
-      // For a state-changing POST we must also attach the X-CSRF-Token
-      // header that pairs with the geode-ui-csrf cookie. The legacy
-      // bearer-token path is preserved when the backout flag is set
-      // (auth.getToken() returns the stored token only in legacy mode).
-      const tok = auth.getToken() ?? ''
-      const csrf = getCsrfToken()
-      const headers: Record<string, string> = {}
-      if (tok) headers.Authorization = `Bearer ${tok}`
-      if (csrf) headers['X-CSRF-Token'] = csrf
-      const res = await fetch('/api/v1/migrations/upload', {
-        method: 'POST',
-        headers,
-        body: form,
-        credentials: 'same-origin',
+      const resp = await client.migrationUpload({
+        file: { blob: f, filename: f.name, contentType: f.type || undefined },
       })
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as {
-          error_description?: string
-          error?: string
-        }
-        throw new Error(
-          j.error_description ||
-            j.error ||
-            t('errors.uploadFailed', { status: res.status })
-        )
-      }
-      const j = (await res.json()) as { file: string }
-      setUploadedFile(j.file)
+      setUploadedFile(resp.file)
       // Default the migration name to the upload filename if the
       // operator hasn't typed one yet.
       if (!name) {
-        setName(j.file.replace(/\.[^.]+$/, ''))
+        setName(resp.file.replace(/\.[^.]+$/, ''))
       }
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))

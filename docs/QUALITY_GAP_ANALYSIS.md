@@ -37,10 +37,10 @@ their own GAP files.
 | Q2  | Extract shared `useApiResource` hook with AbortController **[CLOSED]** | High   |    80 | [#29](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/29)              | `src/hooks/useApiResource.ts` (new); migrated `UsersPage.tsx`, `RolesPage.tsx`, `PoliciesPage.tsx`, `BackupPage.tsx`, `MigrationsPage.tsx`, `AuditLogPage.tsx` (6 pages; `RestorePage.tsx` had no on-mount fetch to migrate) | **Closed** 2026-05-07 (`2b28b85`) -- hook owns AbortController + mounted/aborted guards; pages call `refetch()` after mutations. AuditLogPage poll gated on `document.visibilityState`. |
 | Q3  | Rename `userDB`/`userErr`/`userResponseErr`/`userRowToMap`           | High     |    80 | [#31](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/31)              | `internal/server/{errors,handlers_users,handlers_backups,handlers_grants,handlers_policies,handlers_migrations,handlers_roles}.go` | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q3-31-rename-user-helpers-to-drop-misleading-prefix-resolved). Closure commit `dfbe67a`. Package-wide rename: `userDB`→`connDB` (per-request `*sql.DB` for any wire-level handler), `userErr`→`wireErr` (driver-level wrap with 422/501 split), `userResponseErr`→`respondErr` (inline-write + return-nil), `userRowToMap`→`rowToMap` (open-shape SHOW-row projection used by users / policies / migrations / backups / roles). Stable HTTP `code` field `user_admin_error` preserved for client-API compatibility. Doc comments updated; `userFromRow` (genuinely user-typed) and `userFromContext` (actual current-user accessor) intentionally kept. `make go-test` and `make go-lint` clean. |
 | Q4  | `PatchUsername` runs 3 statements without a transaction              | High     |    80 | [#32](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/32)              | `internal/server/handlers_users.go:154-171`                                                                      | **Closed** 2026-05-07 (`af74e47`) -- Email/Password/Roles wrapped in BEGIN/COMMIT with rollback-on-error; tests cover partial-failure paths. |
-| Q5  | MigrationsPage raw fetch bypasses typed `@api` client                | Medium   |    48 | [#34](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/34)              | `src/components/ops/MigrationsPage.tsx:305-318`                                                                  | **Deferred** 2026-05-10 — requires a separate genapi work cycle: needs `multipart/form-data` request-body support added to the genapi schema (currently the `requestBody` shape only emits JSON marshallers in `cmd/genapi/templates/client_react.ts.tmpl` and `client_go_rest.go.tmpl`). Schema must distinguish file-upload endpoints so the React client emits a `FormData` builder instead of a JSON serializer, and so the Go handler template wires `r.ParseMultipartForm` upstream of the typed handler. Tracked at genapi#216. |
+| Q5  | MigrationsPage raw fetch bypasses typed `@api` client                | Medium   |    48 | [#34](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/34)              | `src/components/ops/MigrationsPage.tsx`, `src/components/ops/RestorePage.tsx`, `internal/server/handlers_uploads.go`, `geode.json`                | **Closed** 2026-05-11 — genapi already supports `"type": "file"` request-schema properties (multipart `multipart/form-data` handling: the React client emits a `FormData` builder + `multipart` bodyMode; the Go handler template wires `r.ParseMultipartForm` + `r.FormFile` + the per-file `maxSize` check upstream of the typed handler). The two upload endpoints (`POST /api/v1/backups/upload`, `POST /api/v1/migrations/upload`) are now declared in `geode.json` with `BackupUploadReq` / `MigrationUploadReq` (`{"file": {"type": "file", "maxSize": 67108864}}`) → `UploadResp`, the hand-rolled `mux.HandleFunc` calls are gone from `cmd/server/main.go`, and `internal/server/handlers_uploads.go` implements the generated `BackupUpload` / `MigrationUpload` methods (JWT auth + admin-role + 64 MiB cap + multipart parsing now come from the genapi wrapper; the handler owns only filename sanitisation, atomic write, the 503-when-no-upload-dir, and the audit event). `MigrationsPage.tsx` and `RestorePage.tsx` call `client.migrationUpload({file: {blob, filename, contentType}})` / `client.backupUpload(...)` — the FormData and `multipart/form-data` Content-Type are built by the generated client, with the cookie/CSRF/bearer auth attached by the shared `api/client.ts` fetch wrapper. Tests: `internal/server/handlers_uploads_test.go` rewritten to drive the typed handlers; `e2e/specs/09-ops.spec.ts` exercises the upload flow over the same HTTP path. |
 | Q6  | `isWireFeatureMissing` substring sniffing of driver messages         | Medium   |    48 | [#36](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/36)              | `internal/server/errors.go:88-172` (was `util.go:144-162` pre-Q3 rename)                                          | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q6-36-typed-errors-for-iswirefeaturemissing-resolved). Closure commit `c949e8a`. Three-tier detection: (1) explicit `errWireFeatureMissing` sentinel callers can wrap via `%w`, (2) typed `statusClasser.StatusClass()=="42000"` via `errors.As`, (3) pinned-substring fallback. Accepted substrings live in `wireFeatureMissingSubstrings`; new file `internal/server/errors_test.go` exhaustively pins each entry — drift trips a loud test failure, not a silent behaviour change. Also covers `wireErr` upgrade-to-501 path. |
 | Q7  | `emitAudit` errors swallowed at 8 call sites                         | Medium   |    48 | [#37](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/37)              | `internal/server/handlers_users.go:107, :188, :238, :265` and `handlers_backups.go:119, :177, :203, :235`        | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q7-37-safeemitaudit-policy-across-handler-sites-resolved). Closure commit `3c5c8fe`. Policy chosen: **best-effort log+continue** (audit is observability, not a security gate). `emitAudit` returns `void` by design; the policy is now sealed inside the helper via `defer recover()` that catches any slog/handler/ringbuffer panic and writes a one-line `AUDIT EMISSION FAILED ...` warning **directly to os.Stderr** (NOT via slog/log, which Go 1.21+ routes through slog and would re-panic on a broken handler). Test `TestEmitAudit_LogContinuePolicy` proves the policy with an injecting `panicHandler` slog sink. The pre-existing 8 call sites need no change because the function never had an error return — the gap-row count is preserved as historical context. |
-| Q8  | Inconsistent contract: typed `User`/`Permission` vs `[]jsontext.Value` | Medium |    48 | [#38](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/38)              | `internal/server/handlers_users.go:53-302`                                                                       | **Deferred** 2026-05-10 — requires a separate genapi work cycle: the list-response handlers currently emit `[]jsontext.Value` because the underlying SHOW USERS / SHOW PERMISSIONS rows are open-shape and the genapi schema has no way to model "row whose columns are runtime-discovered but each cell is a JSON scalar". Closing Q8 requires either (a) a schema mechanism for declaring typed lists with optional/dynamic columns (drift safe), or (b) per-endpoint generated row-projection helpers that match the SHOW catalogue. Tracked at genapi#216. |
+| Q8  | Inconsistent contract: typed `User`/`Permission` vs `[]jsontext.Value` | Medium |    48 | [#38](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/38)              | `internal/server/handlers_users.go`, `geode.json`, `src/components/admin/UsersPage.tsx`                          | **Closed** 2026-05-11 — no genapi change needed: genapi already supports typed list items via `"items": {"$ref": "Schema"}`, and geode-ui already had a hand-rolled `userFromRow` row-projection helper for the single-user endpoint. `geode.json` now declares `UserList.users` as `array<User>` and adds a `Permission` schema (`permission`/`resource`/`scope`) with `PermissionList.permissions` as `array<Permission>` — so `gen/types/types.gen.go` emits `UserList.Users []User` and `PermissionList.Permissions []Permission` and the React client gets typed `User[]` / `Permission[]`. `GetUsers` / `Permissions` in `handlers_users.go` build the typed slices via `userFromRow` / new `permissionFromRow`, which project the runtime-discovered `SHOW USERS` / `SHOW PERMISSIONS FOR USER` columns onto the known fields and drop unknowns with a once-per-process `warnRowDrift` log (so a future Geode catalogue column addition is visible in logs without a wire-shape regression). `src/components/admin/UsersPage.tsx` imports `User` from `@api` instead of re-declaring a structural shadow + casting `Array<unknown>`. Tests: `internal/server/handlers_users_test.go` (typed list happy-path, drift-drops-unknown-column, typed Permissions). |
 | Q9  | DRY: 9 user handlers repeat `connDB`+`quoteIdent` preamble           | Medium   |    40 | [#41](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/41)              | `internal/server/handlers_users.go` (9 sites)                                                                    | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q9-41-extract-withconndbandident-helper-resolved). Closure commit `1b227da`. `withConnDBAndIdent(ctx, name, fn)` extracted in `handlers_users.go`; the 8 handler sites that pair `connDB` with `quoteIdent` (PostUsers, GetUsername, PatchUsername, DeleteUsername, Password, PostUsernameRoles, Permissions, toggleUser) now route through it. `GetUsers` retains the bare `connDB` call (no username to quote). Table-driven test `TestWithConnDBAndIdent_TableDriven` covers happy path, missing-active-connection (502 profile_unreachable), and invalid identifier (400 invalid_username). |
 | Q11 | Drop `@types/cytoscape` — blocks `make web-build`                    | Medium   |    40 | [#43](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/43)              | `package.json` devDependencies                                                                                    | **Closed** 2026-05-07 (`1fda90a`, `0e22763`) -- stub removed; tsc errors uncovered by removal fixed in follow-up commit; `make web-build` now succeeds. |
 | Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | `.pre-commit-config.yaml:130` runs `scripts/run-go.sh tool-golangci` at pre-push | **Closed** — `golangci-lint` already wired into the pre-push hook gauntlet. Output is enforced (commits/pushes are blocked on findings; QF1001/QF1008/unused already burned down). |
@@ -52,7 +52,7 @@ their own GAP files.
 ### Counts by Severity
 
 - High: 4 (4 closed: Q1, Q2, Q3 (2026-05-10), Q4)
-- Medium: 6 (4 closed: Q11, Q6, Q7, Q9; 2 deferred to genapi#216: Q5, Q8)
+- Medium: 6 (6 closed: Q11, Q6, Q7, Q9, Q5 (2026-05-11), Q8 (2026-05-11))
 - Low: 5 (3 closed: Q13, Q15 + Q12 deferred-not-tracked-as-bug; 2 open: Q14, Q10)
 
 ### Closure run 2026-05-08
@@ -85,7 +85,7 @@ their own GAP files.
 ### Counts after 2026-05-08 audit pass
 
 - High: 5 (Q-NEW-1 + Q1, Q2, Q3, Q4 — all closed)
-- Medium: 7 (3 closed: Q11, Q-NEW-2, Q-NEW-3; 4 open: Q5, Q6, Q7, Q8, Q9 + tooling T1/T2)
+- Medium: 7 (closed: Q11, Q-NEW-2, Q-NEW-3, Q5 (2026-05-11), Q6, Q7, Q8 (2026-05-11), Q9; tooling T1/T2 open)
 - Low: 9 (4 closed: Q10, Q13, Q14 deferred-CI, Q15; 5 open: Q-NEW-4 through Q-NEW-T4)
 
 ## Findings by Category
@@ -100,10 +100,16 @@ mostly bookkeeping with an outsized payoff in code-review velocity.
 Q4 (`PatchUsername` non-atomic) is the only finding with a direct production-data risk in
 this batch. Q6 and Q7 are observability traps — they hide failures rather than create them.
 
-### API / Contract (Q5, Q8)
+### API / Contract (Q5, Q8) — closed 2026-05-11
 
-The typed-client boundary is leaking on both sides (raw fetch in TS, raw `jsontext.Value` in
-Go). Best fixed together so the genapi config is the single source of truth.
+The typed-client boundary was leaking on both sides (raw `fetch` in TS for uploads, raw
+`[]jsontext.Value` in Go for the SHOW-catalogue list responses). Both closed by making
+`geode.json` the single source of truth: the upload endpoints are now `"type": "file"`
+multipart routes (typed React client + genapi-emitted multipart handler), and the
+user/permission list schemas are `array<User>` / `array<Permission>` with the
+runtime-discovered columns projected by `userFromRow` / `permissionFromRow` (drift logged,
+not dropped silently). No genapi change was needed for either — both mechanisms already
+exist upstream.
 
 ### Frontend reliability (Q2, Q11)
 
@@ -138,12 +144,16 @@ Standard hygiene. Each is small alone; together they upgrade the floor of every 
 ### Strategic (> 5 days)
 
 - ~~Q5 + Q8 — tighten the typed-client boundary end-to-end (genapi config additions, regenerate
-  client, fix downstream callers, remove `jsontext.Value` from list responses).~~ **Deferred
-  2026-05-10** to a separate genapi work cycle (tracked at genapi#216). Q5 needs
-  `multipart/form-data` request-body support in the genapi schema + React/Go template
-  emitters. Q8 needs either a schema mechanism for typed lists with runtime-discovered
-  columns, or per-endpoint generated row-projection helpers for the SHOW catalogue. Neither
-  is a one-line change in geode-ui; both require coordinated genapi-side schema work.
+  client, fix downstream callers, remove `jsontext.Value` from list responses).~~ **Closed
+  2026-05-11.** Turned out neither needed a genapi change: `"type": "file"` multipart request
+  schemas and `"items": {"$ref": "Schema"}` typed list items both already exist upstream. Q5:
+  the upload endpoints are declared in `geode.json` as multipart routes, the hand-rolled
+  `mux.HandleFunc` is gone, `internal/server/handlers_uploads.go` implements the generated
+  `BackupUpload`/`MigrationUpload`, and `MigrationsPage.tsx`/`RestorePage.tsx` use
+  `client.migrationUpload` / `client.backupUpload`. Q8: `UserList.users` / `PermissionList.permissions`
+  are now `array<User>` / `array<Permission>`, `GetUsers`/`Permissions` project the
+  runtime-discovered SHOW-catalogue columns via `userFromRow`/`permissionFromRow` (drift
+  logged once per process), and `UsersPage.tsx` imports `User` from `@api`.
 
 ## Verdict
 

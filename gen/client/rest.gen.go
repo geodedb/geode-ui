@@ -7,9 +7,12 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"mime/multipart"
+	"net/textproto"
 	"net/http"
 	"net/url"
 	"strings"
+	"geodedb.com/geode-ui/gen/pkg/gen"
 	"geodedb.com/geode-ui/gen/types"
 )
 
@@ -90,6 +93,54 @@ func buildRESTBody(mode string, payload map[string]any) (httpBody, error) {
 			Reader:      strings.NewReader(encoded),
 			ContentType: "application/x-www-form-urlencoded",
 		}, nil
+	case "multipart":
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		for key, value := range payload {
+			switch v := value.(type) {
+			case nil:
+				continue
+			case *gen.FileUpload:
+				if v == nil {
+					continue
+				}
+				if err := writeUploadPart(writer, key, v); err != nil {
+					return httpBody{}, err
+				}
+			case []*gen.FileUpload:
+				for _, item := range v {
+					if item == nil {
+						continue
+					}
+					if err := writeUploadPart(writer, key, item); err != nil {
+						return httpBody{}, err
+					}
+				}
+			default:
+				switch vv := value.(type) {
+				case []string:
+					for _, item := range vv {
+						if err := writer.WriteField(key, item); err != nil {
+							return httpBody{}, err
+						}
+					}
+				case []any:
+					for _, item := range vv {
+						if err := writer.WriteField(key, fmt.Sprint(item)); err != nil {
+							return httpBody{}, err
+						}
+					}
+				default:
+					if err := writer.WriteField(key, fmt.Sprint(value)); err != nil {
+						return httpBody{}, err
+					}
+				}
+			}
+		}
+		if err := writer.Close(); err != nil {
+			return httpBody{}, err
+		}
+		return httpBody{Reader: bytes.NewReader(buf.Bytes()), ContentType: writer.FormDataContentType()}, nil
 	case "json":
 		if len(payload) == 0 {
 			return httpBody{
@@ -119,6 +170,52 @@ func decodeHTTPError(resp *http.Response) error {
 	limited := io.LimitReader(resp.Body, maxRESTResponseBytes)
 	_, _ = io.Copy(&buf, limited)
 	return &HTTPError{StatusCode: resp.StatusCode, Body: buf.Bytes()}
+}
+func writeUploadPart(writer *multipart.Writer, field string, upload *gen.FileUpload) error {
+	if upload == nil || upload.Reader == nil {
+		return fmt.Errorf("upload %q is missing a reader", field)
+	}
+	safeField := sanitizeMultipartDispositionValue(field)
+	if safeField == "" {
+		return fmt.Errorf("upload field name is required")
+	}
+	contentType := sanitizeMultipartHeaderValue(upload.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	filename := sanitizeMultipartDispositionValue(upload.Filename)
+	if filename == "" {
+		filename = safeField
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, safeField, filename))
+	header.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, upload.Reader)
+	return err
+}
+
+func sanitizeMultipartDispositionValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.NewReplacer(
+		"\r", "_",
+		"\n", "_",
+		"\\", "\\\\",
+		`"`, `\"`,
+	).Replace(value)
+	return value
+}
+
+func sanitizeMultipartHeaderValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.NewReplacer(
+		"\r", " ",
+		"\n", " ",
+	).Replace(value)
+	return strings.TrimSpace(value)
 }
 // Audit performs GET /api/v1/audit.
 func (c *Client) Audit(ctx context.Context, req *types.AuditQuery) (*types.AuditList, error) {
@@ -309,6 +406,46 @@ func (c *Client) Cleanup(ctx context.Context, req *types.Empty) (*types.BackupCl
 		return nil, nil
 	}
 	var out types.BackupCleanupResp
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// BackupUpload performs POST /api/v1/backups/upload.
+func (c *Client) BackupUpload(ctx context.Context, req *types.BackupUploadReq) (*types.UploadResp, error) {
+	target, err := c.buildURL("/api/v1/backups/upload")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("multipart", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.UploadResp
 	// PERF-0015: cap response body before streaming decode so a rogue
 	// server cannot exhaust client memory via oversized payloads.
 	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
@@ -773,6 +910,46 @@ func (c *Client) PostMigrationsRun(ctx context.Context, req *types.Empty) (*type
 		return nil, nil
 	}
 	var out types.MigrationRunResp
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// MigrationUpload performs POST /api/v1/migrations/upload.
+func (c *Client) MigrationUpload(ctx context.Context, req *types.MigrationUploadReq) (*types.UploadResp, error) {
+	target, err := c.buildURL("/api/v1/migrations/upload")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("multipart", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.UploadResp
 	// PERF-0015: cap response body before streaming decode so a rogue
 	// server cannot exhaust client memory via oversized payloads.
 	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {

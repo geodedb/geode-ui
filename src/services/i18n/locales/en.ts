@@ -266,7 +266,6 @@ export const en = {
   },
 
   errors: {
-    uploadFailed: 'upload failed ({{status}})',
     queryFailed: 'query failed',
   },
 

@@ -149,19 +149,16 @@ func main() {
 		GlobalBurst: 400,
 	})
 
-	// Hand-rolled multipart upload endpoints — outside genapi because
-	// genapi's request-validator pipeline is JSON-only; multipart is
-	// the natural shape for "upload a backup or migration file".
-	//
-	// IMPORTANT: the method prefix is mandatory. Go 1.22+ ServeMux
-	// detects a conflict with the genapi-emitted `DELETE /api/v1/backups/{file}`
-	// (and similar for migrations) because a method-less pattern like
-	// `/api/v1/backups/upload` is "more specific" but matches more
-	// methods than `DELETE …/{file}`, which makes it ambiguous which
-	// route should win on a DELETE to /api/v1/backups/upload. Pinning
-	// the upload routes to POST removes the ambiguity.
-	mux.HandleFunc("POST /api/v1/backups/upload", srv.HandleBackupUpload)
-	mux.HandleFunc("POST /api/v1/migrations/upload", srv.HandleMigrationUpload)
+	// GAP-Q5 (#34): the multipart upload endpoints
+	// (POST /api/v1/backups/upload, POST /api/v1/migrations/upload) are
+	// now declared in geode.json with a `"type": "file"` request schema
+	// and emitted by genapi as proper typed routes — registered above by
+	// genapi.RegisterGeneratedAPI, implemented as srv.BackupUpload /
+	// srv.MigrationUpload in internal/server/handlers_uploads.go. The
+	// generated wrapper does JWT auth + admin-role enforcement + the
+	// 64 MiB body cap + multipart parsing; the SPA gets a typed
+	// client.backupUpload / client.migrationUpload method that builds
+	// the FormData. No hand-rolled mux.HandleFunc needed any more.
 
 	// SEC-F7 (#62): hand-rolled logout — clears the geode-ui-auth
 	// cookie and returns 204. Anonymous-allowed so a client that has

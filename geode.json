@@ -354,6 +354,17 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/backups/upload",
+      "name": "BackupUpload",
+      "requestSchema": "BackupUploadReq",
+      "responseSchema": "UploadResp",
+      "auth": "jwt",
+      "rateLimit": 10,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 67108864
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/restore",
       "requestSchema": "RestoreReq",
       "responseSchema": "Empty",
@@ -398,6 +409,17 @@
       "auth": "jwt",
       "rateLimit": 20,
       "required_roles": ["admin"]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/migrations/upload",
+      "name": "MigrationUpload",
+      "requestSchema": "MigrationUploadReq",
+      "responseSchema": "UploadResp",
+      "auth": "jwt",
+      "rateLimit": 10,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 67108864
     },
     {
       "method": "GET",
@@ -675,7 +697,7 @@
       "type": "object",
       "required": ["users"],
       "properties": {
-        "users": { "type": "array", "items": { } }
+        "users": { "type": "array", "items": { "$ref": "User" } }
       }
     },
     "UserCreateReq": {
@@ -722,20 +744,19 @@
         "role":     { "type": "string" }
       }
     },
+    "Permission": {
+      "type": "object",
+      "properties": {
+        "permission": { "type": "string" },
+        "resource":   { "type": "string" },
+        "scope":      { "type": "string" }
+      }
+    },
     "PermissionList": {
       "type": "object",
       "required": ["permissions"],
       "properties": {
-        "permissions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "permission": { "type": "string" },
-              "resource":   { "type": "string" }
-            }
-          }
-        }
+        "permissions": { "type": "array", "items": { "$ref": "Permission" } }
       }
     },
     "Role": {
@@ -862,6 +883,30 @@
       "properties": {
         "removed":     { "type": "integer", "minimum": 0 },
         "freed_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "BackupUploadReq": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "file", "maxSize": 67108864 }
+      }
+    },
+    "MigrationUploadReq": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "file", "maxSize": 67108864 }
+      }
+    },
+    "UploadResp": {
+      "type": "object",
+      "required": ["file", "size_bytes", "path", "uploaded_at"],
+      "properties": {
+        "file":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "size_bytes":  { "type": "integer", "minimum": 0 },
+        "path":        { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "uploaded_at": { "type": "string", "minLength": 1, "maxLength": 64 }
       }
     },
     "RestoreReq": {

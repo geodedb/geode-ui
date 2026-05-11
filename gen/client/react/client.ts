@@ -130,6 +130,9 @@ export interface BackupRef {
   path?: string;
   size_bytes?: number;
 }
+export interface BackupUploadReq {
+  file: FileUpload;
+}
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;
 }
@@ -200,13 +203,21 @@ export interface MigrationStatus {
   applied: Array<unknown>;
   pending: Array<string>;
 }
+export interface MigrationUploadReq {
+  file: FileUpload;
+}
 export interface PasswordChangeReq {
   new_password: string;
   old_password?: string;
   username: string;
 }
+export interface Permission {
+  permission?: string;
+  resource?: string;
+  scope?: string;
+}
 export interface PermissionList {
-  permissions: Array<Record<string, unknown>>;
+  permissions: Array<Permission>;
 }
 export interface PingMsg {
   seq: number;
@@ -333,6 +344,12 @@ export interface UpdateProfileReq {
   saved_username?: string;
   tls?: Record<string, unknown>;
 }
+export interface UploadResp {
+  file: string;
+  path: string;
+  size_bytes: number;
+  uploaded_at: string;
+}
 export interface User {
   disabled?: boolean;
   email: string;
@@ -347,7 +364,7 @@ export interface UserCreateReq {
   username: string;
 }
 export interface UserList {
-  users: Array<unknown>;
+  users: Array<User>;
 }
 export interface UserUpdateReq {
   email?: string;
@@ -1074,6 +1091,15 @@ export class GenAPIClient {
       [], copyRecord(req),
     );
   }
+  async backupUpload(req: BackupUploadReq): Promise<UploadResp> {
+    return this.request<UploadResp>(
+      "POST",
+      "/api/v1/backups/upload",
+      "jwt",
+      "multipart",
+      [], copyRecord(req),
+    );
+  }
   async deleteFile(req: BackupFileParam): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
@@ -1179,6 +1205,15 @@ export class GenAPIClient {
       "/api/v1/migrations/run",
       "jwt",
       "json",
+      [], copyRecord(req),
+    );
+  }
+  async migrationUpload(req: MigrationUploadReq): Promise<UploadResp> {
+    return this.request<UploadResp>(
+      "POST",
+      "/api/v1/migrations/upload",
+      "jwt",
+      "multipart",
       [], copyRecord(req),
     );
   }
@@ -1517,6 +1552,9 @@ export function usePostBackupsMutation(client: GenAPIClient): MutationState<Back
 export function useCleanupMutation(client: GenAPIClient): MutationState<Empty, BackupCleanupResp> {
   return useMutationState((req) => client.cleanup(req));
 }
+export function useBackupUploadMutation(client: GenAPIClient): MutationState<BackupUploadReq, UploadResp> {
+  return useMutationState((req) => client.backupUpload(req));
+}
 export function useDeleteFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
   return usePromise(() => client.deleteFile(req), deps);
 }
@@ -1552,6 +1590,9 @@ export function usePostMigrationsMutation(client: GenAPIClient): MutationState<M
 }
 export function usePostMigrationsRunMutation(client: GenAPIClient): MutationState<Empty, MigrationRunResp> {
   return useMutationState((req) => client.postMigrationsRun(req));
+}
+export function useMigrationUploadMutation(client: GenAPIClient): MutationState<MigrationUploadReq, UploadResp> {
+  return useMutationState((req) => client.migrationUpload(req));
 }
 export function useSignMutation(client: GenAPIClient): MutationState<MigrationParam, Empty> {
   return useMutationState((req) => client.sign(req));

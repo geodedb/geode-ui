@@ -1,73 +1,52 @@
 package server
 
 import (
-	"bytes"
-	"encoding/json/v2"
-	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	gen "geodedb.com/geode-ui/gen/pkg/gen"
+	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
-// buildUploadReq builds a multipart upload request hitting path with a
-// single "file" part containing body and Content-Disposition filename.
-// JWT bearer is set when token is non-empty.
-func buildUploadReq(t *testing.T, path, filename, body, token string) *http.Request {
-	t.Helper()
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
-	part, err := w.CreateFormFile("file", filename)
-	if err != nil {
-		t.Fatalf("CreateFormFile: %v", err)
+// uploadReq builds the *gen.FileUpload payload the genapi-emitted
+// multipart wrapper would hand the handler: an open Reader plus the
+// declared filename and size. Tests call the handler methods directly
+// (same convention as the other handlers_*_test.go in this package);
+// the JWT/admin-role gate is enforced by the generated wrapper and
+// covered by the genapi test suite, not re-tested here.
+func uploadFile(filename, body string) *gen.FileUpload {
+	return &gen.FileUpload{
+		Filename: filename,
+		Size:     int64(len(body)),
+		Reader:   strings.NewReader(body),
 	}
-	if _, err := io.WriteString(part, body); err != nil {
-		t.Fatalf("write part: %v", err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatalf("close writer: %v", err)
-	}
-	r := httptest.NewRequest(http.MethodPost, path, &buf)
-	r.Header.Set("Content-Type", w.FormDataContentType())
-	if token != "" {
-		r.Header.Set("Authorization", "Bearer "+token)
-	}
-	return r
 }
 
-// adminToken issues a JWT carrying the "admin" role for round-trip
-// uploads in tests. The subject and profile are arbitrary; only the role
-// matters for the upload role gate.
-func adminToken(t *testing.T, srv *GraphServer) string {
+func newUploadServer(t *testing.T, uploadDir string) *GraphServer {
 	t.Helper()
-	tok, _, err := srv.cfg.JWT.Issue("alice", "default", []string{"admin"}, "")
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
-	}
-	return tok
+	return New(Config{JWT: newTestIssuer(t), UploadDir: uploadDir})
 }
 
-// TestBackupUpload_HappyPath drives a full round-trip: a multipart
-// "file" part is POSTed with an admin JWT, the response is 201, and
-// the file lands under <UploadDir>/backups/<sanitised filename>.
+// TestBackupUpload_HappyPath drives a full round-trip: the typed
+// request carries an open "file" payload, the handler returns a
+// populated UploadResp, and the file lands under
+// <UploadDir>/backups/<sanitised filename> with no .tmp marker left.
 func TestBackupUpload_HappyPath(t *testing.T) {
 	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-	tok := adminToken(t, srv)
-
-	req := buildUploadReq(t, "/api/v1/backups/upload", "snapshot-001.geo", "binary-blob-body", tok)
+	srv := newUploadServer(t, dir)
 	rec := httptest.NewRecorder()
-	srv.HandleBackupUpload(rec, req)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/backups/upload", nil)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%q want 201", rec.Code, rec.Body.String())
+	resp, err := srv.BackupUpload(rec, r, &gentypes.BackupUploadReq{File: uploadFile("snapshot-001.geo", "binary-blob-body")})
+	if err != nil {
+		t.Fatalf("BackupUpload: %v", err)
 	}
-	var resp uploadResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if resp == nil {
+		t.Fatalf("nil resp; recorder body=%q status=%d", rec.Body.String(), rec.Code)
 	}
 	if resp.File != "snapshot-001.geo" {
 		t.Fatalf("file=%q want snapshot-001.geo", resp.File)
@@ -75,8 +54,10 @@ func TestBackupUpload_HappyPath(t *testing.T) {
 	if resp.SizeBytes != int64(len("binary-blob-body")) {
 		t.Fatalf("size=%d want %d", resp.SizeBytes, len("binary-blob-body"))
 	}
+	if resp.UploadedAt == "" || resp.Path == "" {
+		t.Fatalf("incomplete resp: %+v", resp)
+	}
 
-	// Confirm the file actually landed on disk and the .tmp marker is gone.
 	got, err := os.ReadFile(filepath.Join(dir, "backups", "snapshot-001.geo"))
 	if err != nil {
 		t.Fatalf("read final: %v", err)
@@ -90,116 +71,108 @@ func TestBackupUpload_HappyPath(t *testing.T) {
 }
 
 // TestMigrationUpload_HappyPath mirrors the backup test for the
-// migrations subdir. A single check is enough — the dispatch is
-// shared via handleUpload().
+// migrations subdir; the body is shared via stageUpload().
 func TestMigrationUpload_HappyPath(t *testing.T) {
 	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-	tok := adminToken(t, srv)
-
-	req := buildUploadReq(t, "/api/v1/migrations/upload", "0001_init.gql", "CREATE GRAPH demo;\n", tok)
+	srv := newUploadServer(t, dir)
 	rec := httptest.NewRecorder()
-	srv.HandleMigrationUpload(rec, req)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/migrations/upload", nil)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status=%d body=%q want 201", rec.Code, rec.Body.String())
+	resp, err := srv.MigrationUpload(rec, r, &gentypes.MigrationUploadReq{File: uploadFile("0001_init.gql", "CREATE GRAPH demo;\n")})
+	if err != nil {
+		t.Fatalf("MigrationUpload: %v", err)
+	}
+	if resp == nil || resp.File != "0001_init.gql" {
+		t.Fatalf("unexpected resp %+v; recorder=%q", resp, rec.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(dir, "migrations", "0001_init.gql")); err != nil {
 		t.Fatalf("expected file under migrations/: %v", err)
 	}
 }
 
-// TestUpload_RejectsMissingJWT confirms an unauthenticated POST gets a
-// 401 and never touches the disk.
-func TestUpload_RejectsMissingJWT(t *testing.T) {
-	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-
-	req := buildUploadReq(t, "/api/v1/backups/upload", "x.geo", "data", "")
+// TestUpload_DisabledWhenNoUploadDir confirms a server started without
+// -upload-dir surfaces a 503 (written via w) instead of writing files
+// into "" / cwd, and returns (nil, nil) so the genapi wrapper writes
+// nothing further.
+func TestUpload_DisabledWhenNoUploadDir(t *testing.T) {
+	srv := New(Config{JWT: newTestIssuer(t)}) // UploadDir intentionally empty
 	rec := httptest.NewRecorder()
-	srv.HandleBackupUpload(rec, req)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/backups/upload", nil)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status=%d want 401", rec.Code)
+	resp, err := srv.BackupUpload(rec, r, &gentypes.BackupUploadReq{File: uploadFile("x.geo", "data")})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	entries, _ := os.ReadDir(dir)
-	if len(entries) != 0 {
+	if resp != nil {
+		t.Fatalf("expected nil resp on 503, got %+v", resp)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d want 503", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "upload_disabled") {
+		t.Fatalf("body=%q want upload_disabled", rec.Body.String())
+	}
+}
+
+// TestUpload_RejectsMissingFile confirms a request with no file payload
+// gets a 400 and never touches the disk.
+func TestUpload_RejectsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	srv := newUploadServer(t, dir)
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/backups/upload", nil)
+
+	resp, err := srv.BackupUpload(rec, r, &gentypes.BackupUploadReq{File: nil})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil resp, got %+v", resp)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400", rec.Code)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("upload dir not empty after rejected upload: %v", entries)
 	}
 }
 
-// TestUpload_RejectsNonAdmin confirms a JWT carrying only "user" gets a
-// 403 even though it is otherwise valid.
-func TestUpload_RejectsNonAdmin(t *testing.T) {
+// TestUpload_PathTraversalRejected pins the defence-in-depth: a
+// path-bearing filename ("../../etc/passwd") is rejected with a 400
+// invalid_filename (mime/multipart's filepath.Base normalisation runs
+// in the genapi wrapper, but sanitiseUploadName is the belt-and-braces
+// layer that rejects anything with a separator regardless).
+func TestUpload_PathTraversalRejected(t *testing.T) {
 	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-	tok, _, err := srv.cfg.JWT.Issue("alice", "default", []string{"user"}, "")
+	srv := newUploadServer(t, dir)
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/backups/upload", nil)
+
+	resp, err := srv.BackupUpload(rec, r, &gentypes.BackupUploadReq{File: uploadFile("../../etc/passwd", "x")})
 	if err != nil {
-		t.Fatalf("Issue: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	req := buildUploadReq(t, "/api/v1/backups/upload", "x.geo", "data", tok)
-	rec := httptest.NewRecorder()
-	srv.HandleBackupUpload(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status=%d want 403", rec.Code)
+	if resp != nil {
+		t.Fatalf("expected nil resp, got %+v", resp)
 	}
-	if !strings.Contains(rec.Body.String(), "insufficient_role") {
-		t.Fatalf("body=%q want insufficient_role", rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400; body=%s", rec.Code, rec.Body.String())
 	}
-}
-
-// TestUpload_DisabledWhenNoUploadDir confirms a server started without
-// -upload-dir surfaces a 503 instead of writing files into "" / cwd.
-func TestUpload_DisabledWhenNoUploadDir(t *testing.T) {
-	srv := New(Config{JWT: newTestIssuer(t)}) // UploadDir intentionally empty
-	tok := adminToken(t, srv)
-
-	req := buildUploadReq(t, "/api/v1/backups/upload", "x.geo", "data", tok)
-	rec := httptest.NewRecorder()
-	srv.HandleBackupUpload(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d want 503", rec.Code)
+	if !strings.Contains(rec.Body.String(), "invalid_filename") {
+		t.Fatalf("body=%q want invalid_filename", rec.Body.String())
+	}
+	// Nothing escaped the upload dir.
+	entries, _ := os.ReadDir(filepath.Join(dir, "backups"))
+	if len(entries) != 0 {
+		t.Fatalf("backups dir should be empty, got %v", entries)
 	}
 }
 
-// TestUpload_HTTPLevelPathTraversalCollapses pins the defence-in-depth
-// for path-bearing filenames at the HTTP boundary. mime/multipart applies
-// filepath.Base at parse time before our handler ever sees the name, so
-// "../../etc/passwd" arrives as "passwd" and is accepted as a clean
-// basename; the file lands strictly under <UploadDir>/backups/. This
-// test confirms no escape happens regardless of what the client sends.
-func TestUpload_HTTPLevelPathTraversalCollapses(t *testing.T) {
-	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-	tok := adminToken(t, srv)
-
-	req := buildUploadReq(t, "/api/v1/backups/upload", "../../etc/passwd", "x", tok)
-	rec := httptest.NewRecorder()
-	srv.HandleBackupUpload(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status=%d want 201 (stdlib collapses to basename); body=%s", rec.Code, rec.Body.String())
-	}
-	// Stdlib reduced the name to "passwd"; verify the file landed
-	// strictly under UploadDir/backups/.
-	if _, err := os.Stat(filepath.Join(dir, "backups", "passwd")); err != nil {
-		t.Fatalf("expected backups/passwd: %v", err)
-	}
-	// And that nothing escaped to an absolute path or sibling dir.
-	if _, err := os.Stat("/etc/passwd-uploaded-by-test"); err == nil {
-		t.Fatalf("file escaped to /etc")
-	}
-}
-
-// TestUpload_RejectsBadFilenameChars covers names that *do* survive
-// filepath.Base intact but contain characters the safeNameRE forbids
-// (spaces, semicolons, unicode). These get a 400 invalid_filename.
+// TestUpload_RejectsBadFilenameChars covers names with characters the
+// safeNameRE forbids (spaces, semicolons, unicode) — 400 invalid_filename.
 func TestUpload_RejectsBadFilenameChars(t *testing.T) {
 	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-	tok := adminToken(t, srv)
+	srv := newUploadServer(t, dir)
 
 	for _, name := range []string{
 		"foo bar.txt",    // space
@@ -207,9 +180,15 @@ func TestUpload_RejectsBadFilenameChars(t *testing.T) {
 		"café.txt",       // unicode
 	} {
 		t.Run(name, func(t *testing.T) {
-			req := buildUploadReq(t, "/api/v1/backups/upload", name, "data", tok)
 			rec := httptest.NewRecorder()
-			srv.HandleBackupUpload(rec, req)
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/backups/upload", nil)
+			resp, err := srv.BackupUpload(rec, r, &gentypes.BackupUploadReq{File: uploadFile(name, "data")})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp != nil {
+				t.Fatalf("expected nil resp for %q, got %+v", name, resp)
+			}
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status=%d want 400 for filename %q", rec.Code, name)
 			}
@@ -220,23 +199,7 @@ func TestUpload_RejectsBadFilenameChars(t *testing.T) {
 	}
 }
 
-// TestUpload_RejectsWrongMethod confirms GET/PUT/DELETE on the upload
-// endpoint surface a 405.
-func TestUpload_RejectsWrongMethod(t *testing.T) {
-	dir := t.TempDir()
-	srv := New(Config{JWT: newTestIssuer(t), UploadDir: dir})
-
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/backups/upload", nil)
-	rec := httptest.NewRecorder()
-	srv.HandleBackupUpload(rec, r)
-	if rec.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("status=%d want 405", rec.Code)
-	}
-}
-
-// TestSanitiseUploadName pins the filename allow-list directly. The full
-// HTTP-level path-traversal coverage is in TestUpload_RejectsPathTraversal,
-// but this is the unit-level pin.
+// TestSanitiseUploadName pins the filename allow-list directly.
 func TestSanitiseUploadName(t *testing.T) {
 	cases := []struct {
 		in      string
@@ -272,26 +235,5 @@ func TestSanitiseUploadName(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// TestHasAdminRole pins the case-insensitive role match.
-func TestHasAdminRole(t *testing.T) {
-	cases := []struct {
-		in   []string
-		want bool
-	}{
-		{nil, false},
-		{[]string{"admin"}, true},
-		{[]string{"ADMIN"}, true},
-		{[]string{"Admin"}, true},
-		{[]string{"user"}, false},
-		{[]string{"user", "admin"}, true},
-	}
-	for _, tc := range cases {
-		got := hasAdminRole(tc.in)
-		if got != tc.want {
-			t.Fatalf("hasAdminRole(%v)=%v want %v", tc.in, got, tc.want)
-		}
 	}
 }
