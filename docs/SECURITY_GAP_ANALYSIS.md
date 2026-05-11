@@ -60,7 +60,7 @@ geode-ui is an **admin-facing** SPA + thin reverse-proxy/auth-fronting server fo
 | 8 | N1 | Medium | **24** | ALTER USER quoteString edge-case audit | [#63](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/63) | `internal/server/handlers_users.go:233` | Targeted unit tests on quoteString edge cases |
 | 9 | N4 | Low | **24** | No server-side password policy | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `internal/server/handlers_auth.go:99-103` | Min 12 chars; HIBP k-anon (optional) |
 | 10 | N10 | Low | **24** | User-enumeration timing channel on /auth/login | [#76](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/76) | `internal/server/handlers_auth.go:131-148` | Constant-time auth-failure path; unify 401 response |
-| 11 | F8 | Medium | **16** | dompurify@3.2.7 transitive (8 advisories) | [#68](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/68) | `pnpm-lock.yaml` | Bump monaco-editor or pnpm.overrides |
+| 11 | F8 | Medium | **16** | dompurify@3.2.7 transitive (8 advisories) | [#68](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/68) | `package.json` (`overrides`) | **Closed** 2026-05-10 — `package.json` declares `"overrides": { "dompurify": "^3.4.0" }`; `npm ls dompurify --all` resolves the transitive (under `monaco-editor@0.55.1`) to `dompurify@3.4.2 overridden`, satisfying the `>= 3.4` floor and closing the 6+ XSS advisories. Cross-closed by S-NEW-8. |
 | 12 | F5 | Low | **16** | Deprecate ?access_token= query fallback | [#71](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/71) | `internal/server/auth.go:88` | **Closed** 2026-05-08 — `WithAccessTokenDeprecation` middleware emits `Deprecation: true`, `Sunset: <AccessTokenSunsetDate>`, and a `Link; rel="deprecation"` header on every response that carried `?access_token=`. Sunset 2026-07-01. |
 | 13 | N5 | Low | **16** | httpx CORS supports wildcard origin | [#74](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/74) | `gen/pkg/httpx/server.go:117-141` | Reject `*` when CORSEnabled in prod |
 | 14 | F1 | Low | **8** | /mcp mounted but mcpx.SetAuthVerifier never called (fail-closed) | [#69](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/69) | `cmd/server/main.go:165` | **Closed** 2026-05-08 — `mcpx.SetAuthVerifier(srv.AuthJWT)` wired so /mcp authorizes via the same HS256 verifier that gates the REST API. |
@@ -171,7 +171,7 @@ These were flagged by tools or surfaced during manual review but are **confirmed
 - N10 — Constant-time auth-failure path.
 - F5 — Emit Deprecation header on `?access_token=` fallback.
 - F6+N6 — Centralize redaction in `obsx.LogAudit`; expand `sensitiveKeys`.
-- F8 — Bump `monaco-editor` or pin via pnpm overrides.
+- ~~F8 — Bump `monaco-editor` or pin via pnpm overrides.~~ **Closed 2026-05-10** via `package.json::overrides.dompurify ^3.4.0`; resolves to `dompurify@3.4.2 overridden`.
 - F12 — Bump or replace `copy-webpack-plugin`.
 
 **Strategic (> 5 days):**
