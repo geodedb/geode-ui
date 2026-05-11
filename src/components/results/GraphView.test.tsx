@@ -532,6 +532,49 @@ describe('graph inspector property view', () => {
     expect(inspector).toHaveTextContent('Person')
   })
 
+  // Follow-up to the inspector fix: the structured property view must
+  // present `props` keys in the SAME order TableView's data table would
+  // order columns — `projectColumns` uses first-seen / insertion order
+  // of the underlying object, NOT alphabetical. The current code does
+  // `Object.keys(props).sort()`, so a node whose props are built in a
+  // non-alphabetical key order shows them alphabetised in the inspector
+  // while the table shows them in insertion order — an inconsistency.
+  //
+  // Here the node's `props` object is `{ zebra, apple, mango }` in that
+  // key order: alphabetical would be `apple, mango, zebra` but
+  // insertion order — what projectColumns emits — is `zebra, apple,
+  // mango`. The inspector <dt> list must read `zebra, apple, mango`.
+  test('property keys follow insertion order (matches projectColumns), not alphabetical', () => {
+    const resp = {
+      rows: [],
+      graph_summary: {
+        nodes: [
+          {
+            id: 'n1',
+            labels: ['Person'],
+            properties: { zebra: 1, apple: 2, mango: 3 },
+          },
+        ],
+      },
+      row_count: 1,
+    } as unknown as QueryRespLike & { row_count?: number }
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={resp} query="MATCH (n:Person) RETURN n" />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    selectNode(view, 'n1')
+
+    const props = view.getByTestId('graph-inspector-props')
+    const dtKeys = within(props)
+      .getAllByRole('term')
+      .map((dt) => dt.textContent)
+    expect(dtKeys).toEqual(['zebra', 'apple', 'mango'])
+  })
+
   test('toggling to "Raw JSON" swaps to the <pre> view and back', () => {
     const view = renderInspectable()
     selectNode(view, 'n1')

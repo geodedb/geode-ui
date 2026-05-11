@@ -55,6 +55,13 @@ export const sel = {
     p.getByRole('button', { name: /cancel/i }),
   resultsTable: (p: Page): Locator => p.locator('table'),
   graphCanvas: (p: Page): Locator => p.locator('canvas'),
+  // Result-panel maximize/fullscreen toggle + the fixed inset:0 overlay
+  // it opens. Lives in the result-panel toolbar (the Tabs row) so it
+  // works for whichever tab (table/json/graph) is active.
+  resultFullscreenToggle: (p: Page): Locator =>
+    p.getByTestId('result-fullscreen-toggle'),
+  resultFullscreenOverlay: (p: Page): Locator =>
+    p.getByTestId('result-fullscreen-overlay'),
 
   // Admin
   newUserBtn: (p: Page): Locator =>
