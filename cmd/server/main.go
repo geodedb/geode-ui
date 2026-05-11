@@ -38,6 +38,8 @@ func main() {
 		uploadDir         string
 		secureCookies     bool
 		passwordHIBPCheck bool
+		profileCRUDRPS    float64
+		profileCRUDBurst  float64
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config; on first launch with -profile-store empty, seeds the store as scope=system profiles, then is unused")
@@ -48,6 +50,15 @@ func main() {
 	flag.StringVar(&uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
 	flag.BoolVar(&secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
 	flag.BoolVar(&passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and air-gap-friendly")
+	// Per-actor profile-CRUD rate limit (GAP-S7 #120). Production default
+	// is a deliberately tight 30 req/min (rps 0.5) / burst 10 — see
+	// server.ProfileLimiterDefaults(). Tunable here so heavy automated
+	// callers (e.g. the e2e suite, which drives profile CRUD across
+	// several parallel browser workers sharing one JWT subject) can
+	// loosen it without weakening the shipped default. <= 0 means "use
+	// the built-in default".
+	flag.Float64Var(&profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the built-in default (0.5 = 30/min)")
+	flag.Float64Var(&profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the built-in default (10)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -305,6 +316,12 @@ func main() {
 	// stops a flood of malformed POSTs from being free).
 	profileLimiterCfg := server.ProfileLimiterDefaults()
 	profileLimiterCfg.JWT = issuer
+	if profileCRUDRPS > 0 {
+		profileLimiterCfg.PerActorRate = profileCRUDRPS
+	}
+	if profileCRUDBurst > 0 {
+		profileLimiterCfg.PerActorBurst = profileCRUDBurst
+	}
 	profileLimiter := server.NewProfileLimiter(profileLimiterCfg)
 	limited = server.WrapProfileLimit(profileLimiter, limited)
 	// SEC-F7 (#62 S3b): CSRF double-submit middleware. Inspects the

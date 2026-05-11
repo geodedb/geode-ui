@@ -9,12 +9,16 @@ export default defineConfig({
 
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  // Retry once locally too — the Schema Explorer + multi-request specs
-  // flake occasionally under parallel load against a single upstream
-  // Geode driver. The tests are deterministic on rerun; this absorbs
-  // the race without masking real regressions (a deterministic failure
-  // would still fail twice).
-  retries: process.env.CI ? 2 : 1,
+  // The Schema Explorer, responsive-data-table, and multi-request specs
+  // each run a query against the single upstream Geode v0.5.11 driver,
+  // which serialises those queries — so under the suite's parallel
+  // workers one of them can occasionally lag past its timeout. The
+  // specs are deterministic on rerun; two retries absorbs the race
+  // without masking real regressions (a deterministic failure still
+  // fails three times). The helper in 06-schema-explorer.spec.ts also
+  // re-navigates-and-retries on a slow introspection, which keeps the
+  // common case from ever reaching the retry path.
+  retries: 2,
   // Local default lowered from 4 → 2 to match CI. The new profile-
   // CRUD specs (14-profiles-page, 15-profile-api) collectively burst
   // past the per-actor rate limit (30 req/min, burst 10) when 4

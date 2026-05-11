@@ -136,6 +136,16 @@ services:
       # cookie because Set-Cookie carries the `Secure` flag. Disable it
       # for the test container so cookie-based auth works in Playwright.
     - -secure-cookies=false
+      # The Playwright suite drives profile CRUD (create/edit/delete/
+      # set-as-default) across several parallel browser workers that all
+      # share one JWT subject ("geode"), so the production-default
+      # per-actor limit (30 req/min, burst 10) is far too tight for the
+      # test workload and causes spurious 429s in the SPA mutation
+      # paths (which don't retry). Loosen it for the e2e container only.
+    - -profile-crud-rps
+    - '20'
+    - -profile-crud-burst
+    - '200'
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
     - geode-ui-uploads:/var/lib/geode-ui/uploads

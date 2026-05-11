@@ -129,6 +129,19 @@ test.describe('profiles page', () => {
     authToken,
     request,
   }) => {
+    // The SPA's setAsDefault dance issues 1-2 PATCHes through the
+    // generated React client, which (unlike helpers/profiles.ts) does
+    // NOT retry on 429. Under the suite's parallel load the per-actor
+    // rate-limit bucket (30 req/min, burst 10, shared across every
+    // worker) can be drained for several seconds at a stretch, so a
+    // single click can hit a 429 and surface the setDefaultErr banner
+    // instead of promoting the row. We retry the click, and when we
+    // see the banner we wait a full bucket-refill window (~6s = 3
+    // tokens at 0.5/s) before re-clicking. Give the whole test a
+    // generous timeout since the retry budget can exceed the 30s
+    // default.
+    test.setTimeout(90_000)
+
     // Two personal profiles in the same scope/owner so the page's
     // setAsDefault dance has a peer to demote.
     const a = await createProfileViaApi(request, authToken, {
@@ -145,30 +158,34 @@ test.describe('profiles page', () => {
       await expect(sel.profilesNameCell(page, b.name)).toBeVisible()
 
       const rowB = page.getByRole('row', { name: new RegExp(b.name) })
+      const badge = rowB.getByText('Default', { exact: true })
+      const errBanner = sel.profilesSetDefaultError(page)
 
-      // Up to 3 attempts. The SPA's setAsDefault dance issues 1-2
-      // PATCHes; under heavy parallel load they can transiently 429
-      // (the per-actor rate limit is shared across the suite). When
-      // that happens the SPA surfaces a setDefaultErr banner and we
-      // re-click after a short wait — burst tokens refill at 0.5/sec,
-      // so a couple of seconds is plenty.
-      /* eslint-disable no-await-in-loop, no-plusplus */
+      /* eslint-disable no-await-in-loop, no-plusplus, no-promise-executor-return */
+      const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
       let promoted = false
-      for (let attempt = 0; attempt < 3 && !promoted; attempt++) {
+      for (let attempt = 0; attempt < 6 && !promoted; attempt++) {
         await sel.profilesSetDefaultBtn(page, b.name).click()
+        // Race: the badge appears (success) OR the error banner appears
+        // (a 429 in the dance). Whichever wins, react accordingly.
         try {
-          await expect(rowB.getByText('Default', { exact: true })).toBeVisible({
-            timeout: 5000,
-          })
-          promoted = true
+          await Promise.race([
+            badge.waitFor({ state: 'visible', timeout: 6000 }),
+            errBanner.waitFor({ state: 'visible', timeout: 6000 }),
+          ])
         } catch {
-          // Wait out a token refill window before the next attempt.
-          await new Promise<void>((r) => {
-            setTimeout(r, 2500)
-          })
+          // Neither appeared within 6s — unusual; fall through and let
+          // the explicit badge check below decide, then retry.
         }
+        if (await badge.isVisible()) {
+          promoted = true
+          break
+        }
+        // Not promoted. If the banner is up, it's a rate-limit stall —
+        // wait out a refill window. Otherwise a shorter pause.
+        await sleep((await errBanner.isVisible()) ? 6000 : 2000)
       }
-      /* eslint-enable no-await-in-loop, no-plusplus */
+      /* eslint-enable no-await-in-loop, no-plusplus, no-promise-executor-return */
       expect(promoted, 'set-as-default never promoted row B').toBeTruthy()
     } finally {
       await deleteProfileViaApi(request, authToken, a.id)

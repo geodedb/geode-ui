@@ -1,5 +1,56 @@
+import type { Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
 import { seed } from '../helpers/gqlData'
+
+// selectGraphAndExpectButtons navigates to /schema, clicks the seeded
+// graph button, and waits for every name in `names` to appear as a
+// button. The schema introspection API hits the single upstream Geode
+// driver, which occasionally takes >12 s under parallel test load — so
+// on a timeout we re-navigate and try once more with a fresh window
+// (re-navigation remounts SchemaExplorer, dropping its per-graph cache
+// and re-issuing the fetch). Two full windows makes a deterministic
+// slow-query absorb cleanly while a real regression still fails twice.
+async function selectGraphAndExpectButtons(
+  page: Page,
+  names: readonly string[],
+  timeout = 18_000
+): Promise<void> {
+  // Two 18 s attempts + per-step overhead can exceed Playwright's 30 s
+  // default test timeout, so widen it for any test that goes through
+  // this path. (Plus the config's retries:1 still backstops a genuinely
+  // pathological upstream stall.)
+  test.setTimeout(75_000)
+  const tryOnce = async (): Promise<boolean> => {
+    try {
+      await page.goto('/schema')
+      // The graph-list button comes from /api/v1/graphs, which can also
+      // lag under load — wait for it with a bounded timeout, then click.
+      const graphBtn = page.getByRole('button', {
+        name: seed.graph,
+        exact: true,
+      })
+      await graphBtn.waitFor({ state: 'visible', timeout })
+      await graphBtn.click({ timeout })
+      await Promise.all(
+        names.map((n) =>
+          page
+            .getByRole('button', { name: n, exact: true })
+            .waitFor({ state: 'visible', timeout })
+        )
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (await tryOnce()) return
+  // Second attempt with a fresh component mount + fresh timeout window.
+  const ok = await tryOnce()
+  expect(
+    ok,
+    `schema buttons [${names.join(', ')}] never appeared after 2 attempts`
+  ).toBeTruthy()
+}
 
 test.describe('schema explorer', () => {
   test('lists graphs from the seeded database', async ({
@@ -30,30 +81,16 @@ test.describe('schema explorer', () => {
   test('clicking a graph populates the labels pane', async ({
     authedPage: page,
   }) => {
-    await page.goto('/schema')
-    await page.getByRole('button', { name: seed.graph, exact: true }).click()
-    // exact:true so 'Movie' label doesn't collide with 'movies' graph button.
-    // Extended timeout: the labels API hits the upstream Geode driver,
-    // which occasionally takes >8 s under 4-worker parallel test load.
-    await Promise.all(
-      seed.labels.map((label) =>
-        expect(
-          page.getByRole('button', { name: label, exact: true })
-        ).toBeVisible({ timeout: 12_000 })
-      )
-    )
+    // exact:true (inside the helper) so 'Movie' label doesn't collide
+    // with the 'movies' graph button. The helper retries with a fresh
+    // component mount if the upstream introspection query is slow.
+    await selectGraphAndExpectButtons(page, seed.labels)
   })
 
   test('clicking a label stages a MATCH query and navigates to /', async ({
     authedPage: page,
   }) => {
-    await page.goto('/schema')
-    await page.getByRole('button', { name: seed.graph, exact: true }).click()
-    // Wait for the label pane to populate before clicking — under
-    // parallel load the label fetch can lag the click attempt.
-    await expect(
-      page.getByRole('button', { name: 'Person', exact: true })
-    ).toBeVisible({ timeout: 12_000 })
+    await selectGraphAndExpectButtons(page, ['Person'])
     await page.getByRole('button', { name: 'Person', exact: true }).click()
     await expect(page).toHaveURL(/\/$/)
     // The editor should now contain MATCH (n:Person) RETURN n LIMIT 25
@@ -84,24 +121,13 @@ test.describe('schema explorer', () => {
   test('edge types pane lists ACTED_IN and DIRECTED', async ({
     authedPage: page,
   }) => {
-    await page.goto('/schema')
-    await page.getByRole('button', { name: seed.graph, exact: true }).click()
-    // Extended timeout — same upstream-driver-load reasoning as the
-    // labels-pane test above.
-    await Promise.all(
-      seed.edgeTypes.map((t) =>
-        expect(page.getByRole('button', { name: t, exact: true })).toBeVisible({
-          timeout: 12_000,
-        })
-      )
-    )
+    await selectGraphAndExpectButtons(page, seed.edgeTypes)
   })
 
   test('clicking an edge type stages a runnable MATCH', async ({
     authedPage: page,
   }) => {
-    await page.goto('/schema')
-    await page.getByRole('button', { name: seed.graph, exact: true }).click()
+    await selectGraphAndExpectButtons(page, ['ACTED_IN'])
     await page.getByRole('button', { name: 'ACTED_IN', exact: true }).click()
     await expect(page).toHaveURL(/\/$/)
     const editorText = await page
