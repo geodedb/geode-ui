@@ -90,6 +90,13 @@ type Config struct {
 	// in-memory connection pool tracks the persisted set. Typically the
 	// same *conn.Pool that backs Pool. Nil disables hot-reload.
 	PoolReloader PoolReloader
+	// PasswordPolicy controls server-side password validation applied
+	// to PostUsers / PatchUsername / Password handlers (GAP-N4 / #72).
+	// The zero value enforces the length (>=12), weak-pattern, and
+	// username-collision rules; HIBPCheck remains off to keep
+	// password-set handlers hermetic. main.go wires HIBPCheck via the
+	// `-password-hibp-check` CLI flag.
+	PasswordPolicy PasswordPolicy
 	// testAuthenticate is an optional override for authenticateUpstream
 	// used by handler tests that don't want to spin up the database/sql
 	// driver. When non-nil, Login calls this in place of

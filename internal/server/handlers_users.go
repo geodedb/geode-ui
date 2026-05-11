@@ -85,6 +85,13 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 		}
 		stmt := "CREATE USER " + uname + " WITH EMAIL " + email
 		if req.Password != "" {
+			// GAP-N4 (#72): enforce server-side password policy before
+			// the value reaches the wire. Returns a stable 400 shape
+			// (`password_too_short` / `password_too_weak` / etc.) so
+			// clients can branch on the reason.
+			if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
+				return passwordPolicyEndpointError(vErr)
+			}
 			pw, pErr := quoteString(req.Password)
 			if pErr != nil {
 				return badRequest("invalid_password", pErr.Error())
@@ -164,6 +171,10 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		}
 		var pw string
 		if req.Password != "" {
+			// GAP-N4 (#72): same server-side policy gate as PostUsers.
+			if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
+				return passwordPolicyEndpointError(vErr)
+			}
 			var qErr error
 			pw, qErr = quoteString(req.Password)
 			if qErr != nil {
@@ -270,6 +281,12 @@ func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentyp
 // Password implements POST /api/v1/users/{username}/password.
 func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gentypes.PasswordChangeReq) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		// GAP-N4 (#72): server-side password policy. NewPassword must
+		// satisfy length, weak-pattern, username-collision and (when
+		// enabled) HIBP rules before the wire-level ALTER USER runs.
+		if vErr := validatePassword(r.Context(), req.NewPassword, req.Username, s.cfg.PasswordPolicy); vErr != nil {
+			return passwordPolicyEndpointError(vErr)
+		}
 		pw, qErr := quoteString(req.NewPassword)
 		if qErr != nil {
 			return badRequest("invalid_password", qErr.Error())

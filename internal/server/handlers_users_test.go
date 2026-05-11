@@ -148,7 +148,9 @@ func TestUsers_Create(t *testing.T) {
 	resp, err := s.PostUsers(rec, req, &gentypes.UserCreateReq{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "supersecret",
+		// GAP-N4: password must satisfy the >=12-char + non-weak policy
+		// since the wire-level path now validates server-side.
+		Password: "supersecret-pw-1",
 		Roles:    []string{"admin", "auditor"},
 	})
 	if err != nil {
@@ -159,7 +161,7 @@ func TestUsers_Create(t *testing.T) {
 	}
 	stmts := d.seen()
 	want := []string{
-		"CREATE USER `alice` WITH EMAIL 'alice@example.com' PASSWORD 'supersecret'",
+		"CREATE USER `alice` WITH EMAIL 'alice@example.com' PASSWORD 'supersecret-pw-1'",
 		"GRANT ROLE `admin` TO USER `alice`",
 		"GRANT ROLE `auditor` TO USER `alice`",
 	}

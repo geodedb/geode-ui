@@ -111,7 +111,8 @@ func TestPatchUsername_HappyPath_AllUpdatesInOneTx(t *testing.T) {
 	resp, err := s.PatchUsername(rec, req, &gentypes.UserUpdateReq{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "newsecret",
+		// GAP-N4: password must satisfy the >=12-char + non-weak policy.
+		Password: "newsecret-pw1",
 		Roles:    []string{"admin"},
 	})
 	if err != nil {
@@ -125,7 +126,7 @@ func TestPatchUsername_HappyPath_AllUpdatesInOneTx(t *testing.T) {
 	wantOrdered := []string{
 		"begin",
 		"exec:ALTER USER `alice` SET EMAIL 'alice@example.com'",
-		"exec:ALTER USER `alice` SET PASSWORD 'newsecret'",
+		"exec:ALTER USER `alice` SET PASSWORD 'newsecret-pw1'",
 		"exec:GRANT ROLE `admin` TO USER `alice`",
 		"commit",
 	}
@@ -155,7 +156,9 @@ func TestPatchUsername_PartialFailure_RollsBack(t *testing.T) {
 	resp, err := s.PatchUsername(rec, req, &gentypes.UserUpdateReq{
 		Username: "alice",
 		Email:    "alice@example.com",
-		Password: "doomed",
+		// GAP-N4: still needs to pass the policy gate so we reach the
+		// driver-level failure under test (PASSWORD substring trap).
+		Password: "doomed-pw-12c",
 	})
 	// Endpoint errors are inlined into rec; the handler returns nil err.
 	if err != nil {

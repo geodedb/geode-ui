@@ -29,14 +29,15 @@ import (
 
 func main() {
 	var (
-		listen        string
-		profilesFile  string
-		profileStore  string
-		secretHex     string
-		jwtTTL        time.Duration
-		adminUsers    string
-		uploadDir     string
-		secureCookies bool
+		listen            string
+		profilesFile      string
+		profileStore      string
+		secretHex         string
+		jwtTTL            time.Duration
+		adminUsers        string
+		uploadDir         string
+		secureCookies     bool
+		passwordHIBPCheck bool
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config; on first launch with -profile-store empty, seeds the store as scope=system profiles, then is unused")
@@ -46,6 +47,7 @@ func main() {
 	flag.StringVar(&adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
 	flag.StringVar(&uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
 	flag.BoolVar(&secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
+	flag.BoolVar(&passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and air-gap-friendly")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -139,6 +141,7 @@ func main() {
 		SecureCookies:  secureCookies,
 		Store:          store,
 		PoolReloader:   pool,
+		PasswordPolicy: server.PasswordPolicy{HIBPCheck: passwordHIBPCheck},
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
