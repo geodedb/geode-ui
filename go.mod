@@ -2,7 +2,7 @@ module geodedb.com/geode-ui
 
 go 1.26.2
 
-replace geodedb.com/geode => /data/home/benji/src/devnw/codepros/geode/geode-client-go
+replace geodedb.com/geode => ../geode-client-go
 
 require (
 	geodedb.com/geode v0.0.0-00010101000000-000000000000
