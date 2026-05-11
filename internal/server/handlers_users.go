@@ -77,64 +77,64 @@ func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentyp
 
 // PostUsers implements POST /api/v1/users (create user).
 func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gentypes.UserCreateReq) (*gentypes.User, error) {
-	db, err := s.connDB(r.Context())
+	var resp *gentypes.User
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		email, qErr := quoteString(req.Email)
+		if qErr != nil {
+			return badRequest("invalid_email", qErr.Error())
+		}
+		stmt := "CREATE USER " + uname + " WITH EMAIL " + email
+		if req.Password != "" {
+			pw, pErr := quoteString(req.Password)
+			if pErr != nil {
+				return badRequest("invalid_password", pErr.Error())
+			}
+			stmt += " PASSWORD " + pw
+		}
+		if _, err := runStatement(r.Context(), db, stmt); err != nil {
+			return wireErr(err)
+		}
+		for _, role := range req.Roles {
+			if err := assignRole(r.Context(), db, uname, role); err != nil {
+				return err
+			}
+		}
+		emitAudit(auditEventUserCreated,
+			"user", userFromContext(r.Context()),
+			"target", req.Username,
+			"roles", req.Roles,
+		)
+		resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	email, err := quoteString(req.Email)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_email", err.Error()))
-	}
-	stmt := "CREATE USER " + uname + " WITH EMAIL " + email
-	if req.Password != "" {
-		pw, err := quoteString(req.Password)
-		if err != nil {
-			return nil, respondErr(w, badRequest("invalid_password", err.Error()))
-		}
-		stmt += " PASSWORD " + pw
-	}
-	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	for _, role := range req.Roles {
-		if err := assignRole(r.Context(), db, uname, role); err != nil {
-			return nil, respondErr(w, err)
-		}
-	}
-	emitAudit(auditEventUserCreated,
-		"user", userFromContext(r.Context()),
-		"target", req.Username,
-		"roles", req.Roles,
-	)
-	return &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}, nil
+	return resp, nil
 }
 
 // GetUsername implements GET /api/v1/users/{username}.
 func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.User, error) {
-	db, err := s.connDB(r.Context())
+	var resp *gentypes.User
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		rows, cols, qErr := runQuery(r.Context(), db, "SHOW USER "+uname)
+		if qErr != nil {
+			return wireErr(qErr)
+		}
+		if len(rows) == 0 {
+			return &endpointError{
+				status:      http.StatusNotFound,
+				code:        "user_not_found",
+				description: "user " + req.Username + " does not exist",
+			}
+		}
+		resp = userFromRow(cols, rows[0])
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW USER "+uname)
-	if err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	if len(rows) == 0 {
-		return nil, respondErr(w, &endpointError{
-			status:      http.StatusNotFound,
-			code:        "user_not_found",
-			description: "user " + req.Username + " does not exist",
-		})
-	}
-	return userFromRow(cols, rows[0]), nil
+	return resp, nil
 }
 
 // PatchUsername implements PATCH /api/v1/users/{username}.
@@ -150,97 +150,96 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 // empty body. quoteIdent runs unconditionally so a malformed username
 // is rejected with 400 before any driver work.
 func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UserUpdateReq) (*gentypes.User, error) {
-	db, err := s.connDB(r.Context())
+	var resp *gentypes.User
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		// Pre-validate every quoted literal before opening the tx so a 400
+		// from a bad input does not leave a dangling open transaction.
+		var email string
+		if req.Email != "" {
+			var qErr error
+			email, qErr = quoteString(req.Email)
+			if qErr != nil {
+				return badRequest("invalid_email", qErr.Error())
+			}
+		}
+		var pw string
+		if req.Password != "" {
+			var qErr error
+			pw, qErr = quoteString(req.Password)
+			if qErr != nil {
+				return badRequest("invalid_password", qErr.Error())
+			}
+		}
+
+		// Empty patch -- nothing to commit.
+		if email == "" && pw == "" && len(req.Roles) == 0 {
+			resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}
+			return nil
+		}
+
+		tx, txErr := db.BeginTx(r.Context(), nil)
+		if txErr != nil {
+			return wireErr(txErr)
+		}
+		// rollbackErr lets us surface the original failure even when the
+		// driver's Rollback returns a non-nil error of its own. The handler
+		// always prefers the original sub-statement error in the response.
+		commit := false
+		defer func() {
+			if !commit {
+				_ = tx.Rollback()
+			}
+		}()
+
+		if email != "" {
+			if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
+				return wireErr(execErr)
+			}
+		}
+		if pw != "" {
+			if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
+				return wireErr(execErr)
+			}
+		}
+		for _, role := range req.Roles {
+			roleIdent, qErr := quoteIdent(role)
+			if qErr != nil {
+				return badRequest("invalid_role", qErr.Error())
+			}
+			if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO USER "+uname); execErr != nil {
+				return wireErr(execErr)
+			}
+		}
+
+		if cErr := tx.Commit(); cErr != nil {
+			return wireErr(cErr)
+		}
+		commit = true
+
+		resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	// Pre-validate every quoted literal before opening the tx so a 400
-	// from a bad input does not leave a dangling open transaction.
-	var email string
-	if req.Email != "" {
-		var qErr error
-		email, qErr = quoteString(req.Email)
-		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_email", qErr.Error()))
-		}
-	}
-	var pw string
-	if req.Password != "" {
-		var qErr error
-		pw, qErr = quoteString(req.Password)
-		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_password", qErr.Error()))
-		}
-	}
-
-	// Empty patch -- nothing to commit.
-	if email == "" && pw == "" && len(req.Roles) == 0 {
-		return &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}, nil
-	}
-
-	tx, err := db.BeginTx(r.Context(), nil)
-	if err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	// rollbackErr lets us surface the original failure even when the
-	// driver's Rollback returns a non-nil error of its own. The handler
-	// always prefers the original sub-statement error in the response.
-	commit := false
-	defer func() {
-		if !commit {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if email != "" {
-		if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
-			return nil, respondErr(w, wireErr(execErr))
-		}
-	}
-	if pw != "" {
-		if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
-			return nil, respondErr(w, wireErr(execErr))
-		}
-	}
-	for _, role := range req.Roles {
-		roleIdent, qErr := quoteIdent(role)
-		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_role", qErr.Error()))
-		}
-		if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO USER "+uname); execErr != nil {
-			return nil, respondErr(w, wireErr(execErr))
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	commit = true
-
-	return &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}, nil
+	return resp, nil
 }
 
 // DeleteUsername implements DELETE /api/v1/users/{username}.
 func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	db, err := s.connDB(r.Context())
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		if _, err := runStatement(r.Context(), db, "DROP USER "+uname); err != nil {
+			return wireErr(err)
+		}
+		emitAudit(auditEventUserDeleted,
+			"user", userFromContext(r.Context()),
+			"target", req.Username,
+		)
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	if _, err := runStatement(r.Context(), db, "DROP USER "+uname); err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	emitAudit(auditEventUserDeleted,
-		"user", userFromContext(r.Context()),
-		"target", req.Username,
-	)
 	return &gentypes.Empty{}, nil
 }
 
@@ -270,27 +269,25 @@ func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentyp
 
 // Password implements POST /api/v1/users/{username}/password.
 func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gentypes.PasswordChangeReq) (*gentypes.Empty, error) {
-	db, err := s.connDB(r.Context())
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		pw, qErr := quoteString(req.NewPassword)
+		if qErr != nil {
+			return badRequest("invalid_password", qErr.Error())
+		}
+		if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
+			return wireErr(err)
+		}
+		// Note: never log the password value itself; sensitiveKeys would
+		// redact it anyway but we omit it entirely to leave no trace.
+		emitAudit(auditEventUserPasswordSet,
+			"user", userFromContext(r.Context()),
+			"target", req.Username,
+		)
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	pw, err := quoteString(req.NewPassword)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_password", err.Error()))
-	}
-	if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	// Note: never log the password value itself; sensitiveKeys would
-	// redact it anyway but we omit it entirely to leave no trace.
-	emitAudit(auditEventUserPasswordSet,
-		"user", userFromContext(r.Context()),
-		"target", req.Username,
-	)
 	return &gentypes.Empty{}, nil
 }
 
@@ -303,69 +300,65 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 // onto PostUsernameRoles (the URI-prefix fallback because both the
 // terminal segment `roles` and `Roles` collide with /api/v1/roles).
 func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, req *gentypes.AssignRoleReq) (*gentypes.Empty, error) {
-	db, err := s.connDB(r.Context())
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		if err := assignRole(r.Context(), db, uname, req.Role); err != nil {
+			return err
+		}
+		emitAudit(auditEventRoleAssigned,
+			"user", userFromContext(r.Context()),
+			"target", req.Username,
+			"role", req.Role,
+		)
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	if err := assignRole(r.Context(), db, uname, req.Role); err != nil {
-		return nil, respondErr(w, err)
-	}
-	emitAudit(auditEventRoleAssigned,
-		"user", userFromContext(r.Context()),
-		"target", req.Username,
-		"role", req.Role,
-	)
 	return &gentypes.Empty{}, nil
 }
 
 // Permissions implements GET /api/v1/users/{username}/permissions.
 func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.PermissionList, error) {
-	db, err := s.connDB(r.Context())
+	var resp *gentypes.PermissionList
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
+		rows, cols, qErr := runQuery(r.Context(), db, "SHOW PERMISSIONS FOR USER "+uname)
+		if qErr != nil {
+			return wireErr(qErr)
+		}
+		out := make([]jsontext.Value, 0, len(rows))
+		for _, row := range rows {
+			obj := make(map[string]any, len(cols))
+			for i, c := range cols {
+				if i < len(row) {
+					obj[c] = row[i]
+				}
+			}
+			raw, mErr := json.Marshal(obj)
+			if mErr != nil {
+				return fmt.Errorf("marshal permission row: %w", mErr)
+			}
+			out = append(out, jsontext.Value(raw))
+		}
+		resp = &gentypes.PermissionList{Permissions: out}
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	uname, err := quoteIdent(req.Username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW PERMISSIONS FOR USER "+uname)
-	if err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	out := make([]jsontext.Value, 0, len(rows))
-	for _, row := range rows {
-		obj := make(map[string]any, len(cols))
-		for i, c := range cols {
-			if i < len(row) {
-				obj[c] = row[i]
-			}
-		}
-		raw, mErr := json.Marshal(obj)
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal permission row: %w", mErr)
-		}
-		out = append(out, jsontext.Value(raw))
-	}
-	return &gentypes.PermissionList{Permissions: out}, nil
+	return resp, nil
 }
 
 // toggleUser is the shared body of Disable/Enable. action is "DISABLE"
 // or "ENABLE" — the literal verb embedded into the GQL statement.
 func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, username, action string) (*gentypes.Empty, error) {
-	db, err := s.connDB(ctx)
+	err := s.withConnDBAndIdent(ctx, username, func(db *sql.DB, uname string) error {
+		if _, err := runStatement(ctx, db, "ALTER USER "+uname+" "+action); err != nil {
+			return wireErr(err)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, respondErr(w, err)
-	}
-	uname, err := quoteIdent(username)
-	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_username", err.Error()))
-	}
-	if _, err := runStatement(ctx, db, "ALTER USER "+uname+" "+action); err != nil {
-		return nil, respondErr(w, wireErr(err))
 	}
 	return &gentypes.Empty{}, nil
 }
@@ -383,6 +376,28 @@ func assignRole(ctx context.Context, db *sql.DB, uname, role string) error {
 		return wireErr(err)
 	}
 	return nil
+}
+
+// withConnDBAndIdent collapses the recurring user-handler preamble:
+// resolve the active *sql.DB, validate+quote the username identifier,
+// then invoke fn with both. Errors from either preamble step (or the
+// caller's body) flow back as endpointError-shaped errors so the
+// caller's single `respondErr(w, err)` site renders them inline.
+//
+// GAP-Q9 (#41): introduced after the Q3 rename (`userDB`→`connDB`) to
+// retire the 9 hand-rolled preambles in this file. Callers that need
+// only `connDB` (e.g. `GetUsers`) keep using it directly; callers
+// that need `connDB` *and* a quoted username route through here.
+func (s *GraphServer) withConnDBAndIdent(ctx context.Context, name string, fn func(db *sql.DB, qname string) error) error {
+	db, err := s.connDB(ctx)
+	if err != nil {
+		return err
+	}
+	qname, err := quoteIdent(name)
+	if err != nil {
+		return badRequest("invalid_username", err.Error())
+	}
+	return fn(db, qname)
 }
 
 // connDB resolves the *sql.DB for the current request's connection

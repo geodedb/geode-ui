@@ -416,6 +416,112 @@ func TestUsers_GetUsername_NotFound(t *testing.T) {
 	}
 }
 
+// TestWithConnDBAndIdent_TableDriven exercises the GAP-Q9 helper that
+// collapses the connDB+quoteIdent preamble shared by the user
+// handlers. Three paths matter: happy (both lookups succeed and fn
+// runs), connDB failure (no quoteIdent or fn invocation), and
+// quoteIdent failure (no fn invocation, returns a 400 endpointError).
+func TestWithConnDBAndIdent_TableDriven(t *testing.T) {
+	d := &userDriver{}
+	happyServer := newUserStubServer(t, "with_conn_ident_happy", d)
+	brokenServer := New(Config{Version: "test",
+		Pool: &errPool{err: errors.New("boom")},
+	})
+
+	cases := []struct {
+		name        string
+		srv         *GraphServer
+		username    string
+		fnCalled    bool
+		wantErr     bool
+		wantStatus  int
+		wantCode    string
+		wantBodySub string
+	}{
+		{
+			name:     "happy_path_invokes_fn_with_quoted_ident",
+			srv:      happyServer,
+			username: "alice",
+			fnCalled: true,
+			wantErr:  false,
+		},
+		{
+			name:        "missing_active_connection_short_circuits",
+			srv:         brokenServer,
+			username:    "alice",
+			fnCalled:    false,
+			wantErr:     true,
+			wantStatus:  http.StatusBadGateway,
+			wantCode:    "profile_unreachable",
+			wantBodySub: "boom",
+		},
+		{
+			name:        "bad_identifier_short_circuits_without_db_use",
+			srv:         happyServer,
+			username:    "al`ice",
+			fnCalled:    false,
+			wantErr:     true,
+			wantStatus:  http.StatusBadRequest,
+			wantCode:    "invalid_username",
+			wantBodySub: "invalid_username",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			var gotIdent string
+			err := tc.srv.withConnDBAndIdent(context.Background(), tc.username, func(_ *sql.DB, qname string) error {
+				called = true
+				gotIdent = qname
+				return nil
+			})
+			if called != tc.fnCalled {
+				t.Fatalf("fn called=%v want %v", called, tc.fnCalled)
+			}
+			if tc.wantErr {
+				ep := asEndpointError(err)
+				if ep == nil {
+					t.Fatalf("err=%v want endpointError", err)
+				}
+				if ep.status != tc.wantStatus {
+					t.Errorf("status=%d want %d", ep.status, tc.wantStatus)
+				}
+				if ep.code != tc.wantCode {
+					t.Errorf("code=%q want %q", ep.code, tc.wantCode)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err=%v want nil", err)
+			}
+			if gotIdent != "`alice`" {
+				t.Errorf("qname=%q want `alice`", gotIdent)
+			}
+		})
+	}
+}
+
+// TestQ9_CallsitesUnchanged is a regression smoke test that confirms
+// the public handler behaviour after the GAP-Q9 helper extraction.
+// We rely on the existing TestUsers_* suite for full per-handler
+// coverage and just pin one happy path per migrated handler family
+// so that an accidental regression in the helper plumbing trips a
+// localised test.
+func TestQ9_CallsitesUnchanged(t *testing.T) {
+	d := &userDriver{}
+	s := newUserStubServer(t, "q9_callsites_smoke", d)
+	rec := httptest.NewRecorder()
+	if _, err := s.DeleteUsername(rec,
+		httptest.NewRequest(http.MethodDelete, "/api/v1/users/alice", nil),
+		&gentypes.UsernameParam{Username: "alice"},
+	); err != nil {
+		t.Fatalf("DeleteUsername after Q9: %v", err)
+	}
+	if got := d.seen(); len(got) != 1 || got[0] != "DROP USER `alice`" {
+		t.Fatalf("post-Q9 stmts=%v want [DROP USER `alice`]", got)
+	}
+}
+
 // TestUsers_QueryFailureSurfacesAs422 confirms a driver error from a
 // SHOW USERS query gets wrapped as user_admin_error / 422.
 func TestUsers_QueryFailureSurfacesAs422(t *testing.T) {
