@@ -10,12 +10,19 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   // Retry once locally too — the Schema Explorer + multi-request specs
-  // flake occasionally under 4-worker parallel load against a single
-  // upstream Geode driver. The tests are deterministic on rerun; this
-  // absorbs the race without masking real regressions (a deterministic
-  // failure would still fail twice).
+  // flake occasionally under parallel load against a single upstream
+  // Geode driver. The tests are deterministic on rerun; this absorbs
+  // the race without masking real regressions (a deterministic failure
+  // would still fail twice).
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 2 : 4,
+  // Local default lowered from 4 → 2 to match CI. The new profile-
+  // CRUD specs (14-profiles-page, 15-profile-api) collectively burst
+  // past the per-actor rate limit (30 req/min, burst 10) when 4
+  // workers fire profile POSTs concurrently. helpers/profiles.ts
+  // already retries on 429, but the inline PATCH/DELETEs in the
+  // tests themselves don't, and the SPA's setAsDefault dance has no
+  // server-side retry. workers=2 halves the burst pressure.
+  workers: 2,
 
   reporter: [
     ['html', { outputFolder: 'playwright-report', open: 'never' }],

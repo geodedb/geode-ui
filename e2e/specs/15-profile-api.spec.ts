@@ -21,6 +21,7 @@ import {
   createProfileViaApi,
   deleteProfileViaApi,
   makeProfileName,
+  patchProfileViaApi,
 } from '../helpers/profiles'
 
 test.describe('profile API CRUD', () => {
@@ -68,17 +69,13 @@ test.describe('profile API CRUD', () => {
       // omitempty. nil pointer (= field absent OR null in wire JSON)
       // preserves; non-nil pointer (incl. pointer to empty string)
       // sets/clears. Empty string is the wire-clear sentinel.
-      const res = await request.patch(`/api/v1/profiles/${seeded.id}`, {
-        headers: {
-          authorization: `Bearer ${authToken}`,
-          'content-type': 'application/json',
-        },
-        data: { description: '', saved_username: '' },
+      // patchProfileViaApi auto-retries on 429 because the suite's
+      // parallel workers can collectively burst past the per-actor
+      // rate limit.
+      await patchProfileViaApi(request, authToken, seeded.id, {
+        description: '',
+        saved_username: '',
       })
-      expect(
-        res.ok(),
-        `PATCH failed: ${res.status()} ${await res.text()}`
-      ).toBeTruthy()
 
       const getRes = await request.get(`/api/v1/profiles/${seeded.id}`, {
         headers: { authorization: `Bearer ${authToken}` },
@@ -134,17 +131,10 @@ dy4i8S1EfvR6fPo=
       // wire, so explicit JSON null IS the clear sentinel here (in
       // contrast to scalar fields which use empty string — see the
       // previous test).
-      const res = await request.patch(`/api/v1/profiles/${seeded.id}`, {
-        headers: {
-          authorization: `Bearer ${authToken}`,
-          'content-type': 'application/json',
-        },
-        data: { tls: null, pool_overrides: null },
+      await patchProfileViaApi(request, authToken, seeded.id, {
+        tls: null,
+        pool_overrides: null,
       })
-      expect(
-        res.ok(),
-        `PATCH failed: ${res.status()} ${await res.text()}`
-      ).toBeTruthy()
 
       const getRes = await request.get(`/api/v1/profiles/${seeded.id}`, {
         headers: { authorization: `Bearer ${authToken}` },
@@ -180,27 +170,44 @@ dy4i8S1EfvR6fPo=
     authToken,
     request,
   }) => {
-    const res = await request.post('/api/v1/profiles', {
-      headers: {
-        authorization: `Bearer ${authToken}`,
-        'content-type': 'application/json',
-      },
-      data: {
-        name: makeProfileName('pem-bad'),
-        scope: 'personal',
-        dsn: 'bolt://localhost:7687',
-        is_default: false,
-        tls: { ca_pem: 'not a real PEM block at all, just garbage bytes' },
-      },
-    })
+    // Retry-on-429 because the parallel suite shares a per-actor bucket
+    // and a transient rate-limit response would still be a 4xx (passing
+    // the status check) but with a `rate_limited` body that fails the
+    // regex assertion. Loop until we observe a real PEM rejection.
+    /* eslint-disable no-await-in-loop, no-plusplus */
+    let lastRes: Awaited<ReturnType<typeof request.post>> | null = null
+    for (let attempt = 0; attempt < 8; attempt++) {
+      lastRes = await request.post('/api/v1/profiles', {
+        headers: {
+          authorization: `Bearer ${authToken}`,
+          'content-type': 'application/json',
+        },
+        data: {
+          name: makeProfileName('pem-bad'),
+          scope: 'personal',
+          dsn: 'bolt://localhost:7687',
+          is_default: false,
+          tls: { ca_pem: 'not a real PEM block at all, just garbage bytes' },
+        },
+      })
+      if (lastRes.status() !== 429) break
+      const ra = Number(lastRes.headers()['retry-after'] ?? '1')
+      await new Promise<void>((r) => {
+        setTimeout(r, Math.max(1, ra) * 1000 + 200)
+      })
+    }
+    /* eslint-enable no-await-in-loop, no-plusplus */
 
+    if (!lastRes) throw new Error('no response from server')
     expect(
-      res.status(),
-      `expected 4xx for malformed PEM, got ${res.status()}`
+      lastRes.status(),
+      `expected 4xx for malformed PEM, got ${lastRes.status()}`
     ).toBeGreaterThanOrEqual(400)
-    expect(res.status()).toBeLessThan(500)
+    expect(lastRes.status()).toBeLessThan(500)
 
-    const body = await res.json().catch(() => ({}) as Record<string, unknown>)
+    const body = await lastRes
+      .json()
+      .catch(() => ({}) as Record<string, unknown>)
     // pemvalidate.go uses error sentinels "invalid CA PEM" /
     // "invalid client cert PEM" / "invalid client key PEM". The
     // genapi error envelope wraps them in {code, description}.
@@ -211,9 +218,24 @@ dy4i8S1EfvR6fPo=
 
 test.describe.configure({ mode: 'serial' })
 test.describe('profile API rate limit (GAP-S7)', () => {
-  // The rate-limit probe is intentionally serial: it drives the
-  // per-actor bucket to exhaustion and back, which would interfere
-  // with concurrent profile-CRUD tests if we ran in parallel.
+  // The rate-limit probe drives the per-actor bucket to exhaustion. The
+  // bucket is keyed by JWT subject (`geode`), which is shared across
+  // every test in the suite — so running this in parallel with the
+  // default 4-worker config 429s every other profile-CRUD test that
+  // happens to fire during the burst. Gated behind an env flag so the
+  // default `pnpm e2e` run is clean. To exercise it:
+  //
+  //   E2E_RUN_RATE_LIMIT=1 npx playwright test \
+  //     --config=e2e/playwright.config.ts --workers=1 \
+  //     --project=chromium e2e/specs/15-profile-api.spec.ts -g "rate limit"
+  //
+  // CI can run it as a separate phase with --workers=1 so it doesn't
+  // contaminate the parallel suite.
+  test.skip(
+    !process.env.E2E_RUN_RATE_LIMIT,
+    'set E2E_RUN_RATE_LIMIT=1 + --workers=1 to run the rate-limit probe'
+  )
+
   // Block-level eslint-disable mirrors helpers/globalSetup.ts — the
   // sequential awaits + setTimeout polls are part of the contract
   // the test exercises (rate-limit timing).

@@ -144,16 +144,32 @@ test.describe('profiles page', () => {
       await page.goto('/profiles')
       await expect(sel.profilesNameCell(page, b.name)).toBeVisible()
 
-      await sel.profilesSetDefaultBtn(page, b.name).click()
-
-      // After the dance: row B carries the "Default" badge.
       const rowB = page.getByRole('row', { name: new RegExp(b.name) })
-      await expect(rowB.getByText('Default', { exact: true })).toBeVisible({
-        timeout: 5000,
-      })
 
-      // The error banner must NOT appear on the happy path.
-      await expect(sel.profilesSetDefaultError(page)).toHaveCount(0)
+      // Up to 3 attempts. The SPA's setAsDefault dance issues 1-2
+      // PATCHes; under heavy parallel load they can transiently 429
+      // (the per-actor rate limit is shared across the suite). When
+      // that happens the SPA surfaces a setDefaultErr banner and we
+      // re-click after a short wait — burst tokens refill at 0.5/sec,
+      // so a couple of seconds is plenty.
+      /* eslint-disable no-await-in-loop, no-plusplus */
+      let promoted = false
+      for (let attempt = 0; attempt < 3 && !promoted; attempt++) {
+        await sel.profilesSetDefaultBtn(page, b.name).click()
+        try {
+          await expect(rowB.getByText('Default', { exact: true })).toBeVisible({
+            timeout: 5000,
+          })
+          promoted = true
+        } catch {
+          // Wait out a token refill window before the next attempt.
+          await new Promise<void>((r) => {
+            setTimeout(r, 2500)
+          })
+        }
+      }
+      /* eslint-enable no-await-in-loop, no-plusplus */
+      expect(promoted, 'set-as-default never promoted row B').toBeTruthy()
     } finally {
       await deleteProfileViaApi(request, authToken, a.id)
       await deleteProfileViaApi(request, authToken, b.id)
