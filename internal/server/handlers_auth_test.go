@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/internal/conn"
@@ -68,10 +69,19 @@ func TestLogin_RejectsWhenProfilesNil(t *testing.T) {
 	}
 }
 
-// TestLogin_UnknownProfile surfaces a Lookup error as a 502
-// upstream_error rather than a 500. The Profile dial layer is what
-// reports unknown profile names.
+// TestLogin_UnknownProfile asserts an upstream / profile-lookup
+// failure now surfaces as the same 401 invalid_credentials response
+// as a wrong-password attempt — GAP-N10 constant-time auth-failure
+// path. The audit log still distinguishes upstream_error vs
+// invalid_credentials for operator diagnostics; only the *wire-
+// visible* shape is collapsed.
 func TestLogin_UnknownProfile(t *testing.T) {
+	// Lower the latency floor for the test so we don't pay the
+	// production 250 ms wall-clock wait on every run.
+	prev := loginMinFailureLatency
+	loginMinFailureLatency = 0
+	t.Cleanup(func() { loginMinFailureLatency = prev })
+
 	srv := New(Config{
 		JWT:      newTestIssuer(t),
 		Profiles: fakeProfileLookup{err: errMissingProfile},
@@ -87,11 +97,14 @@ func TestLogin_UnknownProfile(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("resp=%v want nil", resp)
 	}
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("status=%d want 502", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d want 401 (collapsed via SEC-N10)", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "upstream_error") {
-		t.Fatalf("body=%q want upstream_error", w.Body.String())
+	if !strings.Contains(w.Body.String(), "invalid_credentials") {
+		t.Fatalf("body=%q want invalid_credentials (collapsed shape)", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "upstream_error") {
+		t.Fatalf("body=%q must not leak upstream_error to wire (SEC-N10)", w.Body.String())
 	}
 }
 
@@ -339,6 +352,11 @@ func TestLogin_InsecureCookieFlag(t *testing.T) {
 // NOT emit an auth cookie. This guards against a future regression that
 // would set the cookie before the credential check.
 func TestLogin_NoCookieOnFailure(t *testing.T) {
+	// SEC-N10 introduced a 250 ms failure-path floor; disable for tests.
+	prev := loginMinFailureLatency
+	loginMinFailureLatency = 0
+	t.Cleanup(func() { loginMinFailureLatency = prev })
+
 	srv := New(Config{
 		JWT:           newTestIssuer(t),
 		Profiles:      fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
@@ -358,6 +376,113 @@ func TestLogin_NoCookieOnFailure(t *testing.T) {
 		if c.Name == AuthCookieName {
 			t.Fatalf("did not expect %s cookie on failed login", AuthCookieName)
 		}
+	}
+}
+
+// TestLogin_FailureBodyIsIdentical_AcrossModes pins the SEC-N10
+// invariant: a login attempt that fails because the user does not
+// exist (upstream_error 28000), because the password is wrong
+// (ok=false from the upstream), and because the profile lookup
+// itself failed (transport error) must all produce **byte-identical**
+// response bodies AND identical status codes. This denies a remote
+// attacker the ability to enumerate user names by inspecting the
+// 4xx shape.
+func TestLogin_FailureBodyIsIdentical_AcrossModes(t *testing.T) {
+	prev := loginMinFailureLatency
+	loginMinFailureLatency = 0
+	t.Cleanup(func() { loginMinFailureLatency = prev })
+
+	type setup struct {
+		name string
+		cfg  Config
+	}
+	cases := []setup{
+		{
+			name: "user_not_found_or_wrong_password",
+			cfg: Config{
+				JWT:      newTestIssuer(t),
+				Profiles: fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+				testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+					return false, nil, nil
+				},
+			},
+		},
+		{
+			name: "upstream_transport_failure",
+			cfg: Config{
+				JWT:      newTestIssuer(t),
+				Profiles: fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+				testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+					return false, nil, errors.New("dial tcp: connection refused")
+				},
+			},
+		},
+		{
+			name: "unknown_profile_lookup_failure",
+			cfg: Config{
+				JWT:      newTestIssuer(t),
+				Profiles: fakeProfileLookup{err: errMissingProfile},
+			},
+		},
+	}
+	var firstStatus int
+	var firstBody string
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := New(tc.cfg)
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+			if _, err := srv.Login(w, r, &gentypes.LoginReq{
+				Username: "alice", Password: "wrong-password-12c", Profile: "default",
+			}); err != nil {
+				t.Fatalf("err=%v want nil", err)
+			}
+			if i == 0 {
+				firstStatus = w.Code
+				firstBody = w.Body.String()
+				if w.Code != http.StatusUnauthorized {
+					t.Fatalf("baseline status=%d want 401", w.Code)
+				}
+				return
+			}
+			if w.Code != firstStatus {
+				t.Fatalf("status=%d differs from baseline %d (SEC-N10 leak)", w.Code, firstStatus)
+			}
+			if w.Body.String() != firstBody {
+				t.Fatalf("body=%q differs from baseline %q (SEC-N10 leak)", w.Body.String(), firstBody)
+			}
+		})
+	}
+}
+
+// TestLogin_LatencyFloor confirms the constant-time floor: a
+// fast-failing login attempt sleeps for at least the configured
+// minimum so the upstream's intrinsic timing diff cannot leak.
+func TestLogin_LatencyFloor(t *testing.T) {
+	prev := loginMinFailureLatency
+	// Pick a small but observable floor to keep tests fast.
+	loginMinFailureLatency = 20 * time.Millisecond
+	t.Cleanup(func() { loginMinFailureLatency = prev })
+
+	srv := New(Config{
+		JWT:      newTestIssuer(t),
+		Profiles: fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+		testAuthenticate: func(_ context.Context, _, _, _ string) (bool, []string, error) {
+			return false, nil, nil // immediate failure
+		},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	start := time.Now()
+	_, _ = srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "anything-12-chars-pw", Profile: "default",
+	})
+	elapsed := time.Since(start)
+	// Allow a small jitter tolerance so the test stays flake-free on
+	// loaded CI runners. 5 ms below the floor is well within scheduler
+	// noise but still catches a regression that removes the floor.
+	if elapsed < loginMinFailureLatency-5*time.Millisecond {
+		t.Fatalf("Login took %v; want at least ~%v (SEC-N10 latency floor)", elapsed, loginMinFailureLatency)
 	}
 }
 

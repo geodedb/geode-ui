@@ -3,12 +3,15 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
@@ -42,6 +45,15 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		})
 		return nil, nil
 	}
+	// SEC-N10 (#76): start the auth-failure timer BEFORE any upstream
+	// call so every failure path — unknown user, wrong password, and
+	// transport / profile-lookup failure — observes the same minimum
+	// wall-clock latency. The floor is intentionally generous (250 ms)
+	// to swallow most cross-failure jitter without making successful
+	// logins feel sluggish (success returns immediately when the
+	// upstream answers faster than the floor).
+	authStart := timeNow()
+
 	// SEC-N3 (#65): canonicalise the profile early so audit logs, rate-
 	// limit buckets (loginlimiter.go), and the upstream auth attempt all
 	// agree on the bucket key. Empty or whitespace-only profile resolves
@@ -55,29 +67,38 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		authenticate = s.authenticateUpstream
 	}
 	ok, roles, err := authenticate(r.Context(), profile, req.Username, req.Password)
-	if err != nil {
+	// SEC-N10 (#76): collapse every authentication-failure path into
+	// the same 401 invalid_credentials response. We still keep the
+	// operator-side audit detail (reason="upstream_error" vs
+	// "invalid_credentials") so the security team can diagnose
+	// infrastructure issues, but the on-the-wire body and status code
+	// are byte-identical across all failure modes — denying the
+	// attacker the side channel.
+	if err != nil || !ok {
+		// Always pay the constant-time hash compare cost so a path
+		// that *would* have early-returned at "user lookup failed"
+		// still spends the same CPU as a path that did a real
+		// password compare. This is the local-side complement to the
+		// upstream constant-time auth — see authenticateUpstream
+		// comment for why we cannot do a local hash compare.
+		performDummyCompare(req.Username, req.Password)
+
+		reason := "invalid_credentials"
+		if err != nil {
+			reason = "upstream_error"
+		}
 		emitAudit(auditEventLoginFailure,
 			"user", req.Username,
 			"profile", profile,
-			"reason", "upstream_error",
+			"reason", reason,
 		)
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusBadGateway,
-			code:        "upstream_error",
-			description: err.Error(),
-		})
-		return nil, nil
-	}
-	if !ok {
-		emitAudit(auditEventLoginFailure,
-			"user", req.Username,
-			"profile", profile,
-			"reason", "invalid_credentials",
-		)
+		// Min-latency floor — wait out the remainder of the policy
+		// window so timing diffs between failure modes are masked.
+		respectLoginLatencyFloor(authStart, loginMinFailureLatency)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnauthorized,
 			code:        "invalid_credentials",
-			description: "username or password incorrect",
+			description: "invalid credentials",
 		})
 		return nil, nil
 	}
@@ -281,6 +302,49 @@ func newConnectionID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// loginMinFailureLatency is the minimum wall-clock duration every
+// failed Login attempt observes (SEC-N10 / #76). Set to 250 ms — long
+// enough to swallow practically all upstream-vs-local timing diffs
+// without bothering users on the happy path (success returns
+// immediately when the upstream answers faster). Lowercase / var so
+// tests in this package can lower it to a few microseconds and avoid
+// pegging the suite on real wall-clock waits.
+var loginMinFailureLatency = 250 * time.Millisecond
+
+// dummyCompareTarget is a constant-time-compare sink: a fixed SHA-256
+// of an arbitrary byte sequence. performDummyCompare hashes the
+// caller-supplied username+password and compares the result against
+// this sink. The comparison itself is constant-time via
+// subtle.ConstantTimeCompare so the function's runtime is dominated
+// by the hash, not by an unequal-byte short-circuit. The output is
+// thrown away — we don't care whether they match.
+var dummyCompareTarget = sha256.Sum256([]byte("SEC-N10 anti-timing sink"))
+
+// performDummyCompare burns roughly the same CPU as a real password
+// hash + compare so a request that fails at "user not found" inside
+// the upstream still spends comparable CPU to one that fails at
+// "wrong password". Combined with the loginMinFailureLatency floor
+// below, this denies the attacker an information-leaking timing
+// channel between failure modes.
+func performDummyCompare(username, password string) {
+	h := sha256.Sum256([]byte(username + ":" + password))
+	_ = subtle.ConstantTimeCompare(h[:], dummyCompareTarget[:])
+}
+
+// respectLoginLatencyFloor sleeps until at least `floor` has elapsed
+// since `start`. Combined with performDummyCompare it ensures every
+// auth-failure path has the same observable latency from a remote
+// attacker's perspective. A no-op if floor has already passed.
+func respectLoginLatencyFloor(start time.Time, floor time.Duration) {
+	if floor <= 0 {
+		return
+	}
+	elapsed := timeNow().Sub(start)
+	if remaining := floor - elapsed; remaining > 0 {
+		time.Sleep(remaining)
+	}
 }
 
 // injectCreds rewrites a Geode DSN to carry the supplied username and

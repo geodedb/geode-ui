@@ -20,14 +20,24 @@ type endpointError struct {
 
 func (e *endpointError) Error() string { return e.code + ": " + e.description }
 
+// errorBody is the on-wire JSON shape every endpoint error serialises
+// into. Defining it as a struct (rather than a map[string]any) keeps
+// the key order deterministic — required by GAP-N10 so that the
+// /auth/login failure path returns byte-identical responses across
+// all failure modes regardless of Go's map-iteration randomisation.
+type errorBody struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
 // writeEndpointError serialises an endpointError as JSON with the standard
 // {error, error_description} shape used elsewhere in the platform.
 func writeEndpointError(w http.ResponseWriter, e *endpointError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(e.status)
-	_ = json.MarshalWrite(w, map[string]any{
-		"error":             e.code,
-		"error_description": e.description,
+	_ = json.MarshalWrite(w, errorBody{
+		Error:            e.code,
+		ErrorDescription: e.description,
 	})
 }
 
