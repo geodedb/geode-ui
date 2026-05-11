@@ -3,6 +3,11 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
+import { useCapabilities } from '../../hooks/useCapabilities'
 import type { Theme } from '../../theme'
 import { Button, Field, Inline, Input, Select, Stack } from '../ui'
 
@@ -51,8 +56,18 @@ const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
+const UnsupportedNote = styled.p`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
+  margin: 0;
+`
+
 export const GrantsPanel: React.FC = () => {
   const { t } = useTranslation()
+  const { adminWritable, loaded: capsLoaded } = useCapabilities()
+  // Render Apply/Revoke enabled until the /capabilities probe confirms
+  // the connected Geode build rejects GRANT/REVOKE over the wire.
+  const gateWrite = capsLoaded && !adminWritable.grants
   const [permission, setPermission] = useState('')
   const [resource, setResource] = useState('')
   const [grantee, setGrantee] = useState('')
@@ -80,7 +95,13 @@ export const GrantsPanel: React.FC = () => {
         setOkMsg(t('grants.revoked'))
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      if (isWireFeatureMissingError(e)) {
+        setErr(
+          wireFeatureMissingDescription(e) ?? t('grants.wireFeatureMissing')
+        )
+      } else {
+        setErr(e instanceof Error ? e.message : String(e))
+      }
     } finally {
       setBusy(false)
     }
@@ -133,14 +154,28 @@ export const GrantsPanel: React.FC = () => {
             <option value="role">{t('grants.granteeKindRole')}</option>
           </Select>
         </Field>
+        {gateWrite && (
+          <UnsupportedNote data-testid="admin-grants-unsupported">
+            {t('grants.unsupportedNote')}
+          </UnsupportedNote>
+        )}
         <Inline $gap="sm">
-          <Button onClick={() => send('apply')} loading={busy}>
+          <Button
+            data-testid="admin-grants-apply-btn"
+            onClick={() => send('apply')}
+            loading={busy}
+            disabled={gateWrite}
+            title={gateWrite ? t('grants.unsupportedTooltip') : undefined}
+          >
             {t('common.apply')}
           </Button>
           <Button
+            data-testid="admin-grants-revoke-btn"
             variant="danger"
             onClick={() => send('revoke')}
             loading={busy}
+            disabled={gateWrite}
+            title={gateWrite ? t('grants.unsupportedTooltip') : undefined}
           >
             {t('common.revoke')}
           </Button>

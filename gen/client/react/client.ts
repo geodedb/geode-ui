@@ -133,6 +133,10 @@ export interface BackupRef {
 export interface BackupUploadReq {
   file: FileUpload;
 }
+export interface Capabilities {
+  admin_writable: Record<string, unknown>;
+  geode_version: string;
+}
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;
 }
@@ -1118,6 +1122,15 @@ export class GenAPIClient {
       ["file"], copyRecord(req),
     );
   }
+  async getCapabilities(req: Empty): Promise<Capabilities> {
+    return this.request<Capabilities>(
+      "GET",
+      "/api/v1/capabilities",
+      "jwt",
+      "query",
+      [], copyRecord(req),
+    );
+  }
   async grants(req: GrantReq): Promise<Empty> {
     return this.request<Empty>(
       "POST",
@@ -1560,6 +1573,9 @@ export function useDeleteFile(client: GenAPIClient, req: BackupFileParam, deps: 
 }
 export function useGetFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = []): RequestState<BackupInfo> {
   return usePromise(() => client.getFile(req), deps);
+}
+export function useGetCapabilities(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<Capabilities> {
+  return usePromise(() => client.getCapabilities(req), deps);
 }
 export function useGrantsMutation(client: GenAPIClient): MutationState<GrantReq, Empty> {
   return useMutationState((req) => client.grants(req));

@@ -3,7 +3,12 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
 import { useApiResource } from '../../hooks/useApiResource'
+import { useCapabilities } from '../../hooks/useCapabilities'
 import {
   Button,
   ConfirmModal,
@@ -62,8 +67,15 @@ const Code = styled.code`
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
+const UnsupportedNote = styled.span`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
+`
+
 export const PoliciesPage: React.FC = () => {
   const { t } = useTranslation()
+  const { adminWritable, loaded: capsLoaded } = useCapabilities()
+  const gateCreate = capsLoaded && !adminWritable.policies
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -103,7 +115,17 @@ export const PoliciesPage: React.FC = () => {
     <Stack $gap="md">
       <ToolBar>
         <h2>{t('policies.title', { count: policies.length })}</h2>
-        <Button onClick={() => setShowCreate(true)}>
+        {gateCreate && (
+          <UnsupportedNote data-testid="admin-policies-unsupported">
+            {t('policies.unsupportedNote')}
+          </UnsupportedNote>
+        )}
+        <Button
+          data-testid="admin-new-policy-btn"
+          onClick={() => setShowCreate(true)}
+          disabled={gateCreate}
+          title={gateCreate ? t('policies.unsupportedTooltip') : undefined}
+        >
           {t('policies.newButton')}
         </Button>
       </ToolBar>
@@ -184,7 +206,13 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       await client.postPolicies({ name, resource, expression })
       onClose()
     } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : String(e2))
+      if (isWireFeatureMissingError(e2)) {
+        setErr(
+          wireFeatureMissingDescription(e2) ?? t('policies.wireFeatureMissing')
+        )
+      } else {
+        setErr(e2 instanceof Error ? e2.message : String(e2))
+      }
     } finally {
       setBusy(false)
     }

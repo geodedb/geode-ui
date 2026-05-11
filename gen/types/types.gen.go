@@ -136,6 +136,18 @@ func (v BackupUploadReq) Valid() error {
 	return nil
 }
 
+// Capabilities generated from config schema
+type Capabilities struct {
+	AdminWritable jsontext.Value `json:"admin_writable" genapi:"admin_writable"`
+	GeodeVersion string `json:"geode_version" genapi:"geode_version"`
+}
+
+// Valid validates Capabilities fields against schema constraints.
+func (v Capabilities) Valid() error {
+	if len(v.GeodeVersion) > 256 { return errors.New("geode_version: too long") }
+	return nil
+}
+
 // ConstraintList generated from config schema
 type ConstraintList struct {
 	Constraints []jsontext.Value `json:"constraints" genapi:"constraints"`

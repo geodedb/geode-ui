@@ -50,6 +50,7 @@ type ServerInterface interface {
 	BackupUpload(w http.ResponseWriter, r *http.Request, req *types.BackupUploadReq) (*types.UploadResp, error)
 	DeleteFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.Empty, error)
 	GetFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.BackupInfo, error)
+	GetCapabilities(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.Capabilities, error)
 	Grants(w http.ResponseWriter, r *http.Request, req *types.GrantReq) (*types.Empty, error)
 	Revoke(w http.ResponseWriter, r *http.Request, req *types.GrantReq) (*types.Empty, error)
 	Graphs(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.GraphList, error)
@@ -128,6 +129,10 @@ func (UnimplementedServer) DeleteFile(_ http.ResponseWriter, _ *http.Request, _ 
 }
 
 func (UnimplementedServer) GetFile(_ http.ResponseWriter, _ *http.Request, _ *types.BackupFileParam) (*types.BackupInfo, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetCapabilities(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.Capabilities, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -569,6 +574,30 @@ func (s catchAllServer) GetFile(w http.ResponseWriter, r *http.Request, req *typ
 		HasTypedResponse:   true,
 		PathParams:         []string{"file"},
 		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetCapabilities(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.Capabilities, error) {
+	return callCatchAll[*types.Capabilities](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/capabilities",
+		MuxPattern:         "GET /api/v1/capabilities",
+		MethodName:         "GetCapabilities",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.Capabilities",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "Capabilities",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
@@ -2259,6 +2288,46 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		req.File = r.PathValue("file")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetFile(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetCapabilities *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetCapabilities = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetCapabilities",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/capabilities"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if bkt_get_GetCapabilities != nil { lim, rem, reset := bkt_get_GetCapabilities.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetCapabilities.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetCapabilities(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")

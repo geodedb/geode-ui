@@ -529,6 +529,44 @@ func (c *Client) GetFile(ctx context.Context, req *types.BackupFileParam) (*type
 	}
 	return &out, nil
 }
+// GetCapabilities performs GET /api/v1/capabilities.
+func (c *Client) GetCapabilities(ctx context.Context, req *types.Empty) (*types.Capabilities, error) {
+	target, err := c.buildURL("/api/v1/capabilities")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, []string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Capabilities
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Grants performs POST /api/v1/grants.
 func (c *Client) Grants(ctx context.Context, req *types.GrantReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/grants")

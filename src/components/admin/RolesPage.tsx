@@ -3,7 +3,12 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
 import { useApiResource } from '../../hooks/useApiResource'
+import { useCapabilities } from '../../hooks/useCapabilities'
 import {
   Button,
   ConfirmModal,
@@ -57,8 +62,15 @@ const ErrorBanner = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
+const UnsupportedNote = styled.span`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
+`
+
 export const RolesPage: React.FC = () => {
   const { t } = useTranslation()
+  const { adminWritable, loaded: capsLoaded } = useCapabilities()
+  const gateCreate = capsLoaded && !adminWritable.roles
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -98,7 +110,17 @@ export const RolesPage: React.FC = () => {
     <Stack $gap="md">
       <ToolBar>
         <h2>{t('roles.title', { count: roles.length })}</h2>
-        <Button onClick={() => setShowCreate(true)}>
+        {gateCreate && (
+          <UnsupportedNote data-testid="admin-roles-unsupported">
+            {t('roles.unsupportedNote')}
+          </UnsupportedNote>
+        )}
+        <Button
+          data-testid="admin-new-role-btn"
+          onClick={() => setShowCreate(true)}
+          disabled={gateCreate}
+          title={gateCreate ? t('roles.unsupportedTooltip') : undefined}
+        >
           {t('roles.newButton')}
         </Button>
       </ToolBar>
@@ -183,7 +205,13 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       await client.postApiRoles({ name, description, permissions: perms })
       onClose()
     } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : String(e2))
+      if (isWireFeatureMissingError(e2)) {
+        setErr(
+          wireFeatureMissingDescription(e2) ?? t('roles.wireFeatureMissing')
+        )
+      } else {
+        setErr(e2 instanceof Error ? e2.message : String(e2))
+      }
     } finally {
       setBusy(false)
     }

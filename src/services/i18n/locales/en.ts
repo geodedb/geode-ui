@@ -163,6 +163,12 @@ export const en = {
     fieldEmail: 'Email',
     fieldPassword: 'Password',
     passwordHint: 'The user can change this on first login.',
+    unsupportedNote:
+      'Creating users is not supported on the connected Geode build.',
+    unsupportedTooltip:
+      'Not supported on the connected Geode build — manage users via the `geode` CLI',
+    wireFeatureMissing:
+      'Not supported on the connected Geode build — manage users via the `geode` CLI',
   },
 
   roles: {
@@ -179,6 +185,12 @@ export const en = {
     fieldDescription: 'Description',
     fieldPermissions: 'Permissions',
     permissionsHint: 'Comma-separated identifiers (e.g. read,write,admin).',
+    unsupportedNote:
+      'Creating roles is not supported on the connected Geode build.',
+    unsupportedTooltip:
+      'Not supported on the connected Geode build — manage roles via the `geode` CLI',
+    wireFeatureMissing:
+      'Not supported on the connected Geode build — manage roles via the `geode` CLI',
   },
 
   policies: {
@@ -196,6 +208,12 @@ export const en = {
     resourceHint:
       'The graph or namespace this policy guards (e.g. graph:default).',
     fieldExpression: 'Expression',
+    unsupportedNote:
+      'Creating policies is not supported on the connected Geode build.',
+    unsupportedTooltip:
+      'Not supported on the connected Geode build — manage policies via the `geode` CLI',
+    wireFeatureMissing:
+      'Not supported on the connected Geode build — manage policies via the `geode` CLI',
   },
 
   grants: {
@@ -211,6 +229,12 @@ export const en = {
     granteeKindRole: 'role',
     applied: 'Grant applied.',
     revoked: 'Grant revoked.',
+    unsupportedNote:
+      'Applying and revoking grants is not supported on the connected Geode build.',
+    unsupportedTooltip:
+      'Not supported on the connected Geode build — manage grants via the `geode` CLI',
+    wireFeatureMissing:
+      'Not supported on the connected Geode build — manage grants via the `geode` CLI',
   },
 
   backups: {

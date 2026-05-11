@@ -95,6 +95,15 @@
       "rateLimit": 100
     },
     {
+      "method": "GET",
+      "path": "/api/v1/capabilities",
+      "name": "GetCapabilities",
+      "requestSchema": "Empty",
+      "responseSchema": "Capabilities",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
       "method": "POST",
       "path": "/api/v1/tx",
       "requestSchema": "TxBeginReq",
@@ -633,6 +642,22 @@
               "table":   { "type": "string" },
               "columns": {}
             }
+          }
+        }
+      }
+    },
+    "Capabilities": {
+      "type": "object",
+      "required": ["geode_version", "admin_writable"],
+      "properties": {
+        "geode_version":  { "type": "string", "maxLength": 256 },
+        "admin_writable": {
+          "type": "object",
+          "properties": {
+            "users":    { "type": "boolean" },
+            "roles":    { "type": "boolean" },
+            "policies": { "type": "boolean" },
+            "grants":   { "type": "boolean" }
           }
         }
       }

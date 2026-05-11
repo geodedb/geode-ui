@@ -4,7 +4,12 @@ import styled from 'styled-components'
 
 import type { User } from '@api'
 import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
 import { useApiResource } from '../../hooks/useApiResource'
+import { useCapabilities } from '../../hooks/useCapabilities'
 import {
   Button,
   ConfirmModal,
@@ -62,8 +67,19 @@ const RowActions = styled.div`
   gap: ${({ theme }) => theme.spacing.xs};
 `
 
+const UnsupportedNote = styled.span`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
+`
+
 export const UsersPage: React.FC = () => {
   const { t } = useTranslation()
+  const { adminWritable, loaded: capsLoaded } = useCapabilities()
+  // Render the CTA enabled until the /capabilities probe confirms the
+  // connected Geode build lacks the wire DDL — only then disable it and
+  // surface the inline note, so the button never flashes disabled-then-
+  // enabled on a build that does support it.
+  const gateCreate = capsLoaded && !adminWritable.users
   const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -129,7 +145,17 @@ export const UsersPage: React.FC = () => {
     <Stack $gap="md">
       <ToolBar>
         <h2>{t('users.title', { count: users.length })}</h2>
-        <Button onClick={() => setShowCreate(true)}>
+        {gateCreate && (
+          <UnsupportedNote data-testid="admin-users-unsupported">
+            {t('users.unsupportedNote')}
+          </UnsupportedNote>
+        )}
+        <Button
+          data-testid="admin-new-user-btn"
+          onClick={() => setShowCreate(true)}
+          disabled={gateCreate}
+          title={gateCreate ? t('users.unsupportedTooltip') : undefined}
+        >
           {t('users.newButton')}
         </Button>
       </ToolBar>
@@ -233,7 +259,13 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       await client.postUsers({ username, email, password })
       onClose()
     } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : String(e2))
+      if (isWireFeatureMissingError(e2)) {
+        setErr(
+          wireFeatureMissingDescription(e2) ?? t('users.wireFeatureMissing')
+        )
+      } else {
+        setErr(e2 instanceof Error ? e2.message : String(e2))
+      }
     } finally {
       setBusy(false)
     }
