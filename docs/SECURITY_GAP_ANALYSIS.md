@@ -67,7 +67,7 @@ geode-ui is an **admin-facing** SPA + thin reverse-proxy/auth-fronting server fo
 | 15 | F3 | Low | **8** | JWT verify has no clock leeway | [#70](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/70) | `internal/jwt/jwt.go:82-94` | **Closed** 2026-05-08 — `jjwt.WithLeeway(60 * time.Second)` passed to `ParseWithClaims`. Tests pin the upper bound: an exp 2 minutes in the past still rejects. |
 | 16 | F12 | Low | **8** | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin | [#73](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/73) | `package-lock.json` | Bump or replace plugin |
 | 17 | N8 | Low | **8** | Missing public/.well-known/security.txt | [#75](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/75) | `public/.well-known/security.txt` | **Closed** 2026-05-08 — file added per RFC 9116 (Contact, Expires 2027-05-08, Encryption, Acknowledgments, Canonical, Policy). Webpack CopyPlugin emits it under the SPA's `/.well-known/security.txt`. |
-| 18 | F11 | Low | **4** | gosec G115 in genapi-emitted gqlx/subscription.go | [#77](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/77) | `gen/pkg/gqlx/subscription.go:394` | Fix in genapi at `~/src/devnw/apps/genapi`; regenerate |
+| 18 | F11 | Low | **4** | gosec G115 in genapi-emitted gqlx/subscription.go | [#77](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/77) | `gen/pkg/gqlx/subscription.go:394` | **Closed** 2026-05-10 — genapi `1033c50` replaces the `//nolint:gosec` suppression with a real `uint64 > maxWSFrameBytes` bounds check before the int64 cast in `pkg/gqlx/subscription.go:readWSFrame`. Regenerated; `gosec -include=G115 ./gen/...` reports 0 issues. |
 
 **Confidential issues** (Critical/High): F2 (#58), F4 (#60), F7 (#62) — created with `--confidential` because they describe an exploit chain or a credential-storage flaw with a concrete exfil path. **All three closed in the 2026-05-07 closure run.**
 
@@ -157,7 +157,7 @@ These were flagged by tools or surfaced during manual review but are **confirmed
 - F3 — JWT clock leeway (`internal/jwt/jwt.go:82-94`).
 - N8 — Add `public/.well-known/security.txt`.
 - F1 — Either call `mcpx.SetAuthVerifier(srv.AuthJWT)` or unmount `/mcp`.
-- F11 — Fix in genapi template; regenerate.
+- ~~F11 — Fix in genapi template; regenerate.~~ **Closed 2026-05-10** via genapi `1033c50` + regen.
 - F14 — Add allowlist pragma; close.
 
 **Medium (1–5 days each):**

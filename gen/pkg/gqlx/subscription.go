@@ -391,7 +391,16 @@ func readWSFrame(c net.Conn) ([]byte, error) {
 		if _, err := readFull(c, ext); err != nil {
 			return nil, err
 		}
-		length = int64(binary.BigEndian.Uint64(ext)) //nolint:gosec // G115: bounded by maxWSFrameBytes check below
+		u := binary.BigEndian.Uint64(ext)
+		// Reject any 64-bit payload length that cannot be safely
+		// represented as a positive int64 (top bit set) or that exceeds
+		// our frame cap. Performing the bound check on the unsigned
+		// value makes the int64 conversion provably safe and removes
+		// the gosec G115 finding without a //nolint suppression.
+		if u > uint64(maxWSFrameBytes) {
+			return nil, ErrWSFrameTooLarge
+		}
+		length = int64(u)
 	}
 	if length < 0 || length > maxWSFrameBytes {
 		return nil, ErrWSFrameTooLarge
