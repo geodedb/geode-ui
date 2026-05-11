@@ -56,7 +56,9 @@ test.describe('profiles page', () => {
     const list = await request.get('/api/v1/profiles', {
       headers: { authorization: `Bearer ${authToken}` },
     })
-    const json = (await list.json()) as { profiles: { id: string; name: string }[] }
+    const json = (await list.json()) as {
+      profiles: { id: string; name: string }[]
+    }
     const created = json.profiles.find((p) => p.name === name)
     if (created) await deleteProfileViaApi(request, authToken, created.id)
   })
@@ -155,6 +157,53 @@ test.describe('profiles page', () => {
     } finally {
       await deleteProfileViaApi(request, authToken, a.id)
       await deleteProfileViaApi(request, authToken, b.id)
+    }
+  })
+
+  test('delete failure surfaces inside the modal (PSR-G05)', async ({
+    authedPage: page,
+    authToken,
+    request,
+  }) => {
+    const seeded = await createProfileViaApi(request, authToken, {
+      name: makeProfileName('delete-err'),
+    })
+
+    try {
+      // Intercept DELETE /api/v1/profiles/<id> and force a 500 so the
+      // SPA's deleteProfile() rejects and the modal must render the
+      // [data-testid=delete-profile-error] banner.
+      await page.route(
+        `**/api/v1/profiles/${seeded.id}`,
+        async (route, req) => {
+          if (req.method() === 'DELETE') {
+            await route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({
+                code: 'internal',
+                description: 'forced failure',
+              }),
+            })
+            return
+          }
+          await route.continue()
+        }
+      )
+
+      await page.goto('/profiles')
+      await expect(sel.profilesNameCell(page, seeded.name)).toBeVisible()
+
+      await sel.profilesDeleteBtn(page, seeded.name).click()
+      await sel.profileDeleteConfirmBtn(page).click()
+
+      await expect(sel.profileDeleteError(page)).toBeVisible({ timeout: 5000 })
+      // Row should still be present (the failed delete didn't actually
+      // remove anything server-side).
+      await expect(sel.profilesNameCell(page, seeded.name)).toBeVisible()
+    } finally {
+      await page.unroute(`**/api/v1/profiles/${seeded.id}`)
+      await deleteProfileViaApi(request, authToken, seeded.id)
     }
   })
 })
