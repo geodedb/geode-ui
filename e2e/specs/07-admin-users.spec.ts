@@ -3,6 +3,43 @@ import { sel } from '../helpers/selectors'
 
 const newUsername = `e2e_user_${Date.now()}`
 
+// Phase-1 reproduction: against the running v0.5.11 stack, the Admin
+// section must NOT surface an operable "+ New user" CTA, because the
+// connected Geode build rejects CREATE USER over the wire. The SPA
+// learns this from GET /api/v1/capabilities (admin_writable.users ===
+// false) and either hides the button or renders it `disabled` with an
+// explanatory title, plus an `admin-users-unsupported` note.
+//
+// On the current (pre-fix) build this fails: the "+ New user" button
+// renders enabled and there is no capabilities-driven gating, so
+// `adminNewUserBtn` is enabled and `adminUsersUnsupported` is absent.
+test.describe('admin / users — Phase 1 CTA gating', () => {
+  test('"+ New user" is gated against the connected Geode build', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/admin/users')
+    // Let the page settle (table empty-state or rows).
+    await page
+      .getByText(/users \(\d+\)|No users|geode/i)
+      .first()
+      .waitFor({ timeout: 6_000 })
+      .catch(() => undefined)
+
+    // The unsupported affordance must be present.
+    await expect(sel.adminUsersUnsupported(page)).toBeVisible({
+      timeout: 6_000,
+    })
+
+    // If the button still renders, it must be disabled with a title.
+    const btn = sel.adminNewUserBtn(page)
+    if (await btn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await expect(btn).toBeDisabled()
+      const title = await btn.getAttribute('title')
+      expect(title && title.length > 0).toBeTruthy()
+    }
+  })
+})
+
 test.describe('admin / users', () => {
   // The server returns an EMPTY user list (HTTP 200, users:[]) when the
   // Geode wire dialect doesn't expose SHOW USERS yet (v0.5.11 is in this

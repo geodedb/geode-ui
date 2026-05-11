@@ -66,6 +66,27 @@ export const sel = {
   // Admin
   newUserBtn: (p: Page): Locator =>
     p.getByRole('button', { name: /new user/i }),
+  // Phase-1 Admin RBAC CTA gating (driven by GET /api/v1/capabilities).
+  // Each create CTA carries a stable data-testid so the e2e suite can
+  // assert it is gated (hidden, or rendered `disabled` with an
+  // explanatory title) when the connected Geode build lacks the admin
+  // DDL. The "unsupported" affordance is the inline note/tooltip text.
+  adminNewUserBtn: (p: Page): Locator => p.getByTestId('admin-new-user-btn'),
+  adminNewRoleBtn: (p: Page): Locator => p.getByTestId('admin-new-role-btn'),
+  adminNewPolicyBtn: (p: Page): Locator =>
+    p.getByTestId('admin-new-policy-btn'),
+  adminGrantsApplyBtn: (p: Page): Locator =>
+    p.getByTestId('admin-grants-apply-btn'),
+  adminGrantsRevokeBtn: (p: Page): Locator =>
+    p.getByTestId('admin-grants-revoke-btn'),
+  adminUsersUnsupported: (p: Page): Locator =>
+    p.getByTestId('admin-users-unsupported'),
+  adminRolesUnsupported: (p: Page): Locator =>
+    p.getByTestId('admin-roles-unsupported'),
+  adminPoliciesUnsupported: (p: Page): Locator =>
+    p.getByTestId('admin-policies-unsupported'),
+  adminGrantsUnsupported: (p: Page): Locator =>
+    p.getByTestId('admin-grants-unsupported'),
 
   // Ops
   newBackupBtn: (p: Page): Locator =>
