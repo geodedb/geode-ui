@@ -36,7 +36,7 @@ These assumptions are the basis for sizing recommendations (e.g., F11 pool sizin
 | P0 (critical) | 2 issues (F4+F5+F6 umbrella, F9) | 0 | 2 (#26, #53) | 2 |
 | P1 (high) | 5 (F1, F2, F3, F11, F12) | 2 (F3, F12) | 3 (#18, #21, #55) | 2 (F11 closed; F12 open) |
 | P2 (medium) | 2 (F7, F10) | 2 | 0 | 0 |
-| P3 / Info (low) | 4 (F8, F13, F15, F18) | 4 | 0 | 0 |
+| P3 / Info (low) | 4 (F8, F13, F15, F18) | 1 (F13 deferred) | 3 (F8, F15 closed; F18 won't-do) | 0 |
 | **Total** | **13 GitLab issues** | 8 | 5 | 5 issues across 3 plays |
 
 ### Closure run 2026-05-07
@@ -95,7 +95,7 @@ Five P0/P1 perf issues closed in this run:
 | 10 | F13 | No gzip, no pprof, no sync.Pool for jsontext | P3 low | **36** (3×3×4) | [#57](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/57) | `cmd/server/main.go:140-180` | — | **Deferred** 2026-05-10 — requires a separate genapi work cycle: gzip + pprof + jsontext sync.Pool are three distinct middlewares on the genapi-side `pkg/httpx` chain, and pprof must gate behind the existing `Observability.EnableDebug` schema flag so we don't ship a live profiler unauthenticated. Tracked at genapi#216. |
 | 11 | F8 | SchemaExplorer: 4-fan-out per switch, no abort/cache | P3 low | **32** (2×4×4) | [#52](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/52) | `src/components/schema/SchemaExplorer.tsx` | — | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#f8-52-schemaexplorer-abortcontroller--per-graph-cache-resolved). Closure commit `975cc59`. (1) `AbortController` per active-graph fetch pair, stored in a `useRef` so the prior controller's `abort()` is called immediately on graph switch — late-resolving responses for the prior graph no longer stomp the new selection; (2) `createSchemaExplorerCache(maxEntries=8)` module-level + props-injectable per-graph cache. A cached re-selection serves indexes+constraints synchronously with zero wire calls. LRU eviction promotes hits to most-recent. Tests `F8: aborts the prior graph fetch when active graph changes mid-flight`, `F8: cached graphs do not refetch on re-select`, `F8: cache LRU eviction respects maxEntries`. Note: the generated client doesn't accept an external `signal` so cancellation is enforced at the React-effect layer via `signal.aborted` checks; structural fix (signal propagation through fetchImpl) tracked as a follow-up on the genapi side. |
 | 12 | F15 | AuditLogPage: 5s setInterval, no visibility gate | P3 low | **24** (2×3×4) | [#59](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/59) | `src/components/ops/AuditLogPage.tsx` | — | **Closed** 2026-05-07 (cross-closed via Q2 / `2b28b85`) — poll skips while `document.visibilityState === 'hidden'` and resumes on the visibilitychange listener. |
-| 13 | F18 | Driver re-parses queries (suspected); no stmt cache | P3 low | **24** (2×3×4) | [#61](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/61) | `internal/conn/pool.go` | — | Open |
+| 13 | F18 | Driver re-parses queries (suspected); no stmt cache | P3 low | **24** (2×3×4) | [#61](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/61) | `internal/conn/pool.go` | — | **Won't-do** 2026-05-11 — benchmark shows parse cost ~10% < 20% threshold, AND the geode driver has no parse-amortisation hook for a `*sql.Stmt` cache to exploit (see note below). |
 
 ## Findings by area
 
@@ -111,7 +111,7 @@ Five P0/P1 perf issues closed in this run:
 ### db — Driver / connection pool
 
 - **F11 (#55)** — Pool defaults 16/4 too small for 2,000 rps assumption.
-- **F18 (#61)** — Suspected driver re-parse on every query; needs benchmark before fix.
+- **F18 (#61)** — **Won't-do (2026-05-11).** Hypothesis was: the driver re-parses identical parameterised statements, so an LRU `*sql.Stmt` cache in `pool.go` would amortise that parse. Benchmark `internal/conn/pool_bench_test.go` (`BenchmarkParseVsExecute`, `BenchmarkParseFraction`) refutes the premise: (1) parse is ~10% of a modelled round-trip — under the ~20% threshold the AC set for landing the cache; and (2) more decisively, the geode driver has **no server-side prepared statements** — `geode.Conn.PrepareContext` does no round-trip and just stashes the query text, and `geode.Stmt.QueryContext` re-sends that text via `conn.QueryContext(ctx, s.query, args)`, i.e. the server re-parses on every call regardless of whether a `*sql.Stmt` was used. So a stmt cache has nothing to amortise. Bench numbers: `PerQueryContext` ≈ 85–107 µs/op vs `PreparedStmtReuse` ≈ 96–107 µs/op (within noise; `PreparedStmtReuse` carries 2 extra allocs/op from the `database/sql` Stmt machinery). Re-open only if the geode driver gains real server-side prepare/parse-cache support.
 
 ### infra — Server hygiene & framing
 
@@ -152,7 +152,7 @@ Together these three plays clear all P0 findings and the highest-impact P1 findi
 |---|---|---|---|
 | Quick wins | < 1 day each | F4+F5+F6 (#26), F9 (#53), F11+F12 (#55,#56), F15 (#59), F8 (#52) | Low-risk, scoped to single files or single config bumps. |
 | Medium | 1-5 days | F1 (#18), F2 (#21), F3 (#25), F7 (#51), F10 (#54), F13 (#57) | Touches multiple files or wire protocol; needs benchmarking before/after. |
-| Strategic | > 5 days | F18 (#61) only after benchmark confirms; CI perf gate (not yet ticketed); document SLOs (not yet ticketed) | Requires upstream coordination (genapi for F3 streaming codec) or new infrastructure (CI bench harness, SLO doc). |
+| Strategic | > 5 days | ~~F18 (#61)~~ — closed won't-do 2026-05-11 (benchmark refuted the premise; see findings table); CI perf gate (not yet ticketed); document SLOs (not yet ticketed) | Requires upstream coordination (genapi for F3 streaming codec) or new infrastructure (CI bench harness, SLO doc). |
 
 ## Notable absences
 
@@ -165,13 +165,13 @@ The following capabilities are NOT present in the repo as of this audit. Each is
 - **No `net/http/pprof`** mount on any port; live diagnostics require a custom build (F13).
 - **No documented SLOs** — every sizing decision (e.g., F11) is inferred. Document target rps / p99 latency / max stream duration so subsequent perf work has a target.
 - **No CI perf gate** — no benchmark suite is enforced in CI; regressions on the codec, pool, or table render path will not be caught automatically. Consider adding `go test -bench` smoke + a frontend Lighthouse budget once baseline is established.
-- **No prepared-statement cache** in the driver layer (F18, suspected).
+- **No prepared-statement cache** in the driver layer — investigated under F18 and closed won't-do 2026-05-11: the geode driver has no server-side prepared statements, so there is nothing for a `*sql.Stmt` cache to amortise (benchmark in `internal/conn/pool_bench_test.go`).
 - **No frame-batching protocol** on WS — wire-protocol change required to bundle rows (F2).
 
 ## Confidence summary
 
 - **Confirmed (12 findings)**: F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F15. Code-evidence is unambiguous; benchmarks will quantify magnitude but not direction.
-- **Suspected (1 finding)**: F18 (driver re-parse). Requires `BenchmarkAuthCheckQuery` (or similar) confirming parse cost > ~20% of total before introducing an LRU.
+- **Suspected → refuted (1 finding)**: F18 (driver re-parse). `internal/conn/pool_bench_test.go` (`BenchmarkParseVsExecute`, `BenchmarkParseFraction`) shows parse cost ~10% (< 20% threshold) and — decisively — the geode driver has no server-side prepared statements, so a `*sql.Stmt` cache has nothing to amortise. Closed won't-do 2026-05-11.
 
 ---
 
