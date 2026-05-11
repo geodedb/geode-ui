@@ -141,20 +141,20 @@ audit-ratchets:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Closes GAP-009: type-check the Electron main + preload independently
-# from the SPA tsc pass. The renderer tsconfig (tsconfig.json) does
-# not include electron/ — without this job, a regression in
-# electron/main.ts or electron/preload.ts would land silently and
-# only surface during a release-engineer's `pnpm electron:package`
-# run. The job is allow_failure for now because @types/node and
-# electron itself are not yet pulled into devDependencies; flip to
-# strict once the release pipeline goes live.
+# Closes GAP-009 / Q25 (#170): type-check the Electron main + preload
+# independently from the SPA tsc pass. The renderer tsconfig
+# (tsconfig.json) does not include electron/ — without this job, a
+# regression in electron/main.ts or electron/preload.ts would land
+# silently and only surface during a release-engineer's
+# `pnpm electron:package` run. `electron` and `@types/node` are now in
+# devDependencies (so `npm run electron:tsc` resolves the `electron`
+# module + `node` lib types), the electron sources type-check cleanly,
+# and the job is a real gate — no longer allow_failure.
 electron-typecheck:
   stage: lint
   needs: ['install']
   script:
     - npm run electron:tsc
-  allow_failure: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
       changes:
