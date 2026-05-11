@@ -236,8 +236,16 @@ func main() {
 	// authVerifier defaulted to nil, leaving the MCP envelope
 	// unreachable to legitimate clients. AuthJWT enforces the same
 	// HS256 lockdown + role context that the REST handlers see.
-	mcpx.SetAuthVerifier(srv.AuthJWT)
-	mux.HandleFunc("/mcp", genmcp.HandleMCPHTTP)
+	//
+	// F-AUTH-1 (#132): use srv.MCPAuthVerifier (AuthJWT + per-request
+	// context stash) rather than bare srv.AuthJWT, and wrap the MCP
+	// handler with srv.WrapMCPHTTP so the stash is cleared after the
+	// request. Together these let the MCP `query` tool run against the
+	// caller's JWT `profile` claim instead of the "default" profile.
+	// Temporary mitigation pending genapi threading context.Context
+	// through MCPServerInterface.Query.
+	mcpx.SetAuthVerifier(srv.MCPAuthVerifier)
+	mux.Handle("/mcp", srv.WrapMCPHTTP(http.HandlerFunc(genmcp.HandleMCPHTTP)))
 
 	uiHandler, err := ui.Handler()
 	if err != nil {
