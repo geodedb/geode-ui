@@ -122,7 +122,8 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 
 	finalPath := filepath.Join(dir, name)
 	tmpPath := finalPath + ".tmp"
-	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640)
+	// G302/G304: mode 0o640 is intentional (group-readable so the backup/restore worker running under the same group can consume staged files); path is filepath.Join(UploadDir, subdir, name) where name is the return of sanitiseUploadName — an [A-Za-z0-9._-]+ allowlist that rejects path separators and "."/".." and re-checks filepath.Base(name)==name, so no traversal is possible.
+	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640) // #nosec G302 G304 -- see comment above; intentional 0o640 + allowlist-sanitised basename //nolint:gosec
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
