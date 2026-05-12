@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,14 @@ func SetLogger(l *slog.Logger) {
 
 func getLogger() *slog.Logger { return loggerPtr.Load() }
 
+// slogArgsPool reuses the []any slice that carries the map's key/value pairs
+// into slog.Logger.Info. slog copies the args into its own Record before Info
+// returns, so the slice can be returned to the pool immediately after the
+// call. Acquired with len 0 (cap retained from prior use).
+var slogArgsPool = sync.Pool{
+	New: func() any { s := make([]any, 0, 32); return &s },
+}
+
 func slogLog(v map[string]any) {
 	if AppName != "" {
 		v["app_name"] = AppName
@@ -60,7 +69,8 @@ func slogLog(v map[string]any) {
 	if AppVersion != "" {
 		v["app_version"] = AppVersion
 	}
-	args := make([]any, 0, len(v)*2)
+	argsp := slogArgsPool.Get().(*[]any)
+	args := (*argsp)[:0]
 	var event string
 	for k, val := range v {
 		args = append(args, k, val)
@@ -74,6 +84,12 @@ func slogLog(v map[string]any) {
 		event = "log"
 	}
 	getLogger().Info(event, args...)
+	// slog has copied args into its Record; clear and return the slice.
+	for i := range args {
+		args[i] = nil
+	}
+	*argsp = args[:0]
+	slogArgsPool.Put(argsp)
 }
 
 // slogRequestStartLog emits a request_start event using slog.LogAttrs which

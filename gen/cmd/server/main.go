@@ -122,12 +122,20 @@ func main() {
 	defer cancel()
 
 	if err := Serve(ctx); err != nil {
+		// Serve defers obsx.FlushLogs(), but log.Fatal calls os.Exit which
+		// bypasses defers in this frame; flush explicitly before exiting so
+		// a fatal log line buffered by the obsx logger is not lost.
+		obsx.FlushLogs()
 		log.Fatal(err)
 	}
 }
 
 // Serve starts the generated API server with functional options.
 func Serve(ctx context.Context, opts ...ServerOption) error {
+	// obsx buffers JSON log records; flush on the way out so a graceful
+	// shutdown does not drop in-flight log lines. (A hard crash still loses
+	// records buffered within the obsx flush interval -- see obsx.FlushLogs.)
+	defer obsx.FlushLogs()
 	var sopts ServerOptions
 	for _, o := range opts {
 		o(&sopts)

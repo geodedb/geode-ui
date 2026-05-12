@@ -20,6 +20,7 @@ import (
 	genmcp "geodedb.com/geode-ui/gen/mcp"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
 	"geodedb.com/geode-ui/gen/pkg/mcpx"
+	"geodedb.com/geode-ui/gen/pkg/obsx"
 	genws "geodedb.com/geode-ui/gen/ws"
 	"geodedb.com/geode-ui/internal/conn"
 	"geodedb.com/geode-ui/internal/jwt"
@@ -481,9 +482,16 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(stdout, nil)))
 
+	// PERF-2026-05-11-03 (#133): obsx buffers its JSON audit-log path; flush
+	// on the way out so a graceful shutdown does not drop in-flight log
+	// lines. The explicit FlushLogs() calls on the error paths below push a
+	// buffered fatal line to the wire before the error text reaches stderr.
+	defer obsx.FlushLogs()
+
 	a, err := newApp(cfg, getenv)
 	if err != nil {
 		slog.Error("startup", "err", err)
+		obsx.FlushLogs()
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -494,6 +502,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 
 	if err := a.serve(ctx); err != nil {
 		slog.Error("serve", "err", err)
+		obsx.FlushLogs()
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1
 	}

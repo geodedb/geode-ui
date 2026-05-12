@@ -2,6 +2,7 @@ package obsx
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"expvar"
@@ -28,6 +29,65 @@ var (
 // logFn is the package-level structured log function.
 // Defaults to logJSON; log_hooks.go overrides with slog-based logging.
 var logFn = logJSON
+
+// logBufferSize is the size of the buffered writer wrapping os.Stdout for the
+// JSON log path. 64 KiB amortises the per-record write syscall across many
+// audit/log records.
+const logBufferSize = 64 << 10
+
+// logFlushInterval bounds how long a log line can sit in the buffered writer
+// before it is flushed by the background ticker. This caps the crash-loss
+// window: on SIGKILL / panic-without-recover, log lines written within the
+// last logFlushInterval may be lost.
+const logFlushInterval = 100 * time.Millisecond
+
+// stdoutWriter is the package-level buffered writer wrapping os.Stdout. All
+// JSON log records go through it. Access is serialised by logMu.
+//
+// CRASH-LOSS TRADEOFF: buffering means in-flight log lines are lost on a
+// hard crash (SIGKILL, panic without recover, os.Exit before flush). The
+// background ticker (started lazily on first write) flushes every
+// logFlushInterval to bound that window; FlushLogs() handles graceful
+// shutdown and MUST be deferred in consumers' main(). For a fatal-init code
+// path that calls os.Exit, call FlushLogs() immediately before os.Exit so
+// the fatal log line is not lost.
+var (
+	logMu         sync.Mutex
+	stdoutWriter  = bufio.NewWriterSize(os.Stdout, logBufferSize)
+	logTickerOnce sync.Once
+)
+
+// logBufPool reuses bytes.Buffer instances for JSON marshalling so a log
+// record is marshalled into a pooled buffer, '\n'-terminated, and flushed to
+// the buffered writer in a single Write call.
+var logBufPool = sync.Pool{
+	New: func() any { return new(bytes.Buffer) },
+}
+
+// startLogTicker lazily starts a goroutine that flushes the buffered log
+// writer every logFlushInterval. Started on first JSON log write so a process
+// that never logs does not spawn the goroutine.
+func startLogTicker() {
+	logTickerOnce.Do(func() {
+		go func() {
+			t := time.NewTicker(logFlushInterval)
+			defer t.Stop()
+			for range t.C {
+				FlushLogs()
+			}
+		}()
+	})
+}
+
+// FlushLogs flushes any buffered JSON log records to os.Stdout. Consumers
+// MUST defer FlushLogs() in main() (and call it immediately before any
+// os.Exit on a fatal path) so log lines buffered by the obsx logger are not
+// lost on shutdown. It is safe to call concurrently and repeatedly.
+func FlushLogs() {
+	logMu.Lock()
+	_ = stdoutWriter.Flush()
+	logMu.Unlock()
+}
 
 // requestStartLogFn and requestEndLogFn are the per-request fast-path log
 // emitters used by Middleware. They avoid the per-event map[string]any literal
@@ -163,8 +223,25 @@ func logJSON(v map[string]any) {
 	if AppVersion != "" {
 		v["app_version"] = AppVersion
 	}
-	_ = json.MarshalWrite(os.Stdout, v)
-	_, _ = os.Stdout.Write([]byte("\n"))
+	buf := logBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	if err := json.MarshalWrite(buf, v); err != nil {
+		// Marshalling a map[string]any of primitive log fields should not
+		// fail; if it does, drop the record rather than emit garbage.
+		logBufPool.Put(buf)
+		return
+	}
+	buf.WriteByte('\n')
+	startLogTicker()
+	logMu.Lock()
+	_, _ = stdoutWriter.Write(buf.Bytes())
+	// Flush eagerly when the buffer is nearly full so a burst of large
+	// records does not stall behind the 100ms ticker.
+	if stdoutWriter.Buffered() >= logBufferSize-(4<<10) {
+		_ = stdoutWriter.Flush()
+	}
+	logMu.Unlock()
+	logBufPool.Put(buf)
 }
 
 // defaultRequestStartLog is the pre-slog fallback used when log_hooks.go has
@@ -435,7 +512,24 @@ func RedactSensitiveKeys(fields map[string]any, fragments []string) map[string]a
 	if fragments == nil {
 		fragments = DefaultSensitiveKeyFragments
 	}
+	// Cheap pre-scan: most audit records carry no sensitive key. The scan
+	// touches each key once; the value-by-value redaction loop below only
+	// runs when at least one key matched.
+	hasSensitive := false
+	for k := range fields {
+		if IsSensitiveKey(k, fragments) {
+			hasSensitive = true
+			break
+		}
+	}
 	out := make(map[string]any, len(fields))
+	if !hasSensitive {
+		// Clean record: a single map copy, no per-value sensitivity check.
+		for k, v := range fields {
+			out[k] = v
+		}
+		return out
+	}
 	for k, v := range fields {
 		if IsSensitiveKey(k, fragments) {
 			out[k] = RedactedValue
@@ -530,9 +624,35 @@ func containsASCII(haystack, needle string) bool {
 // the default list on top, so an app-specific list is a strict superset
 // of the defaults.
 func LogAudit(event string, fields map[string]any) {
-	red := RedactSensitiveKeys(fields, nil)
-	if red == nil {
-		red = make(map[string]any, 1)
+	if fields == nil {
+		logFn(map[string]any{"audit_event": event})
+		return
+	}
+	fragments := DefaultSensitiveKeyFragments
+	// Pre-scan: the common case is an audit record with no sensitive key,
+	// which lets us skip the per-value redaction work below.
+	hasSensitive := false
+	for k := range fields {
+		if IsSensitiveKey(k, fragments) {
+			hasSensitive = true
+			break
+		}
+	}
+	// Build a fresh map sized for the caller's fields plus "audit_event" so
+	// we never alias or mutate the caller's map.
+	red := make(map[string]any, len(fields)+1)
+	if hasSensitive {
+		for k, v := range fields {
+			if IsSensitiveKey(k, fragments) {
+				red[k] = RedactedValue
+				continue
+			}
+			red[k] = v
+		}
+	} else {
+		for k, v := range fields {
+			red[k] = v
+		}
 	}
 	red["audit_event"] = event
 	logFn(red)
