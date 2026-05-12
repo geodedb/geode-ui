@@ -180,6 +180,19 @@ export function createCytoscapeStyle(
         display: 'none',
       },
     },
+    // Per-node hide (Phase 2 — the inspector "Hide" / "Collapse"
+    // actions and the Hidden/Collapsed restore lists). Distinct from
+    // .gv-hidden (the per-label visibility toggle) so the two
+    // workflows don't fight over the same class — a node hidden by
+    // label and a node hidden individually each have their own
+    // restore path. Cytoscape special-cases display:none to skip
+    // layout/render for that element (and edges adjacent to it).
+    {
+      selector: '.hidden-node',
+      style: {
+        display: 'none',
+      },
+    },
     // Path-mode highlight classes (Task 1.5). `highlighted` is applied
     // to the nodes + edges on the shortest path between the two picked
     // nodes; `dimmed` to everything else. Raised z-index so the path
