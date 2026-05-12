@@ -108,6 +108,11 @@ export const en = {
     inspectorActions: 'Node actions',
     actionHide: 'Hide',
     actionCollapse: 'Collapse',
+    actionExploreNeighbours: 'Explore neighbours',
+    exploreNeighboursLoading: 'Exploring…',
+    exploreNeighboursFailed: 'Could not load neighbours: {{message}}',
+    exploreNeighboursUnavailable:
+      'This node has no stable id to query — explore is unavailable for synthesised nodes.',
     collapsedCount_one: '{{count}} neighbour collapsed',
     collapsedCount_other: '{{count}} neighbours collapsed',
     hiddenHeading: 'Hidden ({{count}})',

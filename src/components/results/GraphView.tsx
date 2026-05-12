@@ -9,8 +9,10 @@ import {
   collapseNode,
   expandCollapsed,
   hideNode,
+  mergeSubgraph,
   restoreNode,
 } from './graphActions'
+import { client } from '../../api/client'
 import {
   DEFAULT_LAYOUT,
   InspectorView,
@@ -121,6 +123,38 @@ function layoutConfig(name: LayoutName): cytoscape.LayoutOptions {
 // safer auto default; users can still pick cose explicitly via the
 // dropdown.
 const COSE_NODE_LIMIT = 400
+
+// ----- "Explore neighbours" (Phase 2 / Task 2.4) -----
+//
+// The selected node's 1-hop subgraph is fetched by re-querying the
+// connected graph. Geode GQL supports the `id(n)` predicate (see the
+// geode docs / shell test suite — e.g. `MATCH (e:Employee) WHERE id(e) =
+// nodeId`), so the statement is the id-keyed form below. Only valid for
+// nodes that carry a real (numeric) Geode id — synthesised nodes from a
+// scalar-only RETURN don't have one, so the inspector disables the
+// action for them.
+
+// True when `id` looks like a real Geode node id (a non-negative
+// integer in string form, which is what extractElements emits for
+// graph_summary nodes and edge-endpoint placeholders).
+function isRealNodeId(id: string): boolean {
+  return /^\d+$/.test(id)
+}
+
+// Build the 1-hop subgraph statement for a real node id. Undirected
+// match (`-[r]-`) so both incoming and outgoing edges come back.
+function buildExploreStatement(nodeId: string): string {
+  return `MATCH (n)-[r]-(m) WHERE id(n) = ${nodeId} RETURN n, r, m LIMIT 100;`
+}
+
+// Pull the graph name out of a leading `USE GRAPH <name>;` so the
+// explore query targets the same graph. Returns undefined when the
+// original query has no such prefix (server falls back to the default).
+function graphNameOf(query: string | undefined): string | undefined {
+  if (!query) return undefined
+  const m = query.match(/^\s*USE\s+GRAPH\s+([A-Za-z_][\w-]*)\s*;/i)
+  return m ? m[1] : undefined
+}
 
 // Props.resp is a QueryRespLike from the row stream, which under streaming
 // is a freshly minted object every row. Building a Cytoscape Core +
@@ -650,11 +684,31 @@ const SelectedInspector: React.FC<{
   // actions row is not rendered for edges.
   onHide: (id: string) => void
   onCollapse: (id: string) => void
+  // Fetch + merge this node's 1-hop subgraph. Disabled when the node has
+  // no real Geode id (e.g. a synthesised node) — see `exploreDisabled`.
+  onExplore: (id: string) => void
+  // True while an explore-neighbours fetch for *this* node is in flight.
+  exploreLoading: boolean
+  // True when the node can't be explored (no real numeric id). When set,
+  // the button is disabled with `graph.exploreNeighboursUnavailable` as
+  // its title.
+  exploreDisabled: boolean
   // How many neighbours are currently collapsed behind this node (0 when
   // none / not a node). Surfaced as a small note under the actions row.
   collapsedCount: number
   t: (key: string, opts?: Record<string, unknown>) => string
-}> = ({ selected, view, onSetView, onHide, onCollapse, collapsedCount, t }) => {
+}> = ({
+  selected,
+  view,
+  onSetView,
+  onHide,
+  onCollapse,
+  onExplore,
+  exploreLoading,
+  exploreDisabled,
+  collapsedCount,
+  t,
+}) => {
   const { kind, data } = selected
   const id = String(data.id ?? '')
   const labels: string[] = Array.isArray(data.labels)
@@ -715,6 +769,21 @@ const SelectedInspector: React.FC<{
               onClick={() => onCollapse(id)}
             >
               {t('graph.actionCollapse')}
+            </button>
+            <button
+              type="button"
+              data-testid="graph-action-explore"
+              disabled={exploreDisabled || exploreLoading}
+              title={
+                exploreDisabled
+                  ? t('graph.exploreNeighboursUnavailable')
+                  : undefined
+              }
+              onClick={() => onExplore(id)}
+            >
+              {exploreLoading
+                ? t('graph.exploreNeighboursLoading')
+                : t('graph.actionExploreNeighbours')}
             </button>
           </InspectorActions>
           {collapsedCount > 0 && (
@@ -823,6 +892,10 @@ export const GraphView: React.FC<Props> = ({
   // sig-keyed effect below (same place path mode resets).
   const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [collapsed, setCollapsed] = useState<Map<string, string[]>>(new Map())
+  // The node id whose 1-hop subgraph is currently being fetched by
+  // "Explore neighbours" (null when idle). Used to show a per-button
+  // loading state and to ignore overlapping clicks.
+  const [exploringId, setExploringId] = useState<string | null>(null)
   // Path-mode state machine (off / pickSource / pickTarget / shown).
   // Result-scoped — a new query result resets it to 'off'.
   const [pathState, setPathState] = useState<PathState>({ phase: 'off' })
@@ -980,6 +1053,7 @@ export const GraphView: React.FC<Props> = ({
     // graph that's being replaced.
     setHidden(new Set())
     setCollapsed(new Map())
+    setExploringId(null)
     if (
       layoutRef.current === DEFAULT_LAYOUT &&
       elementsRef.current.length > COSE_NODE_LIMIT
@@ -1455,6 +1529,44 @@ export const GraphView: React.FC<Props> = ({
     })
   }
 
+  // "Explore neighbours" — fetch the selected node's 1-hop subgraph via
+  // a fresh GQL query against the connected graph and merge the new
+  // elements into the live core, then re-run the current layout so they
+  // get positioned. No-ops for a node without a real Geode id (the
+  // inspector disables the action for those). Errors surface via the
+  // existing canvas error banner.
+  const onExploreNeighbours = (id: string): void => {
+    const cy = cyRef.current
+    if (!cy || !id || exploringId) return
+    if (!isRealNodeId(id)) return
+    setExploringId(id)
+    setError(null)
+    client
+      .query({
+        statement: buildExploreStatement(id),
+        graph: graphNameOf(queryRef.current),
+        page_size: 200,
+        timeout_ms: 30000,
+      })
+      .then((result) => {
+        const live = cyRef.current
+        if (!live) return
+        const newEls = extractElements(result as QueryRespLike)
+        const added = mergeSubgraph(live, newEls)
+        if (added.length > 0) {
+          live.layout(layoutConfig(layoutRef.current)).run()
+          live.fit(undefined, 24)
+        }
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(t('graph.exploreNeighboursFailed', { message: msg }))
+      })
+      .finally(() => {
+        setExploringId((cur) => (cur === id ? null : cur))
+      })
+  }
+
   // Resolve a node id to a short display label for the restore lists —
   // the per-bucket label-field preference if set, else the label name /
   // the id. Falls back to the id when the node isn't in the index (e.g.
@@ -1830,6 +1942,15 @@ export const GraphView: React.FC<Props> = ({
               onSetView={setInspectorView}
               onHide={onHideNode}
               onCollapse={onCollapseNode}
+              onExplore={onExploreNeighbours}
+              exploreLoading={
+                selected.kind === 'node' &&
+                exploringId === String(selected.data.id ?? '')
+              }
+              exploreDisabled={
+                selected.kind === 'node' &&
+                !isRealNodeId(String(selected.data.id ?? ''))
+              }
               collapsedCount={
                 selected.kind === 'node'
                   ? (collapsed.get(String(selected.data.id ?? '')) ?? []).length

@@ -1,7 +1,14 @@
 /// <reference types="@testing-library/jest-dom" />
 /* eslint-disable no-underscore-dangle */
 import React from 'react'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 
 // Capture the constructor calls from cytoscape so we can assert that
@@ -250,6 +257,17 @@ jest.mock('cytoscape', () => {
   return { __esModule: true, default: fn }
 })
 
+// GraphView's "Explore neighbours" action (Phase 2 / Task 2.4) runs a
+// one-shot GQL via `client.query`. The component isn't normally rendered
+// with a live client, so we stub the module — the queryMock lets a test
+// inspect the statement that was sent and feed back a synthetic result.
+const queryMock = jest.fn()
+jest.mock('../../api/client', () => ({
+  client: {
+    query: (...args: unknown[]): Promise<unknown> => queryMock(...args),
+  },
+}))
+
 // Helpers used by the new Phase-1 tests.
 function lastLayoutArg(): unknown {
   return layoutCalls[layoutCalls.length - 1]
@@ -303,6 +321,7 @@ beforeEach(() => {
   lastCyInstance = null
   destroyMock.mockClear()
   onMock.mockClear()
+  queryMock.mockReset()
   // NB: useMock is intentionally NOT cleared — cytoscape.use(fcose)/
   // cytoscape.use(dagre) run once at GraphView module load, before any
   // test's beforeEach, so the registration assertions read the
@@ -1214,5 +1233,127 @@ describe('Phase 2: Hidden / Collapsed restore lists', () => {
     expect(view.getByTestId('graph-collapsed-list')).toHaveTextContent(
       /no collapsed nodes/i
     )
+  })
+})
+
+describe('Phase 2: Explore neighbours', () => {
+  // A real-node graph (numeric ids) so the explore action is enabled —
+  // the statement-building uses Geode GQL's `id(n) = <id>` predicate
+  // (supported by the connected build; see the geode docs / shell tests),
+  // which only makes sense for nodes with a real numeric id.
+  const realResp: QueryRespLike & { row_count?: number } = {
+    rows: [],
+    graph_summary: {
+      nodes: [
+        { id: 1, labels: ['Person'], properties: { name: 'Alice' } },
+        { id: 2, labels: ['Movie'], properties: { title: 'M' } },
+      ],
+      edges: [
+        { id: 9, start_node: 1, end_node: 2, type: 'ACTED_IN', properties: {} },
+      ],
+    },
+    row_count: 2,
+  } as unknown as QueryRespLike & { row_count?: number }
+
+  function renderReal(query?: string): ReturnType<typeof render> {
+    window.localStorage.clear()
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={realResp} query={query ?? 'MATCH (n) RETURN n'} />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    return view
+  }
+
+  it('fetches the node 1-hop subgraph and merges the new elements', async () => {
+    queryMock.mockResolvedValue({
+      rows: [],
+      graph_summary: {
+        // node 1 (already present) plus a brand-new node 3 and an edge.
+        nodes: [
+          { id: 1, labels: ['Person'], properties: { name: 'Alice' } },
+          { id: 3, labels: ['Movie'], properties: { title: 'NewMovie' } },
+        ],
+        edges: [
+          {
+            id: 13,
+            start_node: 1,
+            end_node: 3,
+            type: 'ACTED_IN',
+            properties: {},
+          },
+        ],
+      },
+      row_count: 2,
+    })
+    const view = renderReal()
+    pickNode(view, '1')
+    const exploreBtn = view.getByTestId('graph-action-explore')
+    expect(exploreBtn).not.toBeDisabled()
+    await act(async () => {
+      fireEvent.click(exploreBtn)
+    })
+    // client.query was called with a statement carrying the node's id.
+    expect(queryMock).toHaveBeenCalledTimes(1)
+    const arg = queryMock.mock.calls[0][0] as { statement: string }
+    expect(arg.statement).toMatch(/id\([^)]*\)\s*=\s*1\b/)
+    expect(arg.statement).toMatch(/RETURN/i)
+    // The new element (node 3 + edge e13) was added to the core; node 1
+    // and edge e9 were already present so they are NOT re-added.
+    const addedIds = ((lastCy().__addCalls as unknown[]) ?? [])
+      .flatMap((c) => (Array.isArray(c) ? c : [c]))
+      .map((e) => (e as { data?: { id?: unknown } })?.data?.id)
+      .map((x) => String(x))
+    expect(addedIds).toEqual(expect.arrayContaining(['3', 'e13']))
+    expect(addedIds).not.toContain('1')
+    // A relayout was kicked after the merge.
+    expect(lastCy().layout).toHaveBeenCalled()
+  })
+
+  it('disables the action for a synthesised / non-numeric node id', () => {
+    // A scalar-only RETURN → synthesised nodes (ids like `p:Alice`),
+    // which aren't real Geode node ids — the explore predicate can't be
+    // built, so the button is disabled with an explanatory title.
+    const synthResp = {
+      rows: [['Alice', 'M']],
+      columns: [{ name: 'name' }, { name: 'title' }],
+      graph_summary: {},
+      row_count: 1,
+    } as unknown as QueryRespLike & { row_count?: number }
+    window.localStorage.clear()
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView
+          resp={synthResp}
+          query="MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, m.title"
+        />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    // The synthesised node id for `p` is `p:Alice`.
+    pickNode(view, 'p:Alice')
+    const exploreBtn = view.getByTestId('graph-action-explore')
+    expect(exploreBtn).toBeDisabled()
+    expect(exploreBtn).toHaveAttribute('title')
+  })
+
+  it('surfaces a fetch failure via the graph error banner', async () => {
+    queryMock.mockRejectedValue(new Error('explore boom'))
+    const view = renderReal()
+    pickNode(view, '1')
+    await act(async () => {
+      fireEvent.click(view.getByTestId('graph-action-explore'))
+    })
+    await waitFor(() => {
+      expect(view.container.querySelector('[role="alert"]')).not.toBeNull()
+    })
+    expect(
+      view.container.querySelector('[role="alert"]')?.textContent ?? ''
+    ).toMatch(/explore boom|explore neighbours/i)
   })
 })
