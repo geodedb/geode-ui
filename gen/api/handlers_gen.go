@@ -3747,7 +3747,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 	})
 	var bkt_post_Query *securex.Bucket
-	if (200) > 0 && opts.GlobalBurst > 0 { bkt_post_Query = securex.NewBucket(200, opts.GlobalBurst) }
+	if (2000) > 0 && opts.GlobalBurst > 0 { bkt_post_Query = securex.NewBucket(2000, opts.GlobalBurst) }
 	mux.HandleFunc("POST /api/v1/query", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Query",
 			trace.WithAttributes(
