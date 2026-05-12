@@ -62,6 +62,15 @@ export const sel = {
     p.getByTestId('result-fullscreen-toggle'),
   resultFullscreenOverlay: (p: Page): Locator =>
     p.getByTestId('result-fullscreen-overlay'),
+  // Phase-1 graph-viz feature controls (GraphView toolbar). The layout
+  // picker (graph-layout-picker) and the sidebar toggle predate this.
+  graphLayoutPicker: (p: Page): Locator => p.getByTestId('graph-layout-picker'),
+  graphSelectionMode: (p: Page): Locator =>
+    p.getByTestId('graph-selection-mode'),
+  graphClusterToggle: (p: Page): Locator =>
+    p.getByTestId('graph-cluster-toggle'),
+  graphPathMode: (p: Page): Locator => p.getByTestId('graph-path-mode'),
+  graphPathClear: (p: Page): Locator => p.getByTestId('graph-path-clear'),
 
   // Admin
   newUserBtn: (p: Page): Locator =>
