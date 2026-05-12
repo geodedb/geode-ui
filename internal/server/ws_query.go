@@ -142,6 +142,13 @@ func (b *rowBatcher) flush() error {
 type WSServer struct {
 	genws.UnimplementedWSServer
 	cfg Config
+
+	// onCancelReaderExit, when non-nil, is invoked by the cancel-reader
+	// coordinator goroutine just before it returns. It exists solely so
+	// tests can deterministically observe goroutine teardown (e.g. via a
+	// sync.WaitGroup.Done) without racing on runtime.NumGoroutine. It is
+	// never set in production.
+	onCancelReaderExit func()
 }
 
 // NewWSServer constructs a WSServer sharing cfg with the API server.
@@ -212,23 +219,15 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 		stmt = "USE GRAPH " + sanitizeGraphName(first.Graph) + "; " + stmt
 	}
 
-	// Spawn a reader goroutine that watches for cancel/close. Any
-	// further message (or a read error / EOF) cancels the query
-	// context. The main goroutine stays free to drive the rows
-	// cursor and write frames.
-	go func() {
-		for {
-			m, err := readMsg(conn)
-			if err != nil {
-				cancel()
-				return
-			}
-			if m.Kind == "cancel" {
-				cancel()
-				return
-			}
-		}
-	}()
+	// Spawn the cancel-reader: it watches for {kind:"cancel"}, a read
+	// error, EOF, or a close frame and cancels the query context so
+	// db.QueryContext aborts promptly. Closing done on return makes the
+	// coordinator goroutine exit without waiting for the next frame.
+	done := make(chan struct{})
+	defer close(done)
+	// production ignores the returned exited channel; the cancel-reader
+	// coordinator's teardown is observable in tests via onCancelReaderExit.
+	s.startCancelReader(conn, cancel, done)
 
 	args, err := mapToNamedArgs(first.Params)
 	if err != nil {
@@ -255,6 +254,108 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 	// The batcher's marshal buffer comes from wsRowBufPool to avoid
 	// per-batch heap churn under sustained streaming load.
 	batcher := newRowBatcher(conn, wsRowBatchSize)
+	count, err := streamRowsOverWS(conn, rows, cols, batcher)
+	if err != nil {
+		// errStreamAborted means a terminal frame was already written
+		// successfully — the handler is done, with no transport error
+		// to propagate (matches the pre-refactor `return writeErr(...)`).
+		if errors.Is(err, errStreamAborted) {
+			return nil
+		}
+		return err
+	}
+	if err := writeMsg(conn, queryStreamMsg{
+		Kind:      "summary",
+		RowCount:  count,
+		ElapsedMs: time.Since(start).Milliseconds(),
+	}); err != nil {
+		return err
+	}
+	return writeMsg(conn, queryStreamMsg{Kind: "end"})
+}
+
+// readResult is the cancel-reader's relay payload: one decoded message
+// (or the read error that ended the stream).
+type readResult struct {
+	msg queryStreamMsg
+	err error
+}
+
+// errStreamAborted is the sentinel streamRowsOverWS returns after it has
+// already emitted a terminal frame ("scan" / "canceled" / "query_error")
+// to the client. Query treats any non-nil return from streamRowsOverWS as
+// "stop, do not write summary/end"; this sentinel lets the caller tell a
+// successful-error-frame write apart from a real frame-write failure
+// without leaking it onto the wire.
+var errStreamAborted = errors.New("ws: stream aborted (terminal frame already sent)")
+
+// startCancelReader spawns the goroutine that watches the inbound side
+// of a /ws/query connection and cancels the query context on the first
+// {kind:"cancel"} message, read error, EOF, or close frame.
+//
+// Lifetime: the caller MUST `defer close(done)` so this returns on the
+// happy path instead of blocking on the next readMsg until the framework
+// tears the conn down. The coordinator goroutine selects between the
+// relayed read result and <-done; once done closes it returns without
+// touching conn (waking on <-done after the conn has been closed is fine
+// — it just returns). cancel() is still called by Query's own defer
+// regardless, so closing done here races nothing.
+//
+// A bounded inner relay goroutine performs the blocking readMsg; it too
+// exits on <-done or on the first read error. It may briefly outlive the
+// handler while parked in readMsg, but it shares no mutable state with
+// the rest of Query and the conn lifetime bounds it.
+//
+// The returned exited channel is closed by the coordinator goroutine
+// when it has fully returned; production ignores it, tests assert on it.
+func (s *WSServer) startCancelReader(conn *wsx.Conn, cancel context.CancelFunc, done <-chan struct{}) <-chan struct{} {
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		if s.onCancelReaderExit != nil {
+			defer s.onCancelReaderExit()
+		}
+		msgs := make(chan readResult, 1)
+		go func() {
+			for {
+				m, err := readMsg(conn)
+				select {
+				case msgs <- readResult{msg: m, err: err}:
+				case <-done:
+					return
+				}
+				if err != nil {
+					return
+				}
+			}
+		}()
+		for {
+			select {
+			case <-done:
+				return
+			case r := <-msgs:
+				if r.err != nil {
+					cancel()
+					return
+				}
+				if r.msg.Kind == "cancel" {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return exited
+}
+
+// streamRowsOverWS drives the rows cursor: it scans each row into a fresh
+// []any (so the batcher may hold rows until its next flush), feeds the
+// batcher, drains the residual partial batch, then reads rows.Err and
+// reclassifies a context cancellation as the friendlier "canceled" frame.
+// Returns the number of rows successfully streamed plus any frame-write
+// or query error. On a scan failure it drains pending progress, emits the
+// "scan" error frame, and returns its write result.
+func streamRowsOverWS(conn *wsx.Conn, rows *sql.Rows, cols []string, batcher *rowBatcher) (int64, error) {
 	var count int64
 	for rows.Next() {
 		row := make([]any, len(cols))
@@ -266,10 +367,13 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 			// Drain any pending batch so partial progress reaches
 			// the client before the error frame.
 			_ = batcher.flush()
-			return writeErr(conn, "scan", err.Error())
+			if werr := writeErr(conn, "scan", err.Error()); werr != nil {
+				return count, werr
+			}
+			return count, errStreamAborted
 		}
 		if err := batcher.add(row); err != nil {
-			return err
+			return count, err
 		}
 		count++
 	}
@@ -277,25 +381,22 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 	// the client sees every successfully-scanned row even if the
 	// driver reports a late error or the context was cancelled.
 	if err := batcher.flush(); err != nil {
-		return err
+		return count, err
 	}
 	if err := rows.Err(); err != nil {
 		// Distinguish caller-initiated cancellation from a true
 		// query failure so the client can surface a friendlier
 		// message.
+		code, msg := "query_error", err.Error()
 		if errors.Is(err, context.Canceled) {
-			return writeErr(conn, "canceled", "query canceled by client")
+			code, msg = "canceled", "query canceled by client"
 		}
-		return writeErr(conn, "query_error", err.Error())
+		if werr := writeErr(conn, code, msg); werr != nil {
+			return count, werr
+		}
+		return count, errStreamAborted
 	}
-	if err := writeMsg(conn, queryStreamMsg{
-		Kind:      "summary",
-		RowCount:  count,
-		ElapsedMs: time.Since(start).Milliseconds(),
-	}); err != nil {
-		return err
-	}
-	return writeMsg(conn, queryStreamMsg{Kind: "end"})
+	return count, nil
 }
 
 // readMsg reads one application-protocol message from conn. Transport-
