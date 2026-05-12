@@ -115,6 +115,8 @@ export const en = {
     layoutLabel: 'Layout',
     layout: {
       cose: 'Force (cose)',
+      fcose: 'Force (fast)',
+      dagre: 'Layered (DAG)',
       breadthfirst: 'Breadth-first',
       circle: 'Circle',
       concentric: 'Concentric',

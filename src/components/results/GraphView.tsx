@@ -35,14 +35,18 @@ cytoscape.use(dagre)
 
 type Selected = { kind: 'node' | 'edge'; data: Record<string, unknown> }
 
-// Layouts shipped with cytoscape core (no extra plugin needed). cose
-// is the only force-directed option available without a plugin and is
-// the right default for unknown topologies; the others are useful for
-// known shapes (chains, clusters, time-ordered scans). LayoutName /
-// DEFAULT_LAYOUT live in useGraphPrefs (the sticky-prefs store).
+// Layouts offered in the picker. `cose` is the only force-directed
+// option shipped with cytoscape core; `fcose` (faster force layout,
+// handles compound/clustered graphs) and `dagre` (layered DAG layout
+// for directed / hierarchical shapes) are registered as extensions at
+// module load above. The rest are core layouts useful for known shapes
+// (chains, clusters, time-ordered scans). LayoutName / DEFAULT_LAYOUT
+// live in useGraphPrefs (the sticky-prefs store).
 
 const LAYOUTS: readonly LayoutName[] = [
   'cose',
+  'fcose',
+  'dagre',
   'breadthfirst',
   'circle',
   'concentric',
@@ -56,6 +60,10 @@ function layoutLabel(name: LayoutName, t: (key: string) => string): string {
   switch (name) {
     case 'cose':
       return t('graph.layout.cose')
+    case 'fcose':
+      return t('graph.layout.fcose')
+    case 'dagre':
+      return t('graph.layout.dagre')
     case 'breadthfirst':
       return t('graph.layout.breadthfirst')
     case 'circle':
@@ -66,6 +74,38 @@ function layoutLabel(name: LayoutName, t: (key: string) => string): string {
       return t('graph.layout.grid')
     default:
       return name
+  }
+}
+
+// Per-layout option object passed to cytoscape({ layout }) and
+// cy.layout(...). The fcose/dagre branches set the extension-specific
+// tuning knobs; everything else gets the shared base. The casts to
+// cytoscape.LayoutOptions are needed because @types/cytoscape doesn't
+// know about the extension layouts' option shapes.
+function layoutConfig(name: LayoutName): cytoscape.LayoutOptions {
+  const base = { animate: false, padding: 24, fit: true } as const
+  switch (name) {
+    case 'fcose':
+      return {
+        name: 'fcose',
+        ...base,
+        quality: 'default',
+        nodeSeparation: 75,
+        idealEdgeLength: 80,
+        nestingFactor: 0.1,
+      } as unknown as cytoscape.LayoutOptions
+    case 'dagre':
+      return {
+        name: 'dagre',
+        ...base,
+        rankDir: 'TB',
+        nodeSep: 40,
+        rankSep: 60,
+      } as unknown as cytoscape.LayoutOptions
+    case 'cose':
+      return { name: 'cose', ...base } as cytoscape.LayoutOptions
+    default:
+      return { name, ...base } as cytoscape.LayoutOptions
   }
 }
 
@@ -827,7 +867,7 @@ export const GraphView: React.FC<Props> = ({
           container: ref.current,
           elements: els,
           style: createCytoscapeStyle(theme),
-          layout: { name: layoutRef.current, animate: false, padding: 24 },
+          layout: layoutConfig(layoutRef.current),
           wheelSensitivity: 0.2,
         })
         cy.on('tap', 'node', (ev) => {
@@ -893,7 +933,7 @@ export const GraphView: React.FC<Props> = ({
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
-    cy.layout({ name: layout, animate: false, padding: 24 }).run()
+    cy.layout(layoutConfig(layout)).run()
     cy.fit(undefined, 24)
   }, [layout])
 
@@ -1018,7 +1058,7 @@ export const GraphView: React.FC<Props> = ({
     if (!cy) return
     setSelected(null)
     setHiddenLabels(new Set())
-    cy.layout({ name: layout, animate: false, padding: 24 }).run()
+    cy.layout(layoutConfig(layout)).run()
     cy.fit(undefined, 24)
   }
 

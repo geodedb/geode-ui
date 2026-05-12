@@ -15,10 +15,14 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 // zoom/pan) stays component-local — only the sticky display prefs are
 // lifted here.
 
-// Layouts shipped with cytoscape core (no extra plugin needed). Kept in
-// sync with GraphView's LayoutName.
+// Layouts available in GraphView. `cose` is the only force-directed
+// option shipped with cytoscape core; `fcose` (cytoscape-fcose) and
+// `dagre` (cytoscape-dagre) are registered as extensions at module load
+// in GraphView.tsx. Kept in sync with GraphView's LAYOUTS const.
 export type LayoutName =
   | 'cose'
+  | 'fcose'
+  | 'dagre'
   | 'breadthfirst'
   | 'circle'
   | 'concentric'
