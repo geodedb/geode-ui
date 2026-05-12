@@ -180,5 +180,32 @@ export function createCytoscapeStyle(
         display: 'none',
       },
     },
+    // Path-mode highlight classes (Task 1.5). `highlighted` is applied
+    // to the nodes + edges on the shortest path between the two picked
+    // nodes; `dimmed` to everything else. Raised z-index so the path
+    // reads on top of the rest of the (dimmed) graph.
+    {
+      selector: 'node.highlighted',
+      style: {
+        'border-width': 3,
+        'border-color': theme.colors.primary,
+        'z-index': 999,
+      },
+    },
+    {
+      selector: 'edge.highlighted',
+      style: {
+        'line-color': theme.colors.primary,
+        'target-arrow-color': theme.colors.primary,
+        width: 4,
+        'z-index': 998,
+      },
+    },
+    {
+      selector: '.dimmed',
+      style: {
+        opacity: 0.2,
+      },
+    },
   ]
 }

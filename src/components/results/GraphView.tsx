@@ -248,6 +248,17 @@ const Canvas = styled.div<{ $height: number }>`
   border-radius: ${({ theme }) => theme.radii.md};
   background: ${({ theme }) => theme.bg.graphCanvas};
 `
+// Path-mode status line — shown under the toolbar while path mode is
+// active ("Click the start node" / "Click the end node" / the result).
+const PathStatus = styled.div`
+  padding: ${({ theme }) => theme.spacing.xxs}
+    ${({ theme }) => theme.spacing.sm};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  color: ${({ theme }) => theme.text.secondary};
+  background: ${({ theme }) => theme.bg.subtle};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.sm};
+`
 const Overlay = styled.div`
   position: absolute;
   inset: 0;
@@ -474,6 +485,23 @@ function applySelectionMode(cy: Core, mode: 'pan' | 'box'): void {
   }
 }
 
+// ----- path mode -----
+//
+// Path mode lets the operator click two nodes; GraphView runs Cytoscape's
+// built-in Dijkstra on the *rendered* graph and highlights the shortest
+// path between them (dimming everything else). State machine:
+//   off → pickSource → pickTarget → shown → (Clear) → off
+type PathState =
+  | { phase: 'off' }
+  | { phase: 'pickSource' }
+  | { phase: 'pickTarget'; sourceId: string }
+  | { phase: 'shown'; from: string; to: string; hops: number | null }
+
+// Strip the path-highlight classes from every element. Idempotent.
+function clearPathHighlight(cy: Core): void {
+  cy.elements().removeClass('highlighted').removeClass('dimmed')
+}
+
 function applyLabels(
   cy: Core,
   nodePrefs: Record<string, string>,
@@ -663,6 +691,11 @@ export const GraphView: React.FC<Props> = ({
     return () => window.removeEventListener('resize', onResize)
   }, [fillHeight, height])
   const [selected, setSelected] = useState<Selected | null>(null)
+  // Path-mode state machine (off / pickSource / pickTarget / shown).
+  // Result-scoped — a new query result resets it to 'off'.
+  const [pathState, setPathState] = useState<PathState>({ phase: 'off' })
+  const pathStateRef = useRef(pathState)
+  pathStateRef.current = pathState
   // Whether the inspector/controls sidebar is collapsed. Session-local
   // (defaults expanded); not persisted. Useful in both layouts but most
   // impactful in fill mode where it lets the canvas claim the full
@@ -807,6 +840,10 @@ export const GraphView: React.FC<Props> = ({
   useEffect(() => {
     if (lastSigRef.current === sig) return
     lastSigRef.current = sig
+    // A new query result drops any in-progress / shown path. The old
+    // core (which carried the highlight classes) is torn down by the
+    // build effect, so just reset the state machine here.
+    setPathState({ phase: 'off' })
     if (
       layoutRef.current === DEFAULT_LAYOUT &&
       elementsRef.current.length > COSE_NODE_LIMIT
@@ -905,6 +942,11 @@ export const GraphView: React.FC<Props> = ({
           wheelSensitivity: 0.2,
         })
         cy.on('tap', 'node', (ev) => {
+          const id = ev.target.id() as string
+          // In path mode the first/second tap pick the path endpoints;
+          // the handler returns true to swallow the tap. Otherwise fall
+          // through to the normal inspector-select behaviour.
+          if (pathTapRef.current(id)) return
           const data = ev.target.data() as Record<string, unknown>
           setSelected({ kind: 'node', data })
         })
@@ -1071,6 +1113,66 @@ export const GraphView: React.FC<Props> = ({
     // turned off, and a subsequent manual layout pick is respected.
     if (next) setLayout('fcose')
   }
+
+  // Path mode — enter / exit and the per-node-tap state advance. The
+  // tap handler registered in the build effect calls handlePathNodeTap
+  // via pathTapRef so it always reads the current pathState; when path
+  // mode is off it returns false and the tap falls through to the
+  // normal "select for inspector" behaviour.
+  const enterPathMode = (): void => {
+    const cy = cyRef.current
+    if (cy) clearPathHighlight(cy)
+    setPathState({ phase: 'pickSource' })
+  }
+  const exitPathMode = (): void => {
+    const cy = cyRef.current
+    if (cy) clearPathHighlight(cy)
+    setPathState({ phase: 'off' })
+  }
+  const onTogglePathMode = (): void => {
+    if (pathState.phase === 'off') {
+      enterPathMode()
+    } else {
+      exitPathMode()
+    }
+  }
+  const handlePathNodeTap = (nodeId: string): boolean => {
+    const state = pathStateRef.current
+    if (state.phase === 'off') return false
+    const cy = cyRef.current
+    if (!cy) return true
+    if (state.phase === 'pickSource' || state.phase === 'shown') {
+      clearPathHighlight(cy)
+      setPathState({ phase: 'pickTarget', sourceId: nodeId })
+      return true
+    }
+    // pickTarget — run Dijkstra from the recorded source to this node.
+    const src = cy.getElementById(state.sourceId)
+    const dst = cy.getElementById(nodeId)
+    clearPathHighlight(cy)
+    const dij = cy.elements().dijkstra({ root: src, directed: false })
+    const path = dij.pathTo(dst)
+    if (!path || path.length === 0) {
+      setPathState({
+        phase: 'shown',
+        from: state.sourceId,
+        to: nodeId,
+        hops: null,
+      })
+      return true
+    }
+    cy.elements().difference(path).addClass('dimmed')
+    path.addClass('highlighted')
+    setPathState({
+      phase: 'shown',
+      from: state.sourceId,
+      to: nodeId,
+      hops: path.edges().length,
+    })
+    return true
+  }
+  const pathTapRef = useRef(handlePathNodeTap)
+  pathTapRef.current = handlePathNodeTap
   const onPickEdgeId = (rawId: string): void => {
     const id = rawId.trim()
     if (!id) return
@@ -1123,6 +1225,25 @@ export const GraphView: React.FC<Props> = ({
   // the visibility row are exact-pixel matches to the node fills.
   const swatchFor = (label: string): string =>
     labelToColor(label, theme.variant)
+
+  // Path-mode status text for the line under the toolbar.
+  let pathStatusText: string | null = null
+  if (pathState.phase === 'pickSource') {
+    pathStatusText = t('graph.pathPickSource')
+  } else if (pathState.phase === 'pickTarget') {
+    pathStatusText = t('graph.pathPickTarget')
+  } else if (pathState.phase === 'shown' && pathState.hops === null) {
+    pathStatusText = t('graph.pathNone', {
+      from: pathState.from,
+      to: pathState.to,
+    })
+  } else if (pathState.phase === 'shown') {
+    pathStatusText = t('graph.pathResult', {
+      from: pathState.from,
+      to: pathState.to,
+      hops: pathState.hops,
+    })
+  }
 
   return (
     <Wrap $fill={fillHeight} $sidebarCollapsed={sidebarCollapsed}>
@@ -1228,11 +1349,35 @@ export const GraphView: React.FC<Props> = ({
             >
               {t('graph.clusterByLabel')}
             </button>
+            <button
+              type="button"
+              data-testid="graph-path-mode"
+              aria-pressed={pathState.phase !== 'off'}
+              aria-label={t('graph.pathModeLabel')}
+              title={t('graph.pathModeLabel')}
+              onClick={onTogglePathMode}
+            >
+              {t('graph.pathMode')}
+            </button>
+            {pathState.phase !== 'off' && (
+              <button
+                type="button"
+                data-testid="graph-path-clear"
+                onClick={exitPathMode}
+              >
+                {t('graph.pathClear')}
+              </button>
+            )}
           </div>
           <span className="stats" aria-live="polite">
             {t('graph.stats', { nodes: counts.nodes, edges: counts.edges })}
           </span>
         </Toolbar>
+        {pathStatusText && (
+          <PathStatus data-testid="graph-path-status" role="status">
+            {pathStatusText}
+          </PathStatus>
+        )}
         <div style={{ position: 'relative' }}>
           <Canvas
             ref={ref}

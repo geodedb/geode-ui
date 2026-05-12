@@ -38,21 +38,44 @@ jest.mock('@monaco-editor/react', () => ({
     <div data-testid="monaco-editor-stub">{props.value}</div>
   ),
 }))
-jest.mock('cytoscape', () => ({
-  __esModule: true,
-  default: () => ({
+jest.mock('cytoscape', () => {
+  const coll = (): Record<string, unknown> => {
+    const c: Record<string, unknown> = {
+      forEach: jest.fn(),
+      remove: jest.fn(),
+      length: 0,
+      empty: () => true,
+    }
+    const chain = (): Record<string, unknown> => c
+    c.removeClass = chain
+    c.addClass = chain
+    c.difference = chain
+    return c
+  }
+  const factory = () => ({
     on: jest.fn(),
     destroy: jest.fn(),
     add: jest.fn(),
     remove: jest.fn(),
     batch: (fn: () => void) => fn(),
-    elements: () => ({ remove: jest.fn() }),
+    elements: coll,
     layout: () => ({ run: jest.fn() }),
-    nodes: () => ({ forEach: jest.fn() }),
-    edges: () => ({ forEach: jest.fn() }),
+    nodes: () => ({ forEach: jest.fn(), length: 0 }),
+    edges: () => ({ forEach: jest.fn(), length: 0 }),
     $id: () => ({ select: jest.fn() }),
-  }),
-}))
+    getElementById: () => coll(),
+    fit: jest.fn(),
+    zoom: jest.fn(() => 1),
+    width: jest.fn(() => 400),
+    height: jest.fn(() => 300),
+    style: jest.fn(() => ({ update: jest.fn() })),
+    userPanningEnabled: jest.fn(),
+    boxSelectionEnabled: jest.fn(),
+  })
+  const withUse = factory as unknown as { use: jest.Mock }
+  withUse.use = jest.fn()
+  return { __esModule: true, default: factory }
+})
 // The generated client's constructor snapshots fetch at construction
 // time; the polyfill provides a rejecting stub, which is fine here —
 // the maximize/fullscreen tests below mock `client.query` directly so

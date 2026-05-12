@@ -135,6 +135,13 @@ export const en = {
     selectionModeBox: 'Box select',
     clusterByLabel: 'Group by label',
     clusterByLabelLabel: 'Group nodes by label',
+    pathMode: 'Path',
+    pathModeLabel: 'Find a path between two nodes',
+    pathPickSource: 'Click the start node',
+    pathPickTarget: 'Click the end node',
+    pathResult: 'Path: {{from}} → {{to}} · {{hops}} hops',
+    pathNone: 'No path between {{from}} and {{to}}',
+    pathClear: 'Clear path',
   },
 
   schema: {
