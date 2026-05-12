@@ -46,8 +46,6 @@ func profileFromContext(ctx context.Context) string {
 
 // rolesFromContext returns the JWT roles claim attached to ctx by the
 // AuthJWT middleware, or nil if none was set.
-//
-//nolint:unused // wired up by AuthJWT; reserved for required_roles tests.
 func rolesFromContext(ctx context.Context) []string {
 	if v, ok := ctx.Value(rolesCtxKey).([]string); ok {
 		return v

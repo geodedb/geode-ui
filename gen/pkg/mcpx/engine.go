@@ -80,8 +80,43 @@ func (b *bucket) snapshot() (int, int, time.Time) {
 var toolBuckets map[string]*bucket
 var toolTimeout = 5 * time.Second
 var authVerifier func(*http.Request) (context.Context, error)
+var toolRoles map[string][]string
 var wsOriginAllowlist []string
 var wsAllowAnyOrigin bool
+
+// ctxRolesKey is the unexported context key under which mcpx stashes the
+// caller's role set for per-tool role enforcement. It is owned by this
+// package so consumers go through ContextWithRoles / RolesFromContext
+// rather than guessing the key.
+type ctxRolesKey struct{}
+
+// ContextWithRoles returns a copy of ctx carrying the supplied role set.
+// The MCP auth verifier (or an adapter around it) calls this so the
+// dispatcher can enforce per-tool required-role policy without re-parsing
+// the bearer token. A nil/empty slice is stored as-is (RolesFromContext
+// then reports no roles).
+func ContextWithRoles(ctx context.Context, roles []string) context.Context {
+	return context.WithValue(ctx, ctxRolesKey{}, roles)
+}
+
+// RolesFromContext returns the role set stashed by ContextWithRoles, or
+// nil if none was set.
+func RolesFromContext(ctx context.Context) []string {
+	if ctx == nil {
+		return nil
+	}
+	if v, ok := ctx.Value(ctxRolesKey{}).([]string); ok {
+		return v
+	}
+	return nil
+}
+
+// SetToolRoles configures the per-tool required-role policy. For each
+// tool name with a non-empty role list, a tools/call dispatch is allowed
+// only if the caller's context (see ContextWithRoles) carries at least
+// one of the listed roles; tools absent from the map (or mapped to an
+// empty list) have no role requirement. Mirrors SetToolBuckets.
+func SetToolRoles(roles map[string][]string) { toolRoles = roles }
 
 // DefaultMaxHTTPBodyBytes is the default per-request body cap that
 // HandleHTTP enforces via io.LimitReader. Mirrors the route-level
@@ -561,6 +596,17 @@ func handleRaw(ctx context.Context, env *rawEnvelope, tools map[string]Tool, buc
 		if !ok {
 			return objErrRaw(env.ID, -32601, "method not found")
 		}
+		// Per-tool role enforcement (F-AUTH-2). If a required-role
+		// policy is registered for this tool, the caller's context (set
+		// by ContextWithRoles in the auth path) must carry at least one
+		// of the listed roles, or the tool body never runs.
+		if required, ok := toolRoles[call.Name]; ok && len(required) > 0 {
+			if !hasAnyRole(RolesFromContext(ctx), required) {
+				AuditMCP.AuthFail("tool", "insufficient role")
+				obsx.LogAudit("mcp_tool_role_denied", map[string]any{"tool": call.Name, "required": required})
+				return objErrRaw(env.ID, -32000, "insufficient role")
+			}
+		}
 		if buckets != nil {
 			if bk, ok := buckets[call.Name]; ok && !bk.allow() {
 				return objErrRaw(env.ID, -32000, "rate limited")
@@ -657,3 +703,17 @@ func setRateHeaders(w http.ResponseWriter, limit, remaining int, reset time.Time
 
 func itoa(v int) string          { return strconv.Itoa(v) }
 func fmtUnix(t time.Time) string { return strconv.FormatInt(t.Unix(), 10) }
+
+// hasAnyRole reports whether have contains at least one element of want.
+// Both slices are expected to be small (a handful of role names), so the
+// O(n*m) scan is fine and avoids allocating a set.
+func hasAnyRole(have, want []string) bool {
+	for _, w := range want {
+		for _, h := range have {
+			if h == w {
+				return true
+			}
+		}
+	}
+	return false
+}

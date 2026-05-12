@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	genmcp "geodedb.com/geode-ui/gen/mcp"
+	"geodedb.com/geode-ui/gen/pkg/mcpx"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -37,13 +38,17 @@ func NewMCPServer(srv *GraphServer) *MCPServer {
 // (and WS) transport. It runs the standard JWT verification — which both
 // validates the token and enriches *r's context with the
 // subject/profile/roles/connection-id claims — then returns that
-// enriched context for mcpx to thread into the tool body. A verification
-// failure is returned as (nil, err) and nothing is dispatched.
+// enriched context for mcpx to thread into the tool body. The JWT roles
+// claim is also re-published under the mcpx-owned context key so the
+// dispatcher's per-tool role gate (F-AUTH-2 / #135) can read it without
+// re-parsing the bearer token. A verification failure is returned as
+// (nil, err) and nothing is dispatched.
 func (s *GraphServer) MCPAuthVerifier(r *http.Request) (context.Context, error) {
 	if err := s.AuthJWT(r); err != nil {
 		return nil, err
 	}
-	return r.Context(), nil
+	ctx := r.Context()
+	return mcpx.ContextWithRoles(ctx, rolesFromContext(ctx)), nil
 }
 
 // Query is the MCP `query` tool entry point. It accepts the same
