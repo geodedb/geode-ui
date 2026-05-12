@@ -71,6 +71,19 @@ export const sel = {
     p.getByTestId('graph-cluster-toggle'),
   graphPathMode: (p: Page): Locator => p.getByTestId('graph-path-mode'),
   graphPathClear: (p: Page): Locator => p.getByTestId('graph-path-clear'),
+  // Phase-2 node-inspector workflow (GraphView): the keyboard "select
+  // node by id" input, the inspector action buttons, and the sidebar
+  // Hidden/Collapsed restore lists.
+  graphNodeIdPicker: (p: Page): Locator =>
+    p.getByTestId('graph-node-id-picker'),
+  graphActionHide: (p: Page): Locator => p.getByTestId('graph-action-hide'),
+  graphActionCollapse: (p: Page): Locator =>
+    p.getByTestId('graph-action-collapse'),
+  graphActionExplore: (p: Page): Locator =>
+    p.getByTestId('graph-action-explore'),
+  graphHiddenList: (p: Page): Locator => p.getByTestId('graph-hidden-list'),
+  graphCollapsedList: (p: Page): Locator =>
+    p.getByTestId('graph-collapsed-list'),
 
   // Admin
   newUserBtn: (p: Page): Locator =>
