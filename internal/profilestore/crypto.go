@@ -55,7 +55,19 @@ type Cipher struct {
 // up here so the operator sees "key length 31 bytes (need 32)" rather
 // than the cryptic "crypto/aes: invalid key size 31".
 func NewCipherFromEnv(envVar string) (*Cipher, error) {
-	raw := os.Getenv(envVar)
+	return NewCipherFromEnvFunc(os.Getenv, envVar)
+}
+
+// NewCipherFromEnvFunc is NewCipherFromEnv with the environment lookup
+// injected. Pass os.Getenv for the production path; tests (and the
+// server bootstrap, which threads a getenv closure for hermeticity) pass
+// their own. A nil getenv falls back to os.Getenv. The error contract is
+// identical to NewCipherFromEnv.
+func NewCipherFromEnvFunc(getenv func(string) string, envVar string) (*Cipher, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	raw := getenv(envVar)
 	if raw == "" {
 		return nil, fmt.Errorf(
 			"profilestore: env var %s is required for at-rest encryption "+
