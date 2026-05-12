@@ -85,6 +85,13 @@ export const en = {
     exitFullscreen: 'Exit fullscreen',
   },
 
+  workspace: {
+    paneRun: 'Run',
+    paneCancel: 'Cancel',
+    closePane: 'Close pane',
+    paneEmpty: 'Run a query to see results.',
+  },
+
   graph: {
     canvasAria:
       'Cytoscape graph rendering. Use the Display panel to choose which property labels each node and edge.',
