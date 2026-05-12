@@ -1651,6 +1651,13 @@ type APIOptions struct {
 
 // RegisterGeneratedAPI registers generated HTTP routes with validation and middleware.
 func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptions) {
+	// globalRateBkt is a single server-wide aggregate token bucket shared by
+	// every generated route. It is a coarse ceiling enforced per request (after
+	// auth/authz, just before the per-route bucket); it does not replace the
+	// per-route rateLimit buckets or the per-IP limiter. Disabled when
+	// opts.GlobalRate or opts.GlobalBurst is 0.
+	var globalRateBkt *securex.Bucket
+	if opts.GlobalRate > 0 && opts.GlobalBurst > 0 { globalRateBkt = securex.NewBucket(opts.GlobalRate, opts.GlobalBurst) }
 	var bkt_get_Audit *securex.Bucket
 	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Audit = securex.NewBucket(50, opts.GlobalBurst) }
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
@@ -1718,6 +1725,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Audit != nil { lim, rem, reset := bkt_get_Audit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Audit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.AuditQuery
 		req.Event = r.URL.Query().Get("event")
@@ -1751,6 +1759,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		r = r.WithContext(_ctx)
 			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
 			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Login != nil { lim, rem, reset := bkt_post_Login.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Login.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseForm(); err != nil { writeJSONError(w, "bad request", 400); return }
 		var req types.LoginReq
@@ -1840,6 +1849,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetBackups != nil { lim, rem, reset := bkt_get_GetBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -1925,6 +1935,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostBackups != nil { lim, rem, reset := bkt_post_PostBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2011,6 +2022,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Cleanup != nil { lim, rem, reset := bkt_post_Cleanup.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Cleanup.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2097,6 +2109,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_BackupUpload != nil { lim, rem, reset := bkt_post_BackupUpload.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_BackupUpload.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		defer func() {
@@ -2195,6 +2208,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_delete_DeleteFile != nil { lim, rem, reset := bkt_delete_DeleteFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupFileParam
 		req.File = r.URL.Query().Get("file")
@@ -2282,6 +2296,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetFile != nil { lim, rem, reset := bkt_get_GetFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupFileParam
 		req.File = r.URL.Query().Get("file")
@@ -2324,6 +2339,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetCapabilities != nil { lim, rem, reset := bkt_get_GetCapabilities.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetCapabilities.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2409,6 +2425,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Grants != nil { lim, rem, reset := bkt_post_Grants.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Grants.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GrantReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2495,6 +2512,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Revoke != nil { lim, rem, reset := bkt_post_Revoke.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Revoke.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GrantReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2536,6 +2554,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Graphs != nil { lim, rem, reset := bkt_get_Graphs.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Graphs.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2576,6 +2595,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Constraints != nil { lim, rem, reset := bkt_get_Constraints.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Constraints.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2618,6 +2638,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_EdgeTypes != nil { lim, rem, reset := bkt_get_EdgeTypes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_EdgeTypes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2660,6 +2681,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Indexes != nil { lim, rem, reset := bkt_get_Indexes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Indexes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2702,6 +2724,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Labels != nil { lim, rem, reset := bkt_get_Labels.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Labels.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2789,6 +2812,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetMigrations != nil { lim, rem, reset := bkt_get_GetMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2874,6 +2898,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostMigrations != nil { lim, rem, reset := bkt_post_PostMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.MigrationCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2960,6 +2985,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostMigrationsRun != nil { lim, rem, reset := bkt_post_PostMigrationsRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrationsRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3046,6 +3072,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_MigrationUpload != nil { lim, rem, reset := bkt_post_MigrationUpload.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_MigrationUpload.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		defer func() {
@@ -3144,6 +3171,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Sign != nil { lim, rem, reset := bkt_post_Sign.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Sign.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.MigrationParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3231,6 +3259,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetPolicies != nil { lim, rem, reset := bkt_get_GetPolicies.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetPolicies.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3316,6 +3345,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostPolicies != nil { lim, rem, reset := bkt_post_PostPolicies.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostPolicies.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3402,6 +3432,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_delete_DeleteName != nil { lim, rem, reset := bkt_delete_DeleteName.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteName.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyParam
 		req.Name = r.URL.Query().Get("name")
@@ -3489,6 +3520,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetName != nil { lim, rem, reset := bkt_get_GetName.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetName.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyParam
 		req.Name = r.URL.Query().Get("name")
@@ -3531,6 +3563,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetProfiles != nil { lim, rem, reset := bkt_get_GetProfiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3571,6 +3604,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostProfiles != nil { lim, rem, reset := bkt_post_PostProfiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostProfiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.CreateProfileReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3602,6 +3636,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		r = r.WithContext(_ctx)
 			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
 			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Public != nil { lim, rem, reset := bkt_get_Public.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Public.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3642,6 +3677,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_delete_DeleteProfileid != nil { lim, rem, reset := bkt_delete_DeleteProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
 		req.ProfileID = r.URL.Query().Get("profile_id")
@@ -3684,6 +3720,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetProfileid != nil { lim, rem, reset := bkt_get_GetProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
 		req.ProfileID = r.URL.Query().Get("profile_id")
@@ -3726,6 +3763,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_patch_PatchProfileid != nil { lim, rem, reset := bkt_patch_PatchProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UpdateProfileReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3768,6 +3806,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Query != nil { lim, rem, reset := bkt_post_Query.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Query.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.QueryReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3857,6 +3896,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Restore != nil { lim, rem, reset := bkt_post_Restore.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Restore.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RestoreReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3943,6 +3983,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetRoles != nil { lim, rem, reset := bkt_get_GetRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4028,6 +4069,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostApiRoles != nil { lim, rem, reset := bkt_post_PostApiRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostApiRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4114,6 +4156,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_delete_DeleteRole != nil { lim, rem, reset := bkt_delete_DeleteRole.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteRole.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleParam
 		req.Role = r.URL.Query().Get("role")
@@ -4201,6 +4244,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetRole != nil { lim, rem, reset := bkt_get_GetRole.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetRole.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleParam
 		req.Role = r.URL.Query().Get("role")
@@ -4243,6 +4287,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Tx != nil { lim, rem, reset := bkt_post_Tx.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Tx.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxBeginReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4284,6 +4329,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Commit != nil { lim, rem, reset := bkt_post_Commit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Commit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxIDParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4326,6 +4372,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Rollback != nil { lim, rem, reset := bkt_post_Rollback.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Rollback.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxIDParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4368,6 +4415,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostTxidRun != nil { lim, rem, reset := bkt_post_PostTxidRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostTxidRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxRunReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4455,6 +4503,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetUsers != nil { lim, rem, reset := bkt_get_GetUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4540,6 +4589,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostUsers != nil { lim, rem, reset := bkt_post_PostUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UserCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4626,6 +4676,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_delete_DeleteUsername != nil { lim, rem, reset := bkt_delete_DeleteUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
@@ -4713,6 +4764,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_GetUsername != nil { lim, rem, reset := bkt_get_GetUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
@@ -4800,6 +4852,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_patch_PatchUsername != nil { lim, rem, reset := bkt_patch_PatchUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UserUpdateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4887,6 +4940,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Disable != nil { lim, rem, reset := bkt_post_Disable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Disable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4974,6 +5028,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Enable != nil { lim, rem, reset := bkt_post_Enable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Enable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -5016,6 +5071,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_Password != nil { lim, rem, reset := bkt_post_Password.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Password.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PasswordChangeReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -5103,6 +5159,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Permissions != nil { lim, rem, reset := bkt_get_Permissions.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Permissions.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
@@ -5190,6 +5247,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_post_PostUsernameRoles != nil { lim, rem, reset := bkt_post_PostUsernameRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsernameRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.AssignRoleReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -5222,6 +5280,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		r = r.WithContext(_ctx)
 			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
 			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if globalRateBkt != nil && !globalRateBkt.Allow() { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return }
 		if bkt_get_Healthz != nil { lim, rem, reset := bkt_get_Healthz.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Healthz.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }

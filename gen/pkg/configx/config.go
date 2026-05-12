@@ -57,12 +57,19 @@ type CORSConfig struct {
 
 // RateLimitConfig defines global rate-limit defaults.
 //
-// GlobalRPS / Burst configure the single shared token bucket applied at the
-// generated-route layer. PerIPRPS / PerIPBurst configure a coarser ceiling
-// applied to every route, partitioned by client IP (the key source is
-// PerIPSource: "remote_addr" (default, safe), "x-forwarded-for",
-// "x-real-ip", or "tls-subject"). A PerIPRPS of zero disables the per-IP
-// layer (opt-in).
+// GlobalRPS / Burst (-> APIOptions.GlobalRate / GlobalBurst) configure a single
+// server-wide aggregate token bucket shared by every generated route. It is a
+// coarse ceiling: it is checked once per request (after auth/authz, just before
+// the per-route bucket) in addition to -- not instead of -- the per-route
+// rateLimit buckets (which remain the tighter per-endpoint ceiling) and the
+// per-IP limiter. When GlobalRPS is 0 (or Burst is 0) the aggregate limiter is
+// disabled. Note: a route that declares no rateLimit of its own still falls back
+// to GlobalRPS as its *per-route* default rate -- that pre-existing behavior is
+// unchanged and is separate from the aggregate ceiling described here.
+// PerIPRPS / PerIPBurst configure a coarser ceiling applied to every route,
+// partitioned by client IP (the key source is PerIPSource: "remote_addr"
+// (default, safe), "x-forwarded-for", "x-real-ip", or "tls-subject"). A
+// PerIPRPS of zero disables the per-IP layer (opt-in).
 type RateLimitConfig struct {
 	GlobalRPS   int     `json:"global_rps"`
 	Burst       int     `json:"burst"`

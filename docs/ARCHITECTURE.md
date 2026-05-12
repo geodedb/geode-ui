@@ -69,20 +69,39 @@ Assumed workload / targets:
 - **Webpack/Vite bundle budget**: `performance.hints: 'error'`, 1 MiB per
   asset, 1.5 MiB per entrypoint — the SPA build fails if either is exceeded.
 
-### Per-route rate limit on `/api/v1/query`
+### Rate limits: per-route, cross-route aggregate, and per-IP
 
-- The `/api/v1/query` per-route rate limit is set to `2000` rps in
-  `geode.json` (matching the assumed steady-state target above), pinned by
-  `internal/server/query_ratelimit_test.go`. The per-route token bucket is
-  a ceiling on *this* route; the genapi-emitted handlers do not currently
-  wire `GlobalRate` / `global_rps` as a cross-route aggregate limit
-  (`APIOptions.GlobalRate` is populated from config but unused in
-  `RegisterGeneratedAPI`), so the only other server-side throttle in play
-  is the per-IP limiter (`PerIPRPS`, per-IP not aggregate). If a future
-  workload review needs `/api/v1/query` capped lower, change the spec
-  value and regenerate; if it needs a real global aggregate ceiling, that
-  is a genapi-generator change. (Resolved 2026-05-12, #159 — was a
-  documented open question; the per-route value is now aligned to the SLO.)
+Three independent server-side throttles are layered on the genapi-emitted
+HTTP surface, checked in this order on every request (after auth/authz):
+
+1. **Cross-route aggregate ceiling** — `RegisterGeneratedAPI` builds a single
+   server-wide token bucket from `APIOptions.GlobalRate` / `GlobalBurst`
+   (`global_rps` / `burst` in the genapi config). It is the coarsest control:
+   one bucket shared by *every* generated route, checked once per request.
+   `geode.json` sets `global_rps: 2000` (matching the assumed steady-state
+   target above) with a burst of `400`; `cmd/server/app.go` passes those into
+   `RegisterGeneratedAPI`. Set `global_rps: 0` to disable the aggregate
+   limiter entirely. Pinned by
+   `internal/server/global_ratelimit_test.go` (cross-route 429 + disabled-
+   when-zero) and `internal/server/query_ratelimit_test.go`.
+2. **Per-route bucket** — each route declared with a `rateLimit` in
+   `geode.json` gets its own token bucket (e.g. `/api/v1/query` → `2000` rps,
+   pinned by `query_ratelimit_test.go`); a route with no `rateLimit` falls
+   back to `global_rps` as its *per-route default rate*. This is the tighter
+   per-endpoint ceiling — it can never let a single route exceed its own
+   `rateLimit` even if the aggregate budget has room.
+3. **Per-IP limiter** (`PerIPRPS` / `PerIPBurst`, partitioned by client IP)
+   — a coarse per-client ceiling applied to every route; opt-in (disabled
+   when `PerIPRPS` is 0).
+
+The cross-route aggregate limiter landed in genapi via commit `2eabc11`
+(recommended tag `v0.3.1`); before that `APIOptions.GlobalRate` was populated
+from config but unused in `RegisterGeneratedAPI`. (Resolved 2026-05-12, #159 —
+was a documented open question; `global_rps` is now both aligned to the SLO
+*and* a real server-wide ceiling.) If a future workload review needs
+`/api/v1/query` capped lower, change the spec `rateLimit` and regenerate; if
+it needs a different aggregate ceiling, change `global_rps` (and the
+`GlobalRate` argument in `cmd/server/app.go`).
 
 ### Regression net
 
