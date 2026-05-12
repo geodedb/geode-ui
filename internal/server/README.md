@@ -35,6 +35,11 @@ shared helpers.
 
 ## Conventions
 
+See [`CONVENTIONS.md`](CONVENTIONS.md) for the full behavioural contract
+(error-code taxonomy, the empty-result rule, wire-feature-missing
+fallback, per-row dual-key forward-compat, audit-event naming, and the
+envelope helpers). The headline rules:
+
 - **Handler signatures match the genapi contract.** Do not rename the
   parameter types — they are emitted from the genapi config and any
   drift will fail the type-check on the next regeneration.
