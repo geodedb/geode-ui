@@ -183,6 +183,40 @@ func TestParse_RevokeUser_RevokesTokensIssuedBefore(t *testing.T) {
 	}
 }
 
+// TestIsRevoked_DefensiveNonTimeEntries pins the defensive branches in
+// jtiRevoked / subjectRevokeAll (#144 / Q10): a jti map entry whose value
+// is somehow not a time.Time treats the token as revoked (fail closed),
+// while a passwordChangedAt entry whose value is not a time.Time is
+// ignored (no marker → not revoked). These cases shouldn't occur in
+// practice but the behavior is part of the contract.
+func TestIsRevoked_DefensiveNonTimeEntries(t *testing.T) {
+	rs := NewRevocationSet()
+
+	// Corrupt jti entry → revoked.
+	rs.revoked.Store("badjti", "not-a-time")
+	cJTI := &Claims{RegisteredClaims: jjwt.RegisteredClaims{
+		ID:       "badjti",
+		IssuedAt: jjwt.NewNumericDate(time.Now()),
+	}}
+	if !rs.IsRevoked(cJTI) {
+		t.Fatal("a non-time jti revocation entry must flag the token as revoked")
+	}
+
+	// Corrupt passwordChangedAt entry → ignored (token not revoked by
+	// that mechanism). Use a distinct subject with no jti revocation.
+	rs.passwordChangedAt.Store("badsub", 1234)
+	cSub := &Claims{
+		Subject: "badsub",
+		RegisteredClaims: jjwt.RegisteredClaims{
+			Subject:  "badsub",
+			IssuedAt: jjwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		},
+	}
+	if rs.IsRevoked(cSub) {
+		t.Fatal("a non-time passwordChangedAt entry must be ignored, not treated as revoked")
+	}
+}
+
 func mustJTI(t *testing.T) string {
 	t.Helper()
 	j, err := newJTI()

@@ -205,41 +205,65 @@ func (rs *RevocationSet) persistUser(username string, now time.Time) {
 // IsRevoked reports whether the supplied claims correspond to a token
 // that has been revoked, by either mechanism. A nil RevocationSet or nil
 // claims is treated as "not revoked".
+//
+// Runs on every authenticated request, so the body is kept flat: the two
+// revocation mechanisms are delegated to jtiRevoked / subjectRevokeAll,
+// which preserve the exact lazy-GC, defensive, and comparison semantics
+// of the original inline implementation.
 func (rs *RevocationSet) IsRevoked(c *Claims) bool {
 	if rs == nil || c == nil {
 		return false
 	}
-	// Per-token revocation by jti.
-	if c.ID != "" {
-		if v, ok := rs.revoked.Load(c.ID); ok {
-			if exp, ok := v.(time.Time); ok {
-				if rs.now().Before(exp) {
-					return true
-				}
-				// Expired revocation entry — the token's own TTL guard
-				// already rejects it, so drop the stale entry and fall
-				// through.
-				rs.revoked.Delete(c.ID)
-			} else {
-				// Defensive: a non-time value should never be stored,
-				// but if it somehow is, treat the token as revoked
-				// rather than silently letting it through.
-				return true
-			}
-		}
+	if c.ID != "" && rs.jtiRevoked(c.ID, rs.now()) {
+		return true
 	}
-	// Per-user revoke-all by passwordChangedAt.
-	if c.Subject != "" && c.IssuedAt != nil {
-		if v, ok := rs.passwordChangedAt.Load(c.Subject); ok {
-			if changedAt, ok := v.(time.Time); ok {
-				// iat at or before the change instant ⇒ stale token.
-				if !c.IssuedAt.After(changedAt) {
-					return true
-				}
-			}
-		}
+	if c.Subject != "" && c.IssuedAt != nil && rs.subjectRevokeAll(c.Subject, c.IssuedAt.Time) {
+		return true
 	}
 	return false
+}
+
+// jtiRevoked reports whether the per-token revocation map names jti.
+// Lazy GC: an entry whose time.Time expiry has already passed (relative
+// to now) is deleted and reported as not-revoked — the token's own TTL
+// guard already rejects it. Defensive: an entry whose value is somehow
+// not a time.Time is treated as revoked rather than silently passing the
+// token through.
+func (rs *RevocationSet) jtiRevoked(jti string, now time.Time) bool {
+	v, ok := rs.revoked.Load(jti)
+	if !ok {
+		return false
+	}
+	exp, ok := v.(time.Time)
+	if !ok {
+		// A non-time value should never be stored, but if it somehow
+		// is, treat the token as revoked.
+		return true
+	}
+	if now.Before(exp) {
+		return true
+	}
+	// Expired revocation entry — drop the stale entry and treat as
+	// not revoked.
+	rs.revoked.Delete(jti)
+	return false
+}
+
+// subjectRevokeAll reports whether the per-user revoke-all marker for sub
+// invalidates a token issued at iat — i.e. iat is at or before the
+// recorded password-change instant. A non-time stored value is ignored
+// (treated as no marker), matching the original inline behavior.
+func (rs *RevocationSet) subjectRevokeAll(sub string, iat time.Time) bool {
+	v, ok := rs.passwordChangedAt.Load(sub)
+	if !ok {
+		return false
+	}
+	changedAt, ok := v.(time.Time)
+	if !ok {
+		return false
+	}
+	// iat at or before the change instant ⇒ stale token.
+	return !iat.After(changedAt)
 }
 
 // Sweep drops jti entries whose expiry has passed and passwordChangedAt
