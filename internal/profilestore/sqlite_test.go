@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1117,5 +1118,219 @@ func TestMergeProfile_OnlyAppliesNonNilFields(t *testing.T) {
 	got = mergeProfile(cur, ProfilePatch{PoolOverrides: &conn.PoolOverrides{}})
 	if got.PoolOverrides.MaxOpenConns != 0 {
 		t.Errorf("PoolOverrides=&{} should zero everything: got %+v", got.PoolOverrides)
+	}
+}
+
+// --- PERF-2026-05-11-09 (#150): read-only second WAL handle ---
+
+func TestReadOnlyDSN(t *testing.T) {
+	cases := []struct {
+		in     string
+		wantOK bool
+		want   string
+	}{
+		{"/var/lib/geode-ui/profiles.db", true, "file:/var/lib/geode-ui/profiles.db?mode=ro&_pragma=busy_timeout(5000)"},
+		{"profiles.db", true, "file:profiles.db?mode=ro&_pragma=busy_timeout(5000)"},
+		{"  /tmp/p.db  ", true, "file:/tmp/p.db?mode=ro&_pragma=busy_timeout(5000)"},
+		{":memory:", false, ""},
+		{"file::memory:", false, ""},
+		{"file::memory:?cache=shared", false, ""},
+		{"file:/tmp/x.db?mode=memory", false, ""},
+		{"file:/tmp/x.db", false, ""}, // already a URI: don't splice
+		{"/tmp/x.db?_pragma=foo", false, ""},
+		{"", false, ""},
+	}
+	for _, c := range cases {
+		got, ok := readOnlyDSN(c.in)
+		if ok != c.wantOK {
+			t.Errorf("readOnlyDSN(%q) ok = %v, want %v", c.in, ok, c.wantOK)
+			continue
+		}
+		if ok && got != c.want {
+			t.Errorf("readOnlyDSN(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestSQLiteFileBacked_SeparateROHandle: a file-backed store exposes a
+// DISTINCT read-only handle; the file is in WAL mode (a fresh
+// connection reads journal_mode == "wal"); and the RO handle rejects
+// writes (SQLITE_READONLY) while still serving reads.
+func TestSQLiteFileBacked_SeparateROHandle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	st, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	dbp, ok := st.(DBHandleProvider)
+	if !ok {
+		t.Fatal("sqliteStore must implement DBHandleProvider")
+	}
+	rw, ro := dbp.DBHandle(), dbp.DBHandleRO()
+	if rw == nil || ro == nil {
+		t.Fatalf("nil handle: rw=%v ro=%v", rw, ro)
+	}
+	if rw == ro {
+		t.Fatal("file-backed store must use a SEPARATE read-only handle")
+	}
+
+	// WAL mode set by the writer connection is visible on a fresh
+	// connection (it's a property of the file header).
+	fresh, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open fresh: %v", err)
+	}
+	defer func() { _ = fresh.Close() }()
+	var mode string
+	if err := fresh.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Fatalf("journal_mode = %q, want wal", mode)
+	}
+
+	// Write a row through the store (writer handle), then read it back
+	// through the RO handle.
+	saved, err := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "p1", DSN: "stub://x",
+	})
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	var name string
+	if err := ro.QueryRowContext(context.Background(),
+		`SELECT name FROM profiles WHERE id = ?`, saved.ID).Scan(&name); err != nil {
+		t.Fatalf("RO read: %v", err)
+	}
+	if name != "p1" {
+		t.Fatalf("RO read name = %q, want p1", name)
+	}
+
+	// The RO handle must reject writes.
+	if _, err := ro.ExecContext(context.Background(),
+		`INSERT INTO profiles (id, scope, owner_user_id, name, dsn, description, saved_username, is_default, tls_ca_pem, tls_cert_pem, tls_key_pem, max_open_conns, max_idle_conns, conn_max_lifetime_ns, conn_max_idle_ns, created_at, updated_at) VALUES ('x','system','','x','stub://x','','',0,'','','',0,0,0,0,0,0)`); err == nil {
+		t.Fatal("RO handle accepted a write; expected SQLITE_READONLY")
+	}
+}
+
+func TestSQLiteInMemory_ROHandleAliasesWriter(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	dbp := st.(DBHandleProvider)
+	if dbp.DBHandle() != dbp.DBHandleRO() {
+		t.Fatal("in-memory store: RO handle must alias the writer handle")
+	}
+}
+
+// TestSQLiteFileBacked_ROReadsConcurrentWithWrites: many concurrent
+// SELECTs through the RO handle while profile-CRUD writes are in flight
+// on the writer handle — no deadlock, every read completes, results are
+// consistent. This is the core PERF-2026-05-11-09 (#150) property: the
+// RO WAL handle does not serialise behind the single-writer handle.
+func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	st, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	dbp := st.(DBHandleProvider)
+	ro := dbp.DBHandleRO()
+
+	// Seed one row so reads have something to find.
+	seeded, err := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "seed", DSN: "stub://seed",
+	})
+	if err != nil {
+		t.Fatalf("seed Put: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	stop := make(chan struct{})
+	var writerWG sync.WaitGroup
+
+	// Writer goroutine: Put/Patch/Delete churn on the single-writer
+	// handle, running until the readers are done.
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		i := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			i++
+			p, err := st.Put(ctx, conn.Profile{
+				Scope: conn.ProfileScopePersonal, OwnerUserID: "u",
+				Name: fmt.Sprintf("w-%d", i), DSN: "stub://w",
+			})
+			if err != nil {
+				t.Errorf("writer Put: %v", err)
+				return
+			}
+			desc := "updated"
+			if _, err := st.Patch(ctx, p.ID, ProfilePatch{Description: &desc}); err != nil {
+				t.Errorf("writer Patch: %v", err)
+				return
+			}
+			if err := st.Delete(ctx, p.ID); err != nil {
+				t.Errorf("writer Delete: %v", err)
+				return
+			}
+		}
+	}()
+
+	// Reader goroutines: tight-loop SELECTs through the RO handle. Each
+	// does a fixed number of iterations then exits; the test asserts
+	// they ALL completed (no deadlock against the in-flight writer).
+	const (
+		numReaders = 8
+		perReader  = 300
+		wantReads  = numReaders * perReader
+	)
+	var readerWG sync.WaitGroup
+	var reads atomic.Int64
+	for r := 0; r < numReaders; r++ {
+		readerWG.Add(1)
+		go func() {
+			defer readerWG.Done()
+			for k := 0; k < perReader; k++ {
+				var name string
+				err := ro.QueryRowContext(ctx,
+					`SELECT name FROM profiles WHERE id = ?`, seeded.ID).Scan(&name)
+				if err != nil {
+					t.Errorf("RO read: %v", err)
+					return
+				}
+				if name != "seed" {
+					t.Errorf("RO read name = %q, want seed", name)
+					return
+				}
+				reads.Add(1)
+			}
+		}()
+	}
+
+	readersDone := make(chan struct{})
+	go func() { readerWG.Wait(); close(readersDone) }()
+	select {
+	case <-readersDone:
+	case <-ctx.Done():
+		t.Fatal("test timed out — possible deadlock between RO reads and the single-writer handle")
+	}
+	close(stop)
+	writerWG.Wait()
+
+	if got := reads.Load(); got < int64(wantReads) {
+		t.Fatalf("only %d reads completed, want %d", got, wantReads)
 	}
 }

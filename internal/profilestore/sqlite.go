@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -35,8 +37,32 @@ import (
 // on List. Legacy plaintext rows from before the encryption rollout
 // are detected via IsCiphertext on the read path and surfaced
 // transparently; the next Patch through the row will re-encrypt.
+// PERF-2026-05-11-09 (#150): the profile store deliberately pins its
+// primary handle (db) to a single connection — SetMaxOpenConns(1) — so
+// every CRUD statement and every Patch transaction serialises through one
+// driver pipeline (see the Patch concurrency notes). That is correct for
+// the writer, but the JWT revocation subsystem (internal/jwt) used to be
+// handed the *same* handle for its READ path (load()/queryCount) — so a
+// revocation reload (or any future revocation SELECT) queued behind an
+// in-flight profile-CRUD write.
+//
+// dbRO is a SECOND *sql.DB on the SAME on-disk file, opened read-only
+// (`mode=ro`). WAL journal mode is a property of the file (set by the
+// writer connection at open time and persisted in the DB header), so a
+// `mode=ro` connection reads a consistent snapshot WITHOUT taking the
+// write lock and WITHOUT blocking the writer. The RO handle is allowed
+// GOMAXPROCS connections so concurrent revocation reads scale; the
+// profile store owns BOTH handles' lifecycles and Close() closes both.
+//
+// For an in-memory DSN (":memory:" / "file::memory:" / "mode=memory")
+// there is nothing to split — a second in-memory connection would open a
+// fresh empty database — so dbRO aliases db in that case. Callers must
+// continue to route WRITES through DBHandle() (the single-writer handle)
+// and READS through DBHandleRO(); two writers, each capped at one
+// connection, on the same WAL file would deadlock.
 type sqliteStore struct {
-	db     *sql.DB
+	db     *sql.DB // single-writer handle: CRUD + Patch tx. SetMaxOpenConns(1).
+	dbRO   *sql.DB // read-only handle on the same file (mode=ro). Aliases db for in-memory DSNs.
 	cipher *Cipher
 }
 
@@ -94,7 +120,78 @@ func openSQLiteWithCipher(dsn string, cipher *Cipher) (Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("profilestore: schema: %w", err)
 	}
-	return &sqliteStore{db: db, cipher: cipher}, nil
+
+	// PERF-2026-05-11-09 (#150): open a read-only second handle on the
+	// same file for adjacent read-heavy subsystems (JWT revocation). For
+	// in-memory DSNs there is nothing to share — alias the writer handle.
+	dbRO := db
+	if roDSN, ok := readOnlyDSN(dsn); ok {
+		ro, err := sql.Open("sqlite", roDSN)
+		if err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("profilestore: open ro: %w", err)
+		}
+		// Scale concurrent reads with the CPU count; never below 2 so a
+		// single read can never starve a second.
+		n := runtime.GOMAXPROCS(0)
+		if n < 2 {
+			n = 2
+		}
+		ro.SetMaxOpenConns(n)
+		ro.SetMaxIdleConns(n)
+		// Validate the RO DSN eagerly so a busted mode=ro (e.g. the file
+		// does not exist yet, or the driver rejected the URI) fails at
+		// construction time rather than on the first revocation reload.
+		if err := ro.PingContext(context.Background()); err != nil {
+			_ = ro.Close()
+			_ = db.Close()
+			return nil, fmt.Errorf("profilestore: ping ro: %w", err)
+		}
+		dbRO = ro
+	}
+	return &sqliteStore{db: db, dbRO: dbRO, cipher: cipher}, nil
+}
+
+// readOnlyDSN derives a read-only modernc.org/sqlite DSN from the
+// writer DSN, or reports ok=false when no separate RO handle should be
+// opened (in-memory databases, or a DSN shape we can't safely rewrite).
+//
+// modernc.org/sqlite opens every connection with SQLITE_OPEN_URI set, so
+// a `file:<path>?mode=ro` URI is honoured by SQLite: the URI `mode`
+// parameter narrows the connection (it is allowed to be MORE restrictive
+// than the SQLITE_OPEN_READWRITE flag the driver passes). `mode=ro`
+// requires the `file:` URI prefix — without it modernc strips the query
+// from the path it hands to sqlite3_open_v2. busy_timeout is set via the
+// driver's `_pragma=name(value)` form (the modernc spelling — NOT the
+// mattn/go-sqlite3 `_busy_timeout`/`_txlock` spellings).
+//
+// We only rewrite the simple "bare filesystem path" shape (the only one
+// the binary actually uses — see the -profile-store flag). A DSN that
+// already carries a `?` query, or is already a `file:` URI, is left
+// un-split (ok=false): merging query strings safely is more fragile than
+// the contention win is worth, and the caller falls back to sharing the
+// writer handle, which is no worse than the pre-#150 behaviour.
+func readOnlyDSN(dsn string) (string, bool) {
+	trimmed := strings.TrimSpace(dsn)
+	low := strings.ToLower(trimmed)
+	switch {
+	case trimmed == "":
+		return "", false
+	case low == ":memory:":
+		return "", false
+	case strings.HasPrefix(low, "file::memory:"):
+		return "", false
+	case strings.Contains(low, "mode=memory"):
+		return "", false
+	case strings.HasPrefix(low, "file:"):
+		// Already a URI — don't try to splice in mode=ro.
+		return "", false
+	case strings.ContainsAny(trimmed, "?#"):
+		// Query/fragment present; rewriting it safely is out of scope.
+		return "", false
+	default:
+		return "file:" + trimmed + "?mode=ro&_pragma=busy_timeout(5000)", true
+	}
 }
 
 // sealString runs s through the column-level cipher and returns the
@@ -139,7 +236,18 @@ func (s *sqliteStore) unsealBytes(raw []byte) (string, error) {
 	return string(plain), nil
 }
 
-func (s *sqliteStore) Close() error { return s.db.Close() }
+// Close closes both underlying handles. When dbRO aliases db (in-memory
+// DSN) the second Close is skipped. A close error on either handle is
+// returned; the writer handle's error takes precedence.
+func (s *sqliteStore) Close() error {
+	err := s.db.Close()
+	if s.dbRO != nil && s.dbRO != s.db {
+		if roErr := s.dbRO.Close(); roErr != nil && err == nil {
+			err = roErr
+		}
+	}
+	return err
+}
 
 // DBHandle exposes the underlying *sql.DB so adjacent subsystems can
 // reuse the SAME SQLite file (a new table pair in the existing DB)
@@ -157,13 +265,29 @@ func (s *sqliteStore) Close() error { return s.db.Close() }
 // the in-memory fakes used by handler tests don't have a *sql.DB, and
 // only the production binary needs this. Callers type-assert for the
 // DBHandleProvider optional interface.
+//
+// DBHandle returns the SINGLE-WRITER handle (SetMaxOpenConns(1)). All
+// WRITES (schema migrations, INSERT/UPDATE/DELETE) MUST go through this
+// handle. Adjacent subsystems that need a write path (e.g. the JWT
+// revocation backend's putJTI/putUser/sweep) use this one.
 func (s *sqliteStore) DBHandle() *sql.DB { return s.db }
+
+// DBHandleRO returns the read-only handle on the same file
+// (PERF-2026-05-11-09 / #150). It is opened `mode=ro` with up to
+// GOMAXPROCS connections, so concurrent SELECTs do not serialise behind
+// each other or behind the single-writer handle. Reads issued through
+// it never block the writer (WAL). For an in-memory DSN this is the
+// same handle as DBHandle(). Callers MUST NOT issue writes through it
+// (SQLite returns SQLITE_READONLY) and MUST NOT Close it.
+func (s *sqliteStore) DBHandleRO() *sql.DB { return s.dbRO }
 
 // DBHandleProvider is the optional interface implemented by Store
 // backends that are SQLite-file-backed. cmd/server type-asserts for it
-// to hand the *sql.DB to jwt.RevocationSet.AttachSQLite.
+// to hand the writer *sql.DB (for writes) and the RO *sql.DB (for
+// reads) to jwt.RevocationSet.AttachSQLiteRW.
 type DBHandleProvider interface {
-	DBHandle() *sql.DB
+	DBHandle() *sql.DB   // single-writer handle (writes)
+	DBHandleRO() *sql.DB // read-only handle on the same file (reads)
 }
 
 // List returns profiles matching the supplied Filter.

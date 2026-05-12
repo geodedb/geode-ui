@@ -69,22 +69,46 @@ func NewRevocationSet() *RevocationSet {
 
 // AttachSQLite makes this RevocationSet durable, backed by the supplied
 // *sql.DB (intended to be the profile store's handle — a NEW table pair
-// in the existing file, not a second DB). It:
+// in the existing file, not a second DB). Both the read path (the
+// startup hydration SELECTs) and the write path (migrations, putJTI,
+// putUser, sweep) use the single handle. Equivalent to
+// AttachSQLiteRW(db, db).
 //
-//  1. runs CREATE TABLE IF NOT EXISTS migrations,
-//  2. SELECTs every still-relevant row into the in-memory cache
-//     (skipping already-expired jti rows),
-//  3. DELETEs the stale revoked_jti rows so the table stays bounded.
-//
-// After this returns, the existing cache contents (if AttachSQLite is
-// called on a RevocationSet that already had in-memory entries) are
-// preserved AND the loaded rows are merged in — but the intended use is
-// to call it on a fresh set during startup. Idempotent-ish: calling it
-// twice re-runs the load (harmless) but replaces the backend, so don't.
+// Prefer AttachSQLiteRW when a separate read-only handle on the same
+// file is available (see profilestore.DBHandleProvider) — that keeps
+// revocation reloads from queueing behind in-flight profile-CRUD
+// writes (PERF-2026-05-11-09 / #150).
 //
 // db must not be nil.
 func (rs *RevocationSet) AttachSQLite(db *sql.DB) error {
-	be, err := newSQLiteRevocationBackend(db)
+	return rs.AttachSQLiteRW(db, db)
+}
+
+// AttachSQLiteRW makes this RevocationSet durable using TWO handles on
+// the same SQLite file: rw (the single-writer handle — migrations and
+// every write go through it so they serialise with profile CRUD) and ro
+// (a read-only handle, mode=ro, used for the startup hydration SELECTs
+// so a revocation reload never queues behind an in-flight profile-CRUD
+// write). ro may equal rw (in-memory DSN) — then everything uses rw,
+// identical to the pre-#150 behaviour. It:
+//
+//  1. runs CREATE TABLE IF NOT EXISTS migrations on rw,
+//  2. SELECTs every still-relevant row (via ro) into the in-memory
+//     cache (skipping already-expired jti rows),
+//  3. DELETEs the stale revoked_jti rows (via rw) so the table stays
+//     bounded.
+//
+// After this returns, the existing cache contents (if called on a
+// RevocationSet that already had in-memory entries) are preserved AND
+// the loaded rows are merged in — but the intended use is to call it on
+// a fresh set during startup. Idempotent-ish: calling it twice re-runs
+// the load (harmless) but replaces the backend, so don't.
+//
+// rw must not be nil; a nil ro is treated as "use rw for reads too".
+// The caller (the profile store) owns both handles' lifecycles — the
+// backend never closes either.
+func (rs *RevocationSet) AttachSQLiteRW(rw, ro *sql.DB) error {
+	be, err := newSQLiteRevocationBackend(rw, ro)
 	if err != nil {
 		return err
 	}

@@ -3,7 +3,10 @@ package jwt
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -311,4 +314,266 @@ func TestSQLiteRevocation_Issuer_EndToEnd(t *testing.T) {
 	if _, err := iss2.Parse(tok); err == nil {
 		t.Fatal("revoked token should still be rejected after restart")
 	}
+}
+
+// --- PERF-2026-05-11-09 (#150): split RO/RW handles for revocation ---
+
+// openTestRWRO opens a writer + a read-only handle on the SAME temp
+// SQLite file, mirroring the profile store's two-handle model: the
+// writer is pinned to one connection (SetMaxOpenConns(1)) and sets WAL;
+// the reader is opened mode=ro with several connections. Returns
+// (rw, ro, path).
+func openTestRWRO(t *testing.T) (*sql.DB, *sql.DB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rev.db")
+	rw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open rw: %v", err)
+	}
+	rw.SetMaxOpenConns(1)
+	if _, err := rw.ExecContext(context.Background(),
+		`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
+		t.Fatalf("rw pragmas: %v", err)
+	}
+	// A revocation table or two so the file exists for the RO open.
+	if _, err := rw.ExecContext(context.Background(), revocationSchema); err != nil {
+		t.Fatalf("rw schema: %v", err)
+	}
+	ro, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("open ro: %v", err)
+	}
+	ro.SetMaxOpenConns(8)
+	ro.SetMaxIdleConns(8)
+	if err := ro.PingContext(context.Background()); err != nil {
+		t.Fatalf("ro ping: %v", err)
+	}
+	t.Cleanup(func() { _ = ro.Close(); _ = rw.Close() })
+	return rw, ro, path
+}
+
+// TestSQLiteRevocation_AttachRW_ReadsFromROHandle: AttachSQLiteRW(rw,ro)
+// hydrates the cache through the RO handle and persists writes through
+// the RW handle; the file ends up in WAL mode; the RO handle rejects
+// writes.
+func TestSQLiteRevocation_AttachRW_ReadsFromROHandle(t *testing.T) {
+	rw, ro, path := openTestRWRO(t)
+
+	rs := NewRevocationSet()
+	now := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
+	rs.nowFn = func() time.Time { return now }
+	if err := rs.AttachSQLiteRW(rw, ro); err != nil {
+		t.Fatalf("AttachSQLiteRW: %v", err)
+	}
+	// Write a revocation through the RW path.
+	rs.Revoke("jti-1", now.Add(time.Hour))
+	if !rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "jti-1"}}) {
+		t.Fatal("jti-1 should be revoked")
+	}
+	// The RO handle can see the row but cannot write.
+	var cnt int
+	if err := ro.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM revoked_jti WHERE jti = 'jti-1'`).Scan(&cnt); err != nil {
+		t.Fatalf("ro read: %v", err)
+	}
+	if cnt != 1 {
+		t.Fatalf("RO handle sees %d rows for jti-1, want 1", cnt)
+	}
+	if _, err := ro.ExecContext(context.Background(),
+		`INSERT INTO revoked_jti (jti, exp) VALUES ('x', 1)`); err == nil {
+		t.Fatal("RO handle accepted a write; expected SQLITE_READONLY")
+	}
+	// WAL mode is visible on a fresh connection.
+	fresh, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open fresh: %v", err)
+	}
+	defer func() { _ = fresh.Close() }()
+	var mode string
+	if err := fresh.QueryRowContext(context.Background(), `PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatalf("PRAGMA journal_mode: %v", err)
+	}
+	if mode != "wal" {
+		t.Fatalf("journal_mode = %q, want wal", mode)
+	}
+}
+
+// TestSQLiteRevocation_AttachSQLite_AliasesRW: the single-handle
+// AttachSQLite(db) keeps working (rw == ro path) — equivalent to
+// AttachSQLiteRW(db, db).
+func TestSQLiteRevocation_AttachSQLite_AliasesRW(t *testing.T) {
+	db := openTestDB(t, ":memory:")
+	rs := NewRevocationSet()
+	if err := rs.AttachSQLite(db); err != nil {
+		t.Fatalf("AttachSQLite: %v", err)
+	}
+	rs.Revoke("jti-z", time.Now().Add(time.Hour))
+	if !rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "jti-z"}}) {
+		t.Fatal("jti-z should be revoked")
+	}
+	if rs.backend.rw != db || rs.backend.ro != db {
+		t.Fatalf("AttachSQLite must alias rw==ro==db; got rw=%v ro=%v", rs.backend.rw, rs.backend.ro)
+	}
+}
+
+// TestSQLiteRevocation_ROLoadConcurrentWithWrites: many concurrent
+// revocation reloads (load() via the RO handle) and IsRevoked calls
+// while a writer churns the SAME file through the RW handle (Revoke /
+// Sweep) — no deadlock, every reload completes, results are correct.
+// This pins the PERF-2026-05-11-09 (#150) goal: revocation reads do not
+// serialise behind the single-writer handle.
+func TestSQLiteRevocation_ROLoadConcurrentWithWrites(t *testing.T) {
+	rw, ro, _ := openTestRWRO(t)
+	now := time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
+
+	rs := NewRevocationSet()
+	rs.nowFn = func() time.Time { return now }
+	if err := rs.AttachSQLiteRW(rw, ro); err != nil {
+		t.Fatalf("AttachSQLiteRW: %v", err)
+	}
+	// Seed a durable revocation so reloads see something.
+	rs.Revoke("seed-jti", now.Add(time.Hour))
+	rs.RevokeUser("seed-user")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	stop := make(chan struct{})
+	var writerWG sync.WaitGroup
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		i := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			i++
+			rs.Revoke(fmt.Sprintf("churn-%d", i), now.Add(time.Hour))
+			if i%50 == 0 {
+				rs.Sweep(48 * time.Hour) // DELETEs through the RW handle
+			}
+		}
+	}()
+
+	const (
+		numReaders = 8
+		perReader  = 100
+		wantLoads  = numReaders * perReader
+	)
+	var readerWG sync.WaitGroup
+	var loads atomic.Int64
+	for r := 0; r < numReaders; r++ {
+		readerWG.Add(1)
+		go func() {
+			defer readerWG.Done()
+			for k := 0; k < perReader; k++ {
+				jtis, users, err := rs.backend.load(now)
+				if err != nil {
+					t.Errorf("revocation load: %v", err)
+					return
+				}
+				if _, ok := jtis["seed-jti"]; !ok {
+					t.Errorf("reload missing seed-jti")
+					return
+				}
+				if _, ok := users["seed-user"]; !ok {
+					t.Errorf("reload missing seed-user")
+					return
+				}
+				// IsRevoked must also stay correct under churn.
+				if !rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "seed-jti"}}) {
+					t.Errorf("seed-jti not revoked")
+					return
+				}
+				loads.Add(1)
+			}
+		}()
+	}
+
+	readersDone := make(chan struct{})
+	go func() { readerWG.Wait(); close(readersDone) }()
+	select {
+	case <-readersDone:
+	case <-ctx.Done():
+		t.Fatal("test timed out — possible deadlock between RO revocation reloads and the single-writer handle")
+	}
+	close(stop)
+	writerWG.Wait()
+
+	if got := loads.Load(); got < int64(wantLoads) {
+		t.Fatalf("only %d reloads completed, want %d", got, wantLoads)
+	}
+}
+
+// BenchmarkRevocationReloadUnderWrite measures revocation reload
+// (load() via the RO handle) throughput while a writer churns the SAME
+// file through the RW handle — the PERF-2026-05-11-09 (#150) shape.
+func BenchmarkRevocationReloadUnderWrite(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "rev.db")
+	rw, err := sql.Open("sqlite", path)
+	if err != nil {
+		b.Fatalf("open rw: %v", err)
+	}
+	defer func() { _ = rw.Close() }()
+	rw.SetMaxOpenConns(1)
+	if _, err := rw.ExecContext(context.Background(),
+		`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
+		b.Fatalf("rw pragmas: %v", err)
+	}
+	if _, err := rw.ExecContext(context.Background(), revocationSchema); err != nil {
+		b.Fatalf("rw schema: %v", err)
+	}
+	ro, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		b.Fatalf("open ro: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+	ro.SetMaxOpenConns(8)
+	ro.SetMaxIdleConns(8)
+	if err := ro.PingContext(context.Background()); err != nil {
+		b.Fatalf("ro ping: %v", err)
+	}
+
+	rs := NewRevocationSet()
+	now := time.Now()
+	if err := rs.AttachSQLiteRW(rw, ro); err != nil {
+		b.Fatalf("AttachSQLiteRW: %v", err)
+	}
+	for i := 0; i < 200; i++ {
+		rs.Revoke(fmt.Sprintf("seed-%d", i), now.Add(time.Hour))
+	}
+
+	stop := make(chan struct{})
+	var writerWG sync.WaitGroup
+	writerWG.Add(1)
+	go func() {
+		defer writerWG.Done()
+		i := 0
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			i++
+			rs.Revoke(fmt.Sprintf("churn-%d", i), now.Add(time.Hour))
+		}
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, _, err := rs.backend.load(now); err != nil {
+				b.Errorf("load: %v", err)
+				return
+			}
+		}
+	})
+	b.StopTimer()
+	close(stop)
+	writerWG.Wait()
 }

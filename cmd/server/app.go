@@ -188,18 +188,22 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// SEC-N2 follow-up: make the JWT revocation set durable by backing it
 	// with the profile-store SQLite file (a new revoked_jti /
 	// password_changed_at table pair in the existing DB — NOT a second
-	// file). AttachSQLite runs the migrations, hydrates the in-memory
+	// file). AttachSQLiteRW runs the migrations, hydrates the in-memory
 	// read-through cache from disk, and GCs stale rows. After this, a
 	// token revoked before a restart stays revoked; the hot validation
 	// path still reads the cache only and issues zero SQL per request.
 	//
-	// This piggybacks on the profile store's *sql.DB — no new flag. With
-	// `-profile-store :memory:` the revocation store shares that
-	// in-memory SQLite, so test runs keep working. If the store backend
-	// isn't SQLite-file-backed (it always is for the production
-	// constructor), fall back to the in-memory-only revocation set.
+	// PERF-2026-05-11-09 (#150): we hand the revocation backend BOTH the
+	// profile store's single-writer handle (DBHandle — used for the
+	// migrations and the putJTI/putUser/sweep writes, so they serialise
+	// with profile CRUD) AND its read-only handle (DBHandleRO — used for
+	// the hydration SELECTs, so a revocation reload never queues behind
+	// an in-flight profile-CRUD write; for ':memory:' both are the same
+	// handle). This piggybacks on the profile store's *sql.DB pair — no
+	// new flag. If the store backend isn't SQLite-file-backed (it always
+	// is for the production constructor), fall back to in-memory-only.
 	if dbp, ok := store.(profilestore.DBHandleProvider); ok {
-		if err := issuer.Revocation().AttachSQLite(dbp.DBHandle()); err != nil {
+		if err := issuer.Revocation().AttachSQLiteRW(dbp.DBHandle(), dbp.DBHandleRO()); err != nil {
 			return nil, fmt.Errorf("jwt revocation store: %w", err)
 		}
 	} else {
