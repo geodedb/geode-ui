@@ -86,6 +86,18 @@ export const sel = {
   graphCollapsedList: (p: Page): Locator =>
     p.getByTestId('graph-collapsed-list'),
 
+  // Workspace (21-workspace.spec.ts) — multi-pane query surface mounted
+  // at /workspace. The "+ Add pane" button is disabled at MAX_PANES (4);
+  // each WorkspacePane's <section> carries workspace-pane, and inside it a
+  // Run button (pane-run-btn) and a close × (pane-close-btn, disabled when
+  // only one pane remains). Pane-scoped assertions narrow via
+  // `sel.workspacePane(p).nth(i)` then `.locator('.monaco-editor')` /
+  // `.getByTestId('pane-run-btn')`.
+  workspaceAddPane: (p: Page): Locator => p.getByTestId('workspace-add-pane'),
+  workspacePane: (p: Page): Locator => p.getByTestId('workspace-pane'),
+  paneRunBtn: (p: Page): Locator => p.getByTestId('pane-run-btn'),
+  paneCloseBtn: (p: Page): Locator => p.getByTestId('pane-close-btn'),
+
   // Admin
   newUserBtn: (p: Page): Locator =>
     p.getByRole('button', { name: /new user/i }),
