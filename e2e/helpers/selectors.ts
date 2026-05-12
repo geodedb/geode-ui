@@ -51,6 +51,7 @@ export const sel = {
     p.getByRole('tab', { name: 'json', exact: true }),
   queryTabGraph: (p: Page): Locator =>
     p.getByRole('tab', { name: 'graph', exact: true }),
+  queryTabMatrix: (p: Page): Locator => p.getByRole('tab', { name: /matrix/i }),
   cancelStream: (p: Page): Locator =>
     p.getByRole('button', { name: /cancel/i }),
   resultsTable: (p: Page): Locator => p.locator('table'),

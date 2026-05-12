@@ -62,4 +62,18 @@ test.describe('graph viz: layouts, clustering, path mode', () => {
     await page.getByTestId('graph-path-clear').click()
     await expect(pathToggle).toHaveAttribute('aria-pressed', 'false')
   })
+
+  test('matrix tab renders an adjacency heatmap', async ({
+    authedPage: page,
+  }) => {
+    // beforeEach already ran the Person—ACTED_IN→Movie query and is on
+    // the Graph tab; switch to the Matrix tab and assert the heatmap.
+    await sel.queryTabMatrix(page).click()
+    await expect(
+      page.getByRole('table', { name: /adjacency|matrix/i })
+    ).toBeVisible()
+    await expect(
+      page.getByRole('columnheader', { name: /Movie/i })
+    ).toBeVisible()
+  })
 })
