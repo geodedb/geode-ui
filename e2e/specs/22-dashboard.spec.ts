@@ -53,10 +53,7 @@ test.describe('overview dashboard', () => {
     if (await sel.dashboardStatsLoad(page).isVisible()) {
       await sel.dashboardStatsLoad(page).click()
       await expect(
-        page
-          .getByTestId('dashboard-stats-card')
-          .getByText(/^\d+$/)
-          .first()
+        page.getByTestId('dashboard-stats-card').getByText(/^\d+$/).first()
       ).toBeVisible({ timeout: 10_000 })
     }
   })

@@ -46,7 +46,10 @@ test.describe('multi-pane workspace', () => {
     await pane1.getByTestId('pane-close-btn').click()
     await expect(sel.workspacePane(page)).toHaveCount(1)
     await expect(
-      sel.workspacePane(page).first().getByText(/3 rows/)
+      sel
+        .workspacePane(page)
+        .first()
+        .getByText(/3 rows/)
     ).toBeVisible()
   })
 
