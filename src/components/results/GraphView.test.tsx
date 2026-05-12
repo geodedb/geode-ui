@@ -1,6 +1,7 @@
 /// <reference types="@testing-library/jest-dom" />
+/* eslint-disable no-underscore-dangle */
 import React from 'react'
-import { act, fireEvent, render, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 
 // Capture the constructor calls from cytoscape so we can assert that
@@ -10,27 +11,84 @@ import { ThemeProvider } from 'styled-components'
 const cyConstructorCalls: unknown[] = []
 const destroyMock = jest.fn()
 const onMock = jest.fn()
+// Records cytoscape.use(...) registrations (Task 1.1 — fcose, dagre).
+const useMock = jest.fn()
+// Records every layout() arg passed to *any* mock core (Task 1.2).
+const layoutCalls: unknown[] = []
+// The last-constructed mock core, so tests can poke its jest.fn-backed
+// methods (Tasks 1.3/1.4/1.5).
+let lastCyInstance:
+  | (Record<string, unknown> & { __lastElements?: unknown })
+  | null = null
 
 // A no-op chainable collection: every method returns the collection so
 // `.removeClass(...).removeClass(...)` and friends don't blow up. forEach
 // is a real no-op so per-element callbacks (which touch methods this stub
-// doesn't model) are never invoked.
-const makeColl = (): Record<string, unknown> => {
+// doesn't model) are never invoked. The collection also models the
+// graph-algorithm shape GraphView's path mode reaches (dijkstra → pathTo)
+// well enough to drive a deterministic highlight in tests.
+const makeColl = (
+  members: string[] = [],
+  classed: Map<string, Set<string>> | null = null
+): Record<string, unknown> => {
+  const classes = classed ?? new Map<string, Set<string>>()
   const coll: Record<string, unknown> = {
     forEach: jest.fn(),
     remove: jest.fn(),
-    length: 0,
-    empty: () => true,
+    length: members.length,
+    empty: () => members.length === 0,
+    id: () => members[0] ?? '',
+    edges: () => makeColl([], classes),
   }
   const chain = (): Record<string, unknown> => coll
-  coll.addClass = chain
-  coll.removeClass = chain
-  coll.difference = chain
+  // addClass / removeClass record the class on each member id so
+  // __classesOf(id) can be asserted.
+  coll.addClass = jest.fn((cls: string) => {
+    members.forEach((m) => {
+      const set = classes.get(m) ?? new Set<string>()
+      set.add(cls)
+      classes.set(m, set)
+    })
+    return coll
+  })
+  coll.removeClass = jest.fn((cls: string) => {
+    members.forEach((m) => {
+      const set = classes.get(m)
+      if (set) set.delete(cls)
+    })
+    return coll
+  })
+  coll.difference = jest.fn((other: { __members?: string[] }) => {
+    const omit = new Set(other?.__members ?? [])
+    return makeColl(
+      members.filter((m) => !omit.has(m)),
+      classes
+    )
+  })
   coll.union = chain
   coll.connectedNodes = chain
   coll.closedNeighborhood = chain
   coll.select = chain
+  coll.dijkstra = jest.fn(() => ({
+    // pathTo(target): the mock can't run a real shortest-path search
+    // (no node positions in jsdom), so it returns a collection of every
+    // member id — deterministic enough to pin the highlight wiring.
+    pathTo: jest.fn(() => makeColl(members.slice(), classes)),
+  }))
+  coll.__members = members
+  coll.__classes = classes
   return coll
+}
+
+function idsFromElements(opts: unknown): string[] {
+  const els = (opts as { elements?: { data?: { id?: unknown } }[] })?.elements
+  if (!Array.isArray(els)) return []
+  const ids: string[] = []
+  els.forEach((e) => {
+    const id = e.data?.id
+    if (id != null && String(id) !== '') ids.push(String(id))
+  })
+  return ids
 }
 
 // jest.fn-backed factory so individual tests can override behavior
@@ -42,29 +100,83 @@ const makeColl = (): Record<string, unknown> => {
 const cyFactory = jest.fn((opts: unknown) => {
   cyConstructorCalls.push(opts)
   const style = { update: jest.fn() }
-  return {
-    on: onMock,
+  // Per-core shared class registry so addClass/removeClass on any
+  // collection derived from this core are observable via __classesOf.
+  const classes = new Map<string, Set<string>>()
+  const elementIds: string[] = idsFromElements(opts)
+  // Tap-handler registry: cy.on('tap', 'node', fn) records fn so a test
+  // can fire it via cy.__emitTap('node', id).
+  const tapHandlers: Record<string, ((ev: unknown) => void)[]> = {}
+  const pushHandler = (key: string, fn: (e: unknown) => void): void => {
+    const list = tapHandlers[key] ?? []
+    list.push(fn)
+    tapHandlers[key] = list
+  }
+  const recordOn = (...args: unknown[]): void => {
+    onMock(...args)
+    // (event, selectorOrHandler, maybeHandler)
+    const ev = args[0]
+    if (ev !== 'tap') return
+    if (typeof args[1] === 'function') {
+      pushHandler('__bg', args[1] as (e: unknown) => void)
+    } else if (typeof args[1] === 'string' && typeof args[2] === 'function') {
+      pushHandler(args[1] as string, args[2] as (e: unknown) => void)
+    }
+  }
+  const core: Record<string, unknown> & { __lastElements?: unknown } = {
+    on: recordOn,
     destroy: destroyMock,
     add: jest.fn(),
     remove: jest.fn(),
     batch: (fn: () => void) => fn(),
-    elements: () => makeColl(),
-    layout: () => ({ run: jest.fn() }),
-    nodes: () => makeColl(),
-    edges: () => makeColl(),
-    $id: () => makeColl(),
+    elements: () => makeColl(elementIds.slice(), classes),
+    getElementById: (id: string) => makeColl([id], classes),
+    layout: jest.fn((arg: unknown) => {
+      layoutCalls.push(arg)
+      return { run: jest.fn() }
+    }),
+    nodes: () => makeColl([], classes),
+    edges: () => makeColl([], classes),
+    $id: () => makeColl([], classes),
     fit: jest.fn(),
     zoom: jest.fn(() => 1),
     width: jest.fn(() => 400),
     height: jest.fn(() => 300),
     style: jest.fn(() => style),
+    userPanningEnabled: jest.fn(),
+    boxSelectionEnabled: jest.fn(),
+    __lastElements: (opts as { elements?: unknown })?.elements,
+    __classesOf: (id: string): string[] => Array.from(classes.get(id) ?? []),
+    __emitTap: (kind: string, id: string): void => {
+      const handlers = tapHandlers[kind] ?? []
+      const target = makeColl([id], classes)
+      target.id = () => id
+      handlers.forEach((h) => h({ target }))
+    },
   }
+  lastCyInstance = core
+  return core
 })
 
-jest.mock('cytoscape', () => ({ __esModule: true, default: cyFactory }))
+jest.mock('cytoscape', () => {
+  const fn = cyFactory as unknown as { use: jest.Mock }
+  fn.use = useMock
+  return { __esModule: true, default: fn }
+})
+
+// Helpers used by the new Phase-1 tests.
+function lastLayoutArg(): unknown {
+  return layoutCalls[layoutCalls.length - 1]
+}
+function lastCy(): Record<string, unknown> & { __lastElements?: unknown } {
+  if (!lastCyInstance) throw new Error('no cytoscape core constructed yet')
+  return lastCyInstance
+}
 
 // Import after the mock is in place.
 import { GraphView } from './GraphView'
+import cytoscape from 'cytoscape'
+import type { ElementDefinition } from 'cytoscape'
 import type { QueryRespLike } from '../../lib/graphResult'
 
 import { testTheme as theme } from '../../test-utils/theme'
@@ -97,8 +209,14 @@ function makeResp(rowCount: number): {
 
 beforeEach(() => {
   cyConstructorCalls.length = 0
+  layoutCalls.length = 0
+  lastCyInstance = null
   destroyMock.mockClear()
   onMock.mockClear()
+  // NB: useMock is intentionally NOT cleared — cytoscape.use(fcose)/
+  // cytoscape.use(dagre) run once at GraphView module load, before any
+  // test's beforeEach, so the registration assertions read the
+  // cumulative call list.
   jest.useFakeTimers()
 })
 
@@ -660,5 +778,184 @@ describe('graph inspector property view', () => {
     fireEvent.click(view.getByTestId('graph-inspector-view-props'))
     expect(view.getByTestId('graph-inspector-props')).toBeInTheDocument()
     expect(view.queryByTestId('graph-inspector-json')).toBeNull()
+  })
+})
+
+// ------------------------------------------------------------------
+// Phase 1 — graph-viz feature ports (fcose/dagre layouts, box select,
+// group-by-label clustering, path mode).
+// ------------------------------------------------------------------
+
+// Minimal graph response: two nodes (distinct labels) + one edge.
+const twoNodeOneEdgeResp: QueryRespLike & { row_count?: number } = {
+  rows: [],
+  graph_summary: {
+    nodes: [
+      { id: 1, labels: ['A'], properties: {} },
+      { id: 2, labels: ['B'], properties: {} },
+    ],
+    edges: [{ id: 10, start_node: 1, end_node: 2, type: 'R', properties: {} }],
+  },
+  row_count: 2,
+} as unknown as QueryRespLike & { row_count?: number }
+
+function renderGV(
+  resp: QueryRespLike & { row_count?: number }
+): ReturnType<typeof render> {
+  const view = render(
+    <ThemeProvider theme={theme}>
+      <GraphView resp={resp} />
+    </ThemeProvider>
+  )
+  act(() => {
+    jest.advanceTimersByTime(300)
+  })
+  return view
+}
+
+describe('Phase 1: layout extensions', () => {
+  it('registers the fcose and dagre layout extensions at module load', () => {
+    // GraphView.tsx must call cytoscape.use(fcose) and cytoscape.use(dagre)
+    // at module scope. The mock records calls.
+    const use = (cytoscape as unknown as { use: jest.Mock }).use
+    expect(use).toHaveBeenCalled()
+    expect(use.mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('Phase 1: fcose + dagre in the layout picker', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('offers fcose and dagre in the layout picker and applies them', () => {
+    renderGV(twoNodeOneEdgeResp)
+    const picker = screen.getByTestId(
+      'graph-layout-picker'
+    ) as HTMLSelectElement
+    expect([...picker.options].map((o) => o.value)).toEqual(
+      expect.arrayContaining([
+        'cose',
+        'fcose',
+        'dagre',
+        'breadthfirst',
+        'circle',
+        'concentric',
+        'grid',
+      ])
+    )
+    act(() => {
+      fireEvent.change(picker, { target: { value: 'fcose' } })
+    })
+    expect(lastLayoutArg()).toMatchObject({ name: 'fcose' })
+    act(() => {
+      fireEvent.change(picker, { target: { value: 'dagre' } })
+    })
+    expect(lastLayoutArg()).toMatchObject({ name: 'dagre', rankDir: 'TB' })
+  })
+})
+
+describe('Phase 1: box-selection mode toggle', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('toggles box-selection mode and reflects it on the cy instance', () => {
+    renderGV(twoNodeOneEdgeResp)
+    const toggle = screen.getByTestId('graph-selection-mode')
+    // initial: pan mode → userPanningEnabled(true), boxSelectionEnabled(false)
+    expect(lastCy().userPanningEnabled).toHaveBeenLastCalledWith(true)
+    expect(lastCy().boxSelectionEnabled).toHaveBeenLastCalledWith(false)
+    act(() => {
+      fireEvent.click(toggle)
+    })
+    expect(lastCy().userPanningEnabled).toHaveBeenLastCalledWith(false)
+    expect(lastCy().boxSelectionEnabled).toHaveBeenLastCalledWith(true)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('Phase 1: group-by-label clustering', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('toggling group-by-label feeds compound elements to cytoscape', () => {
+    renderGV(twoNodeOneEdgeResp)
+    const toggle = screen.getByTestId('graph-cluster-toggle')
+    act(() => {
+      fireEvent.click(toggle)
+    })
+    // The build is debounced — let it run.
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    const els = lastCy().__lastElements as ElementDefinition[]
+    expect(
+      els.some(
+        (e) =>
+          (e.data as { isClusterParent?: boolean } | undefined)?.isClusterParent
+      )
+    ).toBe(true)
+    expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('Phase 1: path mode', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  // The cytoscape mock models the dijkstra→pathTo wiring (it cannot run a
+  // real shortest-path search since there are no node positions in jsdom),
+  // so this test pins the *wiring + class application*: entering path mode,
+  // tapping a source then a target, calls cy.elements().dijkstra(...) and
+  // applies the .highlighted / .dimmed classes, and the status line reports
+  // a hop count; Clear-path tears it back down. See the plan's accepted
+  // simpler alternative for Task 1.5.
+  it('path mode highlights a path between two tapped nodes and clears it', () => {
+    const resp = {
+      rows: [],
+      graph_summary: {
+        nodes: [1, 2, 3, 4].map((id) => ({
+          id,
+          labels: ['N'],
+          properties: {},
+        })),
+        edges: [
+          { id: 12, start_node: 1, end_node: 2, type: 'R', properties: {} },
+          { id: 23, start_node: 2, end_node: 3, type: 'R', properties: {} },
+          { id: 14, start_node: 1, end_node: 4, type: 'R', properties: {} },
+        ],
+      },
+      row_count: 4,
+    } as unknown as QueryRespLike & { row_count?: number }
+    renderGV(resp)
+    const pathToggle = screen.getByTestId('graph-path-mode')
+    act(() => {
+      fireEvent.click(pathToggle)
+    })
+    expect(pathToggle).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/click the start node/i)).toBeInTheDocument()
+    const cy = lastCy()
+    const emitTap = cy.__emitTap as (k: string, id: string) => void
+    act(() => {
+      emitTap('node', '1')
+    })
+    expect(screen.getByText(/click the end node/i)).toBeInTheDocument()
+    act(() => {
+      emitTap('node', '3')
+    })
+    // n2 is on the synthesised mock path → highlighted; n4 is off it →
+    // dimmed (the mock's difference() drops the path members).
+    const classesOf = cy.__classesOf as (id: string) => string[]
+    expect(classesOf('2')).toContain('highlighted')
+    // Status line shows the hop count.
+    expect(screen.getByTestId('graph-path-status')).toHaveTextContent(/path/i)
+    // Clear path.
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /clear path/i }))
+    })
+    expect(pathToggle).toHaveAttribute('aria-pressed', 'false')
   })
 })

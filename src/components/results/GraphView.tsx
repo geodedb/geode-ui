@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import cytoscape, { Core, ElementDefinition } from 'cytoscape'
+import fcose from 'cytoscape-fcose'
+import dagre from 'cytoscape-dagre'
 import styled, { useTheme } from 'styled-components'
 import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
 import {
@@ -20,6 +22,16 @@ import {
   resolveNodeLabel,
   typeOptions,
 } from '../../lib/graphResult'
+
+// Register the layout extensions once, at module load. cytoscape.use is
+// idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
+// is a no-op. fcose is a faster force layout that also handles compound
+// (clustered) graphs; dagre is a layered DAG layout for directed /
+// hierarchical shapes. Both are surfaced in the layout picker (Task 1.2)
+// and fcose is the auto-pick when group-by-label clustering is on
+// (Task 1.4).
+cytoscape.use(fcose)
+cytoscape.use(dagre)
 
 type Selected = { kind: 'node' | 'edge'; data: Record<string, unknown> }
 
