@@ -2,6 +2,7 @@
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
+import { MemoryRouter } from 'react-router-dom'
 import { LocalizationProvider } from '../services/i18n'
 import { testTheme as theme } from '../test-utils/theme'
 
@@ -120,11 +121,13 @@ beforeEach(() => {
 
 async function renderStreamingPage(): Promise<void> {
   render(
-    <LocalizationProvider>
-      <ThemeProvider theme={theme}>
-        <QueryPage />
-      </ThemeProvider>
-    </LocalizationProvider>
+    <MemoryRouter>
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <QueryPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    </MemoryRouter>
   )
   await waitFor(() =>
     expect(screen.getByTestId('monaco-editor-stub')).toBeInTheDocument()

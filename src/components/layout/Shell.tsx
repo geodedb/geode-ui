@@ -249,6 +249,7 @@ export const Shell: React.FC = () => {
         </BrandLink>
         <ConnectionSwitcher onAddRequested={() => setAddOpen(true)} />
         <DesktopNav>
+          <NavLink to="/dashboard">{t('nav.dashboard')}</NavLink>
           <NavLink to="/" end>
             {t('nav.query')}
           </NavLink>
@@ -277,6 +278,7 @@ export const Shell: React.FC = () => {
         $open={drawerOpen}
         aria-label={t('nav.primaryMobile')}
       >
+        <NavLink to="/dashboard">{t('nav.dashboard')}</NavLink>
         <NavLink to="/" end>
           {t('nav.query')}
         </NavLink>

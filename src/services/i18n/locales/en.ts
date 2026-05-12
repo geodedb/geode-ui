@@ -45,6 +45,7 @@ export const en = {
   nav: {
     primary: 'Primary',
     primaryMobile: 'Primary mobile',
+    dashboard: 'Dashboard',
     query: 'Query',
     workspace: 'Workspace',
     schema: 'Schema',
@@ -180,6 +181,7 @@ export const en = {
   },
 
   dashboard: {
+    title: 'Overview',
     graphsTitle: 'Graphs ({{count}})',
     graphsEmpty: 'No graphs.',
     recentTitle: 'Recent queries',

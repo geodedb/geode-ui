@@ -10,6 +10,7 @@ import {
   within,
 } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
+import { MemoryRouter } from 'react-router-dom'
 import { LocalizationProvider } from '../services/i18n'
 import { testTheme as theme } from '../test-utils/theme'
 
@@ -90,13 +91,25 @@ jest.mock('../api/client', () => ({
 import { QueryPage } from './QueryPage'
 import { useQueryHistory } from '../lib/useQueryHistory'
 
-function renderPage(): void {
-  render(
+// QueryPage reads `?statement=` via react-router's useSearchParams, so it
+// must be rendered inside a router. Wrap it in a MemoryRouter (default
+// entry `/`) plus the i18n + theme providers.
+const Wrappers: React.FC<{
+  children: React.ReactNode
+  initialEntries?: string[]
+}> = ({ children, initialEntries = ['/'] }) => (
+  <MemoryRouter initialEntries={initialEntries}>
     <LocalizationProvider>
-      <ThemeProvider theme={theme}>
-        <QueryPage />
-      </ThemeProvider>
+      <ThemeProvider theme={theme}>{children}</ThemeProvider>
     </LocalizationProvider>
+  </MemoryRouter>
+)
+
+function renderPage(initialEntries?: string[]): ReturnType<typeof render> {
+  return render(
+    <Wrappers initialEntries={initialEntries}>
+      <QueryPage />
+    </Wrappers>
   )
 }
 
@@ -117,6 +130,20 @@ describe('F10: QueryPage lazy-loads Monaco behind a Suspense boundary', () => {
     // The default statement flows through to the editor value.
     expect(screen.getByTestId('monaco-editor-stub')).toHaveTextContent(
       'MATCH (n) RETURN n LIMIT 25'
+    )
+  })
+})
+
+// B4 — the dashboard's recent-queries card deep-links here with
+// `?statement=<query>`. On mount QueryPage must copy that into the editor
+// (then strip the param so a refresh / later edit isn't affected).
+describe('B4: QueryPage prefills the editor from ?statement=', () => {
+  test('the ?statement= query param becomes the editor value', async () => {
+    renderPage(['/?statement=MATCH%20(x)%20RETURN%20x'])
+    await waitFor(() =>
+      expect(screen.getByTestId('monaco-editor-stub')).toHaveTextContent(
+        'MATCH (x) RETURN x'
+      )
     )
   })
 })
@@ -196,11 +223,9 @@ describe('result panel maximize / fullscreen', () => {
   // then wait for the result tabs to appear. Returns the rendered view.
   async function renderWithResults(): Promise<ReturnType<typeof render>> {
     const view = render(
-      <LocalizationProvider>
-        <ThemeProvider theme={theme}>
-          <QueryPage />
-        </ThemeProvider>
-      </LocalizationProvider>
+      <Wrappers>
+        <QueryPage />
+      </Wrappers>
     )
     // Wait for the lazy Monaco stub so the "Run" button is interactive.
     await waitFor(() =>
@@ -303,11 +328,9 @@ describe('B1: running a query records it into the query history', () => {
 
   test('a successful sync run prepends a history entry with the run statement', async () => {
     const view = render(
-      <LocalizationProvider>
-        <ThemeProvider theme={theme}>
-          <QueryPage />
-        </ThemeProvider>
-      </LocalizationProvider>
+      <Wrappers>
+        <QueryPage />
+      </Wrappers>
     )
     await waitFor(() =>
       expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()
@@ -356,11 +379,9 @@ describe('Matrix result tab', () => {
 
   async function renderWithResults(): Promise<ReturnType<typeof render>> {
     const view = render(
-      <LocalizationProvider>
-        <ThemeProvider theme={theme}>
-          <QueryPage />
-        </ThemeProvider>
-      </LocalizationProvider>
+      <Wrappers>
+        <QueryPage />
+      </Wrappers>
     )
     await waitFor(() =>
       expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()

@@ -8,6 +8,7 @@ import React, {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
@@ -148,6 +149,24 @@ export const QueryPage: React.FC = () => {
       clearStaged(null)
     }
   }, [staged, clearStaged])
+
+  // The dashboard's recent-queries card deep-links here with
+  // `?statement=<query>` so a click re-loads the editor with that text.
+  // Read it ONCE on mount: copy it into local editor state and then
+  // strip the param (replace, so it doesn't pollute history) — that way
+  // a manual edit isn't clobbered by a re-render and a refresh doesn't
+  // re-apply the (now stale) query.
+  const [searchParams, setSearchParams] = useSearchParams()
+  useEffect(() => {
+    const s = searchParams.get('statement')
+    if (s) {
+      setStmt(s)
+      const next = new URLSearchParams(searchParams)
+      next.delete('statement')
+      setSearchParams(next, { replace: true })
+    }
+    // Intentionally mount-only: see comment above.
+  }, [])
 
   // Record a stream run into the query history exactly once, when the
   // reducer reaches a terminal status ('done' | 'error'). We cannot read
