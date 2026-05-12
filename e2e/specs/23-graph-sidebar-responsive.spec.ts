@@ -13,7 +13,9 @@ import { seed } from '../helpers/gqlData'
 
 const VIEWPORT = { width: 1024, height: 768 }
 
-function pageOverflows(page: import('@playwright/test').Page): Promise<boolean> {
+function pageOverflows(
+  page: import('@playwright/test').Page
+): Promise<boolean> {
   return page.evaluate(
     () =>
       document.documentElement.scrollWidth >
