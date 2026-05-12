@@ -179,6 +179,28 @@ export const en = {
     cellTitleEmpty: '{{from}} → {{to}}: 0 edges',
   },
 
+  dashboard: {
+    graphsTitle: 'Graphs ({{count}})',
+    graphsEmpty: 'No graphs.',
+    recentTitle: 'Recent queries',
+    recentEmpty: 'No queries yet — run one on the Query page.',
+    recentFailed: 'failed',
+    clearHistory: 'Clear',
+    connectionTitle: 'Connection',
+    version: 'Geode {{version}}',
+    capUsers: 'Users',
+    capRoles: 'Roles',
+    capPolicies: 'Policies',
+    capGrants: 'Grants',
+    capYes: 'enabled',
+    capNo: 'disabled',
+    statsTitle: '{{graph}} stats',
+    statsLoad: 'Load stats',
+    statsNodes: 'Nodes',
+    statsEdges: 'Edges',
+    loading: 'Loading…',
+  },
+
   schema: {
     graphsTitle: 'Graphs',
     noGraphs: 'No graphs.',
