@@ -27,10 +27,7 @@ describe('Q25: electron type-check is a real CI gate', () => {
 
   test('electron/tsconfig.json still references the node lib types', () => {
     const tsconfig = JSON.parse(
-      fs.readFileSync(
-        path.join(repoRoot, 'electron', 'tsconfig.json'),
-        'utf8'
-      )
+      fs.readFileSync(path.join(repoRoot, 'electron', 'tsconfig.json'), 'utf8')
     ) as { compilerOptions?: { types?: string[] } }
     expect(tsconfig.compilerOptions?.types).toEqual(
       expect.arrayContaining(['node'])
