@@ -5,6 +5,7 @@ import fcose from 'cytoscape-fcose'
 import dagre from 'cytoscape-dagre'
 import styled, { useTheme } from 'styled-components'
 import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
+import { collapseNode, hideNode } from './graphActions'
 import {
   DEFAULT_LAYOUT,
   InspectorView,
@@ -422,6 +423,43 @@ const InspectorToggle = styled.div`
     box-shadow: ${({ theme }) => theme.shadows.focus};
   }
 `
+// Actions row inside the inspector — Hide / Collapse / Explore-neighbours
+// for the selected node. Sits between the props/json segmented control
+// and the chosen pane.
+const InspectorActions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.spacing.xxs};
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
+
+  button {
+    font-family: inherit;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    padding: 2px 8px;
+    color: ${({ theme }) => theme.text.primary};
+    background: ${({ theme }) => theme.bg.canvas};
+    border: 1px solid ${({ theme }) => theme.border.default};
+    border-radius: ${({ theme }) => theme.radii.sm};
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) {
+    border-color: ${({ theme }) => theme.border.strong};
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  button:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
+`
+const InspectorNote = styled.p`
+  margin: 0 0 ${({ theme }) => theme.spacing.xs};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  color: ${({ theme }) => theme.text.secondary};
+`
 const IdentityHeader = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.secondary};
@@ -558,8 +596,15 @@ const SelectedInspector: React.FC<{
   selected: Selected
   view: InspectorView
   onSetView: (v: InspectorView) => void
+  // Phase-2 node actions. Only meaningful when kind === 'node'; the
+  // actions row is not rendered for edges.
+  onHide: (id: string) => void
+  onCollapse: (id: string) => void
+  // How many neighbours are currently collapsed behind this node (0 when
+  // none / not a node). Surfaced as a small note under the actions row.
+  collapsedCount: number
   t: (key: string, opts?: Record<string, unknown>) => string
-}> = ({ selected, view, onSetView, t }) => {
+}> = ({ selected, view, onSetView, onHide, onCollapse, collapsedCount, t }) => {
   const { kind, data } = selected
   const id = String(data.id ?? '')
   const labels: string[] = Array.isArray(data.labels)
@@ -601,6 +646,34 @@ const SelectedInspector: React.FC<{
           {t('graph.inspectorViewJson')}
         </button>
       </InspectorToggle>
+      {kind === 'node' && (
+        <>
+          <InspectorActions
+            role="group"
+            aria-label={t('graph.inspectorActions')}
+          >
+            <button
+              type="button"
+              data-testid="graph-action-hide"
+              onClick={() => onHide(id)}
+            >
+              {t('graph.actionHide')}
+            </button>
+            <button
+              type="button"
+              data-testid="graph-action-collapse"
+              onClick={() => onCollapse(id)}
+            >
+              {t('graph.actionCollapse')}
+            </button>
+          </InspectorActions>
+          {collapsedCount > 0 && (
+            <InspectorNote data-testid="graph-collapsed-count">
+              {t('graph.collapsedCount', { count: collapsedCount })}
+            </InspectorNote>
+          )}
+        </>
+      )}
       {view === 'props' ? (
         <div data-testid="graph-inspector-props">
           <IdentityHeader>
@@ -691,6 +764,15 @@ export const GraphView: React.FC<Props> = ({
     return () => window.removeEventListener('resize', onResize)
   }, [fillHeight, height])
   const [selected, setSelected] = useState<Selected | null>(null)
+  // Phase-2 hide/collapse workflow. `hidden` is the set of node ids the
+  // operator has hidden individually (via the inspector "Hide" action or
+  // the explore-neighbours merge being undone — currently just Hide).
+  // `collapsed` maps a node id → the ids of the leaf neighbours folded
+  // behind it by "Collapse", so Expand can restore exactly that set.
+  // Both are result-scoped — a new query result clears them in the
+  // sig-keyed effect below (same place path mode resets).
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Map<string, string[]>>(new Map())
   // Path-mode state machine (off / pickSource / pickTarget / shown).
   // Result-scoped — a new query result resets it to 'off'.
   const [pathState, setPathState] = useState<PathState>({ phase: 'off' })
@@ -844,6 +926,10 @@ export const GraphView: React.FC<Props> = ({
     // core (which carried the highlight classes) is torn down by the
     // build effect, so just reset the state machine here.
     setPathState({ phase: 'off' })
+    // …and the hide/collapse bookkeeping — those node ids belong to the
+    // graph that's being replaced.
+    setHidden(new Set())
+    setCollapsed(new Map())
     if (
       layoutRef.current === DEFAULT_LAYOUT &&
       elementsRef.current.length > COSE_NODE_LIMIT
@@ -1032,6 +1118,22 @@ export const GraphView: React.FC<Props> = ({
     applyVisibility(cy, hiddenLabels)
   }, [hiddenLabels, applyVisibility])
 
+  // Phase-2 per-node hide set changes — re-assert the `.hidden-node`
+  // class on every tracked id. The Hide/Collapse handlers already add
+  // the class directly; this effect is the idempotent backstop so the
+  // `hidden` set is the source of truth (and a future re-render path
+  // that re-derives classes can't drop a hide). Cheap — addClass on an
+  // already-classed element is a no-op.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.batch(() => {
+      hidden.forEach((nodeId) => {
+        cy.getElementById(nodeId).addClass('hidden-node')
+      })
+    })
+  }, [hidden])
+
   // When the canvas box changes size — the maximize toggle flips, the
   // window resizes, the sidebar collapses/expands, or the container
   // reflows for any other reason — Cytoscape needs to recompute its
@@ -1218,6 +1320,46 @@ export const GraphView: React.FC<Props> = ({
     setHiddenLabels(new Set())
     cy.layout(layoutConfig(layout)).run()
     cy.fit(undefined, 24)
+  }
+
+  // ----- Phase-2 hide / collapse handlers -----
+
+  // Hide the selected node. Adds the `.hidden-node` class on the core,
+  // records the id, and deselects (the node is gone from the canvas, so
+  // keeping it in the inspector would be confusing).
+  const onHideNode = (id: string): void => {
+    const cy = cyRef.current
+    if (!cy || !id) return
+    hideNode(cy, id)
+    setHidden((prev) => {
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+    setSelected(null)
+  }
+
+  // Collapse the selected node — fold its degree-1 leaf neighbours
+  // behind it. Records (id → hiddenLeafIds); the leaves also go into the
+  // `hidden` set (so the Hidden list can restore an individual one) but
+  // are tracked under `collapsed` so an Expand restores the whole group.
+  // The node stays selected; the inspector shows "N neighbours collapsed".
+  const onCollapseNode = (id: string): void => {
+    const cy = cyRef.current
+    if (!cy || !id) return
+    const leaves = collapseNode(cy, id)
+    if (leaves.length === 0) return
+    setCollapsed((prev) => {
+      const next = new Map(prev)
+      const existing = next.get(id) ?? []
+      next.set(id, Array.from(new Set([...existing, ...leaves])))
+      return next
+    })
+    setHidden((prev) => {
+      const next = new Set(prev)
+      leaves.forEach((l) => next.add(l))
+      return next
+    })
   }
 
   const empty = elements.length === 0 && !error
@@ -1526,6 +1668,13 @@ export const GraphView: React.FC<Props> = ({
               selected={selected}
               view={inspectorView}
               onSetView={setInspectorView}
+              onHide={onHideNode}
+              onCollapse={onCollapseNode}
+              collapsedCount={
+                selected.kind === 'node'
+                  ? (collapsed.get(String(selected.data.id ?? '')) ?? []).length
+                  : 0
+              }
               t={t}
             />
           ) : (

@@ -27,18 +27,44 @@ let lastCyInstance:
 // doesn't model) are never invoked. The collection also models the
 // graph-algorithm shape GraphView's path mode reaches (dijkstra → pathTo)
 // well enough to drive a deterministic highlight in tests.
+// Per-core graph context the collection stubs read for the Phase-2
+// collapse logic: undirected adjacency (node id → neighbour ids) and a
+// node-id → data-bag map. Built from the constructed element list and
+// extended on cy.add(...). When absent (older call sites) neighborhood/
+// degree/data degrade to "no neighbours / empty data".
+type GraphCtx = {
+  adj: Map<string, Set<string>>
+  dataById: Map<string, Record<string, unknown>>
+}
+
 const makeColl = (
   members: string[] = [],
-  classed: Map<string, Set<string>> | null = null
+  classed: Map<string, Set<string>> | null = null,
+  ctx: GraphCtx | null = null
 ): Record<string, unknown> => {
   const classes = classed ?? new Map<string, Set<string>>()
   const coll: Record<string, unknown> = {
-    forEach: jest.fn(),
+    forEach: jest.fn((fn: (el: unknown) => void) => {
+      members.forEach((m) => fn(makeColl([m], classes, ctx)))
+    }),
     remove: jest.fn(),
     length: members.length,
     empty: () => members.length === 0,
     id: () => members[0] ?? '',
-    edges: () => makeColl([], classes),
+    edges: () => makeColl([], classes, ctx),
+    nodes: () => makeColl(members.slice(), classes, ctx),
+    // data() → the first member's data bag; data(key) → that key.
+    data: (key?: string) => {
+      const d = ctx?.dataById.get(members[0] ?? '') ?? { id: members[0] }
+      return key === undefined ? d : (d as Record<string, unknown>)[key]
+    },
+    // degree(_includeLoops) → undirected degree from the adjacency map.
+    degree: () => ctx?.adj.get(members[0] ?? '')?.size ?? 0,
+    // hasClass — reads the first member's class set.
+    hasClass: (cls: string) => classes.get(members[0] ?? '')?.has(cls) ?? false,
+    // neighborhood() — the adjacency set of the first member.
+    neighborhood: () =>
+      makeColl(Array.from(ctx?.adj.get(members[0] ?? '') ?? []), classes, ctx),
   }
   const chain = (): Record<string, unknown> => coll
   // addClass / removeClass record the class on each member id so
@@ -62,26 +88,35 @@ const makeColl = (
     const omit = new Set(other?.__members ?? [])
     return makeColl(
       members.filter((m) => !omit.has(m)),
-      classes
+      classes,
+      ctx
     )
   })
   coll.union = chain
   coll.connectedNodes = chain
   coll.closedNeighborhood = chain
+  coll.connectedEdges = () => makeColl([], classes, ctx)
   coll.select = chain
   coll.dijkstra = jest.fn(() => ({
     // pathTo(target): the mock can't run a real shortest-path search
     // (no node positions in jsdom), so it returns a collection of every
     // member id — deterministic enough to pin the highlight wiring.
-    pathTo: jest.fn(() => makeColl(members.slice(), classes)),
+    pathTo: jest.fn(() => makeColl(members.slice(), classes, ctx)),
   }))
   coll.__members = members
   coll.__classes = classes
   return coll
 }
 
+type ElLike = {
+  data?: { id?: unknown; source?: unknown; target?: unknown } & Record<
+    string,
+    unknown
+  >
+}
+
 function idsFromElements(opts: unknown): string[] {
-  const els = (opts as { elements?: { data?: { id?: unknown } }[] })?.elements
+  const els = (opts as { elements?: ElLike[] })?.elements
   if (!Array.isArray(els)) return []
   const ids: string[] = []
   els.forEach((e) => {
@@ -89,6 +124,35 @@ function idsFromElements(opts: unknown): string[] {
     if (id != null && String(id) !== '') ids.push(String(id))
   })
   return ids
+}
+
+// Build (or extend) a GraphCtx from an element list — records every
+// node's data bag and wires undirected adjacency from the edge entries.
+function addElsToCtx(ctx: GraphCtx, els: ElLike[] | unknown): void {
+  if (!Array.isArray(els)) return
+  const ensure = (id: string): Set<string> => {
+    let s = ctx.adj.get(id)
+    if (!s) {
+      s = new Set<string>()
+      ctx.adj.set(id, s)
+    }
+    return s
+  }
+  els.forEach((e) => {
+    const data = (e as ElLike).data
+    if (!data) return
+    const id = data.id != null ? String(data.id) : ''
+    if (!id) return
+    const src = data.source != null ? String(data.source) : ''
+    const tgt = data.target != null ? String(data.target) : ''
+    if (src && tgt) {
+      ensure(src).add(tgt)
+      ensure(tgt).add(src)
+    } else {
+      ctx.dataById.set(id, data as Record<string, unknown>)
+      ensure(id) // make sure isolated nodes have an (empty) adjacency entry
+    }
+  })
 }
 
 // jest.fn-backed factory so individual tests can override behavior
@@ -104,6 +168,15 @@ const cyFactory = jest.fn((opts: unknown) => {
   // collection derived from this core are observable via __classesOf.
   const classes = new Map<string, Set<string>>()
   const elementIds: string[] = idsFromElements(opts)
+  // Per-core graph context (adjacency + node data) so the Phase-2
+  // collapse logic — getElementById(id).neighborhood().nodes().forEach
+  // with a degree(false)===1 leaf filter — has a real graph to read.
+  const ctx: GraphCtx = { adj: new Map(), dataById: new Map() }
+  addElsToCtx(ctx, (opts as { elements?: unknown })?.elements)
+  // Recorder for cy.add(...) so mergeSubgraph tests can assert what was
+  // added; also extends the ctx so a subsequent neighborhood() sees the
+  // merged-in elements.
+  const addCalls: unknown[] = []
   // Tap-handler registry: cy.on('tap', 'node', fn) records fn so a test
   // can fire it via cy.__emitTap('node', id).
   const tapHandlers: Record<string, ((ev: unknown) => void)[]> = {}
@@ -123,21 +196,33 @@ const cyFactory = jest.fn((opts: unknown) => {
       pushHandler(args[1] as string, args[2] as (e: unknown) => void)
     }
   }
+  const addImpl = jest.fn((els: unknown) => {
+    addCalls.push(els)
+    addElsToCtx(ctx, els)
+    const arr = Array.isArray(els) ? els : [els]
+    arr.forEach((e) => {
+      const id = (e as ElLike)?.data?.id
+      if (id != null && String(id) !== '') elementIds.push(String(id))
+    })
+    return makeColl([], classes, ctx)
+  })
   const core: Record<string, unknown> & { __lastElements?: unknown } = {
     on: recordOn,
     destroy: destroyMock,
-    add: jest.fn(),
+    add: addImpl,
     remove: jest.fn(),
     batch: (fn: () => void) => fn(),
-    elements: () => makeColl(elementIds.slice(), classes),
-    getElementById: (id: string) => makeColl([id], classes),
+    elements: () => makeColl(elementIds.slice(), classes, ctx),
+    getElementById: (id: string) =>
+      makeColl(elementIds.includes(id) ? [id] : [], classes, ctx),
     layout: jest.fn((arg: unknown) => {
       layoutCalls.push(arg)
       return { run: jest.fn() }
     }),
-    nodes: () => makeColl([], classes),
-    edges: () => makeColl([], classes),
-    $id: () => makeColl([], classes),
+    nodes: () => makeColl([], classes, ctx),
+    edges: () => makeColl([], classes, ctx),
+    $id: (id: string) =>
+      makeColl(elementIds.includes(id) ? [id] : [], classes, ctx),
     fit: jest.fn(),
     zoom: jest.fn(() => 1),
     width: jest.fn(() => 400),
@@ -147,9 +232,10 @@ const cyFactory = jest.fn((opts: unknown) => {
     boxSelectionEnabled: jest.fn(),
     __lastElements: (opts as { elements?: unknown })?.elements,
     __classesOf: (id: string): string[] => Array.from(classes.get(id) ?? []),
+    __addCalls: addCalls,
     __emitTap: (kind: string, id: string): void => {
       const handlers = tapHandlers[kind] ?? []
-      const target = makeColl([id], classes)
+      const target = makeColl([id], classes, ctx)
       target.id = () => id
       handlers.forEach((h) => h({ target }))
     },
@@ -171,6 +257,10 @@ function lastLayoutArg(): unknown {
 function lastCy(): Record<string, unknown> & { __lastElements?: unknown } {
   if (!lastCyInstance) throw new Error('no cytoscape core constructed yet')
   return lastCyInstance
+}
+// The class set recorded for `id` on the last-constructed mock core.
+function classesOf(id: string): string[] {
+  return (lastCy().__classesOf as (i: string) => string[])(id)
 }
 
 // Import after the mock is in place.
@@ -957,5 +1047,94 @@ describe('Phase 1: path mode', () => {
       fireEvent.click(screen.getByRole('button', { name: /clear path/i }))
     })
     expect(pathToggle).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
+// ------------------------------------------------------------------
+// Phase 2 — richer node inspector + hide/collapse workflow.
+// ------------------------------------------------------------------
+
+// A small graph with a hub node ('1') and two leaf neighbours ('2','3')
+// plus a non-leaf neighbour ('4') that itself links to '5'. Used to
+// exercise Collapse (only '2'/'3' get hidden) and Hide.
+const hubGraphResp: QueryRespLike & { row_count?: number } = {
+  rows: [],
+  graph_summary: {
+    nodes: [1, 2, 3, 4, 5].map((id) => ({
+      id,
+      labels: ['N'],
+      properties: { name: `n${id}` },
+    })),
+    edges: [
+      { id: 12, start_node: 1, end_node: 2, type: 'R', properties: {} },
+      { id: 13, start_node: 1, end_node: 3, type: 'R', properties: {} },
+      { id: 14, start_node: 1, end_node: 4, type: 'R', properties: {} },
+      { id: 45, start_node: 4, end_node: 5, type: 'R', properties: {} },
+    ],
+  },
+  row_count: 5,
+} as unknown as QueryRespLike & { row_count?: number }
+
+function renderHub(): ReturnType<typeof render> {
+  window.localStorage.clear()
+  const view = render(
+    <ThemeProvider theme={theme}>
+      <GraphView resp={hubGraphResp} query="MATCH (n) RETURN n" />
+    </ThemeProvider>
+  )
+  act(() => {
+    jest.advanceTimersByTime(300)
+  })
+  return view
+}
+
+// Select a node via the keyboard id picker (deterministic — the canvas
+// isn't interactive in jsdom).
+function pickNode(view: ReturnType<typeof render>, id: string): void {
+  const picker = view.getByTestId('graph-node-id-picker') as HTMLInputElement
+  fireEvent.change(picker, { target: { value: id } })
+}
+
+describe('Phase 2: inspector Hide / Collapse actions', () => {
+  it('Hide adds .hidden-node to the node and closes the inspector', () => {
+    const view = renderHub()
+    pickNode(view, '2')
+    expect(view.getByTestId('graph-inspector')).toBeInTheDocument()
+    const hideBtn = view.getByTestId('graph-action-hide')
+    act(() => {
+      fireEvent.click(hideBtn)
+    })
+    // The node gained the per-node hide class on the cy core.
+    expect(classesOf('2')).toContain('hidden-node')
+    // The inspector closed (the hidden node is gone from view).
+    expect(view.queryByTestId('graph-inspector')).toBeNull()
+  })
+
+  it('Collapse hides the degree-1 leaf neighbours and keeps the node selected', () => {
+    const view = renderHub()
+    pickNode(view, '1')
+    const collapseBtn = view.getByTestId('graph-action-collapse')
+    act(() => {
+      fireEvent.click(collapseBtn)
+    })
+    // '2' and '3' are leaves of '1' → hidden. '4' (degree 2) is not.
+    expect(classesOf('2')).toContain('hidden-node')
+    expect(classesOf('3')).toContain('hidden-node')
+    expect(classesOf('4')).not.toContain('hidden-node')
+    expect(classesOf('1')).not.toContain('hidden-node')
+    // The node stays selected and a "2 neighbours collapsed" hint shows.
+    expect(view.getByTestId('graph-inspector')).toBeInTheDocument()
+    expect(view.getByTestId('graph-inspector')).toHaveTextContent(
+      /2 neighbours collapsed/i
+    )
+  })
+
+  it('does not render the actions row when an edge is selected', () => {
+    const view = renderHub()
+    const picker = view.getByTestId('graph-edge-id-picker') as HTMLInputElement
+    fireEvent.change(picker, { target: { value: 'e12' } })
+    expect(view.getByTestId('graph-inspector')).toBeInTheDocument()
+    expect(view.queryByTestId('graph-action-hide')).toBeNull()
+    expect(view.queryByTestId('graph-action-collapse')).toBeNull()
   })
 })
