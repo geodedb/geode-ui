@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-12
+- **Last updated:** 2026-05-12 (errorcode cross-check + #159 closure run added)
 - **Sibling docs:** [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) (open requirement gaps), [PERF_GAP_ANALYSIS.md](./PERF_GAP_ANALYSIS.md), [QUALITY_GAP_ANALYSIS.md](./QUALITY_GAP_ANALYSIS.md), [SECURITY_GAP_ANALYSIS.md](./SECURITY_GAP_ANALYSIS.md)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors closed issues across the perf / quality / security tracking files.
 
@@ -332,6 +332,7 @@ Verifier returned SAFE-TO-CLOSE for all 9 commits. Three Security (1 cross-close
 - **2026-05-11 (same-day follow-up — F3 closed + N2 durable upgrade + 2 operational follow-ups):** Performance F3 (#25, genapi `38c3c1e`) — streaming `/api/v1/query` response. Security N2 (#64) durable-upgraded — JWT revocation store moved from in-memory to SQLite-backed (`internal/jwt/revocation_sqlite.go`, `RevocationSet.AttachSQLite`, `502e34f`/`3059710`); survives a process restart, validation path stays zero-DB-query. Operational follow-ups (no gap ID): genapi tsc `moduleResolution=node10` deprecation test fix (genapi `a192022` — `ignoreDeprecations "5.0"→"6.0"` in the React-runtime test scaffold; no geode-ui change); gosec G302/G304 false-positive on the upload temp file annotated (`502e34f` — `// #nosec G302 G304` + rationale; recorded as a Confirmed-Safe row in `SECURITY_GAP_ANALYSIS.md`). 4 geode-ui commits (`502e34f`, `3059710`, `bb8319d`, + the bookkeeping commit) + 2 genapi commits (`a192022`, `38c3c1e`; pushed to origin). With F3 closed, the PERF backlog's original F-series is now fully clear — no F-item left open or deferred.
 - **2026-05-12 (genapi + medium-cohort batch — 9 closed + #159 deferred):** Security F-AUTH-1 (#132, `4002c6f`+genapi `e01b2de`), F-AUTH-2 (#135, `1ec9889`+genapi `30fad5d`). Performance PERF-2026-05-11-03 (#133, `8af76ca`+genapi `09d4ac8`), -06 (#142, `203a454`), -09 (#150, `9c39d57`), -10 (#154, `6e6db14`), -11 (#156, `e877465`). Quality Q02/GAP-020 (#90, `9b0a423`+genapi `55c79d2`), Q27 (#173, `2aaaebc`). Deferred: #159 (on product). 9 geode-ui commits + 1 docs-tracking + 5 genapi commits (unpushed; breaking `mcpx`/`SetAuthVerifier` API → minor bump).
 - **2026-05-12 (top-10 quality/perf/CI batch — 13 issues + 1 no-issue follow-up):** Quality Q9 (#125, `a42a792`), Q39 (#134, `a42a792`), Q23 (#126, `df3fd51`), Q41 (#136, `1fea7ba`), Q10 (#144, `6abde32`), Q12 (#146, `e510cb5`), Q13 (#149, `0d629bf`), Q40 (#151, `0d629bf`), Q22 (#168, `03b6ec1`), Q38 (#180, `ea3f681`), Q32 (#127, `d35d3c7`). Performance PERF-2026-05-11-07 (#145, `a42a792`; `bench-baseline.txt` refreshed `6c14368`). Security F-SUP-3 (#153, `d35d3c7`), F-INPUT-2 (#143, `ea3f681`). No-issue follow-up: `createProfile` `as any` body cast removed (#— , `2c5895d`). Deviation: `codesign-windows-ssl@~latest` pin pending an upstream ci-catalog release (tracked via the `# ci-pins-allow:` marker + #127's `TODO`). 11 geode-ui implementation commits + 1 docs-tracking, **unpushed**.
+- **2026-05-12 (errorcode cross-check + #159 — 1 issue + 1 no-issue follow-up):** Performance PERF-2026-05-11-12 (#159, `f1c6064`; pinned `eefd896`; documented `1a2016f`+`5a5e89c`) — `/api/v1/query` `rateLimit` 200→2000. No-issue follow-up: frontend↔`internal/server/errorcodes.go` error-code cross-check (no GitLab issue — was an untracked note in `QUALITY_GAP_ANALYSIS.md`; `41ed5fa`/`312eee2`/`5598434`/`1660908`). Latent genapi gap noted (not ticketed): `APIOptions.GlobalRate` set-but-unused in `RegisterGeneratedAPI`. 8 implementation commits + 1 plan-doc + 1 docs-tracking, **unpushed**.
 
 ---
 
@@ -1024,11 +1025,53 @@ A second `/codepros:gap-close` run on 2026-05-12 landing the top-priority qualit
 
 #### Still open / follow-ups after this run
 
-- **`src/lib/errors.ts` ↔ `internal/server/errorcodes.go` cross-check** -- the frontend error-code strings and the new server-side `ErrCode*` constants are not cross-checked by any automated test. Worth a tiny `go/ast` ↔ TS-string consistency check if a convention emerges. Not ticketed.
+- ~~**`src/lib/errors.ts` ↔ `internal/server/errorcodes.go` cross-check**~~ -- **RESOLVED 2026-05-12** in the errorcode-crosscheck run below (`41ed5fa`/`312eee2`/`5598434`/`1660908`). Note: there was never a `src/lib/errors.ts` -- the coupling lived in `src/api/capabilities.ts`. No GitLab issue ever existed for it.
 - **`codesign-windows-ssl` pin** -- still `@~latest` with a `# ci-pins-allow:` marker + `TODO(#127)`; pin to an immutable ci-catalog tag once one ships that component (today it's only on the catalog's `main`).
-- **#159 (PERF-2026-05-11-12)** -- unchanged from the genapi-batch entry above: `/api/v1/query rateLimit=200` vs ~2000-rps target, deferred on a product decision; documented in `docs/ARCHITECTURE.md`.
+- ~~**#159 (PERF-2026-05-11-12)**~~ -- **RESOLVED 2026-05-12** in the errorcode-crosscheck + #159 run below (`f1c6064` -- `/api/v1/query rateLimit` 200→2000; pinned `eefd896`; documented `1a2016f`+`5a5e89c`).
 
 #### Notes on this run
 
 - **geode-ui commits unpushed:** the 11 implementation commits (`d35d3c7`, `2c5895d`, `a42a792`, `0d629bf`, `e510cb5`, `6abde32`, `ea3f681`, `df3fd51`, `03b6ec1`, `1fea7ba`, `6c14368`) + the docs-tracking commit sit on `main` ahead of origin -- the user decides on `git push origin main`. No genapi change in this run.
 - **Verifier note resolved:** the only verifier note (CI pin == the tag `gen/` was generated against?) was confirmed -- `git rev-parse v0.3.0^{commit}` in `~/src/devnw/go/genapi` == `55c79d2` == genapi `main` HEAD == the working copy `gen/` was regenerated against. No follow-up needed there.
+
+---
+
+### 2026-05-12 closure run -- errorcode cross-check + #159 rate-limit alignment (1 GitLab issue + 1 no-issue follow-up; 8 implementation commits + 1 plan-doc + 1 docs-tracking)
+
+A `superpowers`-plan-driven run (plan: `docs/superpowers/plans/2026-05-12-errorcode-crosscheck-and-query-ratelimit.md`) that landed two threads: a frontend↔server error-code seam + automated cross-check (closes the previously-untracked follow-up that lived only in `QUALITY_GAP_ANALYSIS.md` text -- no GitLab issue ever existed for it), and the #159 `/api/v1/query` rate-limit alignment (deferred-on-product in the prior 2026-05-12 runs -- a product decision is now reflected: the documented ~2000-rps SLO is the budget for `/query`). Both reviewers ran on each thread: Thread A APPROVE-WITH-MINOR-NITS (nits fixed in `1660908`); Thread B NEEDS-FIXES (one doc-accuracy issue, fixed in `5a5e89c`). Full suite green -- `make go-test` / `make go-lint` / `make generate` (clean) / `make go-build` / `npm test` (455/455) / `npm run test:ts` / `npm run lint` / `npm run prettier:check` / `node --test scripts/check-error-codes.test.mjs` (4/4) / `node scripts/check-error-codes.mjs` (OK, 62 server codes). `make bench-gate` was flagged flaky under machine load (it flagged unrelated JWT/profile benchmarks during a noisy run, then passed clean on a quiet run; `bench-baseline.txt` not modified -- it is `allow_failure` in CI and orthogonal to a config-int change). The 8 implementation commits + the plan-doc commit + the docs-tracking commit sit on `main` unpushed at the time of this entry; the user pushes.
+
+#### Performance (1)
+
+##### PERF-2026-05-11-12 (#159): `/api/v1/query` per-route rate limit aligned to the documented 2000-rps SLO [RESOLVED]
+
+- **Issue:** [#159](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/159) (closed)
+- **Domain:** Performance
+- **Severity at close:** P1 (PerfScore 25; was `customer::needs-information`)
+- **Closure commit(s):** `f1c6064` (config + regen); `eefd896` (pinning test, committed intentionally failing); `1a2016f` + `5a5e89c` (ARCHITECTURE.md)
+- **Resolution:** `geode.json` `/api/v1/query` `rateLimit` set to `2000` (the documented SLO; query route only) -- `gen/api/handlers_gen.go` regenerated (`bkt_post_Query = securex.NewBucket(2000, opts.GlobalBurst)`) + `gen/cmd/server/spec.json`. `docs/ARCHITECTURE.md`'s `### Open question — per-route rate limit vs throughput target (#159)` subsection replaced by a `### Per-route rate limit on /api/v1/query` resolution subsection (`1a2016f`); `5a5e89c` corrected an inaccurate "lowering `GlobalRate` at runtime throttles" claim -- `APIOptions.GlobalRate` is **set-but-unused** in `RegisterGeneratedAPI`, so the doc now accurately states: the per-route token bucket is a *ceiling* on this route; `GlobalRate`/`global_rps` is **not** wired as a cross-route aggregate limiter by the genapi handlers; the only other server-side throttle is the per-IP limiter. F11 pool sizing (64/16) is now consistent with the 2000-rps cap.
+- **Evidence:** `internal/server/query_ratelimit_test.go` -- `TestGeodeJSONQueryRateLimit` (reads `../../geode.json`, parses the `api` array, asserts `POST /api/v1/query` `rateLimit == 2000`); `make go-test` green; `make generate` clean; `gen/api/handlers_gen.go` `bkt_post_Query` == `securex.NewBucket(2000, …)`; `docs/ARCHITECTURE.md` `### Per-route rate limit on /api/v1/query` section.
+- **Resolved date:** 2026-05-12
+
+#### Closed-no-issue follow-up
+
+##### Frontend ↔ `internal/server/errorcodes.go` error-code cross-check [RESOLVED]
+
+- **Issue:** none (closed-no-issue follow-up; was an untracked note in `QUALITY_GAP_ANALYSIS.md` text -- a `glab issue list --search "error code" / "errorcodes" / "cross-check"` turned up nothing, confirming no issue ever existed). The note originally said `src/lib/errors.ts` -- there is **no such file**; the real coupling lived in `src/api/capabilities.ts` (hard-coded the literal `'wire_feature_missing'` twice).
+- **Domain:** Quality
+- **Closure commit(s):** `41ed5fa`, `312eee2`, `5598434`, `1660908`
+- **Resolution:** new `src/api/serverErrorCodes.ts` (exports `WIRE_FEATURE_MISSING = 'wire_feature_missing'`) + `src/api/serverErrorCodes.test.ts` (`41ed5fa`); `src/api/capabilities.ts` branches wire-feature-missing detection off the seam constant instead of the raw literal (`312eee2`); `src/components/admin/UsersPage.test.tsx` fixtures use `WIRE_FEATURE_MISSING` instead of raw literals (`1660908`); new `scripts/check-error-codes.mjs` (pure `checkErrorCodes(root)` + `main()`) cross-checks the seam against `internal/server/errorcodes.go` + `scripts/check-error-codes.test.mjs` (`node --test`, 4 subtests); `check-error-codes` local pre-commit hook in `.pre-commit-config.yaml` + `error-codes-check` lint job in `.gitlab-ci.yml` (the CI job also runs `node --test scripts/check-error-codes.test.mjs` before the guard) (`5598434`, `1660908`); corrected the inaccurate "the SPA keys i18n messages off it" header comment in `internal/server/errorcodes.go` (`5598434`).
+- **Evidence:** `src/api/serverErrorCodes.test.ts` (jest); `scripts/check-error-codes.test.mjs` (`node --test`, 4/4); `node scripts/check-error-codes.mjs` -> OK (62 server codes); `npm test` 455/455 green; `npm run test:ts` / `npm run lint` / `npm run prettier:check` clean.
+- **Resolved date:** 2026-05-12
+
+#### Latent gap surfaced (noted, not ticketed)
+
+- **`APIOptions.GlobalRate` set-but-unused (genapi generator)** -- the generated `RegisterGeneratedAPI` accepts `APIOptions.GlobalRate` / a `global_rps` config knob but never wires it as a cross-route aggregate limiter (per-route buckets and the per-IP limiter are the only server-side throttles). Surfaced during the Thread B review; now accurately documented in `docs/ARCHITECTURE.md`. **Not ticketed** -- it's documented behavior, not a regression, and `geode-ui` has no current need for a cross-route cap; file an upstream genapi issue if/when one is required.
+
+#### Still open / follow-ups after this run
+
+- **`codesign-windows-ssl` pin** -- unchanged: still `@~latest` with a `# ci-pins-allow:` marker + `TODO(#127)`; pin to an immutable ci-catalog tag once one ships that component.
+- **`make bench-gate` flakiness under load** -- noted: it can flag unrelated benchmarks as regressions during a noisy run, then pass clean on a quiet one. It is `allow_failure: true` in CI. Not a gap per se; recorded so future runs don't chase a phantom regression.
+
+#### Notes on this run
+
+- **geode-ui commits unpushed:** the 8 implementation commits (`41ed5fa`, `312eee2`, `5598434`, `1660908`, `eefd896`, `f1c6064`, `1a2016f`, `5a5e89c`) + the plan-doc commit + the docs-tracking commit sit on `main` ahead of origin -- the user decides on `git push origin main`. No genapi change in this run (the `GlobalRate` gap is upstream but deliberately left unfiled).

@@ -1,6 +1,6 @@
 # QUALITY_GAP_ANALYSIS.md
 
-Last updated: 2026-05-12 (gap-closure run: Q02 #90 + Q27 #173 closed)
+Last updated: 2026-05-12 (gap-closure runs: Q02 #90 + Q27 #173 closed; error-code cross-check follow-up **Done** — `41ed5fa`/`312eee2`/`5598434`/`1660908`)
 Repo: `devnw/codepros/geode/geode-ui`
 Source: `/codepros:audit` Phase 4 — quality-issue-tracker
 
@@ -498,10 +498,14 @@ backlog plus one perf and one security finding. Verifier returned **ACCEPT-WITH-
 - **Q32 (#127)** — CI tool refs pinned to immutable tags (`genapi@v0.3.0`, `golangci-lint@v2.12.2`, `benchstat@…`); `codesign-windows-ssl@~latest` carries a `# ci-pins-allow:` marker + `TODO(#127)` (**deviation** — no tagged ci-catalog release ships that component yet; pre-existing); new `scripts/check-ci-pins.sh` guard wired into `.pre-commit-config.yaml` + a `ci-pins-check` CI lint job. `d35d3c7`. (Also closes SEC F-SUP-3 #153.)
 - **`createProfile` `as any` body cast (no GitLab issue)** — `src/api/profiles.ts`: `toWireCreateRequest` return type → `CreateProfileReq` (from `@api`); `as any` removed at `client.postProfiles(...)`. The other `listProfiles`/`fromWireProfile` casts (Q2/#90) deliberately left alone. `2c5895d`. Closed-no-issue follow-up; closes the loose end noted under the 2026-05-12 genapi-batch entry above.
 
-**Remaining small follow-up (not ticketed):** the frontend `src/lib/errors.ts` error-code
-strings vs the server-side `internal/server/errorcodes.go` constants are not cross-checked
-by any automated test. Worth a tiny `go/ast` ↔ TS-string consistency check if a convention
-emerges; recorded here for traceability.
+**Follow-up (was: small, not ticketed) — DONE 2026-05-12** (errorcode-crosscheck run; commits `41ed5fa`, `312eee2`, `5598434`, `1660908`): the frontend↔server error-code coupling now has a seam plus an automated cross-check. Note: there is **no `src/lib/errors.ts`** — the real coupling lived in `src/api/capabilities.ts`, which hard-coded the literal `'wire_feature_missing'` twice. Resolution:
+
+- new `src/api/serverErrorCodes.ts` (exports `WIRE_FEATURE_MISSING = 'wire_feature_missing'`) + `src/api/serverErrorCodes.test.ts` (`41ed5fa`);
+- `src/api/capabilities.ts` branches wire-feature-missing detection off the seam constant instead of the raw literal (`312eee2`); `src/components/admin/UsersPage.test.tsx` fixtures use `WIRE_FEATURE_MISSING` instead of raw literals (`1660908`);
+- new `scripts/check-error-codes.mjs` (pure `checkErrorCodes(root)` + `main()`) cross-checks the seam against `internal/server/errorcodes.go` (62 server codes) + `scripts/check-error-codes.test.mjs` (`node --test`, 4 subtests); a `check-error-codes` local pre-commit hook + an `error-codes-check` lint job in `.gitlab-ci.yml` (the CI job also runs `node --test scripts/check-error-codes.test.mjs` before the guard) wire it into the gate (`5598434`, `1660908`);
+- corrected an inaccurate "the SPA keys i18n messages off it" header comment in `internal/server/errorcodes.go` (`5598434`).
+
+Verified: `node --test scripts/check-error-codes.test.mjs` 4/4, `node scripts/check-error-codes.mjs` OK; both reviewers APPROVE (minor nits fixed in `1660908`). Resolved record in `GAP_ANALYSIS_RESOLVED.md`.
 
 **Handoff:** the 11 implementation commits (`d35d3c7`, `2c5895d`, `a42a792`, `0d629bf`,
 `e510cb5`, `6abde32`, `ea3f681`, `df3fd51`, `03b6ec1`, `1fea7ba`, `6c14368`) + the

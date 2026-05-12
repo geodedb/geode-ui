@@ -2,7 +2,7 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-12 (gap-closure runs: GAP-020 / #90 closed [genapi+medium batch]; 13 more issues closed [top-10 quality/perf/CI batch — #125, #126, #127, #134, #136, #143, #144, #146, #149, #151, #153, #168, #180 — none carry a `GAP-NNN` ID])
+- **Last refreshed:** 2026-05-12 (gap-closure runs: GAP-020 / #90 closed [genapi+medium batch]; 13 more issues closed [top-10 quality/perf/CI batch — #125, #126, #127, #134, #136, #143, #144, #146, #149, #151, #153, #168, #180 — none carry a `GAP-NNN` ID]; #159 closed + error-code cross-check follow-up done [errorcode-crosscheck + #159 batch — `41ed5fa`/`312eee2`/`5598434`/`1660908`, `eefd896`/`f1c6064`/`1a2016f`/`5a5e89c`])
 - **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); two 2026-05-12 `/codepros:gap-close` runs
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors them.
 
@@ -268,7 +268,7 @@ The 2026-05-11 audit Phase 3 (gap-detector) re-ran against HEAD `d3e5de1`. The f
 
 - **GAP-020 / #90** — `as unknown as` path-param casts in `src/api/profiles.ts` removed. `9b0a423` (geode-ui) + genapi `55c79d2`. Row above updated to **Closed**; resolved record in `GAP_ANALYSIS_RESOLVED.md`.
 
-The other 8 (#132, #135 security; #133, #142, #150, #154, #156 perf; #173 quality) are tracked by domain ID in `SECURITY_GAP_ANALYSIS.md` / `PERF_GAP_ANALYSIS.md` / `QUALITY_GAP_ANALYSIS.md` and recorded in `GAP_ANALYSIS_RESOLVED.md`. **#159** (`/api/v1/query` `rateLimit=200` vs 2000-rps target) stays **open** — deliberately unchanged pending a product decision; now documented in `docs/ARCHITECTURE.md`. The 9 geode-ui implementation commits + the docs-tracking commit sit on `main` **unpushed**; 5 genapi commits sit on genapi `main` **unpushed** (user decides on pushing/tagging genapi — note: breaking `mcpx`/`SetAuthVerifier` API → minor bump, other consumers must regenerate). Full report: [`docs/gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md`](./gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md).
+The other 8 (#132, #135 security; #133, #142, #150, #154, #156 perf; #173 quality) are tracked by domain ID in `SECURITY_GAP_ANALYSIS.md` / `PERF_GAP_ANALYSIS.md` / `QUALITY_GAP_ANALYSIS.md` and recorded in `GAP_ANALYSIS_RESOLVED.md`. **#159** (`/api/v1/query` `rateLimit=200` vs 2000-rps target) — later **closed** (see "Gap-closure run — 2026-05-12 (errorcode cross-check + #159)" below): `geode.json` `rateLimit` set to `2000` (`f1c6064`). The 9 geode-ui implementation commits + the docs-tracking commit sit on `main` **unpushed**; 5 genapi commits sit on genapi `main` **unpushed** (user decides on pushing/tagging genapi — note: breaking `mcpx`/`SetAuthVerifier` API → minor bump, other consumers must regenerate). Full report: [`docs/gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md`](./gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md).
 
 ### Gap-closure run — 2026-05-12 (top-10 quality / perf / CI batch)
 
@@ -279,9 +279,29 @@ A second `/codepros:gap-close` run on 2026-05-12 closed **13 GitLab issues** —
 - **Security (1):** F-SUP-3 #153 (`d35d3c7` — subsumed by Q32 #127 — 3/4 floating CI refs pinned; `codesign-windows-ssl@~latest` pin pending an upstream ci-catalog release, tracked via the `# ci-pins-allow:` marker + #127's `TODO`) — and F-INPUT-2 #143 (`ea3f681` — `unsealBytes` fails loud on ciphertext-without-cipher).
 - **No-issue follow-up closed:** `createProfile`'s `as any` request-body cast in `src/api/profiles.ts` removed (`2c5895d`).
 
-**Small follow-up (not ticketed):** the frontend `src/lib/errors.ts` error-code strings vs the server-side `internal/server/errorcodes.go` constants are not cross-checked by any automated test — worth a tiny `go/ast` ↔ TS-string consistency check if a convention emerges.
+**Small follow-up (not ticketed) — later DONE** in the "errorcode cross-check + #159" run below: a frontend↔server error-code seam + automated cross-check. (Note: there was never a `src/lib/errors.ts` — the coupling lived in `src/api/capabilities.ts`.)
 
 **Verifier:** ACCEPT-WITH-NOTES — full suite green (`make go-test -race`, `make go-lint`, `make generate` clean, `make bench-gate`, `npm test` 453/453), coverage up on every touched package (`internal/server` 77.1→78.2%, `internal/jwt` 81.0→82.5%, `internal/profilestore` 80.7→81.0%, `cmd/server` 65.3→70.7%); the one note (was `genapi@v0.3.0` the exact tag `gen/` was generated against?) is **resolved** — `git rev-parse v0.3.0^{commit}` in `~/src/devnw/go/genapi` == `55c79d2` == genapi `main` HEAD == the working copy `gen/` was regenerated against. The 11 implementation commits (`d35d3c7`, `2c5895d`, `a42a792`, `0d629bf`, `e510cb5`, `6abde32`, `ea3f681`, `df3fd51`, `03b6ec1`, `1fea7ba`, `6c14368`) + the docs-tracking commit sit on `main` **unpushed** — the user decides on `git push origin main`. Full report: [`docs/gap-closure-reports/2026-05-12-top10-quality-batch-completion.md`](./gap-closure-reports/2026-05-12-top10-quality-batch-completion.md).
+
+### Gap-closure run — 2026-05-12 (errorcode cross-check + #159)
+
+A `superpowers`-plan-driven run (plan: [`docs/superpowers/plans/2026-05-12-errorcode-crosscheck-and-query-ratelimit.md`](./superpowers/plans/2026-05-12-errorcode-crosscheck-and-query-ratelimit.md)) that landed two threads — no `GAP-NNN` ID here; tracked by domain ID in the sibling docs + recorded in `GAP_ANALYSIS_RESOLVED.md`:
+
+- **Thread A — error-code cross-check** (closes the previously-untracked "frontend ↔ `internal/server/errorcodes.go` cross-check" follow-up; recorded in `QUALITY_GAP_ANALYSIS.md` text, not a GitLab issue — confirmed no GitLab issue exists). Note: there is **no `src/lib/errors.ts`** — the real coupling lived in `src/api/capabilities.ts` (hard-coded `'wire_feature_missing'` twice).
+  - `41ed5fa` — new `src/api/serverErrorCodes.ts` (`WIRE_FEATURE_MISSING = 'wire_feature_missing'`) + `src/api/serverErrorCodes.test.ts`.
+  - `312eee2` — `src/api/capabilities.ts` branches wire-feature-missing detection off the seam constant.
+  - `5598434` — new `scripts/check-error-codes.mjs` (pure `checkErrorCodes(root)` + `main()`) + `scripts/check-error-codes.test.mjs` (`node --test`, 4 subtests); `check-error-codes` local pre-commit hook in `.pre-commit-config.yaml`; `error-codes-check` lint job in `.gitlab-ci.yml`; corrected the inaccurate "the SPA keys i18n messages off it" header comment in `internal/server/errorcodes.go`.
+  - `1660908` — review fixes: the `error-codes-check` CI job now runs `node --test scripts/check-error-codes.test.mjs` before the guard; `src/components/admin/UsersPage.test.tsx` fixtures use `WIRE_FEATURE_MISSING`.
+  - Reviews: APPROVE-WITH-MINOR-NITS (both reviewers); nits fixed in `1660908`.
+- **Thread B — #159 `/api/v1/query` rate-limit alignment** (`[PERF-2026-05-11-12]`, `PERF_GAP_ANALYSIS.md`):
+  - `eefd896` — new `internal/server/query_ratelimit_test.go` (`TestGeodeJSONQueryRateLimit` — reads `geode.json`, asserts `POST /api/v1/query` `rateLimit == 2000`); committed intentionally failing.
+  - `f1c6064` — `geode.json` `/api/v1/query` `rateLimit` `200` → `2000` (query route only); regenerated `gen/api/handlers_gen.go` (`bkt_post_Query = securex.NewBucket(2000, opts.GlobalBurst)`) + `gen/cmd/server/spec.json`. Makes `eefd896`'s test pass.
+  - `1a2016f` — replaced the `### Open question — per-route rate limit vs throughput target (#159)` subsection in `docs/ARCHITECTURE.md` with a `### Per-route rate limit on /api/v1/query` resolution subsection.
+  - `5a5e89c` — review fix: corrected an inaccurate "lowering `GlobalRate` at runtime throttles" claim — `APIOptions.GlobalRate` is **set-but-unused** in `RegisterGeneratedAPI`; the per-route bucket is a ceiling on that route, `GlobalRate`/`global_rps` is not wired as a cross-route aggregate limit, and the only other server-side throttle is the per-IP limiter.
+  - Reviews: NEEDS-FIXES (one doc-accuracy issue) → fixed in `5a5e89c`.
+- **Latent genapi gap (noted, not ticketed):** `APIOptions.GlobalRate`/`global_rps` is generated-but-not-wired as a cross-route aggregate limiter by the genapi handler template — surfaced during the Thread B review, now accurately documented in `docs/ARCHITECTURE.md`. One-line mention only; no new issue filed (it's a documented behavior, not a regression — file upstream if/when a cross-route cap is actually needed).
+
+**Verification:** full suite green — `make go-test` / `make go-lint` / `make generate` (clean) / `make go-build` / `npm test` (455/455) / `npm run test:ts` / `npm run lint` / `npm run prettier:check` / `node --test scripts/check-error-codes.test.mjs` (4/4) / `node scripts/check-error-codes.mjs` (OK, 62 server codes). `make bench-gate` flagged flaky under machine load (flagged unrelated JWT/profile benchmarks during a noisy run, then passed clean on a quiet run; `bench-baseline.txt` unmodified — `allow_failure` in CI, orthogonal to a config-int change). The 8 implementation commits (`41ed5fa`, `312eee2`, `5598434`, `1660908`, `eefd896`, `f1c6064`, `1a2016f`, `5a5e89c`) + the plan-doc commit + the docs-tracking commit sit on `main` **unpushed** — the user decides on `git push origin main`. Full report: [`docs/gap-closure-reports/2026-05-12-errorcode-crosscheck-and-159-completion.md`](./gap-closure-reports/2026-05-12-errorcode-crosscheck-and-159-completion.md).
 
 ### Dedup map (closed-as-duplicate this Phase-4 run)
 
