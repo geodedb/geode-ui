@@ -99,7 +99,16 @@ type app struct {
 	httpSrv  *http.Server
 	issuer   *jwt.Issuer
 	cleanups []func()
+	// shutdownBudget is how long serve() waits for in-flight requests to
+	// drain on ctx-cancel before forcing the close. Defaults to
+	// defaultShutdownBudget; tests lower it to keep the graceful-shutdown
+	// path fast to exercise.
+	shutdownBudget time.Duration
 }
+
+// defaultShutdownBudget is the graceful-drain window serve() gives
+// in-flight requests on shutdown.
+const defaultShutdownBudget = 5 * time.Second
 
 // close runs the registered cleanup funcs in reverse registration order
 // (LIFO, like deferred closes in the original main).
@@ -117,7 +126,7 @@ func (a *app) close() {
 // failure it returns an error and runs no cleanup is left dangling: any
 // resource opened before the failure is closed before returning.
 func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
-	a := &app{cfg: cfg}
+	a := &app{cfg: cfg, shutdownBudget: defaultShutdownBudget}
 	// On error, unwind whatever we've opened so far.
 	ok := false
 	defer func() {
@@ -435,10 +444,19 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	return a, nil
 }
 
+// errGracefulShutdown wraps the (rare) error returned by
+// http.Server.Shutdown when in-flight requests don't drain within the
+// budget. run() uses errors.Is against it to log a WARN — a shutdown
+// timeout means some connections were force-closed, which is operationally
+// noteworthy but not a crash — versus an ERROR for a genuine fatal
+// listener error. (Q38 / #180.)
+var errGracefulShutdown = errors.New("graceful shutdown")
+
 // serve runs the listener and blocks until ctx is cancelled, then
 // gracefully drains in-flight requests (5s budget). Returns the first
-// fatal listener error, or any error from Shutdown — distinct from the
-// silent shutdown of the old main (Q38 / #180).
+// fatal listener error, or any error from Shutdown (wrapped in
+// errGracefulShutdown) — distinct from the silent shutdown of the old
+// main (Q38 / #180).
 func (a *app) serve(ctx context.Context) error {
 	// SEC-N2 (#64): periodically prune the in-memory JWT revocation set
 	// so dead jti entries (past their token expiry) and stale
@@ -463,10 +481,14 @@ func (a *app) serve(ctx context.Context) error {
 		return err
 	case <-ctx.Done():
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	budget := a.shutdownBudget
+	if budget <= 0 {
+		budget = defaultShutdownBudget
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	if err := a.httpSrv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("graceful shutdown: %w", err)
+		return fmt.Errorf("%w: %w", errGracefulShutdown, err)
 	}
 	return nil
 }
@@ -505,7 +527,15 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	defer stop()
 
 	if err := a.serve(ctx); err != nil {
-		slog.Error("serve", "err", err)
+		// A graceful-shutdown timeout (some connections force-closed) is
+		// noteworthy but not a crash — log it at WARN. A fatal listener
+		// error stays ERROR. Either way it's surfaced to stderr with a
+		// non-zero exit. (Q38 / #180.)
+		if errors.Is(err, errGracefulShutdown) {
+			slog.Warn("serve", "err", err)
+		} else {
+			slog.Error("serve", "err", err)
+		}
 		obsx.FlushLogs()
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1

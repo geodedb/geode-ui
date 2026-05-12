@@ -1334,3 +1334,40 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 		t.Fatalf("only %d reads completed, want %d", got, wantReads)
 	}
 }
+
+// TestUnsealBytes_FailsLoudWithoutCipher pins SEC F-INPUT-2 (#143): a
+// row holding v1 ciphertext but read by a store with no cipher
+// configured must surface an error rather than returning the raw,
+// undecryptable bytes as if they were plaintext. A plaintext row in the
+// same no-cipher store still passes through unchanged.
+func TestUnsealBytes_FailsLoudWithoutCipher(t *testing.T) {
+	s := &sqliteStore{} // cipher == nil
+
+	// IsCiphertext-positive bytes: leading v1 sentinel.
+	sealed := []byte{ciphertextSentinelV1, 0xde, 0xad, 0xbe, 0xef}
+	if !IsCiphertext(sealed) {
+		t.Fatal("test setup: sealed bytes should be detected as ciphertext")
+	}
+	if got, err := s.unsealBytes(sealed); err == nil {
+		t.Fatalf("unsealBytes(ciphertext, cipher=nil): want error, got %q", got)
+	}
+
+	// Plaintext (legacy / unencrypted) row still flows through unchanged.
+	plain := []byte("geode://host:7687/?graph=g")
+	if IsCiphertext(plain) {
+		t.Fatal("test setup: plaintext DSN should not look like ciphertext")
+	}
+	got, err := s.unsealBytes(plain)
+	if err != nil {
+		t.Fatalf("unsealBytes(plaintext, cipher=nil): unexpected error: %v", err)
+	}
+	if got != string(plain) {
+		t.Fatalf("unsealBytes(plaintext)=%q want %q", got, plain)
+	}
+
+	// Empty column: zero-length bytes are not ciphertext and pass
+	// through as "".
+	if got, err := s.unsealBytes(nil); err != nil || got != "" {
+		t.Fatalf("unsealBytes(nil)=(%q,%v) want (\"\",nil)", got, err)
+	}
+}

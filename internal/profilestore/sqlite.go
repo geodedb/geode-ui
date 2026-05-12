@@ -225,8 +225,20 @@ func (s *sqliteStore) sealString(plain string) (any, error) {
 // PEM block (always '-' = 0x2D) or DSN scheme letter. We dispatch on
 // IsCiphertext: if the bytes are sealed, decrypt; otherwise pass
 // through unchanged. The next Patch through this row re-encrypts.
+//
+// Fail-loud (SEC F-INPUT-2 / #143): if a row holds v1 ciphertext but no
+// cipher is configured, returning the raw bytes would hand the caller an
+// undecryptable blob masquerading as a plaintext credential. Surface an
+// error instead so the misconfiguration is visible rather than silently
+// corrupting the read.
 func (s *sqliteStore) unsealBytes(raw []byte) (string, error) {
-	if s.cipher == nil || !IsCiphertext(raw) {
+	if s.cipher == nil {
+		if IsCiphertext(raw) {
+			return "", fmt.Errorf("profilestore: ciphertext present but no cipher configured")
+		}
+		return string(raw), nil
+	}
+	if !IsCiphertext(raw) {
 		return string(raw), nil
 	}
 	plain, err := s.cipher.Decrypt(raw)
