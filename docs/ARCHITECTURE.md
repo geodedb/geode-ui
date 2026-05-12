@@ -72,13 +72,17 @@ Assumed workload / targets:
 ### Per-route rate limit on `/api/v1/query`
 
 - The `/api/v1/query` per-route rate limit is set to `2000` rps in
-  `geode.json` (matching the assumed steady-state target above and the
-  `GlobalRate` default); the per-route bucket is an upper bound, so
-  lowering `GlobalRate` at runtime still throttles correctly. Pinned by
-  `internal/server/query_ratelimit_test.go`. (Resolved 2026-05-12, #159 --
-  was a documented open question; aligned to the SLO. If a future workload
-  review shows `/api/v1/query` should be capped lower, change the spec
-  value and update this line.)
+  `geode.json` (matching the assumed steady-state target above), pinned by
+  `internal/server/query_ratelimit_test.go`. The per-route token bucket is
+  a ceiling on *this* route; the genapi-emitted handlers do not currently
+  wire `GlobalRate` / `global_rps` as a cross-route aggregate limit
+  (`APIOptions.GlobalRate` is populated from config but unused in
+  `RegisterGeneratedAPI`), so the only other server-side throttle in play
+  is the per-IP limiter (`PerIPRPS`, per-IP not aggregate). If a future
+  workload review needs `/api/v1/query` capped lower, change the spec
+  value and regenerate; if it needs a real global aggregate ceiling, that
+  is a genapi-generator change. (Resolved 2026-05-12, #159 — was a
+  documented open question; the per-route value is now aligned to the SLO.)
 
 ### Regression net
 
