@@ -5,7 +5,12 @@ import fcose from 'cytoscape-fcose'
 import dagre from 'cytoscape-dagre'
 import styled, { useTheme } from 'styled-components'
 import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
-import { collapseNode, hideNode } from './graphActions'
+import {
+  collapseNode,
+  expandCollapsed,
+  hideNode,
+  restoreNode,
+} from './graphActions'
 import {
   DEFAULT_LAYOUT,
   InspectorView,
@@ -377,6 +382,51 @@ const ControlsBlock = styled.section`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+`
+
+// Restore-list (Hidden / Collapsed) — a compact <ul> with one row per
+// affected node: a label/id span on the left, a Restore/Expand button on
+// the right. Empty state is a single muted line.
+const RestoreList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: ${({ theme }) => theme.spacing.xs};
+    align-items: center;
+    margin-bottom: ${({ theme }) => theme.spacing.xxs};
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+  }
+  .restore-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .restore-id {
+    color: ${({ theme }) => theme.text.muted};
+    font-family: ${({ theme }) => theme.font.family.mono};
+  }
+  button {
+    font-family: inherit;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    padding: 1px 6px;
+    color: ${({ theme }) => theme.text.primary};
+    background: ${({ theme }) => theme.bg.canvas};
+    border: 1px solid ${({ theme }) => theme.border.default};
+    border-radius: ${({ theme }) => theme.radii.sm};
+    cursor: pointer;
+  }
+  button:hover {
+    border-color: ${({ theme }) => theme.border.strong};
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+  button:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
   }
 `
 
@@ -1362,6 +1412,61 @@ export const GraphView: React.FC<Props> = ({
     })
   }
 
+  // Restore an individually-hidden node — un-hide on the core, drop it
+  // from `hidden`, and also drop it from any collapsed group it belonged
+  // to (so the group's count stays accurate; an emptied group is removed).
+  const onRestoreHidden = (id: string): void => {
+    const cy = cyRef.current
+    if (cy) restoreNode(cy, id)
+    setHidden((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+    setCollapsed((prev) => {
+      let changed = false
+      const next = new Map<string, string[]>()
+      prev.forEach((leaves, nodeId) => {
+        const filtered = leaves.filter((l) => l !== id)
+        if (filtered.length !== leaves.length) changed = true
+        if (filtered.length > 0) next.set(nodeId, filtered)
+        else changed = true
+      })
+      return changed ? next : prev
+    })
+  }
+
+  // Expand a collapsed node — un-hide every leaf in its stored group,
+  // drop them from `hidden`, and remove the group from `collapsed`.
+  const onExpandCollapsed = (nodeId: string): void => {
+    const cy = cyRef.current
+    const leaves = collapsed.get(nodeId) ?? []
+    if (cy) expandCollapsed(cy, leaves)
+    setHidden((prev) => {
+      const next = new Set(prev)
+      leaves.forEach((l) => next.delete(l))
+      return next
+    })
+    setCollapsed((prev) => {
+      if (!prev.has(nodeId)) return prev
+      const next = new Map(prev)
+      next.delete(nodeId)
+      return next
+    })
+  }
+
+  // Resolve a node id to a short display label for the restore lists —
+  // the per-bucket label-field preference if set, else the label name /
+  // the id. Falls back to the id when the node isn't in the index (e.g.
+  // an explore-neighbours merge added it and the index hasn't caught up).
+  const nodeDisplayLabel = (id: string): string => {
+    const data = nodeDataById.get(id)
+    if (!data) return id
+    return resolveNodeLabel(data, nodeLabelPrefs)
+  }
+  const hiddenIds = Array.from(hidden)
+  const collapsedEntries = Array.from(collapsed.entries())
+
   const empty = elements.length === 0 && !error
   // Reuse the same hash + palette the canvas uses so the swatches in
   // the visibility row are exact-pixel matches to the node fills.
@@ -1662,6 +1767,61 @@ export const GraphView: React.FC<Props> = ({
                   </select>
                 </div>
               ))}
+          </ControlsBlock>
+          <ControlsBlock data-testid="graph-hidden-list">
+            <h5>{t('graph.hiddenHeading', { count: hiddenIds.length })}</h5>
+            {hiddenIds.length === 0 ? (
+              <p className="empty">{t('graph.hiddenEmpty')}</p>
+            ) : (
+              <RestoreList>
+                {hiddenIds.map((id) => {
+                  const label = nodeDisplayLabel(id)
+                  return (
+                    <li key={id}>
+                      <span className="restore-label">
+                        {label !== id && <span>{label} </span>}
+                        <span className="restore-id">{id}</span>
+                      </span>
+                      <button type="button" onClick={() => onRestoreHidden(id)}>
+                        {t('graph.restore')}
+                      </button>
+                    </li>
+                  )
+                })}
+              </RestoreList>
+            )}
+          </ControlsBlock>
+          <ControlsBlock data-testid="graph-collapsed-list">
+            <h5>
+              {t('graph.collapsedHeading', { count: collapsedEntries.length })}
+            </h5>
+            {collapsedEntries.length === 0 ? (
+              <p className="empty">{t('graph.collapsedEmpty')}</p>
+            ) : (
+              <RestoreList>
+                {collapsedEntries.map(([id, leaves]) => {
+                  const label = nodeDisplayLabel(id)
+                  return (
+                    <li key={id}>
+                      <span className="restore-label">
+                        {label !== id && <span>{label} </span>}
+                        <span className="restore-id">{id}</span>
+                        <span> · </span>
+                        <span>
+                          {t('graph.collapsedCount', { count: leaves.length })}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onExpandCollapsed(id)}
+                      >
+                        {t('graph.expand')}
+                      </button>
+                    </li>
+                  )
+                })}
+              </RestoreList>
+            )}
           </ControlsBlock>
           {selected ? (
             <SelectedInspector

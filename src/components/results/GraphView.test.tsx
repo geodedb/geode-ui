@@ -1138,3 +1138,81 @@ describe('Phase 2: inspector Hide / Collapse actions', () => {
     expect(view.queryByTestId('graph-action-collapse')).toBeNull()
   })
 })
+
+describe('Phase 2: Hidden / Collapsed restore lists', () => {
+  it('lists hidden nodes and restores one from the list', () => {
+    const view = renderHub()
+    // Hide '2' then '3'.
+    pickNode(view, '2')
+    act(() => {
+      fireEvent.click(view.getByTestId('graph-action-hide'))
+    })
+    pickNode(view, '3')
+    act(() => {
+      fireEvent.click(view.getByTestId('graph-action-hide'))
+    })
+    const list = view.getByTestId('graph-hidden-list')
+    // Both ids show up in the list (the row text carries the id).
+    expect(list).toHaveTextContent('2')
+    expect(list).toHaveTextContent('3')
+    // The heading shows the count.
+    expect(view.getByText(/hidden \(2\)/i)).toBeInTheDocument()
+
+    // Restore '3' via its row's button.
+    const row3 = within(list)
+      .getAllByRole('listitem')
+      .find((li) => /(^|\D)3(\D|$)/.test(li.textContent ?? ''))
+    expect(row3).toBeDefined()
+    act(() => {
+      fireEvent.click(within(row3!).getByRole('button', { name: /restore/i }))
+    })
+    // '3' un-hidden on the core, gone from the list; '2' still there.
+    expect(classesOf('3')).not.toContain('hidden-node')
+    expect(view.getByTestId('graph-hidden-list')).toHaveTextContent('2')
+    expect(view.getByTestId('graph-hidden-list')).not.toHaveTextContent(
+      /(^|\D)3(\D|$)/
+    )
+    expect(view.getByText(/hidden \(1\)/i)).toBeInTheDocument()
+  })
+
+  it('lists collapsed nodes and expands one — restoring its leaves', () => {
+    const view = renderHub()
+    pickNode(view, '1')
+    act(() => {
+      fireEvent.click(view.getByTestId('graph-action-collapse'))
+    })
+    // '1' is now in the Collapsed list.
+    const collapsedList = view.getByTestId('graph-collapsed-list')
+    expect(collapsedList).toHaveTextContent('1')
+    expect(view.getByText(/collapsed \(1\)/i)).toBeInTheDocument()
+    // Its leaves '2' and '3' are hidden, and (by design) also show in
+    // the Hidden list.
+    expect(view.getByTestId('graph-hidden-list')).toHaveTextContent('2')
+    expect(view.getByTestId('graph-hidden-list')).toHaveTextContent('3')
+
+    // Expand '1'.
+    const row1 = within(collapsedList)
+      .getAllByRole('listitem')
+      .find((li) => /(^|\D)1(\D|$)/.test(li.textContent ?? ''))
+    expect(row1).toBeDefined()
+    act(() => {
+      fireEvent.click(within(row1!).getByRole('button', { name: /expand/i }))
+    })
+    // Leaves un-hidden; '1' gone from the Collapsed list; the Hidden
+    // list no longer carries the leaves.
+    expect(classesOf('2')).not.toContain('hidden-node')
+    expect(classesOf('3')).not.toContain('hidden-node')
+    expect(view.queryByText(/collapsed \(1\)/i)).toBeNull()
+    expect(view.getByText(/collapsed \(0\)/i)).toBeInTheDocument()
+  })
+
+  it('shows empty states when nothing is hidden or collapsed', () => {
+    const view = renderHub()
+    expect(view.getByTestId('graph-hidden-list')).toHaveTextContent(
+      /no hidden nodes/i
+    )
+    expect(view.getByTestId('graph-collapsed-list')).toHaveTextContent(
+      /no collapsed nodes/i
+    )
+  })
+})
