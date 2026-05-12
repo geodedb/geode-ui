@@ -69,15 +69,16 @@ Assumed workload / targets:
 - **Webpack/Vite bundle budget**: `performance.hints: 'error'`, 1 MiB per
   asset, 1.5 MiB per entrypoint — the SPA build fails if either is exceeded.
 
-### Open question — per-route rate limit vs throughput target (#159)
+### Per-route rate limit on `/api/v1/query`
 
-`geode.json` sets `rateLimit: 200` on `POST /api/v1/query`, which is an order
-of magnitude below the assumed ~2,000 rps steady-state target above. This is
-**deliberately not changed** here: it's awaiting a product decision (is 2,000
-rps the real target? is the limit per-instance and meant to be multiplied by
-replica count? should it be raised, or is the assumption wrong?). Tracked as
-issue #159 (`PERF-2026-05-11-...`). If/when product clarifies, update both
-`geode.json` and the throughput assumption above together.
+- The `/api/v1/query` per-route rate limit is set to `2000` rps in
+  `geode.json` (matching the assumed steady-state target above and the
+  `GlobalRate` default); the per-route bucket is an upper bound, so
+  lowering `GlobalRate` at runtime still throttles correctly. Pinned by
+  `internal/server/query_ratelimit_test.go`. (Resolved 2026-05-12, #159 --
+  was a documented open question; aligned to the SLO. If a future workload
+  review shows `/api/v1/query` should be capped lower, change the spec
+  value and update this line.)
 
 ### Regression net
 
