@@ -38,6 +38,13 @@ export type InspectorView = 'props' | 'json'
 
 export const DEFAULT_INSPECTOR_VIEW: InspectorView = 'props'
 
+// Canvas interaction mode for the graph tab. `pan` is Cytoscape's
+// default (drag-pans the viewport); `box` enables box selection
+// (drag-rectangle to multi-select) and disables panning while it's on.
+export type SelectionMode = 'pan' | 'box'
+
+export const DEFAULT_SELECTION_MODE: SelectionMode = 'pan'
+
 const STORAGE_KEY = 'geode-ui.graph-prefs'
 
 type GraphPrefsState = {
@@ -51,12 +58,18 @@ type GraphPrefsState = {
   edgeLabelPrefs: Record<string, string>
   // Which inspector view the operator last picked ('props' | 'json').
   inspectorView: InspectorView
+  // Canvas interaction mode ('pan' | 'box').
+  selectionMode: SelectionMode
+  // Whether nodes are grouped under per-label compound parent nodes.
+  clusterByLabel: boolean
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
   setNodePref: (label: string, key: string) => void
   setEdgePref: (type: string, key: string) => void
   setInspectorView: (v: InspectorView) => void
+  setSelectionMode: (m: SelectionMode) => void
+  setClusterByLabel: (v: boolean) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -67,10 +80,16 @@ type PersistedShape = {
   nodeLabelPrefs: Record<string, string>
   edgeLabelPrefs: Record<string, string>
   inspectorView: InspectorView
+  selectionMode: SelectionMode
+  clusterByLabel: boolean
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
   return v === 'json' ? 'json' : DEFAULT_INSPECTOR_VIEW
+}
+
+function coerceSelectionMode(v: unknown): SelectionMode {
+  return v === 'box' ? 'box' : DEFAULT_SELECTION_MODE
 }
 
 export const useGraphPrefs = create<GraphPrefsState>()(
@@ -81,6 +100,8 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       nodeLabelPrefs: {},
       edgeLabelPrefs: {},
       inspectorView: DEFAULT_INSPECTOR_VIEW,
+      selectionMode: DEFAULT_SELECTION_MODE,
+      clusterByLabel: false,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -98,6 +119,8 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setEdgePref: (type, key) =>
         set((s) => ({ edgeLabelPrefs: { ...s.edgeLabelPrefs, [type]: key } })),
       setInspectorView: (v) => set({ inspectorView: v }),
+      setSelectionMode: (m) => set({ selectionMode: m }),
+      setClusterByLabel: (v) => set({ clusterByLabel: v }),
     }),
     {
       name: STORAGE_KEY,
@@ -108,10 +131,13 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         nodeLabelPrefs: s.nodeLabelPrefs,
         edgeLabelPrefs: s.edgeLabelPrefs,
         inspectorView: s.inspectorView,
+        selectionMode: s.selectionMode,
+        clusterByLabel: s.clusterByLabel,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
-      // missing or garbage inspectorView coerces back to the default.
+      // missing or garbage inspectorView / selectionMode coerces back to
+      // the default; clusterByLabel coerces to a strict boolean.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<PersistedShape>
         return {
@@ -121,6 +147,8 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           nodeLabelPrefs: p.nodeLabelPrefs ?? current.nodeLabelPrefs,
           edgeLabelPrefs: p.edgeLabelPrefs ?? current.edgeLabelPrefs,
           inspectorView: coerceInspectorView(p.inspectorView),
+          selectionMode: coerceSelectionMode(p.selectionMode),
+          clusterByLabel: p.clusterByLabel === true,
         }
       },
     }

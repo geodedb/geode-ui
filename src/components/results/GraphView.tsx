@@ -459,6 +459,20 @@ function respSignature(resp: QueryRespLike & { row_count?: number }): number {
   return resp.rows ? resp.rows.length : 0
 }
 
+// Apply the canvas interaction mode to a Cytoscape core. 'box' enables
+// the built-in box selection (drag-rectangle to multi-select) and turns
+// off viewport panning so the drag doesn't fight it; 'pan' restores the
+// default (drag-pans, no box select).
+function applySelectionMode(cy: Core, mode: 'pan' | 'box'): void {
+  if (mode === 'box') {
+    cy.userPanningEnabled(false)
+    cy.boxSelectionEnabled(true)
+  } else {
+    cy.userPanningEnabled(true)
+    cy.boxSelectionEnabled(false)
+  }
+}
+
 function applyLabels(
   cy: Core,
   nodePrefs: Record<string, string>,
@@ -680,6 +694,10 @@ export const GraphView: React.FC<Props> = ({
   // operator last picked. Sticky so it outlives a re-run remount.
   const inspectorView = useGraphPrefs((s) => s.inspectorView)
   const setInspectorView = useGraphPrefs((s) => s.setInspectorView)
+  // Canvas interaction mode ('pan' | 'box'). 'box' enables Cytoscape's
+  // built-in box selection and disables panning while it's on. Sticky.
+  const selectionMode = useGraphPrefs((s) => s.selectionMode)
+  const setSelectionMode = useGraphPrefs((s) => s.setSelectionMode)
   // Live counts surfaced in the toolbar. Reflect what's actually in
   // the Cytoscape core (post-build, post-filter), not the raw resp,
   // so users see the effect of layout/filter changes.
@@ -710,6 +728,8 @@ export const GraphView: React.FC<Props> = ({
   edgePrefsRef.current = edgeLabelPrefs
   const layoutRef = useRef(layout)
   layoutRef.current = layout
+  const selectionModeRef = useRef(selectionMode)
+  selectionModeRef.current = selectionMode
 
   // GAP-01 / GAP-07: rebuild key combines row_count with the query
   // text. Two queries that happen to return the same row count would
@@ -886,6 +906,9 @@ export const GraphView: React.FC<Props> = ({
         // pref changes are handled by the dedicated effect below without
         // re-running the layout.
         applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
+        // Seed the canvas interaction mode (pan / box select) on the
+        // fresh core; later toggles are handled by the dedicated effect.
+        applySelectionMode(cy, selectionModeRef.current)
         setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
       } catch (e: unknown) {
         // GAP-04: surface the failure as a visible banner instead of
@@ -936,6 +959,14 @@ export const GraphView: React.FC<Props> = ({
     cy.layout(layoutConfig(layout)).run()
     cy.fit(undefined, 24)
   }, [layout])
+
+  // Canvas interaction-mode changes — apply to the live core. Cheap;
+  // just flips two Cytoscape flags.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    applySelectionMode(cy, selectionMode)
+  }, [selectionMode])
 
   // Visibility filter changes — re-run the apply pass against the
   // current core. Cheap; just toggles a class.
@@ -1014,6 +1045,9 @@ export const GraphView: React.FC<Props> = ({
     if (!data) return
     setSelected({ kind: 'node', data })
     cyRef.current?.$id(id).select()
+  }
+  const onToggleSelectionMode = (): void => {
+    setSelectionMode(selectionMode === 'box' ? 'pan' : 'box')
   }
   const onPickEdgeId = (rawId: string): void => {
     const id = rawId.trim()
@@ -1143,6 +1177,24 @@ export const GraphView: React.FC<Props> = ({
               onClick={onResetView}
             >
               {t('graph.resetView')}
+            </button>
+          </div>
+          <div className="group">
+            <button
+              type="button"
+              data-testid="graph-selection-mode"
+              aria-pressed={selectionMode === 'box'}
+              aria-label={t('graph.selectionModeLabel')}
+              title={
+                selectionMode === 'box'
+                  ? t('graph.selectionModeBox')
+                  : t('graph.selectionModePan')
+              }
+              onClick={onToggleSelectionMode}
+            >
+              {selectionMode === 'box'
+                ? t('graph.selectionModeBox')
+                : t('graph.selectionModePan')}
             </button>
           </div>
           <span className="stats" aria-live="polite">

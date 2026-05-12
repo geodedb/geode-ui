@@ -110,3 +110,41 @@ test('useGraphPrefs persists the inspector view choice across a fresh mount', ()
   const second = renderHook(() => useGraphPrefs())
   expect(second.result.current.inspectorView).toBe('json')
 })
+
+// Phase-1 / Task 1.3: the box-selection mode toggle ('pan' | 'box',
+// default 'pan'). Sticky like every other display pref.
+test('useGraphPrefs.selectionMode defaults to "pan" and persists changes', () => {
+  const first = renderHook(() => useGraphPrefs())
+  expect(first.result.current.selectionMode).toBe('pan')
+
+  act(() => {
+    first.result.current.setSelectionMode('box')
+  })
+  expect(first.result.current.selectionMode).toBe('box')
+  expect(window.localStorage.getItem('geode-ui.graph-prefs')).toMatch(
+    /"selectionMode":"box"/
+  )
+
+  first.unmount()
+  const second = renderHook(() => useGraphPrefs())
+  expect(second.result.current.selectionMode).toBe('box')
+})
+
+// Phase-1 / Task 1.4: the group-by-label clustering toggle (default
+// false). Sticky like every other display pref.
+test('useGraphPrefs.clusterByLabel defaults to false and persists changes', () => {
+  const first = renderHook(() => useGraphPrefs())
+  expect(first.result.current.clusterByLabel).toBe(false)
+
+  act(() => {
+    first.result.current.setClusterByLabel(true)
+  })
+  expect(first.result.current.clusterByLabel).toBe(true)
+  expect(window.localStorage.getItem('geode-ui.graph-prefs')).toMatch(
+    /"clusterByLabel":true/
+  )
+
+  first.unmount()
+  const second = renderHook(() => useGraphPrefs())
+  expect(second.result.current.clusterByLabel).toBe(true)
+})

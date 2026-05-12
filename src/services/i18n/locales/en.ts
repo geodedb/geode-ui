@@ -130,6 +130,9 @@ export const en = {
     visibilityHeading: 'Visibility',
     collapseSidebar: 'Collapse sidebar',
     expandSidebar: 'Expand sidebar',
+    selectionModeLabel: 'Selection mode',
+    selectionModePan: 'Pan',
+    selectionModeBox: 'Box select',
   },
 
   schema: {
