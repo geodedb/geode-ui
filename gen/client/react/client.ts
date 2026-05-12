@@ -345,6 +345,7 @@ export interface UpdateProfileReq {
   is_default?: boolean;
   name?: string;
   pool_overrides?: Record<string, unknown>;
+  profile_id: string;
   saved_username?: string;
   tls?: Record<string, unknown>;
 }
@@ -445,19 +446,23 @@ function appendSearchParam(params: URLSearchParams, key: string, value: unknown)
 function expandPath(
   baseUrl: string,
   path: string,
-  pathParams: readonly string[],
+  // genapi#216: each entry is [urlToken, schemaKey]. The URL pattern uses
+  // urlToken ({urlToken}); the request object holds the value under
+  // schemaKey (the generated request types use JSON-schema field names,
+  // which are typically snake_case while the URL token is camelCase).
+  pathParams: readonly (readonly [string, string])[],
   request: Record<string, unknown>,
 ): { url: URL; payload: Record<string, unknown> } {
   const url = new URL(baseUrl);
   let resolvedPath = joinURLPath(url.pathname, path);
   const payload = { ...request };
-  for (const param of pathParams) {
-    if (!(param in payload)) {
-      throw new Error(`missing path parameter "${param}"`);
+  for (const [urlToken, schemaKey] of pathParams) {
+    if (!(schemaKey in payload)) {
+      throw new Error(`missing path parameter "${schemaKey}"`);
     }
-    const value = payload[param];
-    resolvedPath = resolvedPath.replace(`{${param}}`, encodeURIComponent(String(value)));
-    delete payload[param];
+    const value = payload[schemaKey];
+    resolvedPath = resolvedPath.replace(`{${urlToken}}`, encodeURIComponent(String(value)));
+    delete payload[schemaKey];
   }
   url.pathname = resolvedPath;
   return { url, payload };
@@ -934,7 +939,7 @@ export class GenAPIClient {
     path: string,
     authMode: string,
     bodyMode: string,
-    pathParams: readonly string[],
+    pathParams: readonly (readonly [string, string])[],
     request: Record<string, unknown>,
   ): Promise<T> {
     const { url, payload } = expandPath(this.config.baseUrl, path, pathParams, request);
@@ -1110,7 +1115,7 @@ export class GenAPIClient {
       "/api/v1/backups/{file}",
       "jwt",
       "query",
-      ["file"], copyRecord(req),
+      [["file", "file"]], copyRecord(req),
     );
   }
   async getFile(req: BackupFileParam): Promise<BackupInfo> {
@@ -1119,7 +1124,7 @@ export class GenAPIClient {
       "/api/v1/backups/{file}",
       "jwt",
       "query",
-      ["file"], copyRecord(req),
+      [["file", "file"]], copyRecord(req),
     );
   }
   async getCapabilities(req: Empty): Promise<Capabilities> {
@@ -1164,7 +1169,7 @@ export class GenAPIClient {
       "/api/v1/graphs/{graph}/constraints",
       "jwt",
       "query",
-      ["graph"], copyRecord(req),
+      [["graph", "graph"]], copyRecord(req),
     );
   }
   async edgeTypes(req: GraphParam): Promise<EdgeTypeList> {
@@ -1173,7 +1178,7 @@ export class GenAPIClient {
       "/api/v1/graphs/{graph}/edge-types",
       "jwt",
       "query",
-      ["graph"], copyRecord(req),
+      [["graph", "graph"]], copyRecord(req),
     );
   }
   async indexes(req: GraphParam): Promise<IndexList> {
@@ -1182,7 +1187,7 @@ export class GenAPIClient {
       "/api/v1/graphs/{graph}/indexes",
       "jwt",
       "query",
-      ["graph"], copyRecord(req),
+      [["graph", "graph"]], copyRecord(req),
     );
   }
   async labels(req: GraphParam): Promise<LabelList> {
@@ -1191,7 +1196,7 @@ export class GenAPIClient {
       "/api/v1/graphs/{graph}/labels",
       "jwt",
       "query",
-      ["graph"], copyRecord(req),
+      [["graph", "graph"]], copyRecord(req),
     );
   }
   async getMigrations(req: Empty): Promise<MigrationStatus> {
@@ -1236,7 +1241,7 @@ export class GenAPIClient {
       "/api/v1/migrations/{name}/sign",
       "jwt",
       "json",
-      ["name"], copyRecord(req),
+      [["name", "name"]], copyRecord(req),
     );
   }
   async getPolicies(req: Empty): Promise<PolicyList> {
@@ -1263,7 +1268,7 @@ export class GenAPIClient {
       "/api/v1/policies/{name}",
       "jwt",
       "query",
-      ["name"], copyRecord(req),
+      [["name", "name"]], copyRecord(req),
     );
   }
   async getName(req: PolicyParam): Promise<Policy> {
@@ -1272,7 +1277,7 @@ export class GenAPIClient {
       "/api/v1/policies/{name}",
       "jwt",
       "query",
-      ["name"], copyRecord(req),
+      [["name", "name"]], copyRecord(req),
     );
   }
   async getProfiles(req: Empty): Promise<ProfileList> {
@@ -1308,7 +1313,7 @@ export class GenAPIClient {
       "/api/v1/profiles/{profileId}",
       "jwt",
       "query",
-      ["profileId"], copyRecord(req),
+      [["profileId", "profile_id"]], copyRecord(req),
     );
   }
   async getProfileid(req: ProfileIDPath): Promise<Profile> {
@@ -1317,7 +1322,7 @@ export class GenAPIClient {
       "/api/v1/profiles/{profileId}",
       "jwt",
       "query",
-      ["profileId"], copyRecord(req),
+      [["profileId", "profile_id"]], copyRecord(req),
     );
   }
   async patchProfileid(req: UpdateProfileReq): Promise<Profile> {
@@ -1326,7 +1331,7 @@ export class GenAPIClient {
       "/api/v1/profiles/{profileId}",
       "jwt",
       "json",
-      ["profileId"], copyRecord(req),
+      [["profileId", "profile_id"]], copyRecord(req),
     );
   }
   async query(req: QueryReq): Promise<QueryResp> {
@@ -1371,7 +1376,7 @@ export class GenAPIClient {
       "/api/v1/roles/{role}",
       "jwt",
       "query",
-      ["role"], copyRecord(req),
+      [["role", "role"]], copyRecord(req),
     );
   }
   async getRole(req: RoleParam): Promise<Role> {
@@ -1380,7 +1385,7 @@ export class GenAPIClient {
       "/api/v1/roles/{role}",
       "jwt",
       "query",
-      ["role"], copyRecord(req),
+      [["role", "role"]], copyRecord(req),
     );
   }
   async tx(req: TxBeginReq): Promise<TxBeginResp> {
@@ -1398,7 +1403,7 @@ export class GenAPIClient {
       "/api/v1/tx/{txid}/commit",
       "jwt",
       "json",
-      ["txid"], copyRecord(req),
+      [["txid", "txid"]], copyRecord(req),
     );
   }
   async rollback(req: TxIDParam): Promise<Empty> {
@@ -1407,7 +1412,7 @@ export class GenAPIClient {
       "/api/v1/tx/{txid}/rollback",
       "jwt",
       "json",
-      ["txid"], copyRecord(req),
+      [["txid", "txid"]], copyRecord(req),
     );
   }
   async postTxidRun(req: TxRunReq): Promise<QueryResp> {
@@ -1416,7 +1421,7 @@ export class GenAPIClient {
       "/api/v1/tx/{txid}/run",
       "jwt",
       "json",
-      ["txid"], copyRecord(req),
+      [["txid", "txid"]], copyRecord(req),
     );
   }
   async getUsers(req: Empty): Promise<UserList> {
@@ -1443,7 +1448,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}",
       "jwt",
       "query",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async getUsername(req: UsernameParam): Promise<User> {
@@ -1452,7 +1457,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}",
       "jwt",
       "query",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async patchUsername(req: UserUpdateReq): Promise<User> {
@@ -1461,7 +1466,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}",
       "jwt",
       "json",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async disable(req: UsernameParam): Promise<Empty> {
@@ -1470,7 +1475,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}/disable",
       "jwt",
       "json",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async enable(req: UsernameParam): Promise<Empty> {
@@ -1479,7 +1484,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}/enable",
       "jwt",
       "json",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async password(req: PasswordChangeReq): Promise<Empty> {
@@ -1488,7 +1493,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}/password",
       "jwt",
       "json",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async permissions(req: UsernameParam): Promise<PermissionList> {
@@ -1497,7 +1502,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}/permissions",
       "jwt",
       "query",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async postUsernameRoles(req: AssignRoleReq): Promise<Empty> {
@@ -1506,7 +1511,7 @@ export class GenAPIClient {
       "/api/v1/users/{username}/roles",
       "jwt",
       "json",
-      ["username"], copyRecord(req),
+      [["username", "username"]], copyRecord(req),
     );
   }
   async healthz(req: Empty): Promise<HealthResp> {

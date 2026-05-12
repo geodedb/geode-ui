@@ -3729,6 +3729,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if bkt_patch_PatchProfileid != nil { lim, rem, reset := bkt_patch_PatchProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UpdateProfileReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.ProfileID = r.PathValue("profileId")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.PatchProfileid(w, r, &req)
 		if err != nil {

@@ -36,7 +36,13 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("http status %d: %s", e.StatusCode, body)
 }
 
-func expandRoute(rawURL string, pathParams []string, req any) (*url.URL, map[string]any, error) {
+// expandRoute substitutes path parameters into rawURL. genapi#216: each
+// pathParams entry is {urlToken, schemaKey} -- the URL pattern uses
+// "{urlToken}" while the request payload map (built from the request
+// struct's JSON/genapi tags) keys the value under schemaKey, which differs
+// from urlToken whenever the tag is snake_case but the route token is
+// camelCase (e.g. {profileId} <-> "profile_id").
+func expandRoute(rawURL string, pathParams [][2]string, req any) (*url.URL, map[string]any, error) {
 	values, err := payloadMap(req)
 	if err != nil {
 		return nil, nil, err
@@ -45,13 +51,14 @@ func expandRoute(rawURL string, pathParams []string, req any) (*url.URL, map[str
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, param := range pathParams {
-		value, ok := values[param]
+	for _, pp := range pathParams {
+		urlToken, schemaKey := pp[0], pp[1]
+		value, ok := values[schemaKey]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing path parameter %q", param)
+			return nil, nil, fmt.Errorf("missing path parameter %q", schemaKey)
 		}
-		u.Path = strings.ReplaceAll(u.Path, "{"+param+"}", url.PathEscape(fmt.Sprint(value)))
-		delete(values, param)
+		u.Path = strings.ReplaceAll(u.Path, "{"+urlToken+"}", url.PathEscape(fmt.Sprint(value)))
+		delete(values, schemaKey)
 	}
 	return u, values, nil
 }
@@ -223,7 +230,7 @@ func (c *Client) Audit(ctx context.Context, req *types.AuditQuery) (*types.Audit
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +268,7 @@ func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginRe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +308,7 @@ func (c *Client) GetBackups(ctx context.Context, req *types.Empty) (*types.Backu
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +346,7 @@ func (c *Client) PostBackups(ctx context.Context, req *types.BackupCreateReq) (*
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +386,7 @@ func (c *Client) Cleanup(ctx context.Context, req *types.Empty) (*types.BackupCl
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +426,7 @@ func (c *Client) BackupUpload(ctx context.Context, req *types.BackupUploadReq) (
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +466,7 @@ func (c *Client) DeleteFile(ctx context.Context, req *types.BackupFileParam) (*t
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"file"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"file", "file"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +504,7 @@ func (c *Client) GetFile(ctx context.Context, req *types.BackupFileParam) (*type
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"file"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"file", "file"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +542,7 @@ func (c *Client) GetCapabilities(ctx context.Context, req *types.Empty) (*types.
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +580,7 @@ func (c *Client) Grants(ctx context.Context, req *types.GrantReq) (*types.Empty,
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +620,7 @@ func (c *Client) Revoke(ctx context.Context, req *types.GrantReq) (*types.Empty,
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -653,7 +660,7 @@ func (c *Client) Graphs(ctx context.Context, req *types.Empty) (*types.GraphList
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -691,7 +698,7 @@ func (c *Client) Constraints(ctx context.Context, req *types.GraphParam) (*types
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -729,7 +736,7 @@ func (c *Client) EdgeTypes(ctx context.Context, req *types.GraphParam) (*types.E
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -767,7 +774,7 @@ func (c *Client) Indexes(ctx context.Context, req *types.GraphParam) (*types.Ind
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +812,7 @@ func (c *Client) Labels(ctx context.Context, req *types.GraphParam) (*types.Labe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -843,7 +850,7 @@ func (c *Client) GetMigrations(ctx context.Context, req *types.Empty) (*types.Mi
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +888,7 @@ func (c *Client) PostMigrations(ctx context.Context, req *types.MigrationCreateR
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -921,7 +928,7 @@ func (c *Client) PostMigrationsRun(ctx context.Context, req *types.Empty) (*type
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -961,7 +968,7 @@ func (c *Client) MigrationUpload(ctx context.Context, req *types.MigrationUpload
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1001,7 +1008,7 @@ func (c *Client) Sign(ctx context.Context, req *types.MigrationParam) (*types.Em
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"name"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"name", "name"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1041,7 +1048,7 @@ func (c *Client) GetPolicies(ctx context.Context, req *types.Empty) (*types.Poli
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,7 +1086,7 @@ func (c *Client) PostPolicies(ctx context.Context, req *types.PolicyCreateReq) (
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1119,7 +1126,7 @@ func (c *Client) DeleteName(ctx context.Context, req *types.PolicyParam) (*types
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"name"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"name", "name"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1157,7 +1164,7 @@ func (c *Client) GetName(ctx context.Context, req *types.PolicyParam) (*types.Po
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"name"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"name", "name"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1195,7 +1202,7 @@ func (c *Client) GetProfiles(ctx context.Context, req *types.Empty) (*types.Prof
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1233,7 +1240,7 @@ func (c *Client) PostProfiles(ctx context.Context, req *types.CreateProfileReq) 
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1273,7 +1280,7 @@ func (c *Client) Public(ctx context.Context, req *types.Empty) (*types.PublicPro
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1311,7 +1318,7 @@ func (c *Client) DeleteProfileid(ctx context.Context, req *types.ProfileIDPath) 
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"profileId"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"profileId", "profile_id"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1349,7 +1356,7 @@ func (c *Client) GetProfileid(ctx context.Context, req *types.ProfileIDPath) (*t
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"profileId"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"profileId", "profile_id"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1387,7 +1394,7 @@ func (c *Client) PatchProfileid(ctx context.Context, req *types.UpdateProfileReq
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"profileId"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"profileId", "profile_id"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1427,7 +1434,7 @@ func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryRe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1467,7 +1474,7 @@ func (c *Client) Restore(ctx context.Context, req *types.RestoreReq) (*types.Emp
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1507,7 +1514,7 @@ func (c *Client) GetRoles(ctx context.Context, req *types.Empty) (*types.RoleLis
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1545,7 +1552,7 @@ func (c *Client) PostApiRoles(ctx context.Context, req *types.RoleCreateReq) (*t
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1585,7 +1592,7 @@ func (c *Client) DeleteRole(ctx context.Context, req *types.RoleParam) (*types.E
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"role"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"role", "role"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1623,7 +1630,7 @@ func (c *Client) GetRole(ctx context.Context, req *types.RoleParam) (*types.Role
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"role"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"role", "role"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1661,7 +1668,7 @@ func (c *Client) Tx(ctx context.Context, req *types.TxBeginReq) (*types.TxBeginR
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1701,7 +1708,7 @@ func (c *Client) Commit(ctx context.Context, req *types.TxIDParam) (*types.Empty
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"txid", "txid"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1741,7 +1748,7 @@ func (c *Client) Rollback(ctx context.Context, req *types.TxIDParam) (*types.Emp
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"txid", "txid"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1781,7 +1788,7 @@ func (c *Client) PostTxidRun(ctx context.Context, req *types.TxRunReq) (*types.Q
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"txid", "txid"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1821,7 +1828,7 @@ func (c *Client) GetUsers(ctx context.Context, req *types.Empty) (*types.UserLis
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1859,7 +1866,7 @@ func (c *Client) PostUsers(ctx context.Context, req *types.UserCreateReq) (*type
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1899,7 +1906,7 @@ func (c *Client) DeleteUsername(ctx context.Context, req *types.UsernameParam) (
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1937,7 +1944,7 @@ func (c *Client) GetUsername(ctx context.Context, req *types.UsernameParam) (*ty
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1975,7 +1982,7 @@ func (c *Client) PatchUsername(ctx context.Context, req *types.UserUpdateReq) (*
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2015,7 +2022,7 @@ func (c *Client) Disable(ctx context.Context, req *types.UsernameParam) (*types.
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2055,7 +2062,7 @@ func (c *Client) Enable(ctx context.Context, req *types.UsernameParam) (*types.E
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2095,7 +2102,7 @@ func (c *Client) Password(ctx context.Context, req *types.PasswordChangeReq) (*t
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2135,7 +2142,7 @@ func (c *Client) Permissions(ctx context.Context, req *types.UsernameParam) (*ty
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2173,7 +2180,7 @@ func (c *Client) PostUsernameRoles(ctx context.Context, req *types.AssignRoleReq
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -2213,7 +2220,7 @@ func (c *Client) Healthz(ctx context.Context, req *types.Empty) (*types.HealthRe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}

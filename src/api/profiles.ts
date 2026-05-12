@@ -251,16 +251,6 @@ export async function listProfiles(): Promise<ProfileView[]> {
   return ((r.profiles ?? []) as unknown[]).map((p) => fromWireProfile(p))
 }
 
-// NOTE: the genapi TS client extracts the path-token name from the
-// request object using the path's literal token (`profileId`, camel),
-// not the schema's snake_case field name (`profile_id`). The TS type
-// `ProfileIDPath { profile_id: string }` is therefore wrong at runtime
-// — passing `{profile_id: id}` throws "missing path parameter profileId"
-// inside expandPath. We work around this by sending `profileId` and
-// casting through `as unknown` so TypeScript doesn't complain. The
-// structural fix lives in genapi's TS template (~/src/devnw/go/genapi);
-// tracked as a follow-up to Plan A's path-binding fix.
-
 // NOTE: a single-row `getProfile(id)` helper used to live here. It was
 // removed (Q03 / #91) because it had zero callers in the SPA -- the page
 // always rehydrates via `listProfiles()` after a mutation. Add it back in
@@ -279,17 +269,13 @@ export async function updateProfile(
   input: UpdateProfileInput
 ): Promise<ProfileView> {
   const wire = toWireUpdateRequest(input)
-  const r = await client.patchProfileid({
-    ...wire,
-    profileId: id,
-  } as unknown as {
-    description?: string
-  })
+  // genapi#216 (Q02 / #90): the generated client's expandPath now maps the
+  // {profileId} URL token to the schema field `profile_id`, so we pass a
+  // typed UpdateProfileReq directly -- no `as unknown as {...}` cast.
+  const r = await client.patchProfileid({ ...wire, profile_id: id })
   return fromWireProfile(r)
 }
 
 export async function deleteProfile(id: string): Promise<void> {
-  await client.deleteProfileid({ profileId: id } as unknown as {
-    profile_id: string
-  })
+  await client.deleteProfileid({ profile_id: id })
 }

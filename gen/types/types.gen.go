@@ -794,6 +794,7 @@ type UpdateProfileReq struct {
 	IsDefault *bool `json:"is_default,omitempty" genapi:"is_default"`
 	Name *string `json:"name,omitempty" genapi:"name"`
 	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
+	ProfileID string `json:"profile_id" genapi:"profile_id"`
 	SavedUsername *string `json:"saved_username,omitempty" genapi:"saved_username"`
 	TLS jsontext.Value `json:"tls" genapi:"tls"`
 }
@@ -805,6 +806,8 @@ func (v UpdateProfileReq) Valid() error {
 	if v.Dsn != nil && len(*v.Dsn) > 1024 { return errors.New("dsn: too long") }
 	if v.Name != nil && len(*v.Name) < 1 { return errors.New("name: too short") }
 	if v.Name != nil && len(*v.Name) > 64 { return errors.New("name: too long") }
+	if len(v.ProfileID) < 1 { return errors.New("profile_id: too short") }
+	if len(v.ProfileID) > 64 { return errors.New("profile_id: too long") }
 	if v.SavedUsername != nil && len(*v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
 	return nil
 }

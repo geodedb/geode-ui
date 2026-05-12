@@ -1081,7 +1081,9 @@
 
     "UpdateProfileReq": {
       "type": "object",
+      "required": ["profile_id"],
       "properties": {
+        "profile_id":     { "type": "string", "minLength": 1, "maxLength": 64 },
         "name":           { "type": "string", "nullable": true, "minLength": 1, "maxLength": 64 },
         "dsn":            { "type": "string", "nullable": true, "minLength": 1, "maxLength": 1024 },
         "description":    { "type": "string", "nullable": true, "maxLength": 256 },

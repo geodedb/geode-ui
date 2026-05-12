@@ -1235,7 +1235,8 @@ components:
             type: object
         UpdateProfileReq:
             description: Generated schema for UpdateProfileReq
-            example: {}
+            example:
+                profileId: x
             properties:
                 description:
                     example: x
@@ -1260,6 +1261,12 @@ components:
                 poolOverrides:
                     example: {}
                     type: object
+                profileId:
+                    example: x
+                    maxLength: 64
+                    minLength: 1
+                    pattern: ^.*$
+                    type: string
                 savedUsername:
                     example: x
                     maxLength: 128
@@ -1268,6 +1275,8 @@ components:
                 tls:
                     example: {}
                     type: object
+            required:
+                - profileId
             type: object
         UploadResp:
             description: Generated schema for UploadResp
