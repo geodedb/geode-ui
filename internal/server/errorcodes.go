@@ -7,8 +7,13 @@ package server
 // the WebSocket {kind:"error", code, message} frame (queryStreamMsg.Code),
 // or via one of the envelope helpers (badRequest, writeBadRequest,
 // writeEndpointErr, writeErr) — uses a `code` value that is part of the
-// stable wire contract: the SPA keys i18n messages off it and external
-// API consumers branch on it. Renaming a code value is a breaking change.
+// stable wire contract. The SPA renders the server's `error_description`
+// verbatim for display; it additionally *branches* on a small subset of
+// these codes (e.g. wire-feature-missing -> a clean "not supported by
+// this build" message) -- those codes are mirrored in
+// src/api/serverErrorCodes.ts and scripts/check-error-codes.mjs asserts
+// the mirror stays in sync. External API consumers branch on these
+// values too; renaming a code value is a breaking change.
 //
 // To keep that contract reviewable, every distinct `code` string lives
 // here as a typed constant. errorcodes_test.go is a golden test that

@@ -104,6 +104,17 @@ repos:
     pass_filenames: false
     files: ^\.gitlab-ci\.yml$
 
+      # Error-code seam guard: every server error code the SPA branches on
+      # (exported from src/api/serverErrorCodes.ts) must still exist as an
+      # ErrCode* constant in internal/server/errorcodes.go. Catches silent
+      # drift between the two sides. Cheap; runs only when either file moves.
+  - id: check-error-codes
+    name: error-code seam vs errorcodes.go
+    entry: node scripts/check-error-codes.mjs
+    language: system
+    pass_filenames: false
+    files: ^(internal/server/errorcodes\.go|src/api/serverErrorCodes\.ts)$
+
   - id: gofmt-check
     name: gofmt
     entry: scripts/check-gofmt.sh
