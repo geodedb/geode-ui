@@ -160,6 +160,12 @@ export const en = {
     pathClear: 'Clear path',
   },
 
+  matrix: {
+    empty: 'No edges between labelled nodes to show.',
+    tableLabel: 'Label adjacency matrix',
+    cellTitle: '{{from}} → {{to}}: {{count}} edges ({{types}})',
+  },
+
   schema: {
     graphsTitle: 'Graphs',
     noGraphs: 'No graphs.',
