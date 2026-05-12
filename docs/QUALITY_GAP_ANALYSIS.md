@@ -1,6 +1,6 @@
 # QUALITY_GAP_ANALYSIS.md
 
-Last updated: 2026-05-11
+Last updated: 2026-05-11 (Phase 4 cohort appended)
 Repo: `devnw/codepros/geode/geode-ui`
 Source: `/codepros:audit` Phase 4 — quality-issue-tracker
 
@@ -43,7 +43,7 @@ their own GAP files.
 | Q8  | Inconsistent contract: typed `User`/`Permission` vs `[]jsontext.Value` | Medium |    48 | [#38](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/38)              | `internal/server/handlers_users.go`, `geode.json`, `src/components/admin/UsersPage.tsx`                          | **Closed (resolved 2026-05-11)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q8-38-typed-user-and-permission-list-responses-resolved); closure commit `2046289` (no genapi change needed). genapi already supports typed list items via `"items": {"$ref": "Schema"}`, and geode-ui already had a hand-rolled `userFromRow` row-projection helper for the single-user endpoint. `geode.json` now declares `UserList.users` as `array<User>` and adds a `Permission` schema (`permission`/`resource`/`scope`) with `PermissionList.permissions` as `array<Permission>` — so `gen/types/types.gen.go` emits `UserList.Users []User` and `PermissionList.Permissions []Permission` and the React client gets typed `User[]` / `Permission[]`. `GetUsers` / `Permissions` in `handlers_users.go` build the typed slices via `userFromRow` / new `permissionFromRow`, which project the runtime-discovered `SHOW USERS` / `SHOW PERMISSIONS FOR USER` columns onto the known fields and drop unknowns with a once-per-process `warnRowDrift` log (so a future Geode catalogue column addition is visible in logs without a wire-shape regression). `src/components/admin/UsersPage.tsx` imports `User` from `@api` instead of re-declaring a structural shadow + casting `Array<unknown>`. Tests: `internal/server/handlers_users_test.go` (typed list happy-path, drift-drops-unknown-column, typed Permissions). |
 | Q9  | DRY: 9 user handlers repeat `connDB`+`quoteIdent` preamble           | Medium   |    40 | [#41](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/41)              | `internal/server/handlers_users.go` (9 sites)                                                                    | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q9-41-extract-withconndbandident-helper-resolved). Closure commit `1b227da`. `withConnDBAndIdent(ctx, name, fn)` extracted in `handlers_users.go`; the 8 handler sites that pair `connDB` with `quoteIdent` (PostUsers, GetUsername, PatchUsername, DeleteUsername, Password, PostUsernameRoles, Permissions, toggleUser) now route through it. `GetUsers` retains the bare `connDB` call (no username to quote). Table-driven test `TestWithConnDBAndIdent_TableDriven` covers happy path, missing-active-connection (502 profile_unreachable), and invalid identifier (400 invalid_username). |
 | Q11 | Drop `@types/cytoscape` — blocks `make web-build`                    | Medium   |    40 | [#43](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/43)              | `package.json` devDependencies                                                                                    | **Closed** 2026-05-07 (`1fda90a`, `0e22763`) -- stub removed; tsc errors uncovered by removal fixed in follow-up commit; `make web-build` now succeeds. |
-| Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | `.pre-commit-config.yaml:130` runs `scripts/run-go.sh tool-golangci` at pre-push | **Closed** — `golangci-lint` already wired into the pre-push hook gauntlet. Output is enforced (commits/pushes are blocked on findings; QF1001/QF1008/unused already burned down). |
+| Q13 | Adopt `golangci-lint` (errcheck, staticcheck, ...)                   | Low      |    36 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)              | `.pre-commit-config.yaml:130` runs `scripts/run-go.sh tool-golangci` at pre-push | **Partial (re-opened 2026-05-11 as GAP-018)** — pre-push hook is wired and uses the default linter set, but there is **no `.golangci.yml` config file at the repo root**, so the configurable linters called out in the acceptance criteria (`gocognit` / `nestif` / `dupl` / `gocyclo` / `revive`, etc.) are not engaged. The earlier "Closed" mark was incorrect: hook wiring satisfied half the work; the config file is still missing. Tracked at #46 / GAP-018. |
 | Q14 | Wire coverage gates (Go ~68.7% floor, Jest threshold)                | Low      |    32 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48)              | (repo root) CI + Jest config                                                                                      | Enforce floors; ratchet up monthly                                              |
 | Q10 | Missing `docs/adr/` + `internal/server/README.md`                    | Low      |    24 | [#42](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/42)              | `docs/adr/0000-record-architecture-decisions.md` (new), `internal/server/README.md` (new)                         | **Closed (resolved 2026-05-10)** — see [GAP_ANALYSIS_RESOLVED.md](./GAP_ANALYSIS_RESOLVED.md#q10-42-add-docsadr-skeleton--internalserverreadmemd-resolved). Closure commit `bceb198`. ADR meta-record added under `docs/adr/` (Nygard convention, four-section template, supersession protocol documented); `internal/server/README.md` documents per-file layout, audit/rate-limit conventions, generated-code policy, and the `GOEXPERIMENT=jsonv2` build-env requirement. |
 | Q12 | Two lockfiles committed (`package-lock.json` + `pnpm-lock.yaml`)     | Low      |    24 | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44)              | `package-lock.json`, `pnpm-lock.yaml`                                                                              | Delete `package-lock.json`; gitignore                                            |
@@ -257,3 +257,202 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 #### Upstream-blocked
 
 - **Q02** — waits on genapi#216, then a one-MR cast cleanup.
+
+---
+
+## Phase 4 — 2026-05-11 audit (HEAD `d3e5de1`)
+
+This cohort tracks the 46 quality findings (Q1-Q46) from the 2026-05-11 Phase 3
+deep-review of `geode-ui`, scored with the codepros quality-scoring framework
+(`PriorityScore = Severity × Confidence × Reach`). Already-tracked findings that
+the **gap-sync agent** owns (#44 lockfile, #46 golangci, #48 coverage, #90 genapi
+casts, #102 login/connection dup) were **referenced not recreated**; cross-link
+comments were posted to each.
+
+### Tool results at audit time (HEAD `d3e5de1`)
+
+| Tool                     | Result                            | Notes                                           |
+|--------------------------|-----------------------------------|-------------------------------------------------|
+| `tsc --noEmit`           | clean                             | electron-side coverage gated by Q25.            |
+| ESLint / Prettier        | clean                             | No new violations on changed files.             |
+| Jest                     | green                             | No `--coverage` threshold enforced (#48 / Q29). |
+| `go vet ./...`           | clean                             | But picks up `node_modules/flatted/...` (Q31).  |
+| `gofmt -l`               | clean                             |                                                 |
+| `golangci-lint`          | clean (pre-push)                  | No `.golangci.yml` (#46 / Q30).                 |
+| `go test -cover`         | server ~68.7% line; cmd/server 4% → **65.3%** (`adf6b6f`, Q16+Q26) | Q27 / Q28 still raise the floor.                |
+| `make web-build`         | green                             |                                                 |
+| `.gitlab-ci.yml` audit   | gaps (Q35 needs: **FIXED `790cdcb`**; electron-tsc gate **FIXED `f444c70`**) | Q32 (`@latest`), Q33 (cache:[]) still open.     |
+
+### Phase 4 findings table — Phase 3 cohort (PriorityScore desc)
+
+Top-priority (Score ≥ 15):
+
+| ID  | Title                                                                  | Score | Issue                                                              | Evidence                                                                 |
+|-----|------------------------------------------------------------------------|------:|--------------------------------------------------------------------|---------------------------------------------------------------------------|
+| Q9  | streamQueryResult cognitive 38 — extract errWriter shim                |    20 | [#125](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/125) | `internal/server/result_codec.go:81-181`                                  |
+| Q35 | **CLOSED `790cdcb`** — `build` CI job now `needs:` typecheck/unit-tests/audit-ratchets (+ install, eslint) — can no longer ship red |    20 | [#129](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/129) | `.gitlab-ci.yml` `build:` `needs:` block                                  |
+| Q36 | **CLOSED `210133e`** — `go.mod:5` now `replace geodedb.com/geode => ../geode-client-go` (relative); `make go-test`/`go-build` resolve; CI's `go mod edit -replace` still works (now redundant) | 20 | [#131](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/131) | `go.mod:5`                                                                |
+| Q23 | Centralise error-code taxonomy (`internal/server/errorcodes.go`)       |    15 | [#126](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/126) | 9+ distinct `code: "..."` literals across the handler tree                |
+| Q32 | CI installs `genapi` & `golangci-lint` with `@latest` — pin            |    15 | [#127](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/127) | `.gitlab-ci.yml:249,261`                                                  |
+| Q39 | `streamQueryResult` mid-stream truncation logs no rows_sent/elapsed_ms |    15 | [#134](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/134) | `internal/server/result_codec.go:127-150`                                 |
+| Q41 | Add `internal/server/CONVENTIONS.md` (invariants index)                |    15 | [#136](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/136) | `internal/server/` (no `CONVENTIONS.md`)                                  |
+| Q10 | `IsRevoked` nestif 7 on every-request hot path                         |    15 | [#144](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/144) | `internal/jwt/revocation.go:185-218`                                      |
+| Q12 | `Login` handler 123 LOC, cognitive ~30                                 |    15 | [#146](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/146) | `internal/server/handlers_auth.go:31-154`                                 |
+| Q13 | `WSServer.Query` 110 LOC — extract reader+streamer                     |    15 | [#149](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/149) | `internal/server/ws_query.go:189-298`                                     |
+| Q29 | Coverage gate in CI                                                    |    15 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48) *(REFERENCE — gap-sync)*  | (gap-sync owns)                                          |
+| Q30 | `.golangci.yml` config                                                 |    15 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46) *(REFERENCE — gap-sync)*  | (gap-sync owns)                                          |
+
+High-priority (Score 9-14):
+
+| ID  | Title                                                                  | Score | Issue                                                              | Evidence                                                                 |
+|-----|------------------------------------------------------------------------|------:|--------------------------------------------------------------------|---------------------------------------------------------------------------|
+| Q1  | Three SHOW-list handlers duplicate body — extract listRowsAsJSONValues |    9  | [#138](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/138) | `handlers_backups.go:62-84`, `handlers_policies.go:34-56`, `handlers_roles.go:35-57` |
+| Q8  | `PatchUsername` cognitive ~45 — decompose                              |    12 | [#141](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/141) | `internal/server/handlers_users.go:162`                                   |
+| Q14 | `stageUpload` 94 LOC + repeated error blocks                           |    9  | [#155](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/155) | `internal/server/handlers_uploads.go:85-179`                              |
+| Q15 | `profilestore/sqlite.go` `Patch` 87 LOC                                |    9  | [#157](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/157) | `internal/profilestore/sqlite.go:433-520`                                 |
+| Q16 | **CLOSED `adf6b6f`** — `cmd/server/main.go` → 12-line shim; new `cmd/server/app.go` (`appConfig`/`parseFlags`/`newApp`/`(*app).serve`/`run`) + `cmd/server/profileseed.go` | 12 | [#158](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/158) | `cmd/server/main.go`, `cmd/server/app.go`, `cmd/server/profileseed.go`    |
+| Q17 | `projectColumns.ts` 155 LOC dense triple-loop                          |    12 | [#162](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/162) | `src/components/results/projectColumns.ts:75-229`                         |
+| Q18 | `GraphView.tsx` 1257 LOC — split hooks + sub-components                |    6  | [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164) | `src/components/results/GraphView.tsx`                                    |
+| Q21 | SHOW-catalogue list handlers still use `[]jsontext.Value`              |    9  | [#166](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/166) | Backups, Policies, Roles, Migrations handlers                             |
+| Q22 | Empty-result handling inconsistent across list handlers                |    12 | [#168](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/168) | `handlers_*.go` (isWireFeatureMissing branches)                           |
+| Q25 | **CLOSED `f444c70`** — `package.json` devDeps `+ electron@^42.0.1`, `+ @types/node@^22.19.19`; `package-lock.json` updated; `.gitlab-ci.yml electron-typecheck` no longer `allow_failure`; `npm run electron:tsc` exits 0 (also closes F-SUP-4 #160). **Note:** `pnpm-lock.yaml` NOT regenerated — pnpm refuses (`packageManager: npm`); dual-lockfile cleanup tracked at Q-other / GAP-017 #44. | 12 | [#170](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/170) | `.gitlab-ci.yml`, `package.json`                                          |
+| Q26 | **CLOSED `adf6b6f`** — new `cmd/server/app_test.go` (6 tests: `TestRun_MissingJWTSecret_ExitsNonZero`, `TestNewApp_HappyPath` healthz=200, `TestNewApp_WiresMCPAuthVerifier`, …); `internal/profilestore.NewCipherFromEnvFunc` added. `cmd/server` coverage **4.0% → 65.3%**. | 12 | [#172](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/172) | `cmd/server/`                                                             |
+| Q27 | `src/components/ops` 28% coverage on data-destructive pages            |    12 | [#173](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/173) | `src/components/ops/`                                                     |
+| Q31 | `node_modules/flatted/.../flatted.go` picked up by `go list ./...`     |    6  | [#174](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/174) | `node_modules/flatted/golang/pkg/flatted/flatted.go`                      |
+| Q34 | `deploy/Dockerfile` `npm ci` before `COPY` needs invariant header      |    4  | [#175](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/175) | `deploy/Dockerfile:27-29`                                                 |
+| Q37 | `make build` re-runs `make generate` unconditionally                   |    12 | [#177](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/177) | `Makefile:59`                                                             |
+| Q42 | Add `docs/adr/0001-generated-api-boundary.md`                          |    12 | [#178](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/178) | `docs/adr/` (boundary ADR missing)                                        |
+| Q44 | Add `docs/RUNBOOK.md` (rotation, audit reading, retention)             |    12 | [#179](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/179) | `docs/RUNBOOK.md` missing                                                 |
+
+Medium-priority (Score 5-8):
+
+| ID  | Title                                                                  | Score | Issue                                                              | Evidence                                                                 |
+|-----|------------------------------------------------------------------------|------:|--------------------------------------------------------------------|---------------------------------------------------------------------------|
+| Q3  | Tx Commit vs Rollback duplicate body — extract finalizeTx              |    6  | [#182](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/182) | `internal/server/handlers_tx.go:205-261`                                  |
+| Q7  | `AuthProvider.test.tsx` 1009 LOC — extract `mockAuthFetch`             |    6  | [#183](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/183) | `src/auth/AuthProvider.test.tsx`                                          |
+| Q19 | `TableView.tsx` 605 LOC — lift hooks per Q18 pattern                   |    4  | [#184](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/184) | `src/components/results/TableView.tsx`                                    |
+| Q28 | `gqlLanguage.ts` Monaco tokenizer at 33% coverage                      |    6  | [#185](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/185) | `src/language/gqlLanguage.ts`                                             |
+| Q33 | `.gitlab-ci.yml` `.go_defaults cache: []` wipes Go module cache        |    6  | [#176](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/176) | `.gitlab-ci.yml:235-242`                                                  |
+| Q38 | `cmd/server/main.go` shutdown error swallowed silently — **now a trivial follow-up after `adf6b6f`**: `(*app).serve` already returns the shutdown error; remaining work is just to log/propagate it from `run`. Left OPEN. | 4 | [#180](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/180) | `cmd/server/app.go` (`(*app).serve`)                                      |
+| Q40 | `WSServer.Query` cancel-reader goroutine outlives handler              |    8  | [#151](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/151) | `internal/server/ws_query.go:219-231`                                     |
+
+Low-priority (Score ≤ 4):
+
+| ID  | Title                                                                  | Score | Issue                                                              | Evidence                                                                 |
+|-----|------------------------------------------------------------------------|------:|--------------------------------------------------------------------|---------------------------------------------------------------------------|
+| Q2  | Backups DeleteFile vs Migrations Sign duplicate body                   |    4  | [#186](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/186) | `handlers_backups.go`, `handlers_migrations.go`                           |
+| Q4 + Q5 + Q6 | Tighten export surface — useProfileForm / lib/graphResult / GqlNode/RbacAction unused exports | 2+2+3 | [#187](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/187) | `src/components/profiles/useProfileForm.ts`, `src/lib/graphResult.ts`, `src/types/*` |
+| Q11 | `RevocationSet.Sweep` nestif 6 — extract sweep* helpers                |    4  | [#152](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/152) | `internal/jwt/revocation.go:225-252`                                      |
+| Q20 | `lib/graphResult.ts` 524 LOC — split into types/extract/labels         |    4  | [#188](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/188) | `src/lib/graphResult.ts`                                                  |
+| Q24 | Admin handlers accept `name`/`policy`/`role` dual-key — document       |    4  | [#189](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/189) | `handlers_policies.go`, `handlers_roles.go`, `handlers_grants.go`         |
+| Q43 | Add `internal/jwt/README.md`                                           |    4  | [#181](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/181) | `internal/jwt/`                                                           |
+| Q45 | GraphView/graphResult sparse "why" comments                            |    4  | [#190](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/190) | `src/components/results/GraphView.tsx`                                    |
+| Q46 | No `CHANGELOG.md` — seed from git log                                  |    3  | [#191](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/191) | repo root                                                                 |
+
+### Deduplication map (Phase 3 → already-tracked)
+
+| Phase 3 finding | Existing issue (gap-sync owns) | Cross-link comment |
+|-----------------|---------------------------------|----|
+| Q29 (coverage gates)        | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48)  | Posted 2026-05-11 |
+| Q30 (`.golangci.yml`)       | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)  | Posted 2026-05-11 |
+| Q-genapi-shim (5 casts)     | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/90)  | Posted 2026-05-11 (cross-links Q21/#166) |
+| Lockfile dup (re-confirmed) | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44)  | Posted 2026-05-11 |
+| Q-login/conn dup (re-confirmed) | [#102](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/102) | Posted 2026-05-11 |
+
+### Findings by category (Phase 4 cohort)
+
+#### Complexity / decomposition (Q8, Q9, Q10, Q11, Q12, Q13, Q14, Q15, Q16, Q17, Q18, Q19, Q20)
+
+The single largest cohort — 13 findings spanning the Go server hot paths
+(`streamQueryResult`, `Login`, `WSServer.Query`, `IsRevoked`, `Sweep`) and the
+SPA result-view layer (`GraphView`, `TableView`, `projectColumns`,
+`graphResult`). Q16 is the highest-leverage anchor: decomposing the 482-LOC
+god-main into `cmd/server/app.go` unblocks Q26 (4% coverage) and Q38 (shutdown
+swallow). **CLOSED `adf6b6f`** (2026-05-11 gap-closure run): Q16 + Q26 landed
+together — `cmd/server/main.go` is now a 12-line shim, the logic lives in
+`cmd/server/app.go` / `cmd/server/profileseed.go`, and `cmd/server` coverage went
+4.0% → 65.3%. Q38 (#180) is now trivially closeable (`(*app).serve` already
+returns the shutdown error).
+
+#### Duplication (Q1, Q2, Q3, Q4-Q6, Q7)
+
+All small. Q1 (three SHOW-list handlers) is the highest-leverage because the
+same body sits in the path of Q21 (typed list responses) and Q22 (empty-result
+contract) — landing Q1 first makes Q21/Q22 trivially mechanical.
+
+#### API contract / wire stability (Q21, Q22, Q23, Q24)
+
+Q23 (error-code taxonomy) is the keystone — once a central registry exists,
+Q22 (empty-list contract) and Q24 (dual-key documentation) collapse into
+CONVENTIONS.md entries.
+
+#### Test coverage (Q26, Q27, Q28)
+
+Three pinpointed coverage holes. Q27 (`src/components/ops` 28%) is the most
+urgent because those pages mutate live data; Q26 / Q28 are paired with their
+respective decomposition issues.
+
+#### CI / toolchain (Q25, Q29, Q30, Q31, Q32, Q33, Q34, Q35, Q36, Q37, Q46)
+
+Eleven findings. EPIC-Q2 below; Q35 (build needs:) and Q32 (`@latest`) are the
+release-blocker-grade items. **Closed in the 2026-05-11 gap-closure run:** Q35
+(#129, `790cdcb` — `build:` now `needs:` typecheck/unit-tests/audit-ratchets) and
+Q25 (#170, `f444c70` — electron-tsc is a real gate, electron in devDeps). Q32,
+Q33, Q31, Q34, Q37 still open.
+
+#### Docs / ADR / runbook (Q41, Q42, Q43, Q44, Q45)
+
+EPIC-Q3. Q41 (`internal/server/CONVENTIONS.md`) is the anchor; the other four
+cross-link into it.
+
+#### Maintainability / observability (Q38, Q39, Q40)
+
+Q39 (truncation log) and Q40 (cancel-reader lifetime) are the high-leverage
+WS-path items; Q38 is paired with Q16 — and after `adf6b6f` (Q16 closure) Q38 is
+a trivial follow-up since `(*app).serve` already returns the shutdown error.
+
+### Roadmap (Phase 4 cohort)
+
+#### Quick wins (≤ 1 day each)
+
+- Q9 (#125), Q39 (#134) — single-file refactors with strong test coverage already in place.
+- Q1 (#138), Q3 (#182), Q2 (#186) — DRY extractions.
+- Q31 (#174), Q33 (#176), Q34 (#175), Q37 (#177) — CI / Makefile micro-fixes.
+- Q41 (#136), Q42 (#178), Q43 (#181), Q45 (#190), Q46 (#191) — pure-doc.
+
+#### Release-blocker-grade (land before next tag)
+
+- Q32 (#127) — `@latest` is a ticking bomb on CI. **STILL OPEN.**
+- ~~Q35 (#129)~~ — **CLOSED `790cdcb`** — `build:` now `needs:` typecheck/unit-tests/audit-ratchets.
+- ~~Q36 (#131)~~ — **CLOSED `210133e`** — `go.mod` `replace` is now the relative `../geode-client-go` path.
+
+#### Medium (1-5 days each)
+
+- Q23 (#126) — error-code registry; touches every handler.
+- Q8 (#141), Q10 (#144), Q11 (#152), Q12 (#146), Q13 (#149), Q14 (#155), Q15 (#157), Q17 (#162) — focused function decompositions.
+- Q21 (#166), Q22 (#168) — wire-shape parity sweep.
+- ~~Q25 (#170)~~ — **CLOSED `f444c70`** — electron-tsc is now a real gate; electron + @types/node added to devDeps.
+- Q27 (#173) — destructive-pages coverage.
+- Q44 (#179) — runbook.
+
+#### Strategic (> 5 days)
+
+- **EPIC-Q1** (`cmd/server` decomposition): ~~Q16 (#158)~~ + ~~Q26 (#172)~~ — **CLOSED `adf6b6f`** (decomposed into `cmd/server/app.go` + `profileseed.go`; coverage 4.0% → 65.3%). Q38 (#180) remains, now a trivial follow-up.
+- **EPIC-Q2** (CI gating sweep): ~~Q35 (#129)~~ **CLOSED `790cdcb`**; ~~Q25 (#170)~~ **CLOSED `f444c70`**; Q29 + Q30 + Q32 + Q33 still open. **Partial progress** — defer remainder to gap-sync where overlapping (#46, #48).
+- **EPIC-Q3**: Q22 + Q23 + Q41 + Q42 + Q43 + Q44 — module-conventions docs. Q41 + Q23 first; everything else cross-links.
+- Q18 (#164) — GraphView decomposition; two-MR split.
+
+### Phase 4 counts
+
+- Filed in this cohort: **29 new issues** (#125, #126, #127, #129, #131, #134, #136, #138, #141, #144, #146, #149, #151, #152, #155, #157, #158, #162, #164, #166, #168, #170, #172, #173, #174, #175, #176, #177, #178, #179, #180, #181, #182, #183, #184, #185, #186, #187, #188, #189, #190, #191).
+- Cross-link-only (deduped against existing): **5** (#46, #48, #90, #44, #102).
+- Total Phase 3 findings triaged: 46 (Q1-Q46). Q4/Q5/Q6 consolidated under #187; remaining 43 distinct issues.
+- No `won't-fix` decisions in this cohort yet — every finding has a remediation path.
+
+### Notes on Q13/Q14 framing (gap-sync handoff)
+
+The historic Q13 (#46 golangci) and Q14 (#48 coverage) rows above are
+gap-sync-owned. The current scan re-confirms both are still open from a
+Phase-4 perspective; no doc-row status change made here, deferring to
+gap-sync. If a status correction lands in parallel, prefer gap-sync's
+framing.

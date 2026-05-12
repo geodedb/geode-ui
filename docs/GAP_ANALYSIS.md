@@ -2,6 +2,7 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
+- **Last refreshed:** 2026-05-11 (audit Phase 4 sync)
 - **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors them.
 
@@ -40,7 +41,7 @@ No release-blocking gaps. 4 of 7 are blocked on upstream Geode v0.6+; 2 CI verif
 | GAP-006 | e2e job runtime status in CI not verified | **Closed (resolved 2026-05-10)** -- see [GAP_ANALYSIS_RESOLVED.md#gap-006-6-e2e-job-runtime-status-in-ci-not-verified-resolved](./GAP_ANALYSIS_RESOLVED.md) | Low | [#6](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/6) | `.gitlab-ci.yml` declares e2e job; latest `main` pipeline [#2514181822](https://gitlab.com/devnw/codepros/geode/geode-ui/-/pipelines/2514181822) sampled on sha `f815d1a` (2026-05-10). | Pipeline URL recorded; runtime visibility re-established. Pipeline status itself (failed/passed) is tracked separately in the pipelines view; this gap was a *verification* gap (no recent sample) and is closed by the act of sampling. |
 | GAP-007 | docker-compose stack-up smoke not executed | **Closed (resolved 2026-05-10)** -- see [GAP_ANALYSIS_RESOLVED.md#gap-007-7-docker-compose-stack-up-smoke-not-executed-resolved](./GAP_ANALYSIS_RESOLVED.md) | Low | [#7](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/7) | Requirement e2e-7 / T6 rebuild-and-push. e2e stack live smoke 2026-05-10: `curl http://localhost:8080/healthz` -> `200 {"status":"ok","version":"v0.1.0"}`; `curl http://localhost:8080/api/v1/profiles/public` -> `200` with one profile. | Stack-up smoke executed against `deploy/docker-compose.test.yml`; both endpoints 2xx. |
 | GAP-008 | Pre-commit ratchets (lint:hardcoded-styles, lint:contrast, verify:translations, detect:hardcoded-strings) missing from CI | **Closed** 2026-05-08 | Medium | — | `.gitlab-ci.yml:audit-ratchets` job added | New `audit-ratchets` lint-stage job runs all four scripts on MR + main. |
-| GAP-009 | `electron:tsc/build/package` scripts not in CI | **Closed** 2026-05-08 | Medium | — | `.gitlab-ci.yml:electron-typecheck` job added | Type-checks `electron/main.ts` + `electron/preload.ts`; `allow_failure: true` until electron deps land. |
+| GAP-009 | `electron:tsc/build/package` scripts not in CI | **Closed** 2026-05-08 (hardened 2026-05-11) | Medium | — | `.gitlab-ci.yml:electron-typecheck` job added | Type-checks `electron/main.ts` + `electron/preload.ts`. **2026-05-11 (`f444c70`, Q25/#170 + F-SUP-4/#160):** `allow_failure` removed — `electron-typecheck` is now a real gate; `electron@^42.0.1` + `@types/node@^22.19.19` added to devDependencies; `npm run electron:tsc` exits 0. |
 | GAP-010 | CSP behavior under Electron `geode://` origin not documented | **Closed** 2026-05-08 | Low | — | `docs/ELECTRON.md` (new "Content-Security-Policy under the `geode://` origin" section) | Each CSP directive's behaviour under `geode://app` documented; `connect-src` flagged as the only operator-configuration concern. |
 | GAP-011 | No e2e coverage for packaged Electron build | Deferred (release-eng blocker) | Low | — | `e2e/specs/` (12 specs, browser-only) | **Unblock condition:** `electron` + `electron-builder` pulled into devDependencies and a CI job emits a packaged artifact. Then add a Playwright spec using `_electron.launch()`. |
 | GAP-012 | Only one locale (`en.ts`) — language detector is a no-op | Deferred (feature work) | Low | — | `src/services/i18n/locales/index.ts:24-29` | **Unblock condition:** product chooses a second locale to ship. Discipline + addition steps documented at `docs/I18N.md` "Adding a new locale". |
@@ -243,3 +244,58 @@ addressed before the rebuild is tagged as a release.
   reload path).
 - PSR-G04 <-> PSR-G10: same file (`AddConnectionModal.tsx`); G10 is the
   duplicate site, fold into G04's PR.
+
+## 2026-05-11 audit Phase 4 sync — Bucket-A open gaps (GAP-013..GAP-022)
+
+The 2026-05-11 audit Phase 3 (gap-detector) re-ran against HEAD `d3e5de1`. The findings below are the gaps that remain genuinely open as of that pass; each row reflects current code evidence (verified at HEAD `d3e5de1`) and is mirrored on a GitLab issue. The older `[Quality] ...` and `[Perf] ...` titled issues (#8–#17, #19, #24, #25, #28, #30, #33, #35, #39, #40, #45, #47, #50) were closed as duplicates of their newer canonical equivalents (e.g. `[QUALITY-XX]` and `[PERF-FX]`) during this same Phase-4 run. Closures of verified-fixed items are recorded in `docs/GAP_ANALYSIS_RESOLVED.md`.
+
+| Gap-ID  | Title | Status | Severity | Issue | Evidence (verified at HEAD `d3e5de1`) | Next action |
+|---------|-------|--------|----------|-------|---------------------------------------|-------------|
+| GAP-013 | e2e-18 admin-users specs skip on missing Geode wire ops | Open (upstream-blocked) | Low | [#2](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/2) | `e2e/specs/07-admin-users.spec.ts:64,86,112,120` runtime probes still skip on missing `SHOW USERS` / `CREATE USER` / `DROP USER`. | Track upstream Geode v0.6+ release; auto-recovers when ops land. |
+| GAP-014 | e2e-19 admin-roles-policies skips on insufficient role | Open (upstream-blocked) | Low | [#3](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/3) | `e2e/specs/08-admin-roles-policies.spec.ts:5-14` `ADMIN_GAP` probe still triggers. | Wait for upstream admin GQL surface. |
+| GAP-015 | e2e-20 ops audit spec skips when /api/v1/audit returns 403 | Open (upstream-blocked) | Low | [#4](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/4) | `e2e/specs/09-ops.spec.ts:39-45` non-2xx skip still triggers. | Upstream Geode audit-role fix or privileged principal. |
+| GAP-016 | e2e-21 MCP `tools/list` skip on jsonrpc error | Open (upstream-blocked) | Low | [#5](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/5) | `e2e/specs/10-mcp-endpoint.spec.ts:124-127` jsonrpc-error skip still triggers. | Monitor MCP server response shape. |
+| GAP-017 | Dual lockfile committed at repo root | Open | Low | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/44) (canonical; #20 closed as dup) | Both `package-lock.json` and `pnpm-lock.yaml` present at repo root; `.gitignore` only ignores `/pnpm-lock.yaml`. | Delete `package-lock.json`, add it to `.gitignore`, document pnpm-only in README. |
+| GAP-018 | No `.golangci.yml` config (golangci-lint runs defaults only) | Partial | Low | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/46) (canonical; #22 closed as dup) | `.golangci.yml` does not exist at repo root. Pre-push hook (`.pre-commit-config.yaml:130`) runs `scripts/run-go.sh tool-golangci` against default linters only — `gocognit`/`nestif`/`dupl`/`gocyclo`/`revive` etc. are NOT engaged. The earlier `docs/QUALITY_GAP_ANALYSIS.md:46` "Closed" mark was partial. | Add `.golangci.yml` enabling gocognit / nestif / dupl / gocyclo / revive; tune burn-down. |
+| GAP-019 | No coverage thresholds (Jest + Go) | Open | Low | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/48) (canonical; #23 closed as dup) | `jest.config.cjs` has no `coverageThreshold` block; CI `go test` invocations lack `-coverprofile` floors. | Wire Jest `coverageThreshold` (~75% statements floor) + Go `-coverprofile` floor (~68.7% server). |
+| GAP-020 | 2 `as unknown as` casts in `src/api/profiles.ts` (was 5) | Open (upstream::genapi) | Medium | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/90) | `src/api/profiles.ts:285` and `src/api/profiles.ts:292` (`updateProfile` and `deleteProfile` request casts); root cause genapi#216 (request typing). | Awaits upstream genapi fix; regen + remove casts after upstream lands. |
+| GAP-021 | Duplicate fetchPublicProfiles+getStoredPassword effect across LoginPage and AddConnectionModal | Open | Low | [#102](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/102) | `src/pages/LoginPage.tsx:101-128` and `src/components/layout/AddConnectionModal.tsx:60-77,136` both run the public-profiles + saved-password effect with near-identical shape. | Extract `usePublicProfilesWithStoredPasswords` hook; migrate both call sites. |
+| GAP-022 | PSR-F5 hot-path: `fs.Stat` per request in embed.go (mis-credited as closed) | Open | Low | [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/103) | `internal/ui/embed.go:112` (`fs.Stat(sub, clean)`) and `embed.go:120` (`fs.Stat(sub, "index.html")`) still call per request. The 2026-05-11 gzip commit `d5126ad` was mis-credited as closing PSR-F5; gzip is the partial closure, the precompute-asset-path-set acceptance criterion remains open. | **Decision pending** (per audit Phase 4 comment on #103): (a) precompute the asset path set at init, or (b) reclassify as won't-do because `fs.Stat` on `embed.FS` is in-memory and not measurably hot. |
+
+### Dedup map (closed-as-duplicate this Phase-4 run)
+
+The following older issues use early-audit titles (`[Quality] ...` / `[Perf] ...`) and are duplicates of canonical newer entries with stable IDs. They are closed in GitLab with a `Closed as duplicate of #NN — closure evidence at docs/GAP_ANALYSIS_RESOLVED.md` comment. Recorded here so historical issue numbers still trace to a canonical close.
+
+| Closed-as-dup | Canonical | Domain | Notes |
+|---------------|-----------|--------|-------|
+| #8  | #43 (QUALITY-11) | Quality | drop @types/cytoscape |
+| #9  | #27 (QUALITY-01) | Quality | split util.go |
+| #10 | #29 (QUALITY-02) | Quality | useApiResource hook |
+| #11 | #31 (QUALITY-03) | Quality | rename `user*` helpers |
+| #12 | #32 (QUALITY-04) | Quality | PatchUsername txn |
+| #13 | #34 (QUALITY-05) | Quality | typed upload endpoints |
+| #14 | #36 (QUALITY-06) | Quality | typed wire-feature-missing |
+| #15 | #37 (QUALITY-07) | Quality | safeEmitAudit policy |
+| #16 | #38 (QUALITY-08) | Quality | typed User/Permission lists |
+| #17 | #41 (QUALITY-09) | Quality | withConnDBAndIdent helper |
+| #19 | #42 (QUALITY-10) | Quality | docs/adr + internal/server/README |
+| #20 | #44 (QUALITY-12 / GAP-017) | Quality | dual lockfile |
+| #22 | #46 (QUALITY-13 / GAP-018) | Quality | adopt golangci-lint config |
+| #23 | #48 (QUALITY-14 / GAP-019) | Quality | coverage gates |
+| #24 | #49 (QUALITY-15) | Quality | pin Node toolchain |
+| #25 | (canonical #25 itself; F3 closed) | Perf | streaming /api/v1/query |
+| #28 | #51 (PERF-F7) | Perf | projectColumns single-pass |
+| #30 | #52 (PERF-F8) | Perf | SchemaExplorer abort/cache |
+| #33 | #53 (PERF-F9) | Perf | GraphView rebuild gate |
+| #35 | #54 (PERF-F10) | Perf | Monaco/Cytoscape lazy |
+| #39 | #55 (PERF-F11) | Perf | pool defaults |
+| #40 | #56 (PERF-F12) | Perf | WS WriteTimeout |
+| #45 | #57 (PERF-F13) | Perf | server hygiene (gzip + pprof) |
+| #47 | #59 (PERF-F15) | Perf | AuditLogPage poll visibility |
+| #50 | #61 (PERF-F18) | Perf | driver re-parse (won't-do) |
+
+## Gap-closure run 2026-05-11 (audit-cohort)
+
+A `/codepros:gap-close` run on 2026-05-11 implemented and closed 12 audit-cohort findings tracked in the domain docs (`SECURITY_GAP_ANALYSIS.md`, `PERF_GAP_ANALYSIS.md`, `QUALITY_GAP_ANALYSIS.md`). None of these carry a `GAP-NNN` ID in this file — they are tracked by their domain IDs (F-SUP-1, F-INPUT-1, F-SUP-4, PERF-2026-05-11-01/02/04/08, Q35, Q36, Q25, Q16, Q26) and GitLab issues. The one crossover here is **GAP-009** (electron CI job), which the same run hardened — `allow_failure` removed via `f444c70`, electron pulled into devDeps. See `docs/gap-closure-reports/2026-05-11-audit-cohort-completion.md` for the full report.
+
+Closed (GitLab): #148, #131, #129, #140, #128, #130, #137, #147, #170, #160, #158, #172 — commit SHAs `d464fe6`, `210133e`, `790cdcb`, `454d0ba`, `c4ef58c`, `4698645` (×3), `f444c70` (×2), `adf6b6f` (×2). Deferred-but-mitigated: #132 (F-AUTH-1, mitigated `c46e77e`, stays open pending upstream genapi context-threading). Deferred-to-upstream-genapi (stay open): #133 (obsx audit allocs), #135 (MCP per-tool role gate). Trivial follow-up after `adf6b6f`: #180 (Q38 shutdown error).

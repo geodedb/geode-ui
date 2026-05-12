@@ -1,11 +1,13 @@
 # Security Gap Analysis — geode-ui
 
 **Last updated:** 2026-05-11
-**Audit:** /codepros:audit Phase 3 → Phase 4 tracking (PSR cohort)
+**Audit:** /codepros:audit Phase 3 → Phase 4 tracking (Audit-2026-05-11 cohort)
 **Repository:** `devnw/codepros/geode/geode-ui`
-**Branch reviewed:** `main` @ `0b73836`
+**Branch reviewed:** `main` @ `d3e5de1`
 
-> **PSR cohort jump-link:** see [Profile System Rebuild (PSR) — 2026-05-10 audit](#profile-system-rebuild-psr--2026-05-10-audit) for the 10 newly-filed S01-S10 findings (issues #114-#123) covering the recent profile-system rebuild only. Prior cohort (F*/N* series, issues #58-#77) below remains the canonical baseline.
+> **Audit-2026-05-11 cohort jump-link:** see [Audit-2026-05-11 cohort — full-tree security pass](#audit-2026-05-11-cohort--full-tree-security-pass) for the 7 newly-filed `F-AUTH-*`/`F-INPUT-*`/`F-SUP-*` findings (issues #132, #135, #140, #143, #148, #153, #160, #161) plus the deferred-comment on #72 (F-SUP-2). Earlier cohorts (PSR S01-S10 = #114-#123; `F*`/`N*` = #58-#77) remain the canonical historical record below.
+>
+> **PSR cohort jump-link:** see [Profile System Rebuild (PSR) — 2026-05-10 audit](#profile-system-rebuild-psr--2026-05-10-audit) for the 10 newly-filed S01-S10 findings (issues #114-#123) covering the recent profile-system rebuild only. Prior cohort (`F*`/`N*` series, issues #58-#77) below remains the canonical baseline.
 
 ## Scope
 
@@ -261,3 +263,91 @@ The PSR cohort is **healthier than the prior F*/N* cohort** by raw count of rele
 2. **Week 2:** Land C1 (S3 + S8 + S4-partial) and C2 (S5) — coordinated PRs, two reviewers each.
 3. **Week 3:** Land S4 (full) and S10 — straightforward; depend on C1/C2 review feedback.
 4. **Backlog:** S7, S9 — post-release hardening + docs.
+
+---
+
+## Audit-2026-05-11 cohort — full-tree security pass
+
+**Scope:** Full-tree adversarial security pass on HEAD `d3e5de1`. Re-runs gitleaks / npm-audit / govulncheck / gosec / semgrep on the working tree and applies manual review against the MCP, profilestore, quoting, CI, and Electron-packaging surfaces.
+
+**Cohort summary:** 7 new GitLab issues (1 confidential, 1 release-blocker) + 1 cross-link comment on the existing F-SUP-2 (#72). The dominant new pattern is **upstream-genapi context-threading** — F-AUTH-1 and F-AUTH-2 both trace back to the MCP tool generator template — combined with a **stdlib supply-chain bump** (F-SUP-1, release-blocker) and three lower-severity hardening items.
+
+### Audit-2026-05-11 findings — stack ranked by risk score
+
+| ID | OWASP / CWE | Risk | Severity | Decision | GitLab issue | File:Line | Title |
+|----|-------------|-----:|----------|----------|--------------|-----------|-------|
+| F-AUTH-1 | A01 / CWE-863 | **20** | High | **Mitigated in-repo `c46e77e`** — full fix tracked upstream genapi (issue pending); **#132 stays OPEN** | [#132](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/132) | `gen/mcp/tools.gen.go:40`; `internal/server/mcp.go:38-40` | MCP `query` tool drops JWT `profile` claim — cross-profile data access |
+| F-SUP-1 | A06 / CWE-1395 | **16** | High | **Closed `d464fe6`** (release-blocker cleared) | [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148) | `scripts/run-go.sh:9` | Go 1.26.2 stdlib has 4 CALLED CVEs — bump to go1.26.3 |
+| F-AUTH-2 | A01 / CWE-862 | **12** | Medium | **Open (upstream genapi)** — depends on F-AUTH-1 context-threading landing upstream first | [#135](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/135) | `gen/pkg/mcpx/engine.go:500-580` | MCP layer has no per-tool role enforcement |
+| F-INPUT-1 | A03 / CWE-89 | **9** | Medium | **Closed `454d0ba`** | [#140](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/140) | `internal/server/quoting.go:61-68` | `quoteString` does not escape backslash — diverges from authoritative GQL escaper |
+| F-SUP-3 | A08 / CWE-829 | **9** | Medium | Open | [#153](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/153) | `.gitlab-ci.yml:24,249,261` | CI components pinned to floating refs |
+| F-SUP-2 | A06 / CWE-1395 | **9** | Medium | **#72 already open** — deferred-comment by gap-sync | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `pnpm-lock.yaml` | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin |
+| F-SUP-4 | A08 / CWE-1357 | **6** | Low | **Closed `f444c70`** | [#160](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/160) | `package.json:31-34` | electron / electron-builder referenced in scripts but missing from devDependencies |
+| F-INPUT-2 | A04 / CWE-665 | **4** | Low | Open (suspected) | [#143](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/143) | `internal/profilestore/sqlite.go:131-140` | `unsealBytes` silently passes ciphertext when cipher unconfigured |
+| F-SUP-5 | A07 / CWE-798 | **2** | Low (info) | Open | [#161](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/161) | `docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:458,461,1697` | Plan doc embeds copyable JWT_SECRET_HEX placeholder |
+
+### Audit-2026-05-11 — release blockers
+
+Both original release-blockers are now resolved or mitigated as of the 2026-05-11 gap-closure run:
+
+1. **F-AUTH-1 (#132)** — **MITIGATED in-repo at `c46e77e`**. `internal/server/mcp.go`'s `MCPServer.Query` now reads a JWT-enriched context (`mcpQueryContext()`) stashed per-goroutine by `MCPAuthVerifier`/`WrapMCPHTTP` (wired in `cmd/server/app.go:298-299`); it falls back to `context.Background()`→"default" only for non-HTTP transports (fail-safe). Pinned by `internal/server/mcp_profile_test.go` (+4 incl. `TestMCPQuery_CrossProfileIsolation`). The *authoritative* fix still needs genapi to thread `context.Context` through `MCPServerInterface.Query`/`mcpx.Tool`/`mcpx.SetAuthVerifier` — **#132 stays OPEN** until the generated MCP path carries the request context natively. Filed `--confidential`.
+2. **F-SUP-1 (#148)** — **CLOSED at `d464fe6`** (+ `a7d63f3` in sibling `../geode-client-go` on branch `codex/client-parity-sync`). All 5 repo refs (`Makefile:3`, `scripts/run-go.sh:9`, `scripts/check-go-mod-tidy.sh:10`, `.gitlab-ci.yml:242`, `deploy/Dockerfile:45`) now `go1.26.3`; sibling `go.mod` `toolchain go1.26.3`; `govulncheck ./...` → "No vulnerabilities found" (GO-2026-4980/4982/4918/4971 no longer CALLED). **Note:** the sibling-repo commit landed on branch `codex/client-parity-sync`, not `main` — a separate PR/merge there is still pending. Release-blocker → **cleared**.
+
+### Audit-2026-05-11 — cross-references
+
+- **F-AUTH-1 (#132) ↔ F-AUTH-2 (#135)** — both trace to the MCP tool generator template in upstream genapi. F-AUTH-1 (context-threading) must land first because F-AUTH-2 (per-tool role gate) needs the verified context to read role claims from.
+- **F-AUTH-1 (#132) ↔ F-1 (#69)** — SEC-F1 wired `mcpx.SetAuthVerifier` (closed); F-AUTH-1 is the follow-on showing that auth is verified but the verified context is dropped before the tool body runs.
+- **F-INPUT-1 (#140) ↔ N1 (#63)** — same `quoting.go` surface; the existing adversarial corpus (closed via SEC-N1) is the extension point for the new backslash-escape test cases.
+- **F-INPUT-2 (#143) ↔ S5 (#118)** — defense-in-depth on the encryption layer that S5 introduced; closes the `cipher == nil && IsCiphertext(raw) == true` truth-table gap.
+- **F-SUP-1 (#148)** — touches `~/src/devnw/codepros/geode/geode-client-go/scripts/run-go.sh` cross-module; both repos must bump in lockstep.
+- **F-SUP-3 (#153)** — overlaps with the quality-Q32 angle (same file, maintainability framing); this issue is the security framing emphasising upstream-takeover risk.
+- **F-SUP-4 (#160) ↔ SEC-NEW-1** — both observe the same Electron-packaging surface; F-SUP-4 is the lockfile-integrity fix while SEC-NEW-1 is the broader release-engineering deferral.
+
+### Audit-2026-05-11 — upstream-genapi follow-ups (pending)
+
+- `genapi#<id-pending>` — **F-AUTH-1 (#132) full fix**: MCP tool generator threads `context.Context` through `MCPServerInterface.<Tool>`, the `mcpx.Tool` signature, and `mcpx.SetAuthVerifier`, so the verified request context reaches the tool body without the per-goroutine stash. Unblock steps: (1) file the genapi issue against `devnw/genapi`; (2) regenerate `gen/` in geode-ui via `make generate`; (3) replace the `mcpQueryContext()` shim in `internal/server/mcp.go` with the natively-threaded ctx; (4) keep `mcp_profile_test.go` green; (5) close #132. In-repo mitigation already committed at `c46e77e`.
+- `genapi#<id-pending>` — **F-AUTH-2 (#135)**: emit a per-tool `required_roles` table alongside `NewTools` in the MCP template (the analogue of REST's per-route role gate), consulted by `handleRaw` between auth-verify and dispatch. **Depends on F-AUTH-1's context-threading landing upstream first** (the role gate needs the verified context to read role claims from). Unblock steps: land the F-AUTH-1 upstream change → add the `required_roles` emission to the MCP template → `make generate` in geode-ui → add per-tool-role tests → close #135. Ensure the GitLab issue carries the `upstream::genapi` label.
+
+(Both should be filed against `devnw/genapi` and the IDs back-linked into this section once they exist. F-AUTH-1's body already notes "upstream tracker pending"; #132's GitLab comment now records the `c46e77e` mitigation.)
+
+### Audit-2026-05-11 — regression check of previously-closed items
+
+Re-ran the relevant smoke tests against HEAD `d3e5de1`:
+
+| Closed item | Issue | Regression check | Result |
+|---|---|---|---|
+| F1 — `/mcp` auth verifier wired | #69 | `mcpx.SetAuthVerifier(srv.AuthJWT)` still present in `cmd/server/main.go:165` | **PASS** (but F-AUTH-1 surfaces the context-threading hole behind it) |
+| F2 — `/auth/login` rate-limit | #58 | `internal/server/loginlimiter.go` still wired | **PASS** |
+| F3 — JWT clock leeway | #70 | `WithLeeway(60s)` still in `internal/jwt/jwt.go` | **PASS** |
+| F4 — CSP / Permissions-Policy / COOP | #60 | `internal/server/security_headers.go` still wraps the SPA pipeline | **PASS** |
+| F5 — `?access_token=` Deprecation header | #71 | `WithAccessTokenDeprecation` still wired | **PASS** |
+| F6+N6 — Audit-log redaction | #67 | `obsx.IsSensitiveKey` + `audit.go` extension still in place | **PASS** |
+| F7 — JWT cookie + CSRF middleware | #62 | Cookie writer/reader + CSRF middleware still in place | **PASS** |
+| F8 — dompurify override | #68 | `package.json` `"overrides": { "dompurify": "^3.4.0" }` resolves to `3.4.2 overridden` | **PASS** |
+| F11 — gosec G115 in gqlx/subscription.go | #77 | Real bounds-check still in the regenerated file | **PASS** |
+| N1 — `quoteString` adversarial corpus | #63 | `quoting_test.go` corpus intact; **F-INPUT-1 extends it with backslash cases** | **PASS** (corpus needs extension) |
+| N2 — JWT revocation | #64 | `RevocationSet` + SQLite-backed cache still wired | **PASS** |
+| N3 — Login profile canonicalisation | #65 | `canonicalProfile()` still called from `handlers_auth.go` | **PASS** |
+| N4 — Server-side password policy | #72 | `validatePassword` still wired | **PASS** |
+| N5 — Wildcard CORS rejection | #74 | `httpx.ValidateConfig` still in place | **PASS** |
+| N7 — Per-IP global rate limiter | #66 | `httpx.PeerLimiter` still wired at 50 rps / burst 100 | **PASS** |
+| N8 — security.txt | #75 | `/.well-known/security.txt` still served (mailto routability **deferred** under SEC-NEW-6) | **PASS** (with caveat) |
+| N10 — Constant-time auth-failure path | #76 | `performDummyCompare` + `loginMinFailureLatency` still present | **PASS** |
+| S1-S10 PSR — | #114-#123 | All ten closures still in place; spot-checked S5 (`OpenSQLiteEncrypted`), S6 (`profile_*` audit events), S8 (`sanitizeConnections`) | **PASS** |
+
+**Hardening tweaks (not regressions):** F-INPUT-1 extends N1's quoting corpus; F-INPUT-2 hardens S5's `unsealBytes`. Both flagged in the cohort table above; no previously-closed item is reopened.
+
+### Audit-2026-05-11 — verdict
+
+The cohort is **smaller and more focused than PSR**: 1 confidential High (cross-profile data access), 1 supply-chain High (stdlib CVEs), 1 latent Medium (MCP role gate), 2 hardening Mediums (quoting backslash escape, CI pin-immutability), 3 Lows (electron lockfile, ciphertext truth-table, doc placeholder).
+
+**Gap-closure status (2026-05-11 run):** F-SUP-1 (#148) **CLOSED** (`d464fe6`); F-INPUT-1 (#140) **CLOSED** (`454d0ba`); F-SUP-4 (#160) **CLOSED** (`f444c70`). F-AUTH-1 (#132) **mitigated in-repo** (`c46e77e`) — stays OPEN pending upstream genapi context-threading. F-AUTH-2 (#135) stays **OPEN (upstream genapi)**, blocked on F-AUTH-1's upstream fix. F-SUP-2 (#72), F-SUP-3 (#153), F-INPUT-2 (#143), F-SUP-5 (#161) remain open (out of scope for this closure run). Both original release-blockers are resolved or mitigated.
+
+**No production credentials are leaked; no active RCE path was identified.** F-AUTH-1 was the closest thing to an immediate concern but requires a valid JWT to exploit, and is now mitigated in-repo.
+
+### Audit-2026-05-11 — immediate actions
+
+- **None requiring secret rotation.** F-SUP-5 is a placeholder (not deployed).
+- **DONE:** F-SUP-1 (`go1.26.3` bump) — `d464fe6`, closes 4 CALLED CVEs. Sibling-repo merge (`../geode-client-go` branch `codex/client-parity-sync`) still pending.
+- **DONE (mitigation):** F-AUTH-1 in-repo mitigation in `internal/server/mcp.go` / `cmd/server/app.go` — `c46e77e`. Full genapi fix still pending upstream.
+- **Remaining:** F-SUP-3 (CI ref pinning, #153), F-INPUT-2 (ciphertext truth-table, #143), F-AUTH-2 (per-tool role gate, #135 — upstream-blocked).

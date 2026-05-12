@@ -551,15 +551,19 @@ Follow-up to the 2026-05-10 run; cleared four of the five items that were deferr
 - **Evidence:** `gen/pkg/httpx/compress_test.go`; genapi `fd31bbc`.
 - **Resolved date:** 2026-05-11
 
-##### PSR-F5 (#103): on-the-fly gzip for embedded SPA assets [RESOLVED]
+##### PSR-F5 (#103): on-the-fly gzip for embedded SPA assets [PARTIAL — RE-OPENED 2026-05-11]
 
-- **Issue:** [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/103) (closed)
+> **2026-05-11 audit Phase 3 correction:** This entry was mis-credited as a full closure. Commit `d5126ad` added gzip middleware to `ui.Handler()`, but the original PSR-F5 hot-path issue — `fs.Stat(sub, clean)` called per request at `internal/ui/embed.go:112,120` — is **not** addressed by that commit. The gzip work is genuine, but the precompute-asset-path-set acceptance criterion was never met. Issue [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/103) is **kept open** under the new identifier **GAP-022**; the gzip improvement is recorded below as a partial closure for traceability. Decision pending: either (a) precompute the asset path set at init (original PSR-F5 acceptance criterion), or (b) reclassify as won't-do because `fs.Stat` on `embed.FS` is in-memory and not measurably hot.
+
+- **Issue:** [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/103) (**re-opened — partial only**)
 - **Domain:** Performance
 - **Severity at close:** PerfScore +3
-- **Closure commit(s):** `d5126ad`
-- **Resolution:** `ui.Handler()` now gzip-compresses compressible text bundles (.js/.css/.map/.svg/.html/.json/.webmanifest/.txt) ≥ 1 KiB on the fly when the client advertises `Accept-Encoding: gzip`; the response carries `Content-Encoding: gzip` + `Vary: Accept-Encoding` and the uncompressed `Content-Length` is dropped so net/http streams chunked. `gzip.Writer`s are recycled via a `sync.Pool` (BestSpeed — bundles are already minified) so there is no allocation churn on the hot path. Already-compressed binary types (images except SVG, fonts, video/audio, wasm, zip/gzip) and tiny files are served verbatim; HEAD and 304/204/4xx never get a gzip body. The existing `index.html` no-cache vs hashed-asset-immutable behaviour is preserved.
-- **Evidence:** `internal/ui/embed.go`; `TestHandlerGzipsLargeJSAsset` (decompressed body byte-matches the embedded asset, no stale Content-Length), `TestHandlerNoGzipWithoutAcceptEncoding`, `TestHandlerNoGzipForBinaryAsset`, `TestAcceptsGzip`. internal/ui coverage 86.1%.
-- **Resolved date:** 2026-05-11
+- **Partial-closure commit(s):** `d5126ad` (gzip layer landed; hot-path precompute remains open)
+- **What this commit closed:** `ui.Handler()` gzip-compresses compressible text bundles (.js/.css/.map/.svg/.html/.json/.webmanifest/.txt) ≥ 1 KiB on the fly when the client advertises `Accept-Encoding: gzip`; the response carries `Content-Encoding: gzip` + `Vary: Accept-Encoding` and the uncompressed `Content-Length` is dropped so net/http streams chunked. `gzip.Writer`s are recycled via a `sync.Pool` (BestSpeed — bundles are already minified) so there is no allocation churn on the hot path. Already-compressed binary types (images except SVG, fonts, video/audio, wasm, zip/gzip) and tiny files are served verbatim; HEAD and 304/204/4xx never get a gzip body. The existing `index.html` no-cache vs hashed-asset-immutable behaviour is preserved.
+- **Still open:** `internal/ui/embed.go:112` and `embed.go:120` still call `fs.Stat(sub, clean)` per request. The "precompute the asset path set at init" acceptance criterion is unmet.
+- **Evidence (gzip half):** `internal/ui/embed.go`; `TestHandlerGzipsLargeJSAsset` (decompressed body byte-matches the embedded asset, no stale Content-Length), `TestHandlerNoGzipWithoutAcceptEncoding`, `TestHandlerNoGzipForBinaryAsset`, `TestAcceptsGzip`. internal/ui coverage 86.1%.
+- **Tracking:** Open as GAP-022 in `docs/GAP_ANALYSIS.md`.
+- **Resolved date:** N/A (partial only)
 
 ##### PSR-F15 (#112): precompute zero-value tls and pool_overrides wire encodings [RESOLVED]
 
@@ -681,3 +685,89 @@ These are not GAP-* items — they are operational follow-ups recorded here for 
 - **The gosec count jump is a tooling-version artifact** — the higher absolute finding count vs the prior batch is the gosec "dev" build's expanded ruleset, not a regression; no new findings come from this batch's code (the G302/G304 pair on `handlers_uploads.go` is annotated/suppressed with rationale).
 - **F13 gzip confirmed live** — `main.js` (~50 KB) is served with `Content-Encoding: gzip` on the rebuilt e2e image; sub-1KiB JSON is correctly skipped.
 - **Backlog status after this run:** PERF — **F-series fully clear** (F3 was the last open/deferred F-item). QUALITY — clean (all Q-series closed; Q-NEW-T1/T3/T4 adoption-decision-blocked tooling gaps). SECURITY — clean (all N-series closed, N2 now durable; S-NEW-1/6 release-eng/ops-blocked). The only remaining tracked-but-not-actionable items are the upstream-Geode-blocked GAP-002..005 and the product/release-eng deferrals (GAP-011/012, Q-NEW-T*, S-NEW-1/6).
+
+### 2026-05-11 closure run -- audit-cohort batch (12 closed + 3 deferred-upstream, 10 geode-ui commits + 1 sibling-repo commit)
+
+A `/codepros:gap-close` run against the 2026-05-11 audit cohort (the `F-AUTH-*`/`F-INPUT-*`/`F-SUP-*` security findings, the `PERF-2026-05-11-*` findings, and the `Q*` quality findings). The verifier ACCEPTED — full Go + frontend suites green, `cmd/server` coverage 4.0% → 65.3%, frontend 415 → 426 tests, `govulncheck ./...` clean. None of these carry a `GAP-NNN` ID in `GAP_ANALYSIS.md`; they are tracked by domain ID + GitLab issue, but recorded here for the resolved-record. Commits sit on `main` unpushed at the time of this entry.
+
+#### Security (3)
+
+##### F-SUP-1 (#148): Go toolchain go1.26.2 → go1.26.3 — closes 4 CALLED stdlib CVEs [RESOLVED]
+
+- **Closure commit(s):** `d464fe6` (geode-ui) + `a7d63f3` (sibling `../geode-client-go`, branch `codex/client-parity-sync` — separate PR/merge there still pending).
+- **Resolution:** all 5 repo refs bumped — `Makefile:3`, `scripts/run-go.sh:9`, `scripts/check-go-mod-tidy.sh:10`, `.gitlab-ci.yml:242`, `deploy/Dockerfile:45` — now `go1.26.3`; the sibling `go.mod` now `toolchain go1.26.3`. `govulncheck ./...` → "No vulnerabilities found": GO-2026-4980 / 4982 (HTML escaper bypass ×2), GO-2026-4918 (HTTP/2 SETTINGS infinite loop), GO-2026-4971 (`net.Dial` NUL panic) are no longer CALLED. Release-blocker → cleared.
+- **Evidence:** `govulncheck ./...` clean; full Go test suite green at `d464fe6`.
+- **Resolved date:** 2026-05-11
+
+##### F-INPUT-1 (#140): `quoteString` escapes backslash to match the authoritative GQL escaper [RESOLVED]
+
+- **Closure commit(s):** `454d0ba`
+- **Resolution:** `internal/server/quoting.go:78-79` now escapes `\` → `\\` *before* `'` → `''`, matching `../geode-client-go/conn.go:849-861 gqlStringEscaper`. Control characters are still rejected outright (stricter than the authoritative escaper, which permits them).
+- **Evidence:** `internal/server/quoting_test.go:149-181 TestQuoteString_BackslashEscape` (9 cases).
+- **Resolved date:** 2026-05-11
+
+##### F-SUP-4 (#160): electron / electron-builder pulled into devDependencies; electron-tsc is a real CI gate [RESOLVED]
+
+- **Closure commit(s):** `f444c70` (also closes Q25 / #170)
+- **Resolution:** `package.json` devDeps gain `electron@^42.0.1` + `@types/node@^22.19.19`; `package-lock.json` updated; `.gitlab-ci.yml electron-typecheck` job no longer `allow_failure`; `npm run electron:tsc` exits 0 with no source changes needed. **Caveat:** `pnpm-lock.yaml` was NOT regenerated — pnpm refuses in this repo (`packageManager: npm`); the dual-lockfile cleanup remains tracked separately as GAP-017 / #44.
+- **Evidence:** `npm run electron:tsc` → exit 0; CI `electron-typecheck` is now blocking.
+- **Resolved date:** 2026-05-11
+
+#### Performance (4)
+
+##### PERF-2026-05-11-01 (#128): server-side schema-discovery cache (Labels / EdgeTypes) [RESOLVED]
+
+- **Closure commit(s):** `c4ef58c`
+- **Resolution:** new `internal/server/schema_cache.go` — 120s TTL, `singleflight` coalescing, key `{profile, graph, kind}`. `handlers_schema.go`'s Labels / EdgeTypes routes now read through the cache; profile create/update/delete invalidates all entries (`handlers_profiles_crud.go:85,160,196`). Renderer-side cache (#154) was NOT in scope and remains open (pairs with this finding as the "schema-explorer story" bundle in `PERF_GAP_ANALYSIS.md`).
+- **Evidence:** `internal/server/handlers_schema_cache_test.go` — 6 cache tests + `BenchmarkLabels` / `BenchmarkEdgeTypes`.
+- **Resolved date:** 2026-05-11
+
+##### PERF-2026-05-11-02 / -04 / -08 (#130 / #137 / #147): collapse the streaming render storm — single-render-storm bundle [RESOLVED]
+
+- **Closure commit(s):** `4698645` (one commit, all three findings)
+- **Resolution:** (02 / #130) `src/pages/QueryPage.tsx:313 streamStateToResp` wrapped in `useMemo` so its identity is stable across frames — `projectColumns` no longer recomputes per row. (04 / #137) `src/lib/queryStream.ts:82-83` dispatches one `rowBatch` action per WS frame; `src/pages/queryStreamReducer.ts:89` adds the `rowBatch` case (one `rowsVersion` bump per frame instead of one per row) — server batching is no longer defeated by per-row demux. (08 / #147) `src/components/results/JsonView.tsx:33,37` `React.memo` + `useMemo(JSON.stringify)` so the response is re-stringified only when it actually changes.
+- **Evidence:** updated `queryStream.test.ts`; new `JsonView.test.tsx`, `QueryPage.streamMemo.test.tsx`, `queryStreamReducer.test.ts` cases. Frontend suite 415 → 426 tests, all green.
+- **Resolved date:** 2026-05-11
+
+#### Quality (5)
+
+##### Q35 (#129): `build` CI job gated on typecheck / unit-tests / audit-ratchets [RESOLVED]
+
+- **Closure commit(s):** `790cdcb`
+- **Resolution:** `.gitlab-ci.yml` `build:` `needs:` now includes `typecheck`, `unit-tests`, `audit-ratchets` (plus `install`, `eslint`) — the build can no longer ship while those jobs are red.
+- **Evidence:** `.gitlab-ci.yml` `build:` `needs:` block; pipeline DAG.
+- **Resolved date:** 2026-05-11
+
+##### Q36 (#131): `go.mod` uses a relative `replace` path for `geode-client-go` [RESOLVED]
+
+- **Closure commit(s):** `210133e`
+- **Resolution:** `go.mod:5` now `replace geodedb.com/geode => ../geode-client-go` (relative, portable); `make go-test` / `go-build` resolve it; CI's `go mod edit -replace` step still works (now functionally redundant).
+- **Evidence:** `make go-test` green; `go.mod:5`.
+- **Resolved date:** 2026-05-11
+
+##### Q25 (#170): `electron:tsc` is a real CI gate [RESOLVED]
+
+- **Closure commit(s):** `f444c70` (same commit closes F-SUP-4 / #160 — see the security entry above for details)
+- **Resolution:** `allow_failure` removed from the `electron-typecheck` job; `electron` + `@types/node` added to devDependencies; `npm run electron:tsc` exits 0. Crossover with `GAP-009` (electron CI job) — that entry is hardened by this same commit.
+- **Resolved date:** 2026-05-11
+
+##### Q16 / Q26 (#158 / #172): decompose the `cmd/server/main.go` god-main + bootstrap unit tests [RESOLVED]
+
+- **Closure commit(s):** `adf6b6f`
+- **Resolution:** `cmd/server/main.go` is now a 12-line shim; the logic moved to new `cmd/server/app.go` (`appConfig` / `parseFlags` / `newApp` / `(*app).serve` / `run`) + new `cmd/server/profileseed.go`; `internal/profilestore.NewCipherFromEnvFunc` added. New `cmd/server/app_test.go` (6 tests incl. `TestRun_MissingJWTSecret_ExitsNonZero`, `TestNewApp_HappyPath` healthz=200, `TestNewApp_WiresMCPAuthVerifier`). `cmd/server` coverage **4.0% → 65.3%**. Side effect: Q38 (#180, shutdown error swallowed) is now a trivial follow-up — `(*app).serve` already returns the shutdown error; left open.
+- **Evidence:** `cmd/server/app_test.go`; `go test -cover ./cmd/server/...` → 65.3%.
+- **Resolved date:** 2026-05-11
+
+#### Deferred to upstream genapi (NOT closed — kept open with documented unblock steps)
+
+- **F5 / PERF-2026-05-11-03 (#133)** — obsx audit-log per-call allocations. Fix lives in `~/src/devnw/go/genapi/obsx`: combine the JSON payload + trailing newline into a single `Write`; wrap stdout in a `bufio.Writer`; skip the `RedactSensitiveKeys` map clone when there are no sensitive keys; pool the per-call map; add `BenchmarkLogAudit`; then `make generate` in geode-ui to pick up `gen/pkg/obsx/log.go`. Issue kept open with the `upstream::genapi` label; cross-link the genapi tracker once filed.
+- **F-AUTH-2 (#135)** — MCP per-tool role enforcement. Fix in `~/src/devnw/go/genapi`: emit a per-tool `required_roles` table alongside `NewTools` (the analogue of REST's per-route role gate), consulted between auth-verify and dispatch. **Depends on F-AUTH-1's context-threading landing upstream first.** Kept open; `upstream::genapi`.
+- **F-AUTH-1 full fix (#132)** — the in-repo mitigation is committed (`c46e77e`): `internal/server/mcp.go`'s `MCPServer.Query` now reads a JWT-enriched context stashed per-goroutine by `MCPAuthVerifier` / `WrapMCPHTTP` (wired in `cmd/server/app.go:298-299`), with a fail-safe fallback to `context.Background()` → "default" only for non-HTTP transports; pinned by `internal/server/mcp_profile_test.go` (+4 incl. `TestMCPQuery_CrossProfileIsolation`). The *full* fix threads `context.Context` natively through `MCPServerInterface.Query` / `mcpx.Tool` / `mcpx.SetAuthVerifier` in the genapi MCP template. **#132 stays OPEN** until the generated MCP path carries the request context natively; do not close before then.
+
+#### Notes on this run
+
+- **Sibling-repo merge pending:** F-SUP-1's cross-module commit (`a7d63f3` in `../geode-client-go`) landed on branch `codex/client-parity-sync`, not `main` — a separate PR/merge there is still outstanding.
+- **`pnpm-lock.yaml` deliberately not regenerated** — `packageManager: npm` makes pnpm refuse; the dual-lockfile cleanup stays tracked at GAP-017 / #44.
+- **#154 (renderer-side schema cache) NOT in scope** — the server-side half (#128) closed; the renderer cache + AbortController half stays open, partly mitigated by the new 120s server cache.
+- **#180 (Q38, shutdown error)** — now a trivial follow-up after `adf6b6f`; left open.
+- **Commits unpushed:** the 10 geode-ui implementation commits + the docs-tracking commit sit on `main` unpushed at the time of this entry; the user pushes.
