@@ -1,4 +1,5 @@
 import { client } from './client'
+import { WIRE_FEATURE_MISSING } from './serverErrorCodes'
 
 // Capabilities mirrors the `GET /api/v1/capabilities` response. The
 // generated client types `admin_writable` as `Record<string, unknown>`
@@ -69,10 +70,10 @@ export function isWireFeatureMissingError(err: unknown): boolean {
   const e = err as { status?: unknown; body?: unknown; message?: unknown }
   if (e.status === 501) return true
   const body = parseErrBody(e.body)
-  if (body && body.error === 'wire_feature_missing') return true
+  if (body && body.error === WIRE_FEATURE_MISSING) return true
   if (typeof e.message === 'string') {
     if (/http status 501\b/i.test(e.message)) return true
-    if (/wire_feature_missing/i.test(e.message)) return true
+    if (e.message.includes(WIRE_FEATURE_MISSING)) return true
   }
   return false
 }
