@@ -46,6 +46,7 @@ export const en = {
     primary: 'Primary',
     primaryMobile: 'Primary mobile',
     query: 'Query',
+    workspace: 'Workspace',
     schema: 'Schema',
     admin: 'Admin',
     ops: 'Ops',
@@ -86,6 +87,9 @@ export const en = {
   },
 
   workspace: {
+    title: 'Workspace',
+    addPane: '+ Add pane',
+    panesFull: 'Maximum of 4 panes',
     paneRun: 'Run',
     paneCancel: 'Cancel',
     closePane: 'Close pane',
