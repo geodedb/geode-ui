@@ -2,8 +2,8 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-11 (audit Phase 4 sync)
-- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync)
+- **Last refreshed:** 2026-05-12 (gap-closure run: GAP-020 / #90 closed)
+- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); 2026-05-12 `/codepros:gap-close` run
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors them.
 
 ## Methodology
@@ -16,11 +16,11 @@ Phase 3 ran the gap-detector against the project's requirements set and current 
 |----------|-----:|------------:|---------:|---------:|------:|
 | Critical |    0 |           0 |        0 |        0 |     0 |
 | High     |    0 |           0 |        0 |        0 |     0 |
-| Medium   |    0 |           0 |        0 |        0 |     0 |
+| Medium   |    0 |           0 |        1 |        0 |     1 |
 | Low      |    7 |           0 |        0 |        0 |     7 |
-| **Total**|**7** |       **0** |    **0** |    **0** | **7** |
+| **Total**|**7** |       **0** |    **1** |    **0** | **8** |
 
-No release-blocking gaps. 4 of 7 are blocked on upstream Geode v0.6+; 2 CI verification gaps closed 2026-05-10; 1 stale-comment cleanup closed earlier.
+No release-blocking gaps. Of the 7 still-open Low gaps, 4 are blocked on upstream Geode v0.6+ (GAP-013..016); GAP-017 (dual lockfile), GAP-018 (`.golangci.yml`), GAP-019 (coverage thresholds), GAP-021 (dup public-profiles effect), GAP-022 (`embed.go` `fs.Stat`) are in-repo backlog. GAP-020 (`as unknown as` path-param casts, #90) **Resolved 2026-05-12** via `9b0a423` + genapi `55c79d2`. 2 CI verification gaps closed 2026-05-10; 1 stale-comment cleanup closed earlier. (Most quality/perf/security closures of the 2026-05-11/2026-05-12 cohorts are tracked by domain ID in the sibling `*GAP_ANALYSIS.md` docs, not by `GAP-NNN` here.)
 
 ## Severity Rubric
 
@@ -258,9 +258,17 @@ The 2026-05-11 audit Phase 3 (gap-detector) re-ran against HEAD `d3e5de1`. The f
 | GAP-017 | Dual lockfile committed at repo root | Open | Low | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/44) (canonical; #20 closed as dup) | Both `package-lock.json` and `pnpm-lock.yaml` present at repo root; `.gitignore` only ignores `/pnpm-lock.yaml`. | Delete `package-lock.json`, add it to `.gitignore`, document pnpm-only in README. |
 | GAP-018 | No `.golangci.yml` config (golangci-lint runs defaults only) | Partial | Low | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/46) (canonical; #22 closed as dup) | `.golangci.yml` does not exist at repo root. Pre-push hook (`.pre-commit-config.yaml:130`) runs `scripts/run-go.sh tool-golangci` against default linters only — `gocognit`/`nestif`/`dupl`/`gocyclo`/`revive` etc. are NOT engaged. The earlier `docs/QUALITY_GAP_ANALYSIS.md:46` "Closed" mark was partial. | Add `.golangci.yml` enabling gocognit / nestif / dupl / gocyclo / revive; tune burn-down. |
 | GAP-019 | No coverage thresholds (Jest + Go) | Open | Low | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/48) (canonical; #23 closed as dup) | `jest.config.cjs` has no `coverageThreshold` block; CI `go test` invocations lack `-coverprofile` floors. | Wire Jest `coverageThreshold` (~75% statements floor) + Go `-coverprofile` floor (~68.7% server). |
-| GAP-020 | 2 `as unknown as` casts in `src/api/profiles.ts` (was 5) | Open (upstream::genapi) | Medium | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/90) | `src/api/profiles.ts:285` and `src/api/profiles.ts:292` (`updateProfile` and `deleteProfile` request casts); root cause genapi#216 (request typing). | Awaits upstream genapi fix; regen + remove casts after upstream lands. |
+| GAP-020 | ~~2 `as unknown as` casts in `src/api/profiles.ts` (was 5)~~ | **Closed** 2026-05-12 | Medium | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/90) | **Closed `9b0a423`** (geode-ui) + genapi `55c79d2` — genapi `expandPath`/`expandRoute` map URL path tokens to snake_case schema keys (`[["profileId","profile_id"]]`) and `delete` them from the body before sending; `geode.json` `UpdateProfileReq` gains required `profile_id`; regen `gen/`; `src/api/profiles.ts` `updateProfile`/`deleteProfile` call the typed client directly (no cast). Upstream `cmd/genapi/path_params_test.go` cases added. genapi `55c79d2` is on genapi `main` unpushed. | Done. Follow-up (small, not yet ticketed): `createProfile`'s `as any` body-shape cast remains — a different cast. |
 | GAP-021 | Duplicate fetchPublicProfiles+getStoredPassword effect across LoginPage and AddConnectionModal | Open | Low | [#102](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/102) | `src/pages/LoginPage.tsx:101-128` and `src/components/layout/AddConnectionModal.tsx:60-77,136` both run the public-profiles + saved-password effect with near-identical shape. | Extract `usePublicProfilesWithStoredPasswords` hook; migrate both call sites. |
 | GAP-022 | PSR-F5 hot-path: `fs.Stat` per request in embed.go (mis-credited as closed) | Open | Low | [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/103) | `internal/ui/embed.go:112` (`fs.Stat(sub, clean)`) and `embed.go:120` (`fs.Stat(sub, "index.html")`) still call per request. The 2026-05-11 gzip commit `d5126ad` was mis-credited as closing PSR-F5; gzip is the partial closure, the precompute-asset-path-set acceptance criterion remains open. | **Decision pending** (per audit Phase 4 comment on #103): (a) precompute the asset path set at init, or (b) reclassify as won't-do because `fs.Stat` on `embed.FS` is in-memory and not measurably hot. |
+
+### Gap-closure run — 2026-05-12 (genapi + medium-cohort batch)
+
+`/codepros:gap-close` closed 9 GitLab issues this run; only one carries a `GAP-NNN` ID here:
+
+- **GAP-020 / #90** — `as unknown as` path-param casts in `src/api/profiles.ts` removed. `9b0a423` (geode-ui) + genapi `55c79d2`. Row above updated to **Closed**; resolved record in `GAP_ANALYSIS_RESOLVED.md`.
+
+The other 8 (#132, #135 security; #133, #142, #150, #154, #156 perf; #173 quality) are tracked by domain ID in `SECURITY_GAP_ANALYSIS.md` / `PERF_GAP_ANALYSIS.md` / `QUALITY_GAP_ANALYSIS.md` and recorded in `GAP_ANALYSIS_RESOLVED.md`. **#159** (`/api/v1/query` `rateLimit=200` vs 2000-rps target) stays **open** — deliberately unchanged pending a product decision; now documented in `docs/ARCHITECTURE.md`. The 9 geode-ui implementation commits + the docs-tracking commit sit on `main` **unpushed**; 5 genapi commits sit on genapi `main` **unpushed** (user decides on pushing/tagging genapi — note: breaking `mcpx`/`SetAuthVerifier` API → minor bump, other consumers must regenerate). Full report: [`docs/gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md`](./gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md).
 
 ### Dedup map (closed-as-duplicate this Phase-4 run)
 

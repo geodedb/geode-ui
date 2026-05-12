@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-11
+- **Last updated:** 2026-05-12
 - **Sibling docs:** [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) (open requirement gaps), [PERF_GAP_ANALYSIS.md](./PERF_GAP_ANALYSIS.md), [QUALITY_GAP_ANALYSIS.md](./QUALITY_GAP_ANALYSIS.md), [SECURITY_GAP_ANALYSIS.md](./SECURITY_GAP_ANALYSIS.md)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors closed issues across the perf / quality / security tracking files.
 
@@ -771,3 +771,116 @@ A `/codepros:gap-close` run against the 2026-05-11 audit cohort (the `F-AUTH-*`/
 - **#154 (renderer-side schema cache) NOT in scope** — the server-side half (#128) closed; the renderer cache + AbortController half stays open, partly mitigated by the new 120s server cache.
 - **#180 (Q38, shutdown error)** — now a trivial follow-up after `adf6b6f`; left open.
 - **Commits unpushed:** the 10 geode-ui implementation commits + the docs-tracking commit sit on `main` unpushed at the time of this entry; the user pushes.
+
+### 2026-05-12 closure run -- genapi + medium-cohort batch (9 closed + #159 deferred; 9 geode-ui commits + 5 genapi commits)
+
+A `/codepros:gap-close` run that landed the **upstream genapi follow-ups** deferred from the 2026-05-11 run (F-AUTH-1 #132, F-AUTH-2 #135, F5/PERF-2026-05-11-03 #133, Q02/#90 -- all needed a genapi change) plus a **medium in-repo cohort** (PERF-2026-05-11-06 #142, -09 #150, -10 #154, -11 #156; Q27 #173). The verifier ACCEPTED -- full Go + frontend suites green in both repos (`make go-test -race`, `make go-lint`, `make generate` clean, `npm test` 453/453, `make bench-gate`), no regressions. Only `GAP-020` (Q02/#90) carries a `GAP-NNN` ID in `GAP_ANALYSIS.md`; the rest are tracked by domain ID + GitLab issue, recorded here for the resolved-record. Commits sit on `main` unpushed at the time of this entry; the 5 genapi commits sit on genapi `main` unpushed (user decides on pushing/tagging genapi).
+
+> ⚠️ **genapi API break:** genapi `e01b2de` + `30fad5d` change `mcpx.Tool` / `MCPServerInterface` / `SetAuthVerifier` -> the next genapi release should be a **minor bump**. Other genapi consumers (notably `devnw.dev/oidc`) must regenerate, update their `MCPServerInterface` impls to the new `ctx`-carrying signatures, and add `defer obsx.FlushLogs()` on shutdown (genapi `09d4ac8`).
+
+#### Security (2)
+
+##### F-AUTH-1 (#132): MCP `query` tool reads JWT profile claim via natively-threaded context -- per-goroutine stash removed [RESOLVED]
+
+- **Issue:** [#132](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/132) (closed)
+- **Domain:** Security
+- **Severity at close:** High (RiskScore 20; was a release-blocker)
+- **Closure commit(s):** `4002c6f` (geode-ui) + genapi `e01b2de` (+ `1ffa8eb` precursor)
+- **Resolution:** genapi threads `context.Context` natively through the MCP tool path: `mcpx.Tool` takes a `ctx` param; `MCPServerInterface.Query(ctx, params)`; `mcpx.SetAuthVerifier` takes `func(*http.Request)(context.Context,error)`. geode-ui regen'd `gen/mcp/tools.gen.go` (`Query(ctx, ...)`) + `gen/pkg/mcpx/engine.go`; `internal/server/mcp.go`'s `MCPServer.Query(ctx, params)` -> `handleQuery(ctx, params)`; the per-goroutine stash (`mcpQueryContext`/`mcpRequestCtx`/`goID`/`WrapMCPHTTP`) is deleted; `MCPAuthVerifier func(*http.Request)(context.Context,error)` runs `AuthJWT` (mutates `*r` so `r.Context()` carries `profileCtxKey`/`rolesCtxKey`) and returns `r.Context()`. The in-repo mitigation `c46e77e` is fully superseded.
+- **Evidence:** `internal/server/mcp_profile_test.go` -- `TestMCPQuery_CrossProfileIsolation`, `TestMCPQuery_AppliesProfileClaim`, `TestMCPQuery_AuditAttributedToJWTProfile`, `TestMCPQuery_NoTokenFallsBackToDefault` (all against the native path); full Go suite green; `make generate` clean.
+- **Resolved date:** 2026-05-12
+
+##### F-AUTH-2 (#135): MCP per-tool role enforcement mechanism; `query` keeps no-role policy [RESOLVED]
+
+- **Issue:** [#135](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/135) (closed)
+- **Domain:** Security
+- **Severity at close:** Medium (RiskScore 12)
+- **Closure commit(s):** `1ec9889` (geode-ui) + genapi `30fad5d`
+- **Resolution:** genapi adds `mcpx.ContextWithRoles`/`RolesFromContext`/`SetToolRoles` + a `handleRaw` gate (no roles in ctx + tool requires a role -> audit + JSON-RPC `-32000 "insufficient role"`, tool body never runs) + `mcpToolRoles` template emission. geode-ui's `geode.json` `query` tool deliberately declares **NO** required role (matches the `POST /api/v1/query` REST route, which has none) so behavior is unchanged; `internal/server/mcp.go` re-publishes JWT roles via `mcpx.ContextWithRoles(ctx, rolesFromContext(ctx))`. Upstream genapi tests cover sufficient / insufficient / none-declared.
+- **Evidence:** upstream genapi role-gate tests; geode-ui Go suite green; `geode.json` `query` tool has no `required_roles` (intentional).
+- **Resolved date:** 2026-05-12
+
+#### Performance (5)
+
+##### PERF-2026-05-11-03 / F5 (#133): obsx.LogAudit -- buffered single-write audit log + pooled redaction + skip-clone-when-clean [RESOLVED]
+
+- **Issue:** [#133](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/133) (closed)
+- **Domain:** Performance
+- **Severity at close:** P1 (PerfScore 60)
+- **Closure commit(s):** `8af76ca` (geode-ui regen + wiring) + genapi `09d4ac8`
+- **Resolution:** genapi `pkg/obsx/log.go` -- `bufio.Writer` 64 KiB over stdout, `FlushLogs()` exported, 100 ms flush ticker, single `Write` per record under `logMu`, pre-scan skips the redact-clone when no sensitive key (crash-loss tradeoff commented) -- + `log_hooks.go` (pooled `[]any` slog args) + `bench_test.go` (`BenchmarkLogAudit`: 8->7 allocs/op, ~23% smaller B/op on the clean case) + `templates/server.go.tmpl` (generated `Serve()` defers `obsx.FlushLogs()`). geode-ui regen `gen/pkg/obsx/`; `cmd/server/app.go` `defer obsx.FlushLogs()` in `run` + eager flush on fatal-init/serve-error paths. 355 `obsx.LogAudit` call sites unchanged. **Out of scope:** pooling the caller-built `map[string]any` literals at those 355 sites (needs an obsx API change).
+- **Evidence:** genapi `pkg/obsx/bench_test.go BenchmarkLogAudit` (allocs/op + B/op deltas); geode-ui Go suite green; `make generate` clean.
+- **Resolved date:** 2026-05-12
+
+##### PERF-2026-05-11-06 (#142): audit-ring snapshot -- right-size allocation (count-then-copy under lock), encode outside lock [RESOLVED]
+
+- **Issue:** [#142](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/142) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 (PerfScore 45)
+- **Closure commit(s):** `203a454`
+- **Resolution:** `internal/server/audit.go` `snapshot` rewritten to a two-pass count-then-copy (`cap == matchCount`, not `cap == r.count` -- saves ~560 KiB per `/api/v1/audit` poll on a near-full 10k ring); `handlers_audit.go` already marshals JSON after `snapshot` returns. Did **not** shard -- the bench showed append latency is mutex-handoff-bound, not alloc-bound.
+- **Evidence:** `internal/server/audit_test.go` -- `TestAuditRing_SnapshotSinceExact`, `TestAuditRing_SnapshotSinceUnderConcurrentAppend` (`-race`), `BenchmarkAuditRing_ConcurrentAppendSnapshot` (~25% less per-op churn from the background snapshot).
+- **Resolved date:** 2026-05-12
+
+##### PERF-2026-05-11-09 (#150): split a read-only WAL `*sql.DB` for JWT revocation reads [RESOLVED]
+
+- **Issue:** [#150](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/150) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 (PerfScore 36)
+- **Closure commit(s):** `9c39d57`
+- **Resolution:** `internal/profilestore/sqlite.go` opens a second `*sql.DB` on the same file (`file:<path>?mode=ro&_pragma=busy_timeout(5000)`, `SetMaxOpenConns/IdleConns = max(2, GOMAXPROCS)`); `DBHandleRO()` added to `DBHandleProvider`; `Close()` closes both (aliases to the writer for in-memory DBs); `internal/jwt/revocation.go` `AttachSQLiteRW(rw, ro)` (writes via rw, hydration SELECTs via ro; `AttachSQLite(db)` preserved as `AttachSQLiteRW(db, db)`); `cmd/server/app.go` wires `DBHandle()` + `DBHandleRO()`. `mode=ro` enforced (test asserts the RO handle rejects writes).
+- **Evidence:** `internal/profilestore` / `internal/jwt` `-race` concurrency tests (8xN RO reads vs CRUD/Revoke churn -- no deadlock); RO-handle-rejects-writes test; `BenchmarkRevocationReloadUnderWrite`.
+- **Resolved date:** 2026-05-12
+
+##### PERF-2026-05-11-10 (#154): shared schema cache + AbortController for LabelList/EdgeTypeList [RESOLVED]
+
+- **Issue:** [#154](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/154) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 (PerfScore 30)
+- **Closure commit(s):** `6e6db14`
+- **Resolution:** new `src/components/schema/schemaCache.ts` (bounded LRU keyed `kind:graph`, shared by all four schema reads); `SchemaExplorer.tsx` migrated onto it via a pair-accessor shim (its F8 tests still pass); `LabelList.tsx`/`EdgeTypeList.tsx` cache-hit synchronously + arm a fresh `AbortController` per graph change (gating `setState` on `signal.aborted`). Comment cites the #128 server-side cache as the cold-miss backstop.
+- **Evidence:** `LabelList.test.tsx` / `EdgeTypeList.test.tsx` (+6 cases: re-select zero wire calls, mid-flight abort, LRU eviction); frontend suite green.
+- **Resolved date:** 2026-05-12
+
+##### PERF-2026-05-11-11 (#156): CI perf gate + documented SLOs [RESOLVED]
+
+- **Issue:** [#156](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/156) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 (PerfScore 30; foundational)
+- **Closure commit(s):** `e877465`
+- **Resolution:** `Makefile` `bench-gate`/`bench-baseline`/`bench-record` targets; `scripts/bench-gate.sh` (benchstat gate, `-bench=. -benchmem -run='^$' -benchtime=100ms -count=6` over the curated bench-bearing packages, fails on >10% regression in any metric -- self-verified via perturb-and-fail); `.gitlab-ci.yml` `bench-gate` job (`allow_failure: true`, informational-leaning given CI noise); `bench-baseline.txt` committed at repo root (generated post-#142/#150); `docs/ARCHITECTURE.md` "Performance SLOs (assumed, pending real telemetry)" section (~2000 rps `/api/v1/query`, ~400 burst, result-set distribution, upstream p50 ~10 ms, 400+-node graph, webpack bundle budget -- all marked assumed-not-measured) + the **#159 open question** (`/api/v1/query rateLimit=200` vs ~2000-rps target -- deliberately NOT changed; awaiting product decision) + a pprof-gated-behind-`Observability.EnableDebug` note + baseline-refresh instructions. `geode.json rateLimit` unchanged.
+- **Evidence:** `make bench-gate` green in the verifier run; `scripts/bench-gate.sh` perturb-and-fail self-check; `docs/ARCHITECTURE.md` "Performance SLOs" section.
+- **Resolved date:** 2026-05-12
+
+#### Quality (2)
+
+##### Q02 / GAP-020 (#90): `as unknown as` path-param casts in `src/api/profiles.ts` removed [RESOLVED]
+
+- **Issue:** [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/90) (closed); upstream root cause [genapi#216](https://gitlab.com/devnw/apps/genapi/-/work_items/216)
+- **Domain:** Quality
+- **Severity at close:** High (PriorityScore -- api-contract; `GAP-020` Medium)
+- **Closure commit(s):** `9b0a423` (geode-ui) + genapi `55c79d2`
+- **Resolution:** genapi `client_templates.go` + `client_react.ts.tmpl` + `client_go_rest.go.tmpl` -- `expandPath`/`expandRoute` now map URL path tokens to snake_case schema keys (`[["profileId","profile_id"]]`), read `payload[schemaKey]`, substitute `{token}` (still `encodeURIComponent`'d), `delete payload[schemaKey]` before sending the body. geode-ui `geode.json` `UpdateProfileReq` gains required `profile_id`; regen `gen/`; `src/api/profiles.ts` `updateProfile`/`deleteProfile` call the typed client directly (no cast). **Note:** `createProfile`'s `as any` body-shape cast is a *different* cast and remains -- out of scope; tracked as a small follow-up in `QUALITY_GAP_ANALYSIS.md`.
+- **Evidence:** upstream `cmd/genapi/path_params_test.go` cases added; geode-ui frontend suite green; `make generate` clean; `grep "as unknown as" src/api/profiles.ts` -> 0 hits.
+- **Resolved date:** 2026-05-12
+
+##### Q27 (#173): tests for `src/components/ops` destructive pages [RESOLVED]
+
+- **Issue:** [#173](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/173) (closed)
+- **Domain:** Quality
+- **Severity at close:** High (PriorityScore 12)
+- **Closure commit(s):** `2aaaebc`
+- **Resolution:** new `BackupPage.test.tsx` (8) / `MigrationsPage.test.tsx` (9) / `RestorePage.test.tsx` (6) -- confirm-modal flows, error-envelope rendering in `role="alert"`, wire-feature-missing 501 banner + disabled controls, happy/empty list states. `src/components/ops` line coverage **28% -> 91.87%** (Backup 92.5%, Migrations 95.3%, Restore 100%). No coverage gate added -- Q14/#48 owns that (separate, still open).
+- **Evidence:** `BackupPage.test.tsx` / `MigrationsPage.test.tsx` / `RestorePage.test.tsx`; `npm test` 453/453 green; coverage report 91.87% for `src/components/ops`.
+- **Resolved date:** 2026-05-12
+
+#### Still open after this run
+
+- **#159 (PERF-2026-05-11-12)** -- `/api/v1/query` per-route `rateLimit=200` vs the documented ~2000-rps target. **Deliberately unchanged**; now documented in `docs/ARCHITECTURE.md` as an explicit open question. Awaiting a product decision on whether 2000 rps is the budget for `/query` specifically. **Not closed.**
+- **`createProfile`'s `as any` body cast** (`src/api/profiles.ts`) -- a different cast from the path-param casts Q02 closed; small follow-up, not yet ticketed.
+
+#### Notes on this run
+
+- **genapi commits unpushed:** the 5 genapi commits (`1ffa8eb` artifact refresh, `e01b2de` #132 mcpx ctx threading, `30fad5d` #135 mcpx role gate, `09d4ac8` #133 obsx buffered logging, `55c79d2` #90 client/react expandPath) sit on genapi `main` ahead of origin -- the user decides on pushing/tagging genapi. They are **breaking** for other genapi consumers (`mcpx.Tool`/`MCPServerInterface`/`SetAuthVerifier`) -> next genapi release should be a minor bump; `devnw.dev/oidc` must regenerate + update its `MCPServerInterface` impls + add `defer obsx.FlushLogs()` on shutdown.
+- **geode-ui commits unpushed:** the 9 geode-ui implementation commits (`4002c6f`, `1ec9889`, `8af76ca`, `9b0a423`, `203a454`, `9c39d57`, `6e6db14`, `2aaaebc`, `e877465`) + the docs-tracking commit sit on `main` unpushed at the time of this entry; the user pushes.
+- **In-repo mitigation `c46e77e` superseded:** the per-goroutine MCP-context stash is deleted by `4002c6f` -- F-AUTH-1's full fix replaces the 2026-05-11 mitigation entirely.

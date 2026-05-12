@@ -1,6 +1,6 @@
 # QUALITY_GAP_ANALYSIS.md
 
-Last updated: 2026-05-11 (Phase 4 cohort appended)
+Last updated: 2026-05-12 (gap-closure run: Q02 #90 + Q27 #173 closed)
 Repo: `devnw/codepros/geode/geode-ui`
 Source: `/codepros:audit` Phase 4 — quality-issue-tracker
 
@@ -201,7 +201,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 | ID  | Category         | Priority | Decision      | GitLab issue                                                                  | File:Line                                                                                          |
 |-----|------------------|----------|---------------|-------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | Q01 | api-contract     | medium   | **Closed 2026-05-10** | [#89](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/89)       | `src/api/profiles.ts:89` -- **Closed 2026-05-10**: new `WireProfile` type mirrors the server's `Profile` shape (tracks `gen/types/types.gen.go:614`); new `isWireProfile(x: unknown): x is WireProfile` narrowing guard; `fromWireProfile`'s parameter is now `unknown` and falls back to a safe all-empty `ProfileView` on any non-object input (null, undefined, array, scalar) instead of crashing on `wire.id` indirection. The `as any` cast in `listProfiles` is gone. Pinned by 3 new tests (`isWireProfile rejects non-object inputs`, `isWireProfile accepts plain objects`, `fromWireProfile returns safe default ProfileView on non-object input`) -- 15 tests in `src/api/profiles.test.ts` total, all passing. The five `as unknown as` casts (Q02 / #90) remain because they are genapi-upstream (issue #216); not in scope for this closure. |
-| Q02 | api-contract (upstream) | high | Fix-Soon (upstream) | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/90) (shim); upstream [genapi#216](https://gitlab.com/devnw/apps/genapi/-/work_items/216) | `src/api/profiles.ts:173,187,196,208,215` (5x `as unknown as` casts)                                |
+| Q02 | api-contract (upstream) | high | **Closed `9b0a423`** (geode-ui) + genapi `55c79d2` — the `as unknown as` path-param casts in `src/api/profiles.ts` are gone | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/90); upstream [genapi#216](https://gitlab.com/devnw/apps/genapi/-/work_items/216) | `src/api/profiles.ts` `updateProfile`/`deleteProfile` now call the typed client directly. genapi `client_templates.go`/`client_react.ts.tmpl`/`client_go_rest.go.tmpl`: `expandPath`/`expandRoute` map URL path tokens to snake_case schema keys (`[["profileId","profile_id"]]`), read `payload[schemaKey]`, substitute `{token}` (still `encodeURIComponent`'d), `delete payload[schemaKey]` before sending the body. geode-ui `geode.json` `UpdateProfileReq` gains required `profile_id`; regen `gen/`. Upstream `cmd/genapi/path_params_test.go` cases added. **Note:** `createProfile`'s `as any` body cast is a *different* cast (request-body shape, not path-param) and remains — out of scope; tracked as the small follow-up below. |
 | Q03 | dead-code        | low      | **Closed 2026-05-10** | [#91](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/91)       | `src/api/profiles.ts:186` (`getProfile` exported, no caller) -- **Closed 2026-05-10**: deleted the unused export. Comment block left in place pointing at the removal so a future hand re-adding the helper finds the genapi workaround pattern (cast to `{ profile_id: string }` via `as unknown`). No tests removed because no test ever exercised `getProfile`. The page rehydrates via `listProfiles()` after every mutation, so a single-row fetch is unbounded scope until a real caller appears. |
 | Q04 | duplication      | high     | **Closed 2026-05-10** (release blocker) | [#93](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/93) | `electron/preload.ts:14-40` ↔ `src/types/electron.d.ts:8-34` -- canonical types now in `electron/shared/bridge-types.ts`; both files re-export from that single source. Cross-closes PSR-G07 (#84). |
 | Q05 | complexity       | medium   | **Closed 2026-05-10** | [#95](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/95)       | `src/components/profiles/ProfileEditorModal.tsx:50-190` (470 LOC; FormState mirrored 5x) -- **Closed 2026-05-10**: extracted `useProfileForm(initial?)` hook (`src/components/profiles/useProfileForm.ts`, 225 LOC) returning `{state, setField, buildCreateInput, buildUpdateInput, reset}` -- single FormState shape, single `fromProfile`, single create-builder, single update-diff-builder, single `setField(key, value)` callback shared by every input. Extracted `<TLSFieldset>` component (`src/components/profiles/TLSFieldset.tsx`, 105 LOC) that owns the three PEM textareas + Browse buttons; the three near-identical `browseCAPem` / `browseClientCertPem` / `browseClientKeyPem` handlers collapsed to a single parameterised `browse(fieldKey)` driven by a `TLS_FIELDS` spec table. Modal LOC: 473 -> 248 (-48%); JSX body well under 150 LOC. Cross-closes Q06 (#96) by collapsing the three handlers. All 9 prior tests in `ProfileEditorModal.test.tsx` pass unchanged (no selector updates required). |
@@ -230,7 +230,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 
 ### Upstream / cross-links
 
-- **Q02 → genapi#216** ([https://gitlab.com/devnw/apps/genapi/-/work_items/216](https://gitlab.com/devnw/apps/genapi/-/work_items/216)) — root cause of the five `as unknown as` casts. Geode-ui carries a tracking shim (#90) that closes when the upstream lands and the client is regenerated. **Per repo memory: do NOT hand-edit `gen/`.**
+- **Q02 → genapi#216** ([https://gitlab.com/devnw/apps/genapi/-/work_items/216](https://gitlab.com/devnw/apps/genapi/-/work_items/216)) — root cause of the (originally 5, then 2) `as unknown as` path-param casts. **CLOSED 2026-05-12** via genapi `55c79d2` (`expandPath`/`expandRoute` snake_case path-token mapping) + geode-ui `9b0a423` (`geode.json` `UpdateProfileReq` gains `profile_id`, regen `gen/`, `src/api/profiles.ts` calls the typed client directly). The genapi `55c79d2` commit sits on genapi `main` **unpushed** (user decides on pushing). **Per repo memory: do NOT hand-edit `gen/`.** **Follow-up (small, not yet ticketed):** `createProfile`'s `as any` body-shape cast in `src/api/profiles.ts` is a *different* cast — file it under the export-surface / api-contract cleanup if a convention exists, otherwise track here.
 - **Q04 ↔ PSR-G07** — same code, two framings: Q04 (#93) is the quality framing (duplication / release blocker); PSR-G07 (filed by parallel gap-sync agent) is the gap framing (single-source-of-truth requirement). Cross-link recorded in both issue bodies; once PSR-G07 issue number is known, both descriptions can be reciprocally linked.
 
 ### Roadmap
@@ -256,7 +256,7 @@ blocker) / **Fix-Soon** (next sprint) / **Fix-Backlog** / **Wont-Fix-Now** (trac
 
 #### Upstream-blocked
 
-- **Q02** — waits on genapi#216, then a one-MR cast cleanup.
+- ~~**Q02** — waits on genapi#216, then a one-MR cast cleanup.~~ **CLOSED `9b0a423`** + genapi `55c79d2` (2026-05-12). `createProfile`'s `as any` body cast is the only `profiles.ts` cast remaining — a separate, smaller follow-up.
 
 ---
 
@@ -279,7 +279,7 @@ comments were posted to each.
 | `go vet ./...`           | clean                             | But picks up `node_modules/flatted/...` (Q31).  |
 | `gofmt -l`               | clean                             |                                                 |
 | `golangci-lint`          | clean (pre-push)                  | No `.golangci.yml` (#46 / Q30).                 |
-| `go test -cover`         | server ~68.7% line; cmd/server 4% → **65.3%** (`adf6b6f`, Q16+Q26) | Q27 / Q28 still raise the floor.                |
+| `go test -cover`         | server ~68.7% line; cmd/server 4% → **65.3%** (`adf6b6f`, Q16+Q26); `src/components/ops` 28% → **91.87%** (`2aaaebc`, Q27) | Q28 still raises the frontend floor; Q14/#48 owns the coverage gate. |
 | `make web-build`         | green                             |                                                 |
 | `.gitlab-ci.yml` audit   | gaps (Q35 needs: **FIXED `790cdcb`**; electron-tsc gate **FIXED `f444c70`**) | Q32 (`@latest`), Q33 (cache:[]) still open.     |
 
@@ -317,7 +317,7 @@ High-priority (Score 9-14):
 | Q22 | Empty-result handling inconsistent across list handlers                |    12 | [#168](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/168) | `handlers_*.go` (isWireFeatureMissing branches)                           |
 | Q25 | **CLOSED `f444c70`** — `package.json` devDeps `+ electron@^42.0.1`, `+ @types/node@^22.19.19`; `package-lock.json` updated; `.gitlab-ci.yml electron-typecheck` no longer `allow_failure`; `npm run electron:tsc` exits 0 (also closes F-SUP-4 #160). **Note:** `pnpm-lock.yaml` NOT regenerated — pnpm refuses (`packageManager: npm`); dual-lockfile cleanup tracked at Q-other / GAP-017 #44. | 12 | [#170](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/170) | `.gitlab-ci.yml`, `package.json`                                          |
 | Q26 | **CLOSED `adf6b6f`** — new `cmd/server/app_test.go` (6 tests: `TestRun_MissingJWTSecret_ExitsNonZero`, `TestNewApp_HappyPath` healthz=200, `TestNewApp_WiresMCPAuthVerifier`, …); `internal/profilestore.NewCipherFromEnvFunc` added. `cmd/server` coverage **4.0% → 65.3%**. | 12 | [#172](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/172) | `cmd/server/`                                                             |
-| Q27 | `src/components/ops` 28% coverage on data-destructive pages            |    12 | [#173](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/173) | `src/components/ops/`                                                     |
+| Q27 | **CLOSED `2aaaebc`** — new `BackupPage.test.tsx` (8) / `MigrationsPage.test.tsx` (9) / `RestorePage.test.tsx` (6): confirm-modal flows, error-envelope rendering in `role="alert"`, wire-feature-missing 501 banner + disabled controls, happy/empty list states. `src/components/ops` line coverage **28% → 91.87%** (Backup 92.5%, Migrations 95.3%, Restore 100%). No coverage gate added (Q14/#48 owns that — separate, still open). | 12 | [#173](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/173) | `src/components/ops/`                                                     |
 | Q31 | `node_modules/flatted/.../flatted.go` picked up by `go list ./...`     |    6  | [#174](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/174) | `node_modules/flatted/golang/pkg/flatted/flatted.go`                      |
 | Q34 | `deploy/Dockerfile` `npm ci` before `COPY` needs invariant header      |    4  | [#175](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/175) | `deploy/Dockerfile:27-29`                                                 |
 | Q37 | `make build` re-runs `make generate` unconditionally                   |    12 | [#177](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/177) | `Makefile:59`                                                             |
@@ -388,9 +388,11 @@ CONVENTIONS.md entries.
 
 #### Test coverage (Q26, Q27, Q28)
 
-Three pinpointed coverage holes. Q27 (`src/components/ops` 28%) is the most
-urgent because those pages mutate live data; Q26 / Q28 are paired with their
-respective decomposition issues.
+Three pinpointed coverage holes. ~~Q27 (`src/components/ops` 28%) is the most
+urgent because those pages mutate live data~~ — **Q27 CLOSED `2aaaebc`** (2026-05-12):
+`src/components/ops` 28% → **91.87%** via `BackupPage.test.tsx` (8) /
+`MigrationsPage.test.tsx` (9) / `RestorePage.test.tsx` (6). Q26 CLOSED `adf6b6f`.
+Q28 (`gqlLanguage.ts` Monaco tokenizer, 33%) is the remaining frontend hole.
 
 #### CI / toolchain (Q25, Q29, Q30, Q31, Q32, Q33, Q34, Q35, Q36, Q37, Q46)
 
@@ -432,7 +434,7 @@ a trivial follow-up since `(*app).serve` already returns the shutdown error.
 - Q8 (#141), Q10 (#144), Q11 (#152), Q12 (#146), Q13 (#149), Q14 (#155), Q15 (#157), Q17 (#162) — focused function decompositions.
 - Q21 (#166), Q22 (#168) — wire-shape parity sweep.
 - ~~Q25 (#170)~~ — **CLOSED `f444c70`** — electron-tsc is now a real gate; electron + @types/node added to devDeps.
-- Q27 (#173) — destructive-pages coverage.
+- ~~Q27 (#173)~~ — **CLOSED `2aaaebc`** — destructive-pages coverage 28% → 91.87% (Backup/Migrations/Restore page tests).
 - Q44 (#179) — runbook.
 
 #### Strategic (> 5 days)
@@ -456,3 +458,16 @@ gap-sync-owned. The current scan re-confirms both are still open from a
 Phase-4 perspective; no doc-row status change made here, deferring to
 gap-sync. If a status correction lands in parallel, prefer gap-sync's
 framing.
+
+### Gap-closure run — 2026-05-12 (genapi + medium-cohort batch)
+
+Two quality findings closed in this run (alongside 7 perf/security closures tracked
+in the sibling docs):
+
+- **Q02 (#90)** — `as unknown as` path-param casts in `src/api/profiles.ts` removed. `9b0a423` (geode-ui) + genapi `55c79d2`. See the Q02 row + the Upstream/cross-links note above. `createProfile`'s `as any` body cast remains as a small follow-up (not yet ticketed).
+- **Q27 (#173)** — `src/components/ops` destructive-pages coverage 28% → 91.87%. `2aaaebc`. New `BackupPage.test.tsx` / `MigrationsPage.test.tsx` / `RestorePage.test.tsx`. No coverage gate added — Q14/#48 owns that, still open.
+
+Both GitLab issues closed with evidence. The implementation commits sit on geode-ui
+`main` **unpushed**; the genapi `55c79d2` commit sits on genapi `main` unpushed (user
+decides on pushing/tagging genapi). Full report:
+[`docs/gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md`](./gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md).
