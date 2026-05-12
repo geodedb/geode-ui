@@ -219,6 +219,77 @@ func TestAppendUnique(t *testing.T) {
 
 // equalStrings is defined in handlers_schema_test.go (same package).
 
+// TestAdminRolesFor covers the -admin-users membership → grant "admin"
+// role helper extracted from Login (#146 / Q12).
+func TestAdminRolesFor(t *testing.T) {
+	s := &GraphServer{cfg: Config{AdminUsernames: map[string]bool{"root": true}}}
+	if got := s.adminRolesFor("alice", []string{"reader"}); !equalStrings(got, []string{"reader"}) {
+		t.Fatalf("non-admin user: got=%v want unchanged [reader]", got)
+	}
+	if got := s.adminRolesFor("root", nil); !equalStrings(got, []string{"admin"}) {
+		t.Fatalf("admin user empty roles: got=%v want [admin]", got)
+	}
+	if got := s.adminRolesFor("root", []string{"admin"}); !equalStrings(got, []string{"admin"}) {
+		t.Fatalf("admin user already-admin: got=%v want [admin] (no dup)", got)
+	}
+	// Nil AdminUsernames map: a map index on a nil map returns the zero
+	// value (false), so no user is treated as admin.
+	sNil := &GraphServer{cfg: Config{}}
+	if got := sNil.adminRolesFor("root", []string{"reader"}); !equalStrings(got, []string{"reader"}) {
+		t.Fatalf("nil AdminUsernames: got=%v want unchanged [reader]", got)
+	}
+}
+
+// TestMintAndSetAuthCookie covers the SEC-F7 cookie helper extracted from
+// Login (#146 / Q12): the cookie shape, the Secure flag tracking
+// SecureCookies, and the expires_in >= 1 clamp.
+func TestMintAndSetAuthCookie(t *testing.T) {
+	t.Run("normal TTL", func(t *testing.T) {
+		s := &GraphServer{cfg: Config{SecureCookies: true}}
+		rec := httptest.NewRecorder()
+		exp := time.Now().Add(30 * time.Minute)
+		gotExpires := s.mintAndSetAuthCookie(rec, "tok-123", exp)
+		if gotExpires < 1 || gotExpires > 1800 {
+			t.Fatalf("expiresIn=%d want in (0,1800]", gotExpires)
+		}
+		c := findCookie(t, rec, AuthCookieName)
+		if c.Value != "tok-123" || c.Path != "/" || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteStrictMode {
+			t.Fatalf("cookie shape wrong: %+v", c)
+		}
+		if c.MaxAge != int(gotExpires) {
+			t.Fatalf("cookie MaxAge=%d want %d", c.MaxAge, gotExpires)
+		}
+	})
+	t.Run("already-expired clamps to 1", func(t *testing.T) {
+		s := &GraphServer{cfg: Config{SecureCookies: false}}
+		rec := httptest.NewRecorder()
+		exp := time.Now().Add(-time.Hour)
+		gotExpires := s.mintAndSetAuthCookie(rec, "tok", exp)
+		if gotExpires != 1 {
+			t.Fatalf("expiresIn=%d want 1 (clamp)", gotExpires)
+		}
+		c := findCookie(t, rec, AuthCookieName)
+		if c.Secure {
+			t.Fatalf("cookie Secure=true want false (SecureCookies=false)")
+		}
+		if c.MaxAge != 1 {
+			t.Fatalf("cookie MaxAge=%d want 1", c.MaxAge)
+		}
+	})
+}
+
+// findCookie returns the named cookie from rec or fails the test.
+func findCookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Cookie {
+	t.Helper()
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("cookie %q not set; got %v", name, rec.Result().Cookies())
+	return nil
+}
+
 // TestLogin_ReturnsConnectionID asserts that Login mints a non-empty,
 // unique connection_id per call and that the value matches the cid
 // claim embedded in the returned JWT.

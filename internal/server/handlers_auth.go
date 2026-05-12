@@ -75,41 +75,16 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	// are byte-identical across all failure modes — denying the
 	// attacker the side channel.
 	if err != nil || !ok {
-		// Always pay the constant-time hash compare cost so a path
-		// that *would* have early-returned at "user lookup failed"
-		// still spends the same CPU as a path that did a real
-		// password compare. This is the local-side complement to the
-		// upstream constant-time auth — see authenticateUpstream
-		// comment for why we cannot do a local hash compare.
-		performDummyCompare(req.Username, req.Password)
-
 		reason := "invalid_credentials"
 		if err != nil {
 			reason = "upstream_error"
 		}
-		emitAudit(auditEventLoginFailure,
-			"user", req.Username,
-			"profile", profile,
-			"reason", reason,
-		)
-		// Min-latency floor — wait out the remainder of the policy
-		// window so timing diffs between failure modes are masked.
-		respectLoginLatencyFloor(authStart, loginMinFailureLatency)
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusUnauthorized,
-			code:        "invalid_credentials",
-			description: "invalid credentials",
-		})
+		denyLogin(w, authStart, reason, req.Username, req.Password, profile)
 		return nil, nil
 	}
-	// Grant the "admin" role to configured bootstrap admins. Geode v0.5.11
-	// doesn't expose a queryable role-enumeration form (see
-	// authenticateUpstream comment), so without this the bootstrap user
-	// would carry empty roles and every required_roles=["admin"] gate
-	// would 403. AdminUsernames is configured at startup via -admin-users.
-	if s.cfg.AdminUsernames[req.Username] {
-		roles = appendUnique(roles, "admin")
-	}
+	// Grant the "admin" role to configured bootstrap admins (see
+	// adminRolesFor / authenticateUpstream).
+	roles = s.adminRolesFor(req.Username, roles)
 
 	connID := newConnectionID()
 	token, exp, err := s.cfg.JWT.Issue(req.Username, profile, roles, connID)
@@ -122,6 +97,71 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		"roles", roles,
 		"cid", connID,
 	)
+	expiresIn := s.mintAndSetAuthCookie(w, token, exp)
+	return &gentypes.LoginResp{
+		AccessToken:  token,
+		TokenType:    "Bearer",
+		ExpiresIn:    expiresIn,
+		ConnectionID: connID,
+	}, nil
+}
+
+// denyLogin executes the SEC-N10 (#76) constant-time authentication-
+// failure path: pay the dummy hash-compare cost, emit the operator-side
+// audit event (with the diagnostic reason), wait out the minimum-latency
+// floor, then write the byte-identical 401 invalid_credentials response.
+//
+// The order of operations and the latency-floor arithmetic are deliberate
+// — every failure mode (unknown user, wrong password, upstream/transport
+// error) must observe the same observable wall-clock latency. authStart
+// MUST have been captured before any upstream call. (password is taken
+// alongside username only to feed the dummy constant-time compare; it is
+// never logged or otherwise used.)
+func denyLogin(w http.ResponseWriter, authStart time.Time, reason, username, password, profile string) {
+	// Always pay the constant-time hash compare cost so a path
+	// that *would* have early-returned at "user lookup failed"
+	// still spends the same CPU as a path that did a real
+	// password compare. This is the local-side complement to the
+	// upstream constant-time auth — see authenticateUpstream
+	// comment for why we cannot do a local hash compare.
+	performDummyCompare(username, password)
+
+	emitAudit(auditEventLoginFailure,
+		"user", username,
+		"profile", profile,
+		"reason", reason,
+	)
+	// Min-latency floor — wait out the remainder of the policy
+	// window so timing diffs between failure modes are masked.
+	respectLoginLatencyFloor(authStart, loginMinFailureLatency)
+	writeEndpointError(w, &endpointError{
+		status:      http.StatusUnauthorized,
+		code:        "invalid_credentials",
+		description: "invalid credentials",
+	})
+}
+
+// adminRolesFor returns upstreamRoles with the "admin" role appended when
+// username is a configured bootstrap admin (-admin-users). Geode v0.5.11
+// doesn't expose a queryable role-enumeration form (see
+// authenticateUpstream comment), so without this the bootstrap user would
+// carry empty roles and every required_roles=["admin"] gate would 403.
+func (s *GraphServer) adminRolesFor(username string, upstreamRoles []string) []string {
+	if s.cfg.AdminUsernames[username] {
+		return appendUnique(upstreamRoles, "admin")
+	}
+	return upstreamRoles
+}
+
+// mintAndSetAuthCookie sets the SEC-F7 (#62) HttpOnly + SameSite=Strict
+// access-token cookie on w and returns the clamped expires_in (seconds).
+//
+// The cookie's Max-Age tracks the JWT TTL so a stale browser session
+// can't keep replaying a token whose JWT exp has passed. The token is
+// still returned in the response body by the caller so programmatic
+// callers (CLIs, MCP) keep working unchanged. The expires_in clamp
+// arithmetic is preserved exactly.
+func (s *GraphServer) mintAndSetAuthCookie(w http.ResponseWriter, token string, exp time.Time) int64 {
 	expiresIn := int64(exp.Sub(timeNow()).Seconds())
 	if expiresIn < 1 {
 		// Schema requires expires_in >= 1 — clamp to 1 second on the
@@ -129,13 +169,6 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		// past the expiry between Issue() and the Sub() call.
 		expiresIn = 1
 	}
-	// SEC-F7 (#62): also emit the access token as an HttpOnly +
-	// SameSite=Strict cookie so the SPA can drop the localStorage
-	// transport and become resistant to DOM-XSS exfiltration of the
-	// JWT. The cookie's Max-Age tracks the JWT TTL so a stale browser
-	// session can't keep replaying a token whose JWT exp has passed.
-	// We still return the token in the response body so programmatic
-	// callers (CLIs, MCP) keep working unchanged.
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
@@ -145,12 +178,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		Secure:   s.cfg.SecureCookies,
 		SameSite: http.SameSiteStrictMode,
 	})
-	return &gentypes.LoginResp{
-		AccessToken:  token,
-		TokenType:    "Bearer",
-		ExpiresIn:    expiresIn,
-		ConnectionID: connID,
-	}, nil
+	return expiresIn
 }
 
 // HandleLogout (SEC-F7 / #62) clears the geode-ui-auth cookie and
