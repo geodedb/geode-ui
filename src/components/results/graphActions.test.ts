@@ -85,7 +85,8 @@ function makeMockCy(els: ElData[]): MockCy {
         return el
       }),
       hasClass: (cls: string) => classes.get(id)?.has(cls) ?? false,
-      degree: () => adj.get(id)?.size ?? 0,
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      degree: (_includeLoops?: boolean) => adj.get(id)?.size ?? 0,
       empty: () => !present.has(id),
       length: present.has(id) ? 1 : 0,
       neighborhood: () => {

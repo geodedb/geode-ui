@@ -1179,8 +1179,11 @@ export const GraphView: React.FC<Props> = ({
       } catch (e: unknown) {
         // GAP-04: surface the failure as a visible banner instead of
         // an uncaught console rejection. The build is best-effort —
-        // the rest of the page (sidebar, picker) still works.
-        setError(e instanceof Error ? e.message : String(e))
+        // the rest of the page (sidebar, picker) still works. `error`
+        // holds the fully-formatted banner text (the ErrorBanner renders
+        // it verbatim) so explore failures can use their own framing.
+        const buildErr = e instanceof Error ? e.message : String(e)
+        setError(t('graph.errorBanner', { message: buildErr }))
       }
     }
 
@@ -1539,6 +1542,12 @@ export const GraphView: React.FC<Props> = ({
     const cy = cyRef.current
     if (!cy || !id || exploringId) return
     if (!isRealNodeId(id)) return
+    // Snapshot the core before the await: if a fresh query result lands
+    // and the graph is rebuilt while this request is in flight, the
+    // explore result is for the *old* graph — bail rather than merging
+    // stale neighbours into the new core. The `!live` guard alone only
+    // covers the brief teardown window.
+    const capturedCy = cy
     setExploringId(id)
     setError(null)
     client
@@ -1550,7 +1559,7 @@ export const GraphView: React.FC<Props> = ({
       })
       .then((result) => {
         const live = cyRef.current
-        if (!live) return
+        if (!live || live !== capturedCy) return
         const newEls = extractElements(result as QueryRespLike)
         const added = mergeSubgraph(live, newEls)
         if (added.length > 0) {
@@ -1749,11 +1758,7 @@ export const GraphView: React.FC<Props> = ({
               {t('graph.empty')}
             </Overlay>
           )}
-          {error && (
-            <ErrorBanner role="alert">
-              {t('graph.errorBanner', { message: error })}
-            </ErrorBanner>
-          )}
+          {error && <ErrorBanner role="alert">{error}</ErrorBanner>}
         </div>
       </CanvasArea>
       {!sidebarCollapsed && (

@@ -66,7 +66,9 @@ const makeColl = (
       return key === undefined ? d : (d as Record<string, unknown>)[key]
     },
     // degree(_includeLoops) → undirected degree from the adjacency map.
-    degree: () => ctx?.adj.get(members[0] ?? '')?.size ?? 0,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    degree: (_includeLoops?: boolean) =>
+      ctx?.adj.get(members[0] ?? '')?.size ?? 0,
     // hasClass — reads the first member's class set.
     hasClass: (cls: string) => classes.get(members[0] ?? '')?.has(cls) ?? false,
     // neighborhood() — the adjacency set of the first member.
@@ -1298,9 +1300,15 @@ describe('Phase 2: Explore neighbours', () => {
     })
     // client.query was called with a statement carrying the node's id.
     expect(queryMock).toHaveBeenCalledTimes(1)
-    const arg = queryMock.mock.calls[0][0] as { statement: string }
+    const arg = queryMock.mock.calls[0][0] as {
+      statement: string
+      page_size?: number
+      timeout_ms?: number
+    }
     expect(arg.statement).toMatch(/id\([^)]*\)\s*=\s*1\b/)
     expect(arg.statement).toMatch(/RETURN/i)
+    expect(arg.page_size).toBe(200)
+    expect(arg.timeout_ms).toBe(30000)
     // The new element (node 3 + edge e13) was added to the core; node 1
     // and edge e9 were already present so they are NOT re-added.
     const addedIds = ((lastCy().__addCalls as unknown[]) ?? [])
@@ -1352,8 +1360,12 @@ describe('Phase 2: Explore neighbours', () => {
     await waitFor(() => {
       expect(view.container.querySelector('[role="alert"]')).not.toBeNull()
     })
-    expect(
+    const bannerText =
       view.container.querySelector('[role="alert"]')?.textContent ?? ''
-    ).toMatch(/explore boom|explore neighbours/i)
+    // The explore failure uses its own framing ("Could not load
+    // neighbours: …") and is NOT wrapped again in the generic
+    // "Failed to render graph: …" prefix.
+    expect(bannerText).toMatch(/could not load neighbours: explore boom/i)
+    expect(bannerText).not.toMatch(/failed to render graph/i)
   })
 })
