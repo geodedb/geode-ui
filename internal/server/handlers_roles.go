@@ -64,20 +64,20 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	}
 	rname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_role", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidRole, err.Error()))
 	}
 	stmt := "CREATE ROLE " + rname
 	if req.Description != "" {
 		desc, qErr := quoteString(req.Description)
 		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_description", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidDescription, qErr.Error()))
 		}
 		stmt += " DESCRIPTION " + desc
 	}
 	if len(req.Permissions) > 0 {
 		permList, qErr := joinPermissions(req.Permissions)
 		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_permission", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidPermission, qErr.Error()))
 		}
 		stmt += " WITH PERMISSIONS [" + permList + "]"
 	}
@@ -104,7 +104,7 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 	}
 	rname, err := quoteIdent(req.Role)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_role", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidRole, err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW ROLE "+rname)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 	if len(rows) == 0 {
 		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
-			code:        "role_not_found",
+			code:        ErrCodeRoleNotFound,
 			description: "role " + req.Role + " does not exist",
 		})
 	}
@@ -128,7 +128,7 @@ func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *ge
 	}
 	rname, err := quoteIdent(req.Role)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_role", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidRole, err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP ROLE "+rname); err != nil {
 		return nil, respondErr(w, wireErr(err))

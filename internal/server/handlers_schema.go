@@ -295,7 +295,7 @@ func (s *GraphServer) schemaDB(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, &endpointError{
 			status:      http.StatusBadGateway,
-			code:        "profile_unreachable",
+			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		}
 	}
@@ -321,7 +321,7 @@ func schemaErr(err error) error {
 	}
 	return &endpointError{
 		status:      http.StatusUnprocessableEntity,
-		code:        "schema_error",
+		code:        ErrCodeSchemaError,
 		description: err.Error(),
 	}
 }

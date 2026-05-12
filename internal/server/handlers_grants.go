@@ -89,11 +89,11 @@ func (s *GraphServer) Revoke(w http.ResponseWriter, r *http.Request, req *gentyp
 func buildGrant(req *gentypes.GrantReq, verb, preposition string) (string, error) {
 	perm, err := quoteIdent(req.Permission)
 	if err != nil {
-		return "", badRequest("invalid_permission", err.Error())
+		return "", badRequest(ErrCodeInvalidPermission, err.Error())
 	}
 	grantee, err := quoteIdent(req.Grantee)
 	if err != nil {
-		return "", badRequest("invalid_grantee", err.Error())
+		return "", badRequest(ErrCodeInvalidGrantee, err.Error())
 	}
 	kind := req.GranteeKind
 	if kind == "" {
@@ -109,13 +109,13 @@ func buildGrant(req *gentypes.GrantReq, verb, preposition string) (string, error
 		// The Valid()-time enum check would normally catch this, but
 		// keep an explicit guard so direct in-process callers (tests)
 		// also get a 400 on bad kinds.
-		return "", badRequest("invalid_grantee_kind", "grantee_kind must be 'user' or 'role'")
+		return "", badRequest(ErrCodeInvalidGranteeKind, "grantee_kind must be 'user' or 'role'")
 	}
 	stmt := verb + " " + perm
 	if req.Resource != "" {
 		res, qErr := quoteIdent(req.Resource)
 		if qErr != nil {
-			return "", badRequest("invalid_resource", qErr.Error())
+			return "", badRequest(ErrCodeInvalidResource, qErr.Error())
 		}
 		stmt += " ON " + res
 	}

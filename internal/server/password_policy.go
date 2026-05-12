@@ -218,25 +218,25 @@ func passwordPolicyEndpointError(err error) *endpointError {
 	case errors.Is(err, errPasswordTooShort):
 		return &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "password_too_short",
+			code:        ErrCodePasswordTooShort,
 			description: err.Error(),
 		}
 	case errors.Is(err, errPasswordWeakPattern):
 		return &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "password_too_weak",
+			code:        ErrCodePasswordTooWeak,
 			description: err.Error(),
 		}
 	case errors.Is(err, errPasswordContainsUsername):
 		return &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "password_contains_username",
+			code:        ErrCodePasswordContainsUsername,
 			description: err.Error(),
 		}
 	case errors.Is(err, errPasswordPwned):
 		return &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "password_pwned",
+			code:        ErrCodePasswordPwned,
 			description: err.Error(),
 		}
 	}
@@ -244,7 +244,7 @@ func passwordPolicyEndpointError(err error) *endpointError {
 	// defensively so a future sentinel surfaces as a recognisable 400.
 	return &endpointError{
 		status:      http.StatusBadRequest,
-		code:        "password_policy",
+		code:        ErrCodePasswordPolicy,
 		description: err.Error(),
 	}
 }

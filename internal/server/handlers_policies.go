@@ -63,17 +63,17 @@ func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *
 	}
 	pname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_policy_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidPolicyName, err.Error()))
 	}
 	expr, err := quoteString(req.Expression)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_expression", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidExpression, err.Error()))
 	}
 	stmt := "CREATE POLICY " + pname
 	if req.Resource != "" {
 		res, qErr := quoteIdent(req.Resource)
 		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_resource", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidResource, qErr.Error()))
 		}
 		stmt += " ON " + res
 	}
@@ -101,7 +101,7 @@ func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *genty
 	}
 	pname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_policy_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidPolicyName, err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW POLICY "+pname)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *genty
 	if len(rows) == 0 {
 		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
-			code:        "policy_not_found",
+			code:        ErrCodePolicyNotFound,
 			description: "policy " + req.Name + " does not exist",
 		})
 	}
@@ -125,7 +125,7 @@ func (s *GraphServer) DeleteName(w http.ResponseWriter, r *http.Request, req *ge
 	}
 	pname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_policy_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidPolicyName, err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP POLICY "+pname); err != nil {
 		return nil, respondErr(w, wireErr(err))

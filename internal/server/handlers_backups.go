@@ -98,14 +98,14 @@ func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *g
 	if req.Graph != "" {
 		gname, qErr := quoteIdent(req.Graph)
 		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_graph", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidGraph, qErr.Error()))
 		}
 		stmt += " GRAPH " + gname
 	}
 	if req.Output != "" {
 		out, qErr := quoteString(req.Output)
 		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_output", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidOutput, qErr.Error()))
 		}
 		stmt += " OUTPUT " + out
 	}
@@ -138,11 +138,11 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	fname, err := quoteIdent(req.File)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW BACKUP "+fname)
 	if err != nil {
@@ -151,7 +151,7 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 	if len(rows) == 0 {
 		return nil, respondErr(w, &endpointError{
 			status:      http.StatusNotFound,
-			code:        "backup_not_found",
+			code:        ErrCodeBackupNotFound,
 			description: "backup " + req.File + " does not exist",
 		})
 	}
@@ -165,11 +165,11 @@ func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *ge
 		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	fname, err := quoteIdent(req.File)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "DROP BACKUP "+fname); err != nil {
 		return nil, respondErr(w, wireErr(err))
@@ -215,17 +215,17 @@ func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *genty
 		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	fname, err := quoteIdent(req.File)
 	if err != nil {
-		return nil, respondErr(w, badRequest("invalid_file", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	stmt := "RESTORE " + fname
 	if req.TargetTime != "" {
 		tt, qErr := quoteString(req.TargetTime)
 		if qErr != nil {
-			return nil, respondErr(w, badRequest("invalid_target_time", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidTargetTime, qErr.Error()))
 		}
 		stmt += " AT " + tt
 	}

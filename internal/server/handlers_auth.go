@@ -32,7 +32,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	if s.cfg.JWT == nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "server_misconfigured",
+			code:        ErrCodeServerMisconfigured,
 			description: "jwt issuer not configured",
 		})
 		return nil, nil
@@ -40,7 +40,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	if s.cfg.Profiles == nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "server_misconfigured",
+			code:        ErrCodeServerMisconfigured,
 			description: "profile lookup not configured",
 		})
 		return nil, nil
@@ -136,7 +136,7 @@ func denyLogin(w http.ResponseWriter, authStart time.Time, reason, username, pas
 	respectLoginLatencyFloor(authStart, loginMinFailureLatency)
 	writeEndpointError(w, &endpointError{
 		status:      http.StatusUnauthorized,
-		code:        "invalid_credentials",
+		code:        ErrCodeInvalidCredentials,
 		description: "invalid credentials",
 	})
 }

@@ -194,7 +194,7 @@ func storeErrorToHTTP(err error) *endpointError {
 	if err == nil {
 		return &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "internal_error",
+			code:        ErrCodeInternalError,
 			description: "unknown store error",
 		}
 	}
@@ -202,31 +202,31 @@ func storeErrorToHTTP(err error) *endpointError {
 	case errors.Is(err, profilestore.ErrNotFound):
 		return &endpointError{
 			status:      http.StatusNotFound,
-			code:        "not_found",
+			code:        ErrCodeNotFound,
 			description: "profile not found",
 		}
 	case errors.Is(err, profilestore.ErrConflict):
 		return &endpointError{
 			status:      http.StatusConflict,
-			code:        "conflict",
+			code:        ErrCodeConflict,
 			description: "profile name already exists in this scope",
 		}
 	case errors.Is(err, profilestore.ErrImmutable):
 		return &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "immutable",
+			code:        ErrCodeImmutable,
 			description: "scope and owner cannot be changed",
 		}
 	case errors.Is(err, profilestore.ErrInvalid):
 		return &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "invalid",
+			code:        ErrCodeInvalid,
 			description: err.Error(),
 		}
 	default:
 		return &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "internal_error",
+			code:        ErrCodeInternalError,
 			description: err.Error(),
 		}
 	}

@@ -195,7 +195,7 @@ type queryStreamMsg struct {
 //     db.QueryContext is aborted promptly.
 func (s *WSServer) Query(conn *wsx.Conn) error {
 	if s.cfg.Pool == nil {
-		return writeErr(conn, "internal", "pool not configured")
+		return writeErr(conn, ErrCodeWSInternal, "pool not configured")
 	}
 	ctx, cancel := context.WithCancel(conn.Context())
 	defer cancel()
@@ -205,13 +205,13 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 		return err
 	}
 	if first.Kind != "start" || first.Statement == "" {
-		return writeErr(conn, "bad_request", "first message must be kind=start with non-empty statement")
+		return writeErr(conn, ErrCodeWSBadRequest, "first message must be kind=start with non-empty statement")
 	}
 
 	profileName := profileFromContextOrDefault(ctx)
 	db, err := s.cfg.Pool.DB(profileName)
 	if err != nil {
-		return writeErr(conn, "profile_unreachable", err.Error())
+		return writeErr(conn, ErrCodeProfileUnreachable, err.Error())
 	}
 
 	stmt := first.Statement
@@ -231,19 +231,19 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 
 	args, err := mapToNamedArgs(first.Params)
 	if err != nil {
-		return writeErr(conn, "invalid_params", err.Error())
+		return writeErr(conn, ErrCodeInvalidParams, err.Error())
 	}
 
 	start := time.Now()
 	rows, err := db.QueryContext(ctx, stmt, args...)
 	if err != nil {
-		return writeErr(conn, "query_error", err.Error())
+		return writeErr(conn, ErrCodeQueryError, err.Error())
 	}
 	defer func() { _ = rows.Close() }()
 
 	cols, err := rows.Columns()
 	if err != nil {
-		return writeErr(conn, "internal", err.Error())
+		return writeErr(conn, ErrCodeWSInternal, err.Error())
 	}
 	if err := writeMsg(conn, queryStreamMsg{Kind: "schema", Columns: stringsToAny(cols)}); err != nil {
 		return err
@@ -367,7 +367,7 @@ func streamRowsOverWS(conn *wsx.Conn, rows *sql.Rows, cols []string, batcher *ro
 			// Drain any pending batch so partial progress reaches
 			// the client before the error frame.
 			_ = batcher.flush()
-			if werr := writeErr(conn, "scan", err.Error()); werr != nil {
+			if werr := writeErr(conn, ErrCodeWSScan, err.Error()); werr != nil {
 				return count, werr
 			}
 			return count, errStreamAborted
@@ -387,9 +387,9 @@ func streamRowsOverWS(conn *wsx.Conn, rows *sql.Rows, cols []string, batcher *ro
 		// Distinguish caller-initiated cancellation from a true
 		// query failure so the client can surface a friendlier
 		// message.
-		code, msg := "query_error", err.Error()
+		code, msg := ErrCodeQueryError, err.Error()
 		if errors.Is(err, context.Canceled) {
-			code, msg = "canceled", "query canceled by client"
+			code, msg = ErrCodeWSCanceled, "query canceled by client"
 		}
 		if werr := writeErr(conn, code, msg); werr != nil {
 			return count, werr

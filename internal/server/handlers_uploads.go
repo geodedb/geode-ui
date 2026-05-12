@@ -86,7 +86,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 	if s.cfg.UploadDir == "" {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusServiceUnavailable,
-			code:        "upload_disabled",
+			code:        ErrCodeUploadDisabled,
 			description: "server started without -upload-dir; uploads disabled",
 		})
 		return nil, nil
@@ -94,7 +94,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 	if file == nil || file.Reader == nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "missing_file",
+			code:        ErrCodeMissingFile,
 			description: `multipart field "file" is required`,
 		})
 		return nil, nil
@@ -104,7 +104,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "invalid_filename",
+			code:        ErrCodeInvalidFilename,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -114,7 +114,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "upload_dir_failed",
+			code:        ErrCodeUploadDirFailed,
 			description: "could not create upload dir: " + err.Error(),
 		})
 		return nil, nil
@@ -127,7 +127,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "upload_open_failed",
+			code:        ErrCodeUploadOpenFailed,
 			description: "could not open destination: " + err.Error(),
 		})
 		return nil, nil
@@ -138,7 +138,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 		_ = os.Remove(tmpPath)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "upload_write_failed",
+			code:        ErrCodeUploadWriteFailed,
 			description: "could not write file: " + copyErr.Error(),
 		})
 		return nil, nil
@@ -147,7 +147,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 		_ = os.Remove(tmpPath)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "upload_close_failed",
+			code:        ErrCodeUploadCloseFailed,
 			description: "could not close file: " + closeErr.Error(),
 		})
 		return nil, nil
@@ -156,7 +156,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 		_ = os.Remove(tmpPath)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
-			code:        "upload_rename_failed",
+			code:        ErrCodeUploadRenameFailed,
 			description: "could not finalise upload: " + err.Error(),
 		})
 		return nil, nil

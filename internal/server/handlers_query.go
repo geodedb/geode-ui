@@ -114,7 +114,7 @@ func (s *GraphServer) runQuery(ctx context.Context, req *gentypes.QueryReq) (*sq
 	if err != nil {
 		return nil, time.Time{}, &endpointError{
 			status:      http.StatusBadGateway,
-			code:        "profile_unreachable",
+			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		}
 	}
@@ -123,7 +123,7 @@ func (s *GraphServer) runQuery(ctx context.Context, req *gentypes.QueryReq) (*sq
 	if err != nil {
 		return nil, time.Time{}, &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "invalid_params",
+			code:        ErrCodeInvalidParams,
 			description: "params field is not a valid JSON object: " + err.Error(),
 		}
 	}
@@ -133,7 +133,7 @@ func (s *GraphServer) runQuery(ctx context.Context, req *gentypes.QueryReq) (*sq
 	if err != nil {
 		return nil, time.Time{}, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        "query_error",
+			code:        ErrCodeQueryError,
 			description: err.Error(),
 		}
 	}
@@ -170,7 +170,7 @@ func (s *GraphServer) handleQuery(ctx context.Context, req *gentypes.QueryReq) (
 		if rerr := rows.Err(); rerr != nil && errors.Is(err, rerr) {
 			return nil, &endpointError{
 				status:      http.StatusUnprocessableEntity,
-				code:        "query_error",
+				code:        ErrCodeQueryError,
 				description: err.Error(),
 			}
 		}

@@ -66,7 +66,7 @@ func writeEndpointErr(w http.ResponseWriter, status int, code, msg string) {
 // PatchProfileid / DeleteProfileid.
 func writeStoreUnavailable(w http.ResponseWriter) {
 	writeEndpointErr(w, http.StatusServiceUnavailable,
-		"store_disabled", "profile store not configured")
+		ErrCodeStoreDisabled, "profile store not configured")
 }
 
 // writeBadRequest is a named convenience for the recurring 400 +
@@ -82,7 +82,7 @@ func writeBadRequest(w http.ResponseWriter, code, msg string) {
 // (returning 404 instead of 403 for a personal profile owned by
 // someone else) and the canMutate cloak in PATCH/DELETE.
 func writeNotFound(w http.ResponseWriter, msg string) {
-	writeEndpointErr(w, http.StatusNotFound, "not_found", msg)
+	writeEndpointErr(w, http.StatusNotFound, ErrCodeNotFound, msg)
 }
 
 // asEndpointError extracts an *endpointError from err if it is one (or wraps
@@ -213,13 +213,13 @@ func wireErr(err error) error {
 	if isWireFeatureMissing(err) {
 		return &endpointError{
 			status:      http.StatusNotImplemented,
-			code:        "wire_feature_missing",
+			code:        ErrCodeWireFeatureMissing,
 			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA may have surfaced this CTA prematurely",
 		}
 	}
 	return &endpointError{
 		status:      http.StatusUnprocessableEntity,
-		code:        "user_admin_error",
+		code:        ErrCodeUserAdminError,
 		description: err.Error(),
 	}
 }

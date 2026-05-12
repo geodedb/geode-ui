@@ -30,7 +30,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 	isAdmin := hasRole(actr.Roles, "admin")
 	scope := conn.ProfileScope(req.Scope)
 	if !scope.Valid() {
-		writeBadRequest(w, "invalid_scope", "scope must be 'system' or 'personal'")
+		writeBadRequest(w, ErrCodeInvalidScope, "scope must be 'system' or 'personal'")
 		return nil, nil
 	}
 
@@ -39,7 +39,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 	case conn.ProfileScopeSystem:
 		if !isAdmin {
 			writeEndpointErr(w, http.StatusForbidden,
-				"forbidden", "system profiles require the admin role")
+				ErrCodeForbidden, "system profiles require the admin role")
 			return nil, nil
 		}
 	case conn.ProfileScopePersonal:
@@ -48,12 +48,12 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 
 	tlsMat, err := tlsFromGenJSON(req.TLS)
 	if err != nil {
-		writeBadRequest(w, "invalid_tls", err.Error())
+		writeBadRequest(w, ErrCodeInvalidTLS, err.Error())
 		return nil, nil
 	}
 	poolOv, err := poolOverridesFromGenJSON(req.PoolOverrides)
 	if err != nil {
-		writeBadRequest(w, "invalid_pool_overrides", err.Error())
+		writeBadRequest(w, ErrCodeInvalidPoolOverrides, err.Error())
 		return nil, nil
 	}
 
@@ -91,7 +91,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 // GetProfileid implements GET /api/v1/profiles/{profileId}.
 func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
-		writeEndpointErr(w, http.StatusServiceUnavailable, "store_disabled", "")
+		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
 		return nil, nil
 	}
 	actr := actorFromContext(r.Context())
@@ -118,12 +118,12 @@ func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *
 // http.ServeMux populates from the route pattern.
 func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.UpdateProfileReq) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
-		writeEndpointErr(w, http.StatusServiceUnavailable, "store_disabled", "")
+		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
 		return nil, nil
 	}
 	id := r.PathValue("profileId")
 	if id == "" {
-		writeBadRequest(w, "missing_id", "path parameter profileId is required")
+		writeBadRequest(w, ErrCodeMissingID, "path parameter profileId is required")
 		return nil, nil
 	}
 	actr := actorFromContext(r.Context())
@@ -166,7 +166,7 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 // DeleteProfileid implements DELETE /api/v1/profiles/{profileId}.
 func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath) (*gentypes.Empty, error) {
 	if s.cfg.Store == nil {
-		writeEndpointErr(w, http.StatusServiceUnavailable, "store_disabled", "")
+		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
 		return nil, nil
 	}
 	actr := actorFromContext(r.Context())
@@ -328,7 +328,7 @@ func buildProfilePatch(req *gentypes.UpdateProfileReq) (profilestore.ProfilePatc
 	tlsP, err := tlsPatchFromGenJSON(req.TLS)
 	if err != nil {
 		return profilestore.ProfilePatch{}, &endpointError{
-			status: http.StatusBadRequest, code: "invalid_tls", description: err.Error(),
+			status: http.StatusBadRequest, code: ErrCodeInvalidTLS, description: err.Error(),
 		}
 	}
 	patch.TLS = tlsP
@@ -336,7 +336,7 @@ func buildProfilePatch(req *gentypes.UpdateProfileReq) (profilestore.ProfilePatc
 	poP, err := poolPatchFromGenJSON(req.PoolOverrides)
 	if err != nil {
 		return profilestore.ProfilePatch{}, &endpointError{
-			status: http.StatusBadRequest, code: "invalid_pool_overrides", description: err.Error(),
+			status: http.StatusBadRequest, code: ErrCodeInvalidPoolOverrides, description: err.Error(),
 		}
 	}
 	patch.PoolOverrides = poP

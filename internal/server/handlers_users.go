@@ -84,7 +84,7 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		email, qErr := quoteString(req.Email)
 		if qErr != nil {
-			return badRequest("invalid_email", qErr.Error())
+			return badRequest(ErrCodeInvalidEmail, qErr.Error())
 		}
 		stmt := "CREATE USER " + uname + " WITH EMAIL " + email
 		if req.Password != "" {
@@ -97,7 +97,7 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 			}
 			pw, pErr := quoteString(req.Password)
 			if pErr != nil {
-				return badRequest("invalid_password", pErr.Error())
+				return badRequest(ErrCodeInvalidPassword, pErr.Error())
 			}
 			stmt += " PASSWORD " + pw
 		}
@@ -134,7 +134,7 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 		if len(rows) == 0 {
 			return &endpointError{
 				status:      http.StatusNotFound,
-				code:        "user_not_found",
+				code:        ErrCodeUserNotFound,
 				description: "user " + req.Username + " does not exist",
 			}
 		}
@@ -169,7 +169,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			var qErr error
 			email, qErr = quoteString(req.Email)
 			if qErr != nil {
-				return badRequest("invalid_email", qErr.Error())
+				return badRequest(ErrCodeInvalidEmail, qErr.Error())
 			}
 		}
 		var pw string
@@ -181,7 +181,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			var qErr error
 			pw, qErr = quoteString(req.Password)
 			if qErr != nil {
-				return badRequest("invalid_password", qErr.Error())
+				return badRequest(ErrCodeInvalidPassword, qErr.Error())
 			}
 		}
 
@@ -218,7 +218,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		for _, role := range req.Roles {
 			roleIdent, qErr := quoteIdent(role)
 			if qErr != nil {
-				return badRequest("invalid_role", qErr.Error())
+				return badRequest(ErrCodeInvalidRole, qErr.Error())
 			}
 			if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO USER "+uname); execErr != nil {
 				return wireErr(execErr)
@@ -300,7 +300,7 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 		}
 		pw, qErr := quoteString(req.NewPassword)
 		if qErr != nil {
-			return badRequest("invalid_password", qErr.Error())
+			return badRequest(ErrCodeInvalidPassword, qErr.Error())
 		}
 		if _, err := runStatement(r.Context(), db, "ALTER USER "+uname+" SET PASSWORD "+pw); err != nil {
 			return wireErr(err)
@@ -401,7 +401,7 @@ func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, use
 func assignRole(ctx context.Context, db *sql.DB, uname, role string) error {
 	roleIdent, err := quoteIdent(role)
 	if err != nil {
-		return badRequest("invalid_role", err.Error())
+		return badRequest(ErrCodeInvalidRole, err.Error())
 	}
 	if _, err := runStatement(ctx, db, "GRANT ROLE "+roleIdent+" TO USER "+uname); err != nil {
 		return wireErr(err)
@@ -426,7 +426,7 @@ func (s *GraphServer) withConnDBAndIdent(ctx context.Context, name string, fn fu
 	}
 	qname, err := quoteIdent(name)
 	if err != nil {
-		return badRequest("invalid_username", err.Error())
+		return badRequest(ErrCodeInvalidUsername, err.Error())
 	}
 	return fn(db, qname)
 }
@@ -443,7 +443,7 @@ func (s *GraphServer) connDB(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, &endpointError{
 			status:      http.StatusBadGateway,
-			code:        "profile_unreachable",
+			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		}
 	}
