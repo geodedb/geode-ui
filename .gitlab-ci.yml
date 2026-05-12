@@ -314,7 +314,7 @@ go:generate-verify:
     # already be go-gettable by the runner (it was being fetched at
     # @latest before); runner-side module-proxy/auth for devnw.dev/genapi
     # is a separate, pre-existing concern.
-    - go install devnw.dev/genapi/cmd/genapi@v0.3.0
+    - go install devnw.dev/genapi/cmd/genapi@v0.3.1
     - make generate
     - git diff --exit-code -- gen/ || (echo "make generate produced changes — commit them"; exit 1)
   rules:
