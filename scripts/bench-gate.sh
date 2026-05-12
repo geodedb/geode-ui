@@ -119,8 +119,14 @@ benchstat -format csv "$BASELINE" "$CURRENT" 2>/dev/null > "$CURRENT.cmp"
 REGRESSIONS="$(
   awk -F, -v thr="$THRESHOLD" '
     # skip header/blank/section rows; data rows have >= 7 fields and a
-    # non-empty first column that is not a column label.
-    NF >= 7 && $1 != "" && $1 !~ /^(goos|goarch|pkg|cpu)$/ {
+    # non-empty first column that is not a column label. Also skip the
+    # "geomean" summary row: benchstat only computes a meaningful geomean
+    # delta when the baseline and current runs share the *same* set of
+    # benchmark names — adding (or removing) a benchmark shifts the
+    # geomean even when no individual benchmark moved, which is a false
+    # positive for a per-benchmark regression gate. The later
+    # `make bench-baseline` refresh re-aligns the two sets.
+    NF >= 7 && $1 != "" && $1 != "geomean" && $1 !~ /^(goos|goarch|pkg|cpu)$/ {
       delta = $6
       # only flag explicit positive deltas above the threshold
       if (delta ~ /^\+[0-9.]+%$/) {

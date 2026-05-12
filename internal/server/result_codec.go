@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -15,6 +16,44 @@ import (
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
+
+// errWriter is a first-error-latching wrapper around a *bufio.Writer used
+// by streamQueryResult. Once any write fails, every subsequent call is a
+// no-op and err holds the first failure — so the streaming body becomes a
+// linear sequence of `ew.str(...)` / `ew.marshal(...)` / `ew.byte(...)`
+// calls with a single error check at the end instead of a dozen inline
+// `if _, err := ...; err != nil { return ... }` blocks (Q9 / #125).
+type errWriter struct {
+	w   *bufio.Writer
+	err error
+}
+
+func (e *errWriter) str(s string) {
+	if e.err == nil {
+		_, e.err = io.WriteString(e.w, s)
+	}
+}
+
+func (e *errWriter) byte(b byte) {
+	if e.err == nil {
+		e.err = e.w.WriteByte(b)
+	}
+}
+
+func (e *errWriter) raw(p []byte) {
+	if e.err == nil {
+		_, e.err = e.w.Write(p)
+	}
+}
+
+// marshal streams v as JSON directly into the buffered writer via the
+// encoding/json/v2 streaming encoder — no per-call []byte allocation,
+// unlike json.Marshal(v) + w.Write(raw) (PERF-2026-05-11-07 / #145).
+func (e *errWriter) marshal(v any) {
+	if e.err == nil {
+		e.err = json.MarshalWrite(e.w, v)
+	}
+}
 
 // queryRowScanner is the read-only subset of *sql.Rows that scanQueryResult
 // needs. *sql.Tx.QueryContext and *sql.DB.QueryContext both return
@@ -76,8 +115,10 @@ const streamFlushEvery = 64
 // owns the status line / Content-Type / body). On a mid-stream driver error
 // (rows.Scan or rows.Err) the head is already on the wire, so we return the
 // error with the JSON document left intentionally truncated (unclosed); the
-// caller's generated wrapper logs it but cannot change the 200 status. On
-// success returns the row count and a nil error.
+// caller's generated wrapper logs it but cannot change the 200 status. Such
+// a mid-stream abort is additionally surfaced server-side via slog.Warn
+// (Q39 / #134) because the truncated body is the only client-visible
+// signal otherwise. On success returns the row count and a nil error.
 func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []string, colDescs []jsontext.Value, start time.Time) (int64, error) {
 	bw := bufio.NewWriter(w)
 	flusher, _ := w.(http.Flusher)
@@ -88,26 +129,37 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 		}
 	}
 
+	// midStreamAbort logs the abort and wraps err for the caller. Called
+	// only after the document head is on the wire, so the on-the-wire
+	// behavior (truncated body, 200 already committed) is unchanged — this
+	// just makes the failure visible in the server logs (Q39 / #134).
+	midStreamAbort := func(stage string, rowCount int64, err error) (int64, error) {
+		slog.Warn("streamQueryResult: mid-stream abort",
+			"stage", stage,
+			"rows_sent", rowCount,
+			"elapsed_ms", time.Since(start).Milliseconds(),
+			"err", err)
+		return rowCount, fmt.Errorf("%s: %w", stage, err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	// 200 is implied on the first Write; set it explicitly so the
 	// status is unambiguous even for an empty result set.
 	w.WriteHeader(http.StatusOK)
 
-	if _, err := io.WriteString(bw, `{"columns":[`); err != nil {
-		return 0, fmt.Errorf("write head: %w", err)
-	}
+	ew := &errWriter{w: bw}
+	ew.str(`{"columns":[`)
 	for i, cd := range colDescs {
 		if i > 0 {
-			if err := bw.WriteByte(','); err != nil {
-				return 0, fmt.Errorf("write head: %w", err)
-			}
+			ew.byte(',')
 		}
-		if _, err := bw.Write(cd); err != nil {
-			return 0, fmt.Errorf("write head: %w", err)
-		}
+		ew.raw(cd)
 	}
-	if _, err := io.WriteString(bw, `],"rows":[`); err != nil {
-		return 0, fmt.Errorf("write head: %w", err)
+	ew.str(`],"rows":[`)
+	if ew.err != nil {
+		// Head failed before any flush: nothing meaningful is on the wire,
+		// but the status is already committed — treat as a head error.
+		return 0, fmt.Errorf("write head: %w", ew.err)
 	}
 	flush() // TTFB: client sees the document open before any rows are fetched.
 
@@ -126,20 +178,19 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			// Head already on the wire — abort with a truncated body.
-			return rowCount, fmt.Errorf("scan: %w", err)
+			return midStreamAbort("scan", rowCount, err)
 		}
 		summary.visitRow(row)
-		raw, mErr := json.Marshal(row)
-		if mErr != nil {
-			return rowCount, fmt.Errorf("marshal row: %w", mErr)
-		}
 		if rowCount > 0 {
-			if err := bw.WriteByte(','); err != nil {
-				return rowCount, fmt.Errorf("write row: %w", err)
-			}
+			ew.byte(',')
 		}
-		if _, err := bw.Write(raw); err != nil {
-			return rowCount, fmt.Errorf("write row: %w", err)
+		// Stream the row directly into the buffered writer — no per-row
+		// []byte allocation (PERF-2026-05-11-07 / #145). The v2 encoder
+		// completes synchronously before the next loop iteration overwrites
+		// the shared `row` backing array.
+		ew.marshal(row)
+		if ew.err != nil {
+			return midStreamAbort("write row", rowCount, ew.err)
 		}
 		rowCount++
 		if rowCount%streamFlushEvery == 0 {
@@ -147,37 +198,29 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return rowCount, err
+		return midStreamAbort("rows", rowCount, err)
 	}
 
-	if _, err := io.WriteString(bw, `],"row_count":`); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
-	}
-	if _, err := io.WriteString(bw, strconv.FormatInt(rowCount, 10)); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
-	}
-	if _, err := io.WriteString(bw, `,"elapsed_ms":`); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
-	}
-	if _, err := io.WriteString(bw, strconv.FormatInt(time.Since(start).Milliseconds(), 10)); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
-	}
-	graphSummary := summary.finish()
-	summaryJSON, mErr := json.Marshal(graphSummary)
-	if mErr != nil {
-		return rowCount, fmt.Errorf("marshal graph summary: %w", mErr)
-	}
-	if _, err := io.WriteString(bw, `,"graph_summary":`); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
-	}
-	if _, err := bw.Write(summaryJSON); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
-	}
-	if err := bw.WriteByte('}'); err != nil {
-		return rowCount, fmt.Errorf("write trailer: %w", err)
+	writeTrailer(ew, rowCount, start, summary.finish())
+	if ew.err != nil {
+		return midStreamAbort("write trailer", rowCount, ew.err)
 	}
 	flush()
 	return rowCount, nil
+}
+
+// writeTrailer appends the `],"row_count":N,"elapsed_ms":M,"graph_summary":{...}}`
+// tail that closes the streamed QueryResp document. Pulled out of
+// streamQueryResult so the row loop reads as a flat sequence of writes
+// (Q9 / #125). Errors latch on ew; the caller checks ew.err once.
+func writeTrailer(ew *errWriter, rowCount int64, start time.Time, summary GraphSummary) {
+	ew.str(`],"row_count":`)
+	ew.str(strconv.FormatInt(rowCount, 10))
+	ew.str(`,"elapsed_ms":`)
+	ew.str(strconv.FormatInt(time.Since(start).Milliseconds(), 10))
+	ew.str(`,"graph_summary":`)
+	ew.marshal(summary)
+	ew.byte('}')
 }
 
 // scanQueryResult drains rows into a *gentypes.QueryResp using the same

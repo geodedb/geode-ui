@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"net/http"
 	"reflect"
 	"testing"
 	"time"
@@ -206,3 +207,54 @@ func mustScan(b *testing.B, fr *fakeRowScanner) GraphSummary {
 // elapsed_ms; not currently used but kept here so future stop-the-world
 // regression tests can pin a deterministic time.Since.
 var referenceTime = time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC) //nolint:unused
+
+// discardFlushWriter is an http.ResponseWriter that discards the body
+// (so the benchmark measures the codec, not buffer growth) and implements
+// http.Flusher as a no-op. The header map is real so WriteHeader is happy.
+type discardFlushWriter struct{ h http.Header }
+
+func newDiscardFlushWriter() *discardFlushWriter { return &discardFlushWriter{h: http.Header{}} }
+
+func (d *discardFlushWriter) Header() http.Header         { return d.h }
+func (d *discardFlushWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (d *discardFlushWriter) WriteHeader(int)             {}
+func (d *discardFlushWriter) Flush()                      {}
+
+// BenchmarkStreamQueryResult_PerRowAlloc streams a fixed number of rows
+// through streamQueryResult and reports allocs/op. PERF-2026-05-11-07
+// (#145): the per-row path now serialises each row directly into the
+// buffered writer via json.MarshalWrite instead of json.Marshal(row) +
+// w.Write(raw), so the per-row []byte allocation is gone — this bench is
+// the regression guard for that. Paralleling BenchmarkScanQueryResult_FoldedSummary.
+func BenchmarkStreamQueryResult_PerRowAlloc(b *testing.B) {
+	const nRows = 256
+	rows := make([][]any, nRows)
+	for i := range rows {
+		rows[i] = []any{
+			map[string]any{"id": int64(i), "labels": []string{"P"}, "properties": map[string]any{"k": "v"}},
+			map[string]any{"id": int64(i + nRows), "start_node": int64(i), "end_node": int64(i + 1), "type": "T", "properties": map[string]any{}},
+			"scalar",
+		}
+	}
+	colNames := []string{"n", "r", "s"}
+	colDescs := make([]jsontext.Value, len(colNames))
+	for i, n := range colNames {
+		raw, err := json.Marshal(struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}{Name: n, Type: "TEXT"})
+		if err != nil {
+			b.Fatalf("marshal col desc: %v", err)
+		}
+		colDescs[i] = jsontext.Value(raw)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fr := &fakeRowScanner{cols: colNames, rows: rows}
+		w := newDiscardFlushWriter()
+		if _, err := streamQueryResult(w, fr, fr.cols, colDescs, time.Now()); err != nil {
+			b.Fatalf("streamQueryResult: %v", err)
+		}
+	}
+}

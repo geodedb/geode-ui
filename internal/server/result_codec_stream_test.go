@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -199,16 +202,47 @@ func TestStreamQueryResult_MidStreamError(t *testing.T) {
 	}
 	er := &errRowScanner{fakeRowScanner: inner, failOn: 3}
 	rec := newFlushRecorder()
-	_, err := streamQueryResult(rec, er, inner.cols, colDescsForTest(t, "v"), time.Now())
+
+	// Capture slog so we can assert the mid-stream-abort warning fires
+	// (Q39 / #134): the truncated body is the only client-visible signal,
+	// so the server must log the failure.
+	var logBuf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	rowCount, err := streamQueryResult(rec, er, inner.cols, colDescsForTest(t, "v"), time.Now())
 	if err == nil {
 		t.Fatal("expected an error from the mid-stream Scan failure")
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("status=%d want 200 (head was already committed before the error)", rec.Code)
 	}
+	// Two rows ("ok1", "ok2") made it onto the wire before the third Scan blew up.
+	if rowCount != 2 {
+		t.Errorf("rowCount=%d want 2 (rows streamed before the abort)", rowCount)
+	}
 	// The body should be a truncated/unclosed JSON document.
 	var anyVal any
 	if json.Unmarshal(rec.Body.Bytes(), &anyVal) == nil {
 		t.Errorf("expected truncated/invalid JSON body, got parseable: %s", rec.Body.Bytes())
+	}
+
+	// The abort must be logged with rows_sent (and the originating error).
+	logged := logBuf.String()
+	if !strings.Contains(logged, "streamQueryResult: mid-stream abort") {
+		t.Errorf("missing mid-stream-abort warning in slog output:\n%s", logged)
+	}
+	if !strings.Contains(logged, "rows_sent=2") {
+		t.Errorf("mid-stream-abort warning missing rows_sent=2:\n%s", logged)
+	}
+	if !strings.Contains(logged, "stage=scan") {
+		t.Errorf("mid-stream-abort warning missing stage=scan:\n%s", logged)
+	}
+	if !strings.Contains(logged, "driver boom") {
+		t.Errorf("mid-stream-abort warning missing the underlying error:\n%s", logged)
+	}
+	if !strings.Contains(logged, "level=WARN") {
+		t.Errorf("mid-stream-abort should be logged at WARN level:\n%s", logged)
 	}
 }
