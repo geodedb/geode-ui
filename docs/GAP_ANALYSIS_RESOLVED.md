@@ -330,6 +330,8 @@ Verifier returned SAFE-TO-CLOSE for all 9 commits. Three Security (1 cross-close
 - **2026-05-10 (gap-close pass — 16 closed + 5 deferred):** Requirements #6, #7. Quality Q3 (#31), Q6 (#36), Q7 (#37), Q9 (#41), Q10 (#42). Security N1 (#63), N4 (#72), N5 (#74), N10 (#76), F8-sec (#68), F11 (#77), F6+N6 (#67). Performance F7 (#51), F8 (#52). Deferred (tracked at `genapi#215`/`genapi#216`): F3 (#25), F13 (#57), N7-remainder (#66), Q5 (#34), Q8 (#38).
 - **2026-05-11 (follow-up batch — 9 closed + 1 won't-do):** Performance F10 (#54), F12 (#56), F13 (#57, genapi `fd31bbc`), PSR-F5 (#103), PSR-F15 (#112). Quality Q5 (#34), Q8 (#38). Security N2 (#64), N7-remainder (#66, genapi `fd31bbc`). Won't-do: F18 (#61). 9 geode-ui commits + 3 genapi commits (`fd31bbc`, `5dd5f61`, `7eaf8a1`; genapi pushed to origin). Still deferred at the time: F3 (#25), tracked at `genapi#216`.
 - **2026-05-11 (same-day follow-up — F3 closed + N2 durable upgrade + 2 operational follow-ups):** Performance F3 (#25, genapi `38c3c1e`) — streaming `/api/v1/query` response. Security N2 (#64) durable-upgraded — JWT revocation store moved from in-memory to SQLite-backed (`internal/jwt/revocation_sqlite.go`, `RevocationSet.AttachSQLite`, `502e34f`/`3059710`); survives a process restart, validation path stays zero-DB-query. Operational follow-ups (no gap ID): genapi tsc `moduleResolution=node10` deprecation test fix (genapi `a192022` — `ignoreDeprecations "5.0"→"6.0"` in the React-runtime test scaffold; no geode-ui change); gosec G302/G304 false-positive on the upload temp file annotated (`502e34f` — `// #nosec G302 G304` + rationale; recorded as a Confirmed-Safe row in `SECURITY_GAP_ANALYSIS.md`). 4 geode-ui commits (`502e34f`, `3059710`, `bb8319d`, + the bookkeeping commit) + 2 genapi commits (`a192022`, `38c3c1e`; pushed to origin). With F3 closed, the PERF backlog's original F-series is now fully clear — no F-item left open or deferred.
+- **2026-05-12 (genapi + medium-cohort batch — 9 closed + #159 deferred):** Security F-AUTH-1 (#132, `4002c6f`+genapi `e01b2de`), F-AUTH-2 (#135, `1ec9889`+genapi `30fad5d`). Performance PERF-2026-05-11-03 (#133, `8af76ca`+genapi `09d4ac8`), -06 (#142, `203a454`), -09 (#150, `9c39d57`), -10 (#154, `6e6db14`), -11 (#156, `e877465`). Quality Q02/GAP-020 (#90, `9b0a423`+genapi `55c79d2`), Q27 (#173, `2aaaebc`). Deferred: #159 (on product). 9 geode-ui commits + 1 docs-tracking + 5 genapi commits (unpushed; breaking `mcpx`/`SetAuthVerifier` API → minor bump).
+- **2026-05-12 (top-10 quality/perf/CI batch — 13 issues + 1 no-issue follow-up):** Quality Q9 (#125, `a42a792`), Q39 (#134, `a42a792`), Q23 (#126, `df3fd51`), Q41 (#136, `1fea7ba`), Q10 (#144, `6abde32`), Q12 (#146, `e510cb5`), Q13 (#149, `0d629bf`), Q40 (#151, `0d629bf`), Q22 (#168, `03b6ec1`), Q38 (#180, `ea3f681`), Q32 (#127, `d35d3c7`). Performance PERF-2026-05-11-07 (#145, `a42a792`; `bench-baseline.txt` refreshed `6c14368`). Security F-SUP-3 (#153, `d35d3c7`), F-INPUT-2 (#143, `ea3f681`). No-issue follow-up: `createProfile` `as any` body cast removed (#— , `2c5895d`). Deviation: `codesign-windows-ssl@~latest` pin pending an upstream ci-catalog release (tracked via the `# ci-pins-allow:` marker + #127's `TODO`). 11 geode-ui implementation commits + 1 docs-tracking, **unpushed**.
 
 ---
 
@@ -884,3 +886,149 @@ A `/codepros:gap-close` run that landed the **upstream genapi follow-ups** defer
 - **genapi commits unpushed:** the 5 genapi commits (`1ffa8eb` artifact refresh, `e01b2de` #132 mcpx ctx threading, `30fad5d` #135 mcpx role gate, `09d4ac8` #133 obsx buffered logging, `55c79d2` #90 client/react expandPath) sit on genapi `main` ahead of origin -- the user decides on pushing/tagging genapi. They are **breaking** for other genapi consumers (`mcpx.Tool`/`MCPServerInterface`/`SetAuthVerifier`) -> next genapi release should be a minor bump; `devnw.dev/oidc` must regenerate + update its `MCPServerInterface` impls + add `defer obsx.FlushLogs()` on shutdown.
 - **geode-ui commits unpushed:** the 9 geode-ui implementation commits (`4002c6f`, `1ec9889`, `8af76ca`, `9b0a423`, `203a454`, `9c39d57`, `6e6db14`, `2aaaebc`, `e877465`) + the docs-tracking commit sit on `main` unpushed at the time of this entry; the user pushes.
 - **In-repo mitigation `c46e77e` superseded:** the per-goroutine MCP-context stash is deleted by `4002c6f` -- F-AUTH-1's full fix replaces the 2026-05-11 mitigation entirely.
+
+---
+
+### 2026-05-12 closure run -- top-10 quality / perf / CI batch (13 issues + 1 no-issue follow-up; 11 geode-ui commits + 1 docs-tracking, unpushed)
+
+A second `/codepros:gap-close` run on 2026-05-12 landing the top-priority quality backlog (`streamQueryResult` cleanup, error-code taxonomy, `CONVENTIONS.md`, `IsRevoked` flatten, `Login` decomposition, `WSServer.Query` decomposition + cancel-reader lifetime, list-endpoint empty-result rule, graceful-shutdown error propagation, CI tool-ref pinning) plus one perf quick-win (per-row `MarshalWrite`) and one security item (ciphertext truth-table). Verifier returned **ACCEPT-WITH-NOTES** -- full suite green (`make go-test -race`, `make go-lint`, `make generate` clean, `make bench-gate`, `npm test` 453/453); coverage up on every touched package (`internal/server` 77.1→78.2%, `internal/jwt` 81.0→82.5%, `internal/profilestore` 80.7→81.0%, `cmd/server` 65.3→70.7%); no regressions. The one note (was `genapi@v0.3.0` the exact tag `gen/` was generated against?) is **resolved**: `git rev-parse v0.3.0^{commit}` in `~/src/devnw/go/genapi` == `55c79d2` == genapi `main` HEAD == the working copy `gen/` was regenerated against -- so the CI pin is correct. None of these carry a `GAP-NNN` ID in `GAP_ANALYSIS.md`; they are tracked by domain ID + GitLab issue, recorded here for the resolved-record. The 11 implementation commits + the docs-tracking commit sit on `main` **unpushed** at the time of this entry; the user pushes.
+
+#### Quality (11)
+
+##### Q9 (#125) + Q39 (#134): `streamQueryResult` cleanup -- `errWriter` shim, mid-stream-abort logging, per-row `MarshalWrite` [RESOLVED]
+
+- **Issue:** [#125](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/125) (closed) + [#134](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/134) (closed)
+- **Domain:** Quality (also closes Perf #145 -- see Performance section below)
+- **Severity at close:** PriorityScore 20 (#125) / 15 (#134)
+- **Closure commit(s):** `a42a792`
+- **Resolution:** `internal/server/result_codec.go`: `errWriter` first-error-latching shim; `streamQueryResult` flattened (gocognit < ~20; golangci-lint 0 issues); `midStreamAbort()` emits `slog.Warn` on every post-head error path (`stage`/`rows_sent`/`elapsed_ms`/`err`); `writeTrailer()` helper; per-row `json.MarshalWrite(bw, row)` replaces the per-row `json.Marshal`→`bw.Write` (one `[]byte`/row removed -- 256-row box 3646→3389 allocs/op, 183648→147212 B/op). `scripts/bench-gate.sh` now skips the `geomean` summary row in its regression check.
+- **Evidence:** `internal/server/result_codec_test.go` + `BenchmarkStreamQueryResult_PerRowAlloc`; `result_codec_stream_test.go` +slog-capture assertion in `TestStreamQueryResult_MidStreamError`. `bench-baseline.txt` refreshed in `6c14368`.
+- **Resolved date:** 2026-05-12
+
+##### Q23 (#126): centralise error-code taxonomy in `internal/server/errorcodes.go` [RESOLVED]
+
+- **Issue:** [#126](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/126) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 15
+- **Closure commit(s):** `df3fd51`
+- **Resolution:** new `internal/server/errorcodes.go` -- 62 `ErrCode*` constants grouped by area + `allErrorCodes`/`errorCodeSet`. ~100 literal occurrences (38 distinct codes) migrated across 17 handler/helper files; **wire values byte-identical** (verified `ErrCodeInvalidCredentials == "invalid_credentials"` etc., no drift).
+- **Evidence:** new `internal/server/errorcodes_test.go` -- dep-free `go/ast` golden test asserting every `code:`/`Code:`-position literal is an `ErrCode*` constant + no dead constants (verified it catches a planted straggler); full Go suite green.
+- **Resolved date:** 2026-05-12
+
+##### Q41 (#136): add `internal/server/CONVENTIONS.md` [RESOLVED]
+
+- **Issue:** [#136](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/136) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 15
+- **Closure commit(s):** `1fea7ba`
+- **Resolution:** new `internal/server/CONVENTIONS.md` -- 6 sections, each `file`-cited: error-code taxonomy → `errorcodes.go`; empty-result rule + the single-resource-404 split; wire-feature-missing fallback + `errWireFeatureMissing` sentinel; per-row dual-key forward-compat in `policyFromRow`/`roleFromRow`; `auditEvent*` naming + `emitAudit` best-effort + substring redaction; the `withConnDBAndIdent`/`writeEndpointError`/`badRequest` envelope helpers + the JWT→connDB→quoted-ident admin-RBAC skeleton. `README.md` pointer added.
+- **Evidence:** `internal/server/CONVENTIONS.md` present; markdownlint clean; `README.md` links it.
+- **Resolved date:** 2026-05-12
+
+##### Q10 (#144): flatten `IsRevoked` hot path -- extract `jtiRevoked` / `subjectRevokeAll` [RESOLVED]
+
+- **Issue:** [#144](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/144) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 15
+- **Closure commit(s):** `6abde32`
+- **Resolution:** `internal/jwt/revocation.go` -- extracted `jtiRevoked(jti, now) bool` (preserves lazy-GC of expired entries + fail-closed non-`time.Time`→revoked) and `subjectRevokeAll(sub, iat) bool` (preserves `!iat.After(changedAt)`); `IsRevoked` flattened to two `if`s.
+- **Evidence:** `internal/jwt/revocation_test.go` +`TestIsRevoked_DefensiveNonTimeEntries`; `internal/jwt` coverage 81.0% → **82.5%**.
+- **Resolved date:** 2026-05-12
+
+##### Q12 (#146): decompose `Login` handler -- `denyLogin` / `mintAndSetAuthCookie` / `adminRolesFor` [RESOLVED]
+
+- **Issue:** [#146](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/146) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 15
+- **Closure commit(s):** `e510cb5`
+- **Resolution:** `internal/server/handlers_auth.go` -- extracted `denyLogin(w, authStart, reason, username, password, profile)` (SEC-N10 constant-time path: `performDummyCompare`→`emitAudit`→`respectLoginLatencyFloor`→`writeEndpointError(401)` order + arithmetic byte-preserved; `authStart` captured at the same point), `mintAndSetAuthCookie(w, token, exp) int64` (SEC-F7 cookie attrs + `expires_in>=1` clamp, returns the clamped value), `adminRolesFor(username, upstreamRoles) []string`. Security-reviewed: no timing-profile change between success/failure paths.
+- **Evidence:** `internal/server/handlers_auth_test.go` +`TestAdminRolesFor`, +`TestMintAndSetAuthCookie`; pinning tests (`TestLogin_FailureBodyIsIdentical_AcrossModes`, `TestLogin_LatencyFloor`, …) + `loginlimiter_test.go` + `auth_test.go` pass unchanged.
+- **Resolved date:** 2026-05-12
+
+##### Q13 (#149) + Q40 (#151): decompose `WSServer.Query` + fix cancel-reader goroutine lifetime [RESOLVED]
+
+- **Issue:** [#149](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/149) (closed) + [#151](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/151) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 15 (#149) / 8 (#151)
+- **Closure commit(s):** `0d629bf`
+- **Resolution:** `internal/server/ws_query.go` -- extracted `startCancelReader(conn, cancel, done) <-chan struct{}` (coordinator + bounded relay; selects on `<-done` so it exits on the happy path) and `streamRowsOverWS(conn, rows, cols, batcher) (int64, error)`. `Query` now `defer close(done)`s and is a thin sequencer. Test-only `onCancelReaderExit func()` hook; `errStreamAborted` sentinel (terminal error frame written ≠ transport failure). The cancel-reader goroutine no longer outlives the handler.
+- **Evidence:** `internal/server/ws_query_test.go` +`TestStartCancelReader_ExitsOnDone`, +`TestStartCancelReader_CancelsOnError`; verified `-race` clean, no goroutine leak.
+- **Resolved date:** 2026-05-12
+
+##### Q22 (#168): pin the list-endpoint empty-result / wire-feature-missing rule with tests [RESOLVED]
+
+- **Issue:** [#168](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/168) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 12
+- **Closure commit(s):** `03b6ec1`
+- **Resolution:** new `internal/server/list_handlers_test.go` -- asserts every list endpoint (`GetRoles`/`GetPolicies`/`GetBackups`/`GetUsers`/`GetMigrations`, schema lists, `Audit`) returns non-nil empty slices and renders `[]`/`{"...":[]}` not `null` -- both on empty result and on an `isWireFeatureMissing` upstream. **No production code changed:** all handlers already satisfied the invariant (audited + verified the test fails when a regression is introduced).
+- **Evidence:** `internal/server/list_handlers_test.go`; full Go suite green; perturb-and-fail self-check.
+- **Resolved date:** 2026-05-12
+
+##### Q38 (#180): propagate + log the graceful-shutdown error [RESOLVED]
+
+- **Issue:** [#180](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/180) (closed)
+- **Domain:** Quality
+- **Severity at close:** PriorityScore 4
+- **Closure commit(s):** `ea3f681` (same commit as SEC F-INPUT-2 #143)
+- **Resolution:** `cmd/server/app.go` -- `errGracefulShutdown` sentinel + configurable `shutdownBudget` field (default 5s); `serve` wraps the `Shutdown` error (not discarded); `run` logs **WARN** for the shutdown-timeout case, ERROR for fatal listener errors. Verified no `_ = httpSrv.Shutdown(...)` anywhere.
+- **Evidence:** `cmd/server/app_test.go` +`TestServe_GracefulShutdownErrorPropagates`; `cmd/server` coverage 65.3% → **70.7%**.
+- **Resolved date:** 2026-05-12
+
+##### Q32 (#127): pin CI tool & catalog refs to immutable tags [RESOLVED]
+
+- **Issue:** [#127](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/127) (closed); also closes SEC F-SUP-3 [#153](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/153) (closed)
+- **Domain:** Quality (+ Security supply-chain)
+- **Severity at close:** PriorityScore 15 (#127) / RiskScore 9 (#153)
+- **Closure commit(s):** `d35d3c7`
+- **Resolution:** `.gitlab-ci.yml`: `genapi@v0.3.0` (verified == genapi `main` HEAD `55c79d2`, the tree `gen/` was generated against), `golangci-lint@v2.12.2`, `benchstat@v0.0.0-20260409210113-…`. `codesign-windows-ssl@~latest` left unpinned with a `# ci-pins-allow:` marker + `TODO(#127)` -- **deviation**: no tagged ci-catalog release ships that component yet (it's only on the catalog's `main`; pre-existing -- `glab ci lint` failed on that line before this change too). New `scripts/check-ci-pins.sh` guard wired into `.pre-commit-config.yaml` + a `ci-pins-check` CI lint job (still catches *new* `@latest` regressions). The codesign-pin follow-up rides on the marker + #127's `TODO`.
+- **Evidence:** `.gitlab-ci.yml` shows immutable tags for the 3 pinned refs; `scripts/check-ci-pins.sh` present + wired; `ci-pins-check` job in `.gitlab-ci.yml`; full suite green.
+- **Resolved date:** 2026-05-12
+
+#### Performance (1)
+
+##### PERF-2026-05-11-07 (#145): `streamQueryResult` per-row `json.MarshalWrite` [RESOLVED]
+
+- **Issue:** [#145](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/145) (closed)
+- **Domain:** Performance
+- **Severity at close:** P2 (PerfScore 45)
+- **Closure commit(s):** `a42a792` (same commit as Q9 #125 / Q39 #134); `6c14368` (bench-baseline refresh)
+- **Resolution:** `internal/server/result_codec.go` -- per-row `json.MarshalWrite(bw, row)` replaces the per-row `json.Marshal`→`bw.Write` (one `[]byte`/row removed): 256-row box **3646→3389 allocs/op, 183648→147212 B/op**. `scripts/bench-gate.sh` now skips the `geomean` summary row in its regression check; `bench-baseline.txt` regenerated (`-count=6`) in `6c14368` so `make bench-gate` baselines on the new numbers.
+- **Evidence:** `BenchmarkStreamQueryResult_PerRowAlloc`; `result_codec_test.go`; `make bench-gate` green against the refreshed baseline.
+- **Resolved date:** 2026-05-12
+
+#### Security (1)
+
+##### F-INPUT-2 (#143): `unsealBytes` fails loud on ciphertext without a configured cipher [RESOLVED]
+
+- **Issue:** [#143](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/143) (closed)
+- **Domain:** Security
+- **Severity at close:** Low (RiskScore 4; A04 / CWE-665)
+- **Closure commit(s):** `ea3f681` (same commit as Q38 #180)
+- **Resolution:** `internal/profilestore/sqlite.go` -- `unsealBytes`'s `cipher == nil` branch now `if IsCiphertext(raw) { return "", fmt.Errorf("profilestore: ciphertext present but no cipher configured") }`; plaintext + empty pass through unchanged; the 4 sensitive-column reads still work; the prior #150 `dbRO` path unaffected. Defense-in-depth -- production still fail-fasts on a missing `GEODE_PROFILESTORE_KEY` at store construction.
+- **Evidence:** `internal/profilestore/sqlite_test.go` +`TestUnsealBytes_FailsLoudWithoutCipher`; `internal/profilestore` coverage 80.7% → **81.0%**.
+- **Resolved date:** 2026-05-12
+
+(F-SUP-3 #153 is recorded under Q32 #127 above -- it was closed by the same commit and is the security framing of the same `.gitlab-ci.yml` ref-pinning work.)
+
+#### Closed-no-issue follow-up
+
+##### `createProfile` `as any` request-body cast removed [RESOLVED]
+
+- **Issue:** none (closed-no-issue follow-up; loose end noted in the 2026-05-12 genapi-batch entry above)
+- **Domain:** Quality (api-contract)
+- **Closure commit(s):** `2c5895d`
+- **Resolution:** `src/api/profiles.ts` -- `toWireCreateRequest` return type → `CreateProfileReq` (imported from `@api`); the `as any` removed at `client.postProfiles(...)`. The other `listProfiles`/`fromWireProfile` casts (tracked under Q2/#90) deliberately left alone.
+- **Evidence:** `grep "as any" src/api/profiles.ts` → only the still-tracked-elsewhere casts remain; `npm test` 453/453 green; `tsc --noEmit` clean.
+- **Resolved date:** 2026-05-12
+
+#### Still open / follow-ups after this run
+
+- **`src/lib/errors.ts` ↔ `internal/server/errorcodes.go` cross-check** -- the frontend error-code strings and the new server-side `ErrCode*` constants are not cross-checked by any automated test. Worth a tiny `go/ast` ↔ TS-string consistency check if a convention emerges. Not ticketed.
+- **`codesign-windows-ssl` pin** -- still `@~latest` with a `# ci-pins-allow:` marker + `TODO(#127)`; pin to an immutable ci-catalog tag once one ships that component (today it's only on the catalog's `main`).
+- **#159 (PERF-2026-05-11-12)** -- unchanged from the genapi-batch entry above: `/api/v1/query rateLimit=200` vs ~2000-rps target, deferred on a product decision; documented in `docs/ARCHITECTURE.md`.
+
+#### Notes on this run
+
+- **geode-ui commits unpushed:** the 11 implementation commits (`d35d3c7`, `2c5895d`, `a42a792`, `0d629bf`, `e510cb5`, `6abde32`, `ea3f681`, `df3fd51`, `03b6ec1`, `1fea7ba`, `6c14368`) + the docs-tracking commit sit on `main` ahead of origin -- the user decides on `git push origin main`. No genapi change in this run.
+- **Verifier note resolved:** the only verifier note (CI pin == the tag `gen/` was generated against?) was confirmed -- `git rev-parse v0.3.0^{commit}` in `~/src/devnw/go/genapi` == `55c79d2` == genapi `main` HEAD == the working copy `gen/` was regenerated against. No follow-up needed there.

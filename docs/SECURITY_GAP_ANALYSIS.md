@@ -1,6 +1,6 @@
 # Security Gap Analysis — geode-ui
 
-**Last updated:** 2026-05-12 (gap-closure run: F-AUTH-1 #132 + F-AUTH-2 #135 closed)
+**Last updated:** 2026-05-12 (gap-closure runs: F-AUTH-1 #132 + F-AUTH-2 #135 closed [genapi+medium batch]; F-SUP-3 #153 [`d35d3c7`] + F-INPUT-2 #143 [`ea3f681`] closed [top-10 quality/perf/CI batch])
 **Audit:** /codepros:audit Phase 3 → Phase 4 tracking (Audit-2026-05-11 cohort)
 **Repository:** `devnw/codepros/geode/geode-ui`
 **Branch reviewed:** `main` @ `d3e5de1`
@@ -280,10 +280,10 @@ The PSR cohort is **healthier than the prior F*/N* cohort** by raw count of rele
 | F-SUP-1 | A06 / CWE-1395 | **16** | High | **Closed `d464fe6`** (release-blocker cleared) | [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148) | `scripts/run-go.sh:9` | Go 1.26.2 stdlib has 4 CALLED CVEs — bump to go1.26.3 |
 | F-AUTH-2 | A01 / CWE-862 | **12** | Medium | **Closed `1ec9889`** (geode-ui) + genapi `30fad5d` — mechanism landed; `query` keeps its no-role policy (matches the `POST /api/v1/query` REST route); **#135 closed** | [#135](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/135) | `gen/pkg/mcpx/engine.go:500-580` | MCP layer has no per-tool role enforcement |
 | F-INPUT-1 | A03 / CWE-89 | **9** | Medium | **Closed `454d0ba`** | [#140](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/140) | `internal/server/quoting.go:61-68` | `quoteString` does not escape backslash — diverges from authoritative GQL escaper |
-| F-SUP-3 | A08 / CWE-829 | **9** | Medium | Open | [#153](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/153) | `.gitlab-ci.yml:24,249,261` | CI components pinned to floating refs |
+| F-SUP-3 | A08 / CWE-829 | **9** | Medium | **Closed `d35d3c7`** (2026-05-12) — 3/4 floating refs pinned to immutable tags (`genapi@v0.3.0`, `golangci-lint@v2.12.2`, `benchstat@…`); the 4th (`codesign-windows-ssl@~latest`) carries a `# ci-pins-allow:` marker + `TODO(#127)` (no tagged ci-catalog release ships it yet — pre-existing); new `scripts/check-ci-pins.sh` guard + `ci-pins-check` job still catches *new* `@latest` regressions; **#153 closed** (codesign pin tracked via the marker + #127's TODO) | [#153](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/153) | `.gitlab-ci.yml`, `scripts/check-ci-pins.sh` (new) | CI components pinned to floating refs |
 | F-SUP-2 | A06 / CWE-1395 | **9** | Medium | **#72 already open** — deferred-comment by gap-sync | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `pnpm-lock.yaml` | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin |
 | F-SUP-4 | A08 / CWE-1357 | **6** | Low | **Closed `f444c70`** | [#160](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/160) | `package.json:31-34` | electron / electron-builder referenced in scripts but missing from devDependencies |
-| F-INPUT-2 | A04 / CWE-665 | **4** | Low | Open (suspected) | [#143](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/143) | `internal/profilestore/sqlite.go:131-140` | `unsealBytes` silently passes ciphertext when cipher unconfigured |
+| F-INPUT-2 | A04 / CWE-665 | **4** | Low | **Closed `ea3f681`** (2026-05-12) — `unsealBytes`'s `cipher == nil` branch now `if IsCiphertext(raw) { return "", fmt.Errorf("profilestore: ciphertext present but no cipher configured") }`; plaintext + empty pass through unchanged; defense-in-depth (production still fail-fasts on missing `GEODE_PROFILESTORE_KEY` at store construction). Test: `sqlite_test.go` +`TestUnsealBytes_FailsLoudWithoutCipher`. `internal/profilestore` cov 80.7%→81.0%; **#143 closed** | [#143](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/143) | `internal/profilestore/sqlite.go` | `unsealBytes` silently passes ciphertext when cipher unconfigured |
 | F-SUP-5 | A07 / CWE-798 | **2** | Low (info) | Open | [#161](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/161) | `docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:458,461,1697` | Plan doc embeds copyable JWT_SECRET_HEX placeholder |
 
 ### Audit-2026-05-11 — release blockers
@@ -298,9 +298,9 @@ Both original release-blockers are now **fully resolved** (the 2026-05-12 gap-cl
 - **F-AUTH-1 (#132) ↔ F-AUTH-2 (#135)** — both trace to the MCP tool generator template in upstream genapi. F-AUTH-1 (context-threading) must land first because F-AUTH-2 (per-tool role gate) needs the verified context to read role claims from.
 - **F-AUTH-1 (#132) ↔ F-1 (#69)** — SEC-F1 wired `mcpx.SetAuthVerifier` (closed); F-AUTH-1 is the follow-on showing that auth is verified but the verified context is dropped before the tool body runs.
 - **F-INPUT-1 (#140) ↔ N1 (#63)** — same `quoting.go` surface; the existing adversarial corpus (closed via SEC-N1) is the extension point for the new backslash-escape test cases.
-- **F-INPUT-2 (#143) ↔ S5 (#118)** — defense-in-depth on the encryption layer that S5 introduced; closes the `cipher == nil && IsCiphertext(raw) == true` truth-table gap.
+- **F-INPUT-2 (#143) ↔ S5 (#118)** — defense-in-depth on the encryption layer that S5 introduced; **closed `ea3f681`** — `unsealBytes` now closes the `cipher == nil && IsCiphertext(raw) == true` truth-table gap by failing loud.
 - **F-SUP-1 (#148)** — touches `~/src/devnw/codepros/geode/geode-client-go/scripts/run-go.sh` cross-module; both repos must bump in lockstep.
-- **F-SUP-3 (#153)** — overlaps with the quality-Q32 angle (same file, maintainability framing); this issue is the security framing emphasising upstream-takeover risk.
+- **F-SUP-3 (#153) ↔ Q32 (#127)** — same `.gitlab-ci.yml` surface; **both closed `d35d3c7`** (Q32 is the maintainability framing, F-SUP-3 the upstream-takeover-risk framing). 3/4 floating refs pinned to immutable tags; `codesign-windows-ssl@~latest` pin pending an upstream ci-catalog release (tracked via the `# ci-pins-allow:` marker + #127's `TODO`).
 - **F-SUP-4 (#160) ↔ SEC-NEW-1** — both observe the same Electron-packaging surface; F-SUP-4 is the lockfile-integrity fix while SEC-NEW-1 is the broader release-engineering deferral.
 
 ### Audit-2026-05-11 — upstream-genapi follow-ups
@@ -337,7 +337,7 @@ Re-ran the relevant smoke tests against HEAD `d3e5de1`:
 | N10 — Constant-time auth-failure path | #76 | `performDummyCompare` + `loginMinFailureLatency` still present | **PASS** |
 | S1-S10 PSR — | #114-#123 | All ten closures still in place; spot-checked S5 (`OpenSQLiteEncrypted`), S6 (`profile_*` audit events), S8 (`sanitizeConnections`) | **PASS** |
 
-**Hardening tweaks (not regressions):** F-INPUT-1 extends N1's quoting corpus; F-INPUT-2 hardens S5's `unsealBytes`. Both flagged in the cohort table above; no previously-closed item is reopened.
+**Hardening tweaks (not regressions):** F-INPUT-1 extended N1's quoting corpus (closed `454d0ba`); F-INPUT-2 hardened S5's `unsealBytes` (closed `ea3f681` — fail-loud on ciphertext-without-cipher; `TestUnsealBytes_FailsLoudWithoutCipher`). Both were flagged in the cohort table above; no previously-closed item is reopened.
 
 ### Audit-2026-05-11 — verdict
 
@@ -345,7 +345,11 @@ The cohort is **smaller and more focused than PSR**: 1 confidential High (cross-
 
 **Gap-closure status (2026-05-11 run):** F-SUP-1 (#148) **CLOSED** (`d464fe6`); F-INPUT-1 (#140) **CLOSED** (`454d0ba`); F-SUP-4 (#160) **CLOSED** (`f444c70`).
 
-**Gap-closure status (2026-05-12 run):** F-AUTH-1 (#132) **CLOSED** (`4002c6f` + genapi `e01b2de`/`1ffa8eb`) — full fix; the in-repo mitigation `c46e77e` is fully superseded (the per-goroutine stash is deleted). F-AUTH-2 (#135) **CLOSED** (`1ec9889` + genapi `30fad5d`) — per-tool role mechanism landed; `query` keeps its no-role policy. **Both original release-blockers are now fully resolved.** F-SUP-2 (#72), F-SUP-3 (#153), F-INPUT-2 (#143), F-SUP-5 (#161) remain open (out of scope for these closure runs).
+**Gap-closure status (2026-05-12 genapi+medium run):** F-AUTH-1 (#132) **CLOSED** (`4002c6f` + genapi `e01b2de`/`1ffa8eb`) — full fix; the in-repo mitigation `c46e77e` is fully superseded (the per-goroutine stash is deleted). F-AUTH-2 (#135) **CLOSED** (`1ec9889` + genapi `30fad5d`) — per-tool role mechanism landed; `query` keeps its no-role policy. **Both original release-blockers are now fully resolved.**
+
+**Gap-closure status (2026-05-12 top-10 quality/perf/CI run):** F-SUP-3 (#153) **CLOSED** (`d35d3c7`) — 3/4 floating CI refs pinned to immutable tags (`genapi@v0.3.0` [== genapi `main` HEAD `55c79d2`, the tree `gen/` was generated against], `golangci-lint@v2.12.2`, `benchstat@…`); `codesign-windows-ssl@~latest` left unpinned with a `# ci-pins-allow:` marker + `TODO(#127)` (**deviation** — no tagged ci-catalog release ships that component yet; pre-existing — `glab ci lint` failed on that line before this change too); the codesign-pin follow-up is tracked via the marker + #127's TODO; new `scripts/check-ci-pins.sh` guard wired into `.pre-commit-config.yaml` + a `ci-pins-check` CI lint job still catch *new* `@latest` regressions. F-INPUT-2 (#143) **CLOSED** (`ea3f681`) — `unsealBytes` fails loud on ciphertext without a cipher; defense-in-depth (production still fail-fasts at store construction); `TestUnsealBytes_FailsLoudWithoutCipher`.
+
+F-SUP-2 (#72) and F-SUP-5 (#161) remain open (out of scope for these closure runs).
 
 **No production credentials are leaked; no active RCE path was identified.** F-AUTH-1 (the closest thing to an immediate concern, and JWT-gated) is now fully fixed via natively-threaded request context.
 
@@ -355,4 +359,7 @@ The cohort is **smaller and more focused than PSR**: 1 confidential High (cross-
 - **DONE:** F-SUP-1 (`go1.26.3` bump) — `d464fe6`, closes 4 CALLED CVEs. Sibling-repo merge (`../geode-client-go` branch `codex/client-parity-sync`) still pending.
 - **DONE:** F-AUTH-1 full fix — `internal/server/mcp.go` / `cmd/server/app.go` natively-threaded ctx — `4002c6f` + genapi `e01b2de`/`1ffa8eb`. **#132 closed.** genapi commits unpushed; the API change is breaking for other genapi consumers (see the upstream-genapi follow-ups note above).
 - **DONE:** F-AUTH-2 per-tool role mechanism — `1ec9889` + genapi `30fad5d`. **#135 closed.**
-- **Remaining:** F-SUP-3 (CI ref pinning, #153), F-INPUT-2 (ciphertext truth-table, #143), F-SUP-2 (dev-only serialize-javascript, #72), F-SUP-5 (doc placeholder, #161).
+- **DONE (2026-05-12 top-10 batch):** F-SUP-3 CI ref pinning — `d35d3c7`. 3/4 floating refs pinned (`genapi@v0.3.0`, `golangci-lint@v2.12.2`, `benchstat@…`); `codesign-windows-ssl@~latest` carries a `# ci-pins-allow:` marker + `TODO(#127)` because no tagged ci-catalog release ships it yet (the pin-immutability follow-up rides on the marker + #127's TODO); new `scripts/check-ci-pins.sh` guard + `ci-pins-check` job. **#153 closed.**
+- **DONE (2026-05-12 top-10 batch):** F-INPUT-2 ciphertext truth-table — `ea3f681`. `unsealBytes` now fails loud (`fmt.Errorf("profilestore: ciphertext present but no cipher configured")`) when `cipher == nil && IsCiphertext(raw)`; plaintext + empty pass through; defense-in-depth (production still fail-fasts on missing `GEODE_PROFILESTORE_KEY` at store construction). `TestUnsealBytes_FailsLoudWithoutCipher`. **#143 closed.**
+- **Remaining:** F-SUP-2 (dev-only serialize-javascript, #72), F-SUP-5 (doc placeholder, #161).
+- **Carried-forward CI follow-up (not a security item — tracked via the in-file `# ci-pins-allow:` marker + #127's `TODO`):** pin `codesign-windows-ssl` to an immutable ci-catalog tag once one ships that component (today it's only on the catalog's `main`).

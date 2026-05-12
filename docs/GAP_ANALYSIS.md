@@ -2,8 +2,8 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-12 (gap-closure run: GAP-020 / #90 closed)
-- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); 2026-05-12 `/codepros:gap-close` run
+- **Last refreshed:** 2026-05-12 (gap-closure runs: GAP-020 / #90 closed [genapi+medium batch]; 13 more issues closed [top-10 quality/perf/CI batch — #125, #126, #127, #134, #136, #143, #144, #146, #149, #151, #153, #168, #180 — none carry a `GAP-NNN` ID])
+- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); two 2026-05-12 `/codepros:gap-close` runs
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors them.
 
 ## Methodology
@@ -269,6 +269,19 @@ The 2026-05-11 audit Phase 3 (gap-detector) re-ran against HEAD `d3e5de1`. The f
 - **GAP-020 / #90** — `as unknown as` path-param casts in `src/api/profiles.ts` removed. `9b0a423` (geode-ui) + genapi `55c79d2`. Row above updated to **Closed**; resolved record in `GAP_ANALYSIS_RESOLVED.md`.
 
 The other 8 (#132, #135 security; #133, #142, #150, #154, #156 perf; #173 quality) are tracked by domain ID in `SECURITY_GAP_ANALYSIS.md` / `PERF_GAP_ANALYSIS.md` / `QUALITY_GAP_ANALYSIS.md` and recorded in `GAP_ANALYSIS_RESOLVED.md`. **#159** (`/api/v1/query` `rateLimit=200` vs 2000-rps target) stays **open** — deliberately unchanged pending a product decision; now documented in `docs/ARCHITECTURE.md`. The 9 geode-ui implementation commits + the docs-tracking commit sit on `main` **unpushed**; 5 genapi commits sit on genapi `main` **unpushed** (user decides on pushing/tagging genapi — note: breaking `mcpx`/`SetAuthVerifier` API → minor bump, other consumers must regenerate). Full report: [`docs/gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md`](./gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md).
+
+### Gap-closure run — 2026-05-12 (top-10 quality / perf / CI batch)
+
+A second `/codepros:gap-close` run on 2026-05-12 closed **13 GitLab issues** — none carry a `GAP-NNN` ID here; all are tracked by domain ID in the sibling `*GAP_ANALYSIS.md` docs and recorded in `GAP_ANALYSIS_RESOLVED.md`:
+
+- **Quality (11):** Q9 #125 + Q39 #134 (`a42a792` — `streamQueryResult` cleanup), Q23 #126 (`df3fd51` — error-code taxonomy), Q41 #136 (`1fea7ba` — `internal/server/CONVENTIONS.md`), Q10 #144 (`6abde32` — `IsRevoked` flatten), Q12 #146 (`e510cb5` — `Login` decomposition), Q13 #149 + Q40 #151 (`0d629bf` — `WSServer.Query` decomposition + cancel-reader lifetime), Q22 #168 (`03b6ec1` — list-endpoint empty-result rule, pinned-by-test), Q38 #180 (`ea3f681` — graceful-shutdown error wrapped + logged), Q32 #127 (`d35d3c7` — CI tool refs pinned to immutable tags).
+- **Perf (1):** PERF-2026-05-11-07 #145 (`a42a792` — per-row `MarshalWrite`; `bench-baseline.txt` refreshed `6c14368`).
+- **Security (1):** F-SUP-3 #153 (`d35d3c7` — subsumed by Q32 #127 — 3/4 floating CI refs pinned; `codesign-windows-ssl@~latest` pin pending an upstream ci-catalog release, tracked via the `# ci-pins-allow:` marker + #127's `TODO`) — and F-INPUT-2 #143 (`ea3f681` — `unsealBytes` fails loud on ciphertext-without-cipher).
+- **No-issue follow-up closed:** `createProfile`'s `as any` request-body cast in `src/api/profiles.ts` removed (`2c5895d`).
+
+**Small follow-up (not ticketed):** the frontend `src/lib/errors.ts` error-code strings vs the server-side `internal/server/errorcodes.go` constants are not cross-checked by any automated test — worth a tiny `go/ast` ↔ TS-string consistency check if a convention emerges.
+
+**Verifier:** ACCEPT-WITH-NOTES — full suite green (`make go-test -race`, `make go-lint`, `make generate` clean, `make bench-gate`, `npm test` 453/453), coverage up on every touched package (`internal/server` 77.1→78.2%, `internal/jwt` 81.0→82.5%, `internal/profilestore` 80.7→81.0%, `cmd/server` 65.3→70.7%); the one note (was `genapi@v0.3.0` the exact tag `gen/` was generated against?) is **resolved** — `git rev-parse v0.3.0^{commit}` in `~/src/devnw/go/genapi` == `55c79d2` == genapi `main` HEAD == the working copy `gen/` was regenerated against. The 11 implementation commits (`d35d3c7`, `2c5895d`, `a42a792`, `0d629bf`, `e510cb5`, `6abde32`, `ea3f681`, `df3fd51`, `03b6ec1`, `1fea7ba`, `6c14368`) + the docs-tracking commit sit on `main` **unpushed** — the user decides on `git push origin main`. Full report: [`docs/gap-closure-reports/2026-05-12-top10-quality-batch-completion.md`](./gap-closure-reports/2026-05-12-top10-quality-batch-completion.md).
 
 ### Dedup map (closed-as-duplicate this Phase-4 run)
 

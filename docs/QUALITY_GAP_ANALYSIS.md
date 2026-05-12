@@ -279,9 +279,9 @@ comments were posted to each.
 | `go vet ./...`           | clean                             | But picks up `node_modules/flatted/...` (Q31).  |
 | `gofmt -l`               | clean                             |                                                 |
 | `golangci-lint`          | clean (pre-push)                  | No `.golangci.yml` (#46 / Q30).                 |
-| `go test -cover`         | server ~68.7% line; cmd/server 4% → **65.3%** (`adf6b6f`, Q16+Q26); `src/components/ops` 28% → **91.87%** (`2aaaebc`, Q27) | Q28 still raises the frontend floor; Q14/#48 owns the coverage gate. |
+| `go test -cover`         | `internal/server` 77.1% → **78.2%**; `internal/jwt` 81.0% → **82.5%**; `internal/profilestore` 80.7% → **81.0%**; `cmd/server` 65.3% → **70.7%** (all ↑ after the 2026-05-12 top-10 batch); `src/components/ops` 28% → **91.87%** (`2aaaebc`, Q27) | Q28 still raises the frontend floor; Q14/#48 owns the coverage gate. |
 | `make web-build`         | green                             |                                                 |
-| `.gitlab-ci.yml` audit   | gaps (Q35 needs: **FIXED `790cdcb`**; electron-tsc gate **FIXED `f444c70`**) | Q32 (`@latest`), Q33 (cache:[]) still open.     |
+| `.gitlab-ci.yml` audit   | gaps (Q35 needs: **FIXED `790cdcb`**; electron-tsc gate **FIXED `f444c70`**; `@latest` tool refs **FIXED `d35d3c7`**, Q32 #127) | Q33 (cache:[]) still open. New `scripts/check-ci-pins.sh` guard + `ci-pins-check` job (`d35d3c7`). |
 
 ### Phase 4 findings table — Phase 3 cohort (PriorityScore desc)
 
@@ -289,16 +289,16 @@ Top-priority (Score ≥ 15):
 
 | ID  | Title                                                                  | Score | Issue                                                              | Evidence                                                                 |
 |-----|------------------------------------------------------------------------|------:|--------------------------------------------------------------------|---------------------------------------------------------------------------|
-| Q9  | streamQueryResult cognitive 38 — extract errWriter shim                |    20 | [#125](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/125) | `internal/server/result_codec.go:81-181`                                  |
+| Q9  | **CLOSED `a42a792`** (2026-05-12) — `internal/server/result_codec.go`: `errWriter` first-error-latching shim; `streamQueryResult` flattened (gocognit < ~20; golangci-lint 0 issues); `writeTrailer()` helper. Tests: `result_codec_test.go`. (Landed together with Q39 #134 + PERF-2026-05-11-07 #145 in the same commit.) |    20 | [#125](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/125) | `internal/server/result_codec.go`                                         |
 | Q35 | **CLOSED `790cdcb`** — `build` CI job now `needs:` typecheck/unit-tests/audit-ratchets (+ install, eslint) — can no longer ship red |    20 | [#129](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/129) | `.gitlab-ci.yml` `build:` `needs:` block                                  |
 | Q36 | **CLOSED `210133e`** — `go.mod:5` now `replace geodedb.com/geode => ../geode-client-go` (relative); `make go-test`/`go-build` resolve; CI's `go mod edit -replace` still works (now redundant) | 20 | [#131](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/131) | `go.mod:5`                                                                |
-| Q23 | Centralise error-code taxonomy (`internal/server/errorcodes.go`)       |    15 | [#126](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/126) | 9+ distinct `code: "..."` literals across the handler tree                |
-| Q32 | CI installs `genapi` & `golangci-lint` with `@latest` — pin            |    15 | [#127](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/127) | `.gitlab-ci.yml:249,261`                                                  |
-| Q39 | `streamQueryResult` mid-stream truncation logs no rows_sent/elapsed_ms |    15 | [#134](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/134) | `internal/server/result_codec.go:127-150`                                 |
-| Q41 | Add `internal/server/CONVENTIONS.md` (invariants index)                |    15 | [#136](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/136) | `internal/server/` (no `CONVENTIONS.md`)                                  |
-| Q10 | `IsRevoked` nestif 7 on every-request hot path                         |    15 | [#144](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/144) | `internal/jwt/revocation.go:185-218`                                      |
-| Q12 | `Login` handler 123 LOC, cognitive ~30                                 |    15 | [#146](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/146) | `internal/server/handlers_auth.go:31-154`                                 |
-| Q13 | `WSServer.Query` 110 LOC — extract reader+streamer                     |    15 | [#149](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/149) | `internal/server/ws_query.go:189-298`                                     |
+| Q23 | **CLOSED `df3fd51`** (2026-05-12) — new `internal/server/errorcodes.go`: 62 `ErrCode*` constants grouped by area + `allErrorCodes`/`errorCodeSet`. ~100 literal occurrences (38 distinct codes) migrated across 17 handler/helper files — **wire values byte-identical** (verified `ErrCodeInvalidCredentials == "invalid_credentials"` etc., no drift). New `errorcodes_test.go`: dep-free `go/ast` golden test asserting every `code:`/`Code:`-position literal is an `ErrCode*` constant + no dead constants (verified it catches a planted straggler). |    15 | [#126](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/126) | `internal/server/errorcodes.go` (new)                                     |
+| Q32 | **CLOSED `d35d3c7`** (2026-05-12; also closes SEC F-SUP-3 #153) — `.gitlab-ci.yml`: `genapi@v0.3.0` (verified == genapi `main` HEAD `55c79d2`, the tree `gen/` was generated against), `golangci-lint@v2.12.2`, `benchstat@v0.0.0-20260409210113-…`. `codesign-windows-ssl@~latest` left unpinned with a `# ci-pins-allow:` marker + `TODO(#127)` — **deviation**: no tagged ci-catalog release ships that component yet (pre-existing — `glab ci lint` failed on that line before this change too). New `scripts/check-ci-pins.sh` guard wired into `.pre-commit-config.yaml` + a `ci-pins-check` CI lint job (still catches *new* `@latest` regressions). |    15 | [#127](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/127) | `.gitlab-ci.yml`, `scripts/check-ci-pins.sh` (new)                        |
+| Q39 | **CLOSED `a42a792`** (2026-05-12) — `internal/server/result_codec.go`: `midStreamAbort()` emits `slog.Warn` on every post-head error path (`stage`/`rows_sent`/`elapsed_ms`/`err`). Test: `result_codec_stream_test.go` +slog-capture assertion in `TestStreamQueryResult_MidStreamError`. (Same commit as Q9 #125 + PERF-2026-05-11-07 #145.) |    15 | [#134](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/134) | `internal/server/result_codec.go`                                         |
+| Q41 | **CLOSED `1fea7ba`** (2026-05-12) — new `internal/server/CONVENTIONS.md` (6 sections: error-code taxonomy → `errorcodes.go`; empty-result rule + single-resource-404 split; wire-feature-missing fallback + `errWireFeatureMissing` sentinel; per-row dual-key forward-compat in `policyFromRow`/`roleFromRow`; `auditEvent*` naming + `emitAudit` best-effort + substring redaction; the `withConnDBAndIdent`/`writeEndpointError`/`badRequest` envelope helpers + the JWT→connDB→quoted-ident admin-RBAC skeleton — each `file`-cited). `README.md` pointer added; markdownlint clean. |    15 | [#136](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/136) | `internal/server/CONVENTIONS.md` (new)                                    |
+| Q10 | **CLOSED `6abde32`** (2026-05-12) — `internal/jwt/revocation.go`: extracted `jtiRevoked(jti, now) bool` (preserves lazy-GC of expired entries + fail-closed non-`time.Time`→revoked) and `subjectRevokeAll(sub, iat) bool` (preserves `!iat.After(changedAt)`); `IsRevoked` flattened to two `if`s. Test: `revocation_test.go` +`TestIsRevoked_DefensiveNonTimeEntries`. `internal/jwt` cov 81.0%→82.5%. |    15 | [#144](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/144) | `internal/jwt/revocation.go`                                              |
+| Q12 | **CLOSED `e510cb5`** (2026-05-12) — `internal/server/handlers_auth.go`: extracted `denyLogin(...)` (SEC-N10 constant-time path — `performDummyCompare`→`emitAudit`→`respectLoginLatencyFloor`→`writeEndpointError(401)` order + arithmetic byte-preserved; `authStart` captured at the same point), `mintAndSetAuthCookie(...) int64` (SEC-F7 cookie attrs + `expires_in>=1` clamp), `adminRolesFor(...)`. Tests: `handlers_auth_test.go` +`TestAdminRolesFor`, +`TestMintAndSetAuthCookie`; pinning tests pass unchanged. Security-reviewed: no timing-profile change between success/failure paths. |    15 | [#146](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/146) | `internal/server/handlers_auth.go`                                        |
+| Q13 | **CLOSED `0d629bf`** (2026-05-12; also closes Q40 #151) — `internal/server/ws_query.go`: extracted `startCancelReader(conn, cancel, done) <-chan struct{}` (coordinator + bounded relay; selects on `<-done` so it exits on the happy path) and `streamRowsOverWS(conn, rows, cols, batcher) (int64, error)`; `Query` now `defer close(done)`s and is a thin sequencer. Test-only `onCancelReaderExit` hook; `errStreamAborted` sentinel. Tests: `ws_query_test.go` +`TestStartCancelReader_ExitsOnDone`, +`TestStartCancelReader_CancelsOnError`. Verified `-race` clean, no goroutine leak. |    15 | [#149](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/149) | `internal/server/ws_query.go`                                             |
 | Q29 | Coverage gate in CI                                                    |    15 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48) *(REFERENCE — gap-sync)*  | (gap-sync owns)                                          |
 | Q30 | `.golangci.yml` config                                                 |    15 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46) *(REFERENCE — gap-sync)*  | (gap-sync owns)                                          |
 
@@ -314,7 +314,7 @@ High-priority (Score 9-14):
 | Q17 | `projectColumns.ts` 155 LOC dense triple-loop                          |    12 | [#162](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/162) | `src/components/results/projectColumns.ts:75-229`                         |
 | Q18 | `GraphView.tsx` 1257 LOC — split hooks + sub-components                |    6  | [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164) | `src/components/results/GraphView.tsx`                                    |
 | Q21 | SHOW-catalogue list handlers still use `[]jsontext.Value`              |    9  | [#166](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/166) | Backups, Policies, Roles, Migrations handlers                             |
-| Q22 | Empty-result handling inconsistent across list handlers                |    12 | [#168](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/168) | `handlers_*.go` (isWireFeatureMissing branches)                           |
+| Q22 | **CLOSED `03b6ec1`** (2026-05-12) — new `internal/server/list_handlers_test.go`: asserts every list endpoint (`GetRoles`/`GetPolicies`/`GetBackups`/`GetUsers`/`GetMigrations`, schema lists, `Audit`) returns non-nil empty slices and renders `[]`/`{"...":[]}` not `null` — both on empty result and on an `isWireFeatureMissing` upstream. No production code changed: all handlers already satisfied the invariant (audited + verified the test fails when a regression is introduced). |    12 | [#168](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/168) | `internal/server/list_handlers_test.go` (new)                             |
 | Q25 | **CLOSED `f444c70`** — `package.json` devDeps `+ electron@^42.0.1`, `+ @types/node@^22.19.19`; `package-lock.json` updated; `.gitlab-ci.yml electron-typecheck` no longer `allow_failure`; `npm run electron:tsc` exits 0 (also closes F-SUP-4 #160). **Note:** `pnpm-lock.yaml` NOT regenerated — pnpm refuses (`packageManager: npm`); dual-lockfile cleanup tracked at Q-other / GAP-017 #44. | 12 | [#170](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/170) | `.gitlab-ci.yml`, `package.json`                                          |
 | Q26 | **CLOSED `adf6b6f`** — new `cmd/server/app_test.go` (6 tests: `TestRun_MissingJWTSecret_ExitsNonZero`, `TestNewApp_HappyPath` healthz=200, `TestNewApp_WiresMCPAuthVerifier`, …); `internal/profilestore.NewCipherFromEnvFunc` added. `cmd/server` coverage **4.0% → 65.3%**. | 12 | [#172](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/172) | `cmd/server/`                                                             |
 | Q27 | **CLOSED `2aaaebc`** — new `BackupPage.test.tsx` (8) / `MigrationsPage.test.tsx` (9) / `RestorePage.test.tsx` (6): confirm-modal flows, error-envelope rendering in `role="alert"`, wire-feature-missing 501 banner + disabled controls, happy/empty list states. `src/components/ops` line coverage **28% → 91.87%** (Backup 92.5%, Migrations 95.3%, Restore 100%). No coverage gate added (Q14/#48 owns that — separate, still open). | 12 | [#173](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/173) | `src/components/ops/`                                                     |
@@ -333,8 +333,8 @@ Medium-priority (Score 5-8):
 | Q19 | `TableView.tsx` 605 LOC — lift hooks per Q18 pattern                   |    4  | [#184](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/184) | `src/components/results/TableView.tsx`                                    |
 | Q28 | `gqlLanguage.ts` Monaco tokenizer at 33% coverage                      |    6  | [#185](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/185) | `src/language/gqlLanguage.ts`                                             |
 | Q33 | `.gitlab-ci.yml` `.go_defaults cache: []` wipes Go module cache        |    6  | [#176](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/176) | `.gitlab-ci.yml:235-242`                                                  |
-| Q38 | `cmd/server/main.go` shutdown error swallowed silently — **now a trivial follow-up after `adf6b6f`**: `(*app).serve` already returns the shutdown error; remaining work is just to log/propagate it from `run`. Left OPEN. | 4 | [#180](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/180) | `cmd/server/app.go` (`(*app).serve`)                                      |
-| Q40 | `WSServer.Query` cancel-reader goroutine outlives handler              |    8  | [#151](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/151) | `internal/server/ws_query.go:219-231`                                     |
+| Q38 | **CLOSED `ea3f681`** (2026-05-12) — `cmd/server/app.go`: `errGracefulShutdown` sentinel + configurable `shutdownBudget` field (default 5s); `serve` wraps the `Shutdown` error (not discarded); `run` logs **WARN** for the shutdown-timeout case, ERROR for fatal listener errors. Verified no `_ = httpSrv.Shutdown(...)` anywhere. Test: `app_test.go` +`TestServe_GracefulShutdownErrorPropagates`. `cmd/server` cov 65.3%→70.7%. (Same commit as SEC F-INPUT-2 #143.) | 4 | [#180](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/180) | `cmd/server/app.go`                                                       |
+| Q40 | **CLOSED `0d629bf`** (2026-05-12) — fixed as part of the Q13 #149 `WSServer.Query` decomposition: `startCancelReader` selects on `<-done` and `Query` `defer close(done)`s, so the cancel-reader goroutine no longer outlives the handler. Test-only `onCancelReaderExit` hook; `ws_query_test.go` +`TestStartCancelReader_ExitsOnDone` / `TestStartCancelReader_CancelsOnError`. Verified `-race` clean, no goroutine leak. |    8  | [#151](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/151) | `internal/server/ws_query.go`                                             |
 
 Low-priority (Score ≤ 4):
 
@@ -417,31 +417,31 @@ a trivial follow-up since `(*app).serve` already returns the shutdown error.
 
 #### Quick wins (≤ 1 day each)
 
-- Q9 (#125), Q39 (#134) — single-file refactors with strong test coverage already in place.
+- ~~Q9 (#125)~~ **CLOSED `a42a792`**, ~~Q39 (#134)~~ **CLOSED `a42a792`** — single-file refactors with strong test coverage already in place.
 - Q1 (#138), Q3 (#182), Q2 (#186) — DRY extractions.
 - Q31 (#174), Q33 (#176), Q34 (#175), Q37 (#177) — CI / Makefile micro-fixes.
-- Q41 (#136), Q42 (#178), Q43 (#181), Q45 (#190), Q46 (#191) — pure-doc.
+- ~~Q41 (#136)~~ **CLOSED `1fea7ba`**; Q42 (#178), Q43 (#181), Q45 (#190), Q46 (#191) — pure-doc.
 
 #### Release-blocker-grade (land before next tag)
 
-- Q32 (#127) — `@latest` is a ticking bomb on CI. **STILL OPEN.**
+- ~~Q32 (#127)~~ — **CLOSED `d35d3c7`** — CI tool refs pinned to immutable tags (`genapi@v0.3.0`, `golangci-lint@v2.12.2`, `benchstat@…`); `codesign-windows-ssl@~latest` carries a `# ci-pins-allow:` marker + `TODO(#127)` (no tagged ci-catalog release ships it yet); new `scripts/check-ci-pins.sh` guard + `ci-pins-check` job. Also closes SEC F-SUP-3 #153.
 - ~~Q35 (#129)~~ — **CLOSED `790cdcb`** — `build:` now `needs:` typecheck/unit-tests/audit-ratchets.
 - ~~Q36 (#131)~~ — **CLOSED `210133e`** — `go.mod` `replace` is now the relative `../geode-client-go` path.
 
 #### Medium (1-5 days each)
 
-- Q23 (#126) — error-code registry; touches every handler.
-- Q8 (#141), Q10 (#144), Q11 (#152), Q12 (#146), Q13 (#149), Q14 (#155), Q15 (#157), Q17 (#162) — focused function decompositions.
-- Q21 (#166), Q22 (#168) — wire-shape parity sweep.
+- ~~Q23 (#126)~~ — **CLOSED `df3fd51`** — error-code registry (`errorcodes.go`, 62 constants, ~100 sites migrated, wire values byte-identical, `go/ast` golden test).
+- Q8 (#141), ~~Q10 (#144)~~ **CLOSED `6abde32`**, Q11 (#152), ~~Q12 (#146)~~ **CLOSED `e510cb5`**, ~~Q13 (#149)~~ **CLOSED `0d629bf`**, Q14 (#155), Q15 (#157), Q17 (#162) — focused function decompositions.
+- Q21 (#166), ~~Q22 (#168)~~ **CLOSED `03b6ec1`** — wire-shape parity sweep (Q22: pinned-by-test, no production change).
 - ~~Q25 (#170)~~ — **CLOSED `f444c70`** — electron-tsc is now a real gate; electron + @types/node added to devDeps.
 - ~~Q27 (#173)~~ — **CLOSED `2aaaebc`** — destructive-pages coverage 28% → 91.87% (Backup/Migrations/Restore page tests).
 - Q44 (#179) — runbook.
 
 #### Strategic (> 5 days)
 
-- **EPIC-Q1** (`cmd/server` decomposition): ~~Q16 (#158)~~ + ~~Q26 (#172)~~ — **CLOSED `adf6b6f`** (decomposed into `cmd/server/app.go` + `profileseed.go`; coverage 4.0% → 65.3%). Q38 (#180) remains, now a trivial follow-up.
-- **EPIC-Q2** (CI gating sweep): ~~Q35 (#129)~~ **CLOSED `790cdcb`**; ~~Q25 (#170)~~ **CLOSED `f444c70`**; Q29 + Q30 + Q32 + Q33 still open. **Partial progress** — defer remainder to gap-sync where overlapping (#46, #48).
-- **EPIC-Q3**: Q22 + Q23 + Q41 + Q42 + Q43 + Q44 — module-conventions docs. Q41 + Q23 first; everything else cross-links.
+- **EPIC-Q1** (`cmd/server` decomposition): ~~Q16 (#158)~~ + ~~Q26 (#172)~~ — **CLOSED `adf6b6f`** (decomposed into `cmd/server/app.go` + `profileseed.go`; coverage 4.0% → 65.3%). ~~Q38 (#180)~~ — **CLOSED `ea3f681`** (graceful-shutdown error wrapped + logged WARN; `cmd/server` cov 65.3%→70.7%). EPIC-Q1 now fully closed.
+- **EPIC-Q2** (CI gating sweep): ~~Q35 (#129)~~ **CLOSED `790cdcb`**; ~~Q25 (#170)~~ **CLOSED `f444c70`**; ~~Q32 (#127)~~ **CLOSED `d35d3c7`**; Q29 + Q30 + Q33 still open. **Mostly closed** — defer remainder to gap-sync where overlapping (#46, #48).
+- **EPIC-Q3**: ~~Q22~~ + ~~Q23~~ + ~~Q41~~ **all CLOSED** (`03b6ec1` / `df3fd51` / `1fea7ba`) + Q42 + Q43 + Q44 — module-conventions docs. Anchors landed; Q42/Q43/Q44 cross-link into `CONVENTIONS.md`.
 - Q18 (#164) — GraphView decomposition; two-MR split.
 
 ### Phase 4 counts
@@ -471,3 +471,40 @@ Both GitLab issues closed with evidence. The implementation commits sit on geode
 `main` **unpushed**; the genapi `55c79d2` commit sits on genapi `main` unpushed (user
 decides on pushing/tagging genapi). Full report:
 [`docs/gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md`](./gap-closure-reports/2026-05-12-genapi-and-medium-cohort-completion.md).
+
+### Gap-closure run — 2026-05-12 (top-10 quality / perf / CI batch)
+
+A second `/codepros:gap-close` run on 2026-05-12 landed the top-priority quality
+backlog plus one perf and one security finding. Verifier returned **ACCEPT-WITH-NOTES**
+— full suite green (`make go-test -race`, `make go-lint`, `make generate` clean,
+`make bench-gate`, `npm test` 453/453), coverage up on every touched package
+(`internal/server` 77.1→78.2%, `internal/jwt` 81.0→82.5%, `internal/profilestore`
+80.7→81.0%, `cmd/server` 65.3→70.7%), no regressions. The one note (was
+`genapi@v0.3.0` the exact tag `gen/` was generated against?) is **resolved**:
+`git rev-parse v0.3.0^{commit}` in `~/src/devnw/go/genapi` == `55c79d2` == genapi
+`main` HEAD == the working copy `gen/` was regenerated against — so the CI pin is correct.
+
+**Quality findings closed (11 issues + 1 untracked follow-up):**
+
+- **Q9 (#125)** — `streamQueryResult` `errWriter` shim + flatten. `a42a792`.
+- **Q39 (#134)** — `streamQueryResult` `midStreamAbort()` slog.Warn (`stage`/`rows_sent`/`elapsed_ms`/`err`). `a42a792` (same commit as Q9 + PERF-2026-05-11-07 #145).
+- **Q23 (#126)** — error-code taxonomy (`internal/server/errorcodes.go`, 62 constants, ~100 sites migrated wire-byte-identical, `go/ast` golden test). `df3fd51`.
+- **Q41 (#136)** — `internal/server/CONVENTIONS.md` (6 sections, each `file`-cited; `README.md` pointer). `1fea7ba`.
+- **Q10 (#144)** — `IsRevoked` flatten — `jtiRevoked` / `subjectRevokeAll` extracted (fail-closed semantics preserved). `6abde32`.
+- **Q12 (#146)** — `Login` decomposition — `denyLogin` / `mintAndSetAuthCookie` / `adminRolesFor` (SEC-N10 constant-time + SEC-F7 cookie attrs preserved; security-reviewed). `e510cb5`.
+- **Q13 (#149)** + **Q40 (#151)** — `WSServer.Query` decomposition (`startCancelReader` / `streamRowsOverWS`) + cancel-reader goroutine lifetime fix (`defer close(done)` + `select <-done`); `-race` clean, no leak. `0d629bf`.
+- **Q22 (#168)** — list-endpoint empty-result / wire-feature-missing rule pinned by `internal/server/list_handlers_test.go` (no production change — all handlers already satisfied it; verified the test catches a regression). `03b6ec1`.
+- **Q38 (#180)** — `cmd/server` graceful-shutdown error wrapped (`errGracefulShutdown` sentinel + `shutdownBudget` field) + logged WARN; no `_ = httpSrv.Shutdown(...)` anywhere. `ea3f681` (same commit as SEC F-INPUT-2 #143). `cmd/server` cov 65.3→70.7%.
+- **Q32 (#127)** — CI tool refs pinned to immutable tags (`genapi@v0.3.0`, `golangci-lint@v2.12.2`, `benchstat@…`); `codesign-windows-ssl@~latest` carries a `# ci-pins-allow:` marker + `TODO(#127)` (**deviation** — no tagged ci-catalog release ships that component yet; pre-existing); new `scripts/check-ci-pins.sh` guard wired into `.pre-commit-config.yaml` + a `ci-pins-check` CI lint job. `d35d3c7`. (Also closes SEC F-SUP-3 #153.)
+- **`createProfile` `as any` body cast (no GitLab issue)** — `src/api/profiles.ts`: `toWireCreateRequest` return type → `CreateProfileReq` (from `@api`); `as any` removed at `client.postProfiles(...)`. The other `listProfiles`/`fromWireProfile` casts (Q2/#90) deliberately left alone. `2c5895d`. Closed-no-issue follow-up; closes the loose end noted under the 2026-05-12 genapi-batch entry above.
+
+**Remaining small follow-up (not ticketed):** the frontend `src/lib/errors.ts` error-code
+strings vs the server-side `internal/server/errorcodes.go` constants are not cross-checked
+by any automated test. Worth a tiny `go/ast` ↔ TS-string consistency check if a convention
+emerges; recorded here for traceability.
+
+**Handoff:** the 11 implementation commits (`d35d3c7`, `2c5895d`, `a42a792`, `0d629bf`,
+`e510cb5`, `6abde32`, `ea3f681`, `df3fd51`, `03b6ec1`, `1fea7ba`, `6c14368`) + the
+docs-tracking commit sit on geode-ui `main` **unpushed** — the user decides on
+`git push origin main`. Full report:
+[`docs/gap-closure-reports/2026-05-12-top10-quality-batch-completion.md`](./gap-closure-reports/2026-05-12-top10-quality-batch-completion.md).
