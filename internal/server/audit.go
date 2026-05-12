@@ -105,6 +105,13 @@ const auditBufferCap = 10_000
 // a snapshot. The mutex is the simplest safe approach — append is O(1)
 // and snapshot is O(n) over the whole buffer; n is bounded by
 // auditBufferCap so this never grows unbounded.
+//
+// PERF-2026-05-11-06 (#142): snapshot sizes its result slice to the
+// number of entries that pass the `since` filter rather than to the
+// whole ring, and the JSON encoding of the result is done by the
+// handler AFTER snapshot releases the lock — so a /api/v1/audit poll
+// no longer copies (and encodes) ~10k entries while holding the lock
+// that every hot emitAudit append needs.
 type auditRing struct {
 	mu    sync.Mutex
 	buf   []AuditEntry
@@ -135,10 +142,50 @@ func (r *auditRing) append(entry AuditEntry) {
 // order. A zero `since` returns every retained entry. The returned
 // slice is safely owned by the caller — the ring's underlying buffer
 // is not shared.
+//
+// PERF-2026-05-11-06 (#142): the result slice is sized to the number of
+// MATCHING entries, not to the whole ring. The /api/v1/audit endpoint
+// polls every ~5s with a `since` that usually trims the buffer to a
+// handful of recent rows; allocating make([]AuditEntry, 0, r.count) on
+// a near-full 10k-entry ring meant every poll forced ~256 KiB of churn
+// under the ring lock, blocking concurrent emitAudit appends for the
+// duration. We now walk the ring once to count matches (cheap — bounded
+// by auditBufferCap, no allocation), allocate exactly that many slots,
+// then walk again to copy. JSON encoding of the result happens OUTSIDE
+// this lock — see GraphServer.Audit, which marshals each returned entry
+// after this method has released r.mu.
+//
+// When entries chronologically precede `since`, the ring is in
+// timestamp order (append is monotonic for a single ring; appends never
+// reorder), so once we hit the first matching entry every subsequent
+// entry also matches. The two-pass walk exploits that: pass one finds
+// the first matching index and counts the tail; pass two copies the
+// tail. A non-monotonic clock (NTP step backwards) could in theory
+// produce an out-of-order timestamp, in which case a later entry might
+// be < since while an earlier one was >= since; to stay correct under
+// that pathology we DON'T short-circuit — pass one counts every match
+// individually and pass two re-checks each entry. That keeps the
+// historical "exactly the entries >= since, in ring order" contract.
 func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]AuditEntry, 0, r.count)
+
+	// Pass one: count matches without allocating. For a zero `since`
+	// every retained entry matches, so the count is just r.count.
+	matches := r.count
+	if !since.IsZero() {
+		matches = 0
+		for i := 0; i < r.count; i++ {
+			idx := (r.start + i) % len(r.buf)
+			if !r.buf[idx].Timestamp.Before(since) {
+				matches++
+			}
+		}
+	}
+
+	// Pass two: allocate exactly `matches` slots and copy the matching
+	// entries in ring (chronological) order.
+	out := make([]AuditEntry, 0, matches)
 	for i := 0; i < r.count; i++ {
 		idx := (r.start + i) % len(r.buf)
 		e := r.buf[idx]
