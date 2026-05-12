@@ -133,12 +133,22 @@ describe('F10: monaco-bootstrap is not a static import of QueryPage', () => {
     expect(src).not.toMatch(
       /^\s*import\s+\{\s*GraphView\s*\}\s+from\s+'\.\.\/components\/results\/GraphView'/m
     )
-    // Both are React.lazy'd via a dynamic import().
+    // The editor is React.lazy'd via a dynamic import() from QueryPage.
     expect(src).toMatch(
       /React\.lazy\([\s\S]*import\(['"]\.\.\/components\/editor\/GqlEditor['"]\)/
     )
-    expect(src).toMatch(
-      /React\.lazy\([\s\S]*import\(['"]\.\.\/components\/results\/GraphView['"]\)/
+    // The Cytoscape-backed GraphView now lives behind ResultPanel (the
+    // shared tab switcher extracted in A0); it must be React.lazy'd
+    // there, and ResultPanel must not statically import it.
+    const panelSrc = fs.readFileSync(
+      path.join(__dirname, '..', 'components', 'results', 'ResultPanel.tsx'),
+      'utf8'
+    )
+    expect(panelSrc).not.toMatch(
+      /^\s*import\s+\{\s*GraphView\s*\}\s+from\s+'\.\/GraphView'/m
+    )
+    expect(panelSrc).toMatch(
+      /React\.lazy\([\s\S]*import\(['"]\.\/GraphView['"]\)/
     )
   })
 })

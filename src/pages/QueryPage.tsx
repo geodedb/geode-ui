@@ -11,11 +11,8 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
-import { TableView } from '../components/results/TableView'
-import { JsonView } from '../components/results/JsonView'
-import { MatrixView } from '../components/results/MatrixView'
+import { ResultPanel, type ResultTab } from '../components/results/ResultPanel'
 import { Button } from '../components/ui'
-import type { Theme } from '../theme'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryStore } from '../lib/queryStore'
@@ -36,30 +33,6 @@ const GqlEditor = React.lazy(() =>
     default: m.GqlEditor,
   }))
 )
-const GraphView = React.lazy(() =>
-  import('../components/results/GraphView').then((m) => ({
-    default: m.GraphView,
-  }))
-)
-
-interface TabProps {
-  theme: Theme
-  $active: boolean
-}
-
-function tabBg({ $active, theme }: TabProps): string {
-  return $active ? theme.bg.subtle : 'transparent'
-}
-
-function tabColor({ $active, theme }: TabProps): string {
-  return $active ? theme.text.primary : theme.text.secondary
-}
-
-function tabBorder({ $active, theme }: TabProps): string {
-  return $active ? theme.border.default : 'transparent'
-}
-
-type Tab = 'table' | 'json' | 'graph' | 'matrix'
 
 const Bar = styled.div`
   margin-top: ${({ theme }) => theme.spacing.sm};
@@ -71,41 +44,14 @@ const Bar = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-// Tab buttons drive content swap inside the QueryPage results panel.
-// We keep them as a styled element (not the shared Button primitive)
-// because role=tab + aria-selected differs from role=button — the WAI
-// tab pattern is its own a11y contract.
-const TabBtn = styled.button<{ $active: boolean }>`
-  padding: 6px 14px;
-  background: ${tabBg};
-  color: ${tabColor};
-  border: 1px solid ${tabBorder};
-  border-radius: ${({ theme }) => theme.radii.md};
-  cursor: pointer;
-  font-family: inherit;
-  font-weight: ${({ theme }) => theme.font.weights.medium};
-  text-transform: capitalize;
-  min-height: 32px;
-
-  &:hover {
-    background: ${({ theme }) => theme.bg.subtle};
-    color: ${({ theme }) => theme.text.primary};
-  }
-
-  &:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-  }
-`
-
 const Err = styled.span`
   color: ${({ theme }) => theme.text.danger};
 `
 
-// Suspense fallback shown while the lazy Monaco editor / Cytoscape
-// graph chunks download (F10 / #54). Sized to roughly the editor's
-// default height so the layout doesn't jump when the real component
-// resolves. role=status keeps it announced to assistive tech.
+// Suspense fallback shown while the lazy Monaco editor chunk downloads
+// (F10 / #54). Sized to roughly the editor's default height so the
+// layout doesn't jump when the real component resolves. role=status
+// keeps it announced to assistive tech.
 const LazyFallback = styled.div`
   display: flex;
   align-items: center;
@@ -117,49 +63,12 @@ const LazyFallback = styled.div`
   border-radius: ${({ theme }) => theme.radii.md};
 `
 
-const Tabs = styled.div`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.xs};
-  margin: ${({ theme }) => theme.spacing.md} 0
-    ${({ theme }) => theme.spacing.sm};
-`
-
 const ToggleLabel = styled.label`
   display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   user-select: none;
-`
-
-// Maximize toggle in the result-panel toolbar. Styled like the tab
-// buttons (it sits in the same row) but it's a plain button, not a
-// WAI tab — aria-pressed reflects the maximized state.
-const MaximizeBtn = styled.button`
-  margin-left: auto;
-  padding: 6px 12px;
-  background: transparent;
-  color: ${({ theme }) => theme.text.secondary};
-  border: 1px solid ${({ theme }) => theme.border.default};
-  border-radius: ${({ theme }) => theme.radii.md};
-  cursor: pointer;
-  font-family: inherit;
-  font-weight: ${({ theme }) => theme.font.weights.medium};
-  min-height: 32px;
-
-  &:hover {
-    background: ${({ theme }) => theme.bg.subtle};
-    color: ${({ theme }) => theme.text.primary};
-  }
-  &[aria-pressed='true'] {
-    background: ${({ theme }) => theme.bg.subtle};
-    color: ${({ theme }) => theme.text.primary};
-    border-color: ${({ theme }) => theme.border.strong};
-  }
-  &:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-  }
 `
 
 // The fullscreen result overlay. Rendered via a portal into
@@ -192,7 +101,7 @@ export const QueryPage: React.FC = () => {
   const [resp, setResp] = useState<QueryResp | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<Tab>('table')
+  const [tab, setTab] = useState<ResultTab>('table')
   const [streamMode, setStreamMode] = useState(false)
   const [expand, setExpand] = useState(true)
   // Result panel maximized into a viewport-filling overlay. Session-
@@ -325,77 +234,27 @@ export const QueryPage: React.FC = () => {
   const activeResp: QueryResp | null = streamMode ? streamResp : resp
   const activeErr = streamMode ? stream.error || err : err
 
-  // F10 (#54): Suspense fallbacks for the lazy Monaco editor / Cytoscape
-  // graph chunks. Held as locals so the multiline JSX doesn't run into
-  // the airbnb/prettier disagreement on parenthesising JSX in props.
+  // F10 (#54): Suspense fallback for the lazy Monaco editor chunk. Held
+  // as a local so the multiline JSX doesn't run into the airbnb/prettier
+  // disagreement on parenthesising JSX in props.
   const editorFallback = (
     <LazyFallback role="status">{t('query.loadingEditor')}</LazyFallback>
   )
-  const graphFallback = (
-    <LazyFallback role="status">{t('query.loadingGraph')}</LazyFallback>
-  )
 
   // The result panel — the tabs row (with the maximize toggle) plus the
-  // active tabpanel. `fillHeight={maximized}` is threaded into the
-  // active child so it drops its inline height cap in fullscreen.
+  // active tabpanel. `maximized` is threaded into ResultPanel so the
+  // active child drops its inline height cap in fullscreen.
   const resultPanel = activeResp && (
-    <>
-      <Tabs role="tablist" aria-label={t('query.resultViewLabel')}>
-        {(
-          [
-            ['table', t('query.tabTable')],
-            ['json', t('query.tabJson')],
-            ['graph', t('query.tabGraph')],
-            ['matrix', t('query.tabMatrix')],
-          ] as const
-        ).map(([kind, label]) => (
-          <TabBtn
-            key={kind}
-            role="tab"
-            aria-selected={tab === kind}
-            aria-controls={`result-panel-${kind}`}
-            tabIndex={tab === kind ? 0 : -1}
-            $active={tab === kind}
-            onClick={() => setTab(kind)}
-          >
-            {label}
-          </TabBtn>
-        ))}
-        <MaximizeBtn
-          ref={maximizeBtnRef}
-          type="button"
-          data-testid="result-fullscreen-toggle"
-          aria-pressed={maximized}
-          aria-label={
-            maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
-          }
-          title={
-            maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
-          }
-          onClick={() => setMaximized((m) => !m)}
-        >
-          {maximized ? '⤡' : '⤢'}
-        </MaximizeBtn>
-      </Tabs>
-      <div
-        id={`result-panel-${tab}`}
-        role="tabpanel"
-        aria-labelledby={`result-panel-${tab}`}
-      >
-        {tab === 'table' && (
-          <TableView resp={activeResp} expand={expand} fillHeight={maximized} />
-        )}
-        {tab === 'json' && (
-          <JsonView data={activeResp} fillHeight={maximized} />
-        )}
-        {tab === 'graph' && (
-          <Suspense fallback={graphFallback}>
-            <GraphView resp={activeResp} query={stmt} fillHeight={maximized} />
-          </Suspense>
-        )}
-        {tab === 'matrix' && <MatrixView resp={activeResp} />}
-      </div>
-    </>
+    <ResultPanel
+      resp={activeResp}
+      query={stmt}
+      tab={tab}
+      onTabChange={setTab}
+      expand={expand}
+      maximized={maximized}
+      onToggleMaximize={() => setMaximized((m) => !m)}
+      maximizeBtnRef={maximizeBtnRef}
+    />
   )
 
   // When maximized, portal the panel into document.body as a fixed
