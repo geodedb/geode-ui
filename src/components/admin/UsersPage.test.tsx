@@ -30,6 +30,7 @@ jest.mock('../../api/client', () => ({
 
 import { UsersPage } from './UsersPage'
 import { client } from '../../api/client'
+import { WIRE_FEATURE_MISSING } from '../../api/serverErrorCodes'
 
 import { testTheme as theme } from '../../test-utils/theme'
 
@@ -145,13 +146,15 @@ test('surfaces the friendly error_description, not the raw 501 blob, on wire_fea
   mockClient.postUsers.mockRejectedValue(
     Object.assign(
       new Error(
-        'http status 501: {"error":"wire_feature_missing","error_description":"' +
+        'http status 501: {"error":"' +
+          WIRE_FEATURE_MISSING +
+          '","error_description":"' +
           desc +
           '"}'
       ),
       {
         status: 501,
-        body: { error: 'wire_feature_missing', error_description: desc },
+        body: { error: WIRE_FEATURE_MISSING, error_description: desc },
       }
     )
   )

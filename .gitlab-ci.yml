@@ -199,6 +199,7 @@ error-codes-check:
   cache: []
   script:
     - apk add --no-cache nodejs
+    - node --test scripts/check-error-codes.test.mjs
     - node scripts/check-error-codes.mjs
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
