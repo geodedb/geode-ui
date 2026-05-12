@@ -16,6 +16,7 @@ import {
   EDGE_TYPE_DEFAULT,
   NODE_LABEL_DEFAULT,
   QueryRespLike,
+  buildCompoundElements,
   extractElements,
   labelOptions,
   resolveEdgeLabel,
@@ -698,6 +699,11 @@ export const GraphView: React.FC<Props> = ({
   // built-in box selection and disables panning while it's on. Sticky.
   const selectionMode = useGraphPrefs((s) => s.selectionMode)
   const setSelectionMode = useGraphPrefs((s) => s.setSelectionMode)
+  // Whether nodes are grouped under per-label compound parent nodes.
+  // When on, the rendered element set is buildCompoundElements(baseEls)
+  // and the auto-pick layout is fcose (best with compound graphs). Sticky.
+  const clusterByLabel = useGraphPrefs((s) => s.clusterByLabel)
+  const setClusterByLabel = useGraphPrefs((s) => s.setClusterByLabel)
   // Live counts surfaced in the toolbar. Reflect what's actually in
   // the Cytoscape core (post-build, post-filter), not the raw resp,
   // so users see the effect of layout/filter changes.
@@ -734,23 +740,31 @@ export const GraphView: React.FC<Props> = ({
   // GAP-01 / GAP-07: rebuild key combines row_count with the query
   // text. Two queries that happen to return the same row count would
   // previously fail to trigger the rebuild and leave a stale graph
-  // on the canvas.
-  const sig = `${respSignature(resp)}|${query ?? ''}`
+  // on the canvas. The clusterByLabel flag is folded in so toggling
+  // group-by-label re-runs the build (the rendered element set changes).
+  const sig = `${respSignature(resp)}|${query ?? ''}|${clusterByLabel ? 'c' : ''}`
 
-  // Compute available options from the current resp (cheap; same data
-  // extractElements would walk). The build effect reads through
-  // elementsRef so the per-rebuild teardown doesn't repeat the work.
-  const elements = useMemo<ElementDefinition[]>(
+  // The plain element set for this resp (no synthetic cluster parents) —
+  // this is what the pickers / visibility buckets / display selectors
+  // read. The *rendered* set (`elements`) is the same thing wrapped in
+  // per-label compound parents when group-by-label is on.
+  const baseEls = useMemo<ElementDefinition[]>(
     () => extractElements(resp, query),
     [resp, query]
   )
+  const elements = useMemo<ElementDefinition[]>(
+    () => (clusterByLabel ? buildCompoundElements(baseEls) : baseEls),
+    [baseEls, clusterByLabel]
+  )
   elementsRef.current = elements
-  const nodeOptions = useMemo(() => labelOptions(elements), [elements])
-  const edgeOptions = useMemo(() => typeOptions(elements), [elements])
+  // Options / id index are derived from the plain set so the cluster
+  // parents never leak into the dropdowns.
+  const nodeOptions = useMemo(() => labelOptions(baseEls), [baseEls])
+  const edgeOptions = useMemo(() => typeOptions(baseEls), [baseEls])
 
-  // Per-element id index for the keyboard pickers (GAP-03). Both
-  // arrays are derived from the memoized `elements` so they're cheap
-  // to recompute on resp change.
+  // Per-element id index for the keyboard pickers (GAP-03). Built from
+  // the plain element set (`baseEls`) so synthetic cluster parents
+  // never show up in the id pickers or visibility buckets.
   const { nodeIds, edgeIds, nodeDataById, edgeDataById, nodeLabelBuckets } =
     useMemo(() => {
       const nIds: string[] = []
@@ -758,7 +772,7 @@ export const GraphView: React.FC<Props> = ({
       const nMap = new Map<string, Record<string, unknown>>()
       const eMap = new Map<string, Record<string, unknown>>()
       const buckets = new Map<string, number>()
-      elements.forEach((el) => {
+      baseEls.forEach((el) => {
         const data = el.data as Record<string, unknown> | undefined
         if (!data) return
         const id = data.id != null ? String(data.id) : ''
@@ -783,7 +797,7 @@ export const GraphView: React.FC<Props> = ({
         edgeDataById: eMap,
         nodeLabelBuckets: buckets,
       }
-    }, [elements])
+    }, [baseEls])
 
   // Auto-pick a saner default layout when the response is large enough
   // that cose would freeze the tab. Only fires once per response —
@@ -1049,6 +1063,14 @@ export const GraphView: React.FC<Props> = ({
   const onToggleSelectionMode = (): void => {
     setSelectionMode(selectionMode === 'box' ? 'pan' : 'box')
   }
+  const onToggleClusterByLabel = (): void => {
+    const next = !clusterByLabel
+    setClusterByLabel(next)
+    // Switching clustering ON auto-picks fcose (it lays out compound
+    // graphs best). We don't force it back off when clustering is
+    // turned off, and a subsequent manual layout pick is respected.
+    if (next) setLayout('fcose')
+  }
   const onPickEdgeId = (rawId: string): void => {
     const id = rawId.trim()
     if (!id) return
@@ -1195,6 +1217,16 @@ export const GraphView: React.FC<Props> = ({
               {selectionMode === 'box'
                 ? t('graph.selectionModeBox')
                 : t('graph.selectionModePan')}
+            </button>
+            <button
+              type="button"
+              data-testid="graph-cluster-toggle"
+              aria-pressed={clusterByLabel}
+              aria-label={t('graph.clusterByLabelLabel')}
+              title={t('graph.clusterByLabelLabel')}
+              onClick={onToggleClusterByLabel}
+            >
+              {t('graph.clusterByLabel')}
             </button>
           </div>
           <span className="stats" aria-live="polite">

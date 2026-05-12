@@ -522,3 +522,55 @@ export function resolveEdgeLabel(
 
 export const NODE_LABEL_DEFAULT = LABEL_DEFAULT
 export const EDGE_TYPE_DEFAULT = TYPE_DEFAULT
+
+// ----- group-by-label clustering (compound parent nodes) -----
+
+// Prefix for the synthetic per-label "cluster parent" node ids.
+export const CLUSTER_PARENT_PREFIX = '__cluster__:'
+
+/**
+ * Returns a *copy* of `els` where each node is reparented under a
+ * synthetic "cluster parent" node keyed by its primary label, so
+ * Cytoscape renders labelled groups. Nodes with no label — or a node
+ * that already carries a `data.parent` (caller-set parenting wins) —
+ * are returned untouched and do not contribute a cluster parent. Edges
+ * are returned unchanged. Pure: does not mutate `els` or any element's
+ * `data` bag.
+ *
+ * extractElements stores a node's labels under `data.labels` (an array;
+ * `labels[0]` is the primary). This function mirrors that key — keep it
+ * in sync with extractElements if the element shape ever changes.
+ */
+export function buildCompoundElements(
+  els: ElementDefinition[]
+): ElementDefinition[] {
+  const labelsSeen = new Set<string>()
+  const out: ElementDefinition[] = []
+  els.forEach((el) => {
+    if (el.group === 'edges') {
+      out.push(el)
+      return
+    }
+    const data = (el.data ?? {}) as Record<string, unknown>
+    const labels = Array.isArray(data.labels) ? (data.labels as string[]) : []
+    const primary = labels[0]
+    if (!primary || data.parent) {
+      out.push(el)
+      return
+    }
+    labelsSeen.add(primary)
+    out.push({
+      ...el,
+      data: { ...data, parent: CLUSTER_PARENT_PREFIX + primary },
+    })
+  })
+  labelsSeen.forEach((label) => {
+    out.push({
+      group: 'nodes',
+      data: { id: CLUSTER_PARENT_PREFIX + label, label, isClusterParent: true },
+      selectable: false,
+      grabbable: false,
+    })
+  })
+  return out
+}

@@ -1,6 +1,7 @@
 import {
   EDGE_TYPE_DEFAULT,
   NODE_LABEL_DEFAULT,
+  buildCompoundElements,
   extractElements,
   labelOptions,
   resolveEdgeLabel,
@@ -358,4 +359,99 @@ test('falls back to placeholder #id when no scalar column is available', () => {
   )
   expect(stubs.length).toBe(2)
   expect((stubs[0]?.data as any).label).toMatch(/^#\d+$/)
+})
+
+// ------------------------------------------------------------------
+// Phase 1 / Task 1.4 — group-by-label clustering (compound parents).
+// ------------------------------------------------------------------
+describe('buildCompoundElements', () => {
+  it('wraps nodes in a per-label parent and reparents them', () => {
+    const resp = {
+      graph_summary: {
+        nodes: [
+          { id: 1, labels: ['Person'], properties: { name: 'A' } },
+          { id: 2, labels: ['Person'], properties: { name: 'B' } },
+          { id: 3, labels: ['Company'], properties: { name: 'C' } },
+        ],
+        edges: [
+          {
+            id: 10,
+            start_node: 1,
+            end_node: 3,
+            type: 'WORKS_AT',
+            properties: {},
+          },
+        ],
+      },
+    }
+    const els = extractElements(resp as any)
+    const compound = buildCompoundElements(els)
+    const parents = compound.filter(
+      (e) => e.data && (e.data as Record<string, unknown>).isClusterParent
+    )
+    expect(
+      parents.map((p) => (p.data as { label?: string }).label).sort()
+    ).toEqual(['Company', 'Person'])
+    // Parents are non-interactive.
+    parents.forEach((p) => {
+      expect(p.selectable).toBe(false)
+      expect(p.grabbable).toBe(false)
+    })
+    // Each original Person node now has a parent pointing at the cluster.
+    const personNodes = compound.filter(
+      (e) =>
+        e.group !== 'edges' &&
+        (e.data as { labels?: string[] }).labels?.[0] === 'Person'
+    )
+    expect(personNodes.length).toBe(2)
+    personNodes.forEach((n) => {
+      expect((n.data as { parent?: string }).parent).toBe('__cluster__:Person')
+    })
+    // Edges are unchanged in count.
+    expect(compound.filter((e) => e.group === 'edges').length).toBe(1)
+    // Pure: the input array is not mutated.
+    expect(els.every((e) => !(e.data as Record<string, unknown>)?.parent)).toBe(
+      true
+    )
+  })
+
+  it('adds no parent nodes when every node lacks a label', () => {
+    const els = extractElements({
+      graph_summary: {
+        nodes: [{ id: 1, labels: [], properties: {} }],
+        edges: [],
+      },
+    } as any)
+    const out = buildCompoundElements(els)
+    expect(
+      out.filter(
+        (e) => (e.data as Record<string, unknown> | undefined)?.isClusterParent
+      )
+    ).toHaveLength(0)
+    // The lone node is returned untouched (no synthetic parent).
+    expect(
+      out.filter((e) => (e.data as Record<string, unknown> | undefined)?.parent)
+    ).toHaveLength(0)
+  })
+
+  it('leaves a node with a pre-set data.parent alone', () => {
+    const els = extractElements({
+      graph_summary: {
+        nodes: [{ id: 1, labels: ['Person'], properties: {} }],
+        edges: [],
+      },
+    } as any)
+    // Simulate a caller-set parent.
+    const firstData = els[0]?.data as Record<string, unknown>
+    firstData.parent = 'manual-parent'
+    const out = buildCompoundElements(els)
+    const node = out.find((e) => (e.data as { id?: string }).id === '1')
+    expect((node?.data as { parent?: string }).parent).toBe('manual-parent')
+    // No cluster parent minted for that label since the node was skipped.
+    expect(
+      out.filter(
+        (e) => (e.data as Record<string, unknown> | undefined)?.isClusterParent
+      )
+    ).toHaveLength(0)
+  })
 })

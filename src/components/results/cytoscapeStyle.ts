@@ -126,6 +126,28 @@ export function createCytoscapeStyle(
       },
     },
     {
+      // Compound parent nodes — the synthetic per-label "cluster" boxes
+      // drawn behind their children when group-by-label clustering is
+      // on. A faint dashed rounded-rect with a top-aligned label so it
+      // reads as a grouping container, not a real node.
+      selector: ':parent',
+      style: {
+        'background-opacity': 0.08,
+        'background-color': theme.colors.neutralScale[500],
+        'border-width': 1,
+        'border-style': 'dashed',
+        'border-color': theme.colors.neutralScale[500],
+        'border-opacity': 0.4,
+        label: 'data(label)',
+        'text-valign': 'top',
+        'text-halign': 'center',
+        'font-size': 11,
+        color: theme.text.secondary,
+        padding: '12px',
+        shape: 'round-rectangle',
+      },
+    },
+    {
       selector: ':selected',
       style: {
         'border-width': 3,

@@ -133,6 +133,8 @@ export const en = {
     selectionModeLabel: 'Selection mode',
     selectionModePan: 'Pan',
     selectionModeBox: 'Box select',
+    clusterByLabel: 'Group by label',
+    clusterByLabelLabel: 'Group nodes by label',
   },
 
   schema: {
