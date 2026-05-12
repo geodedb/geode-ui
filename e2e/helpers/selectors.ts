@@ -98,6 +98,25 @@ export const sel = {
   paneRunBtn: (p: Page): Locator => p.getByTestId('pane-run-btn'),
   paneCloseBtn: (p: Page): Locator => p.getByTestId('pane-close-btn'),
 
+  // Overview dashboard (22-dashboard.spec.ts) — mounted at /dashboard. An
+  // <h1> "Overview" plus a grid of 4 cards: GraphsCard
+  // (dashboard-graphs-card, a <ul> of graph names), RecentQueriesCard
+  // (dashboard-recent-card, <li data-testid="dashboard-recent-row"> rows
+  // each deep-linking to /?statement=…), ConnectionCard
+  // (dashboard-connection-card, "Geode v…" + 4 capability badges), and
+  // GraphStatsCard (dashboard-stats-card; until loaded it shows only the
+  // dashboard-stats-load button which runs the count() scans).
+  dashboardGraphsCard: (p: Page): Locator =>
+    p.getByTestId('dashboard-graphs-card'),
+  dashboardRecentCard: (p: Page): Locator =>
+    p.getByTestId('dashboard-recent-card'),
+  dashboardRecentRow: (p: Page): Locator =>
+    p.getByTestId('dashboard-recent-row'),
+  dashboardConnectionCard: (p: Page): Locator =>
+    p.getByTestId('dashboard-connection-card'),
+  dashboardStatsLoad: (p: Page): Locator =>
+    p.getByTestId('dashboard-stats-load'),
+
   // Admin
   newUserBtn: (p: Page): Locator =>
     p.getByRole('button', { name: /new user/i }),
