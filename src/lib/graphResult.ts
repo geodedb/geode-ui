@@ -86,6 +86,37 @@ function scalarLabel(
   return preferred ?? fallback
 }
 
+// pickScalarLabel mirrors chooseLabelText's preference order — a
+// field literally named name/title/id, else the first non-empty
+// stringifiable scalar — but works on a flat {field: value} map
+// (the per-variable projection gathered from one result row).
+function pickScalarLabel(fields: Record<string, unknown>): string | null {
+  const named = fields.name ?? fields.title ?? fields.id
+  if (named !== undefined && named !== null && named !== '') {
+    return String(named)
+  }
+  const keys = Object.keys(fields).sort()
+  const hit = keys
+    .map((k) => fields[k])
+    .find((v) => v !== undefined && v !== null && v !== '')
+  return hit !== undefined ? String(hit) : null
+}
+
+// matchEdgeBinding pairs a result edge with the MATCH edge binding
+// it most likely came from: trivial when the pattern had a single
+// edge, otherwise a unique relationship-type match. Returns null
+// when the pairing is ambiguous so the caller falls back to the
+// type-agnostic placeholder label.
+function matchEdgeBinding(
+  bindings: EdgeBinding[],
+  type: string
+): EdgeBinding | null {
+  if (bindings.length === 1) return bindings[0] ?? null
+  const t = type.toLowerCase()
+  const hits = bindings.filter((b) => (b.type ?? '').toLowerCase() === t)
+  return hits.length === 1 ? (hits[0] ?? null) : null
+}
+
 // extractElements builds the Cytoscape element list from a query
 // response. It draws:
 //
@@ -128,9 +159,27 @@ export function extractElements(
   // need to consider IDs referenced by edges that aren't already in
   // realNodeIds; first-seen wins on label so the same Person ID
   // appearing across many rows doesn't keep getting overwritten.
+  //
+  // When the query text is available we parse its MATCH/RETURN so
+  // each endpoint is labelled from *its own* variable's projected
+  // scalar. Without this, an edge like
+  //   (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m.title
+  // gives BOTH the Person placeholder and the Movie placeholder the
+  // value of whichever column is literally named "name" — so the
+  // movie node shows the actor's name. With the parse, start_node
+  // takes the edge's from-variable column and end_node takes the
+  // to-variable column.
   const placeholderLabels = new Map<number, string>()
   const rows = resp.rows
   const columns = resp.columns ?? []
+  const parsed = query ? parseMatchAndReturn(query) : null
+  // column index -> the MATCH variable it projects from (a `var.field`
+  // or bare `var` RETURN), but only when the parser recovered exactly
+  // one entry per result column so the index alignment is trustworthy.
+  const colVar: (string | null)[] =
+    parsed && parsed.returnColumns.length === columns.length
+      ? parsed.returnColumns.map((rc) => rc.varName ?? null)
+      : []
   if (Array.isArray(rows) && Array.isArray(edges) && edges.length > 0) {
     rows.forEach((row) => {
       if (!Array.isArray(row)) return
@@ -149,17 +198,42 @@ export function extractElements(
         }
       })
       if (rowEdges.length === 0) return
+      // Per-variable best scalar from this row's scalar columns
+      // (only when we have a trustworthy column->var mapping).
+      const varScalar = new Map<string, string>()
+      if (colVar.length > 0 && parsed) {
+        const varFields = new Map<string, Record<string, unknown>>()
+        row.forEach((v, i) => {
+          if (skip.has(i)) return
+          if (v === null || v === undefined || typeof v === 'object') return
+          const vn = colVar[i]
+          if (!vn) return
+          const fld = parsed.returnColumns[i]?.field ?? `c${i}`
+          let entry = varFields.get(vn)
+          if (!entry) {
+            entry = {}
+            varFields.set(vn, entry)
+          }
+          entry[fld] = v
+        })
+        varFields.forEach((fields, vn) => {
+          const picked = pickScalarLabel(fields)
+          if (picked !== null) varScalar.set(vn, picked)
+        })
+      }
+      const fallback = scalarLabel(row, columns, skip)
       rowEdges.forEach((edge) => {
-        const endpoints = [edge.start_node, edge.end_node]
-        endpoints.forEach((endpoint) => {
+        const eb = parsed ? matchEdgeBinding(parsed.edges, edge.type) : null
+        const assign = (endpoint: number, varName?: string): void => {
           if (realNodeIds.has(endpoint)) return
           if (rowNodeIds.has(endpoint)) return
           if (placeholderLabels.has(endpoint)) return
-          const label = scalarLabel(row, columns, skip)
-          if (label !== null) {
-            placeholderLabels.set(endpoint, label)
-          }
-        })
+          const byVar = varName ? varScalar.get(varName) : undefined
+          const label = byVar ?? fallback
+          if (label !== null) placeholderLabels.set(endpoint, label)
+        }
+        assign(edge.start_node, eb?.fromVar)
+        assign(edge.end_node, eb?.toVar)
       })
     })
   }
@@ -231,8 +305,8 @@ export function extractElements(
   const haveReal =
     (Array.isArray(nodes) && nodes.length > 0) ||
     (Array.isArray(edges) && edges.length > 0)
-  if (!haveReal && query && Array.isArray(rows) && rows.length > 0) {
-    pushSynthesised(els, parseMatchAndReturn(query), rows)
+  if (!haveReal && parsed && Array.isArray(rows) && rows.length > 0) {
+    pushSynthesised(els, parsed, rows)
   }
   return els
 }

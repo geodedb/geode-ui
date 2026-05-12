@@ -108,6 +108,63 @@ test('synthesises placeholder nodes for projected scalars', () => {
   expect((edge.data as any).label).toBe('ACTED_IN')
 })
 
+test('labels each edge endpoint from its own variable scalar (not the "name" column)', () => {
+  // Reported bug: with
+  //   MATCH (p:Person)-[r:ACTED_IN]->(m:Movie)
+  //   RETURN p.name, r, m.title LIMIT 25
+  // both endpoints are placeholders (only r is a full EDGE column;
+  // p and m are scalars). The old code picked the column literally
+  // named "name" for *both* endpoints, so the Movie node showed the
+  // actor's name. With the MATCH/RETURN parse, start_node should
+  // take p.name and end_node should take m.title.
+  const personId = 901
+  const movieId = 902
+  const resp = {
+    columns: [
+      { name: 'name', type: 'STRING' },
+      { name: 'r', type: 'EDGE' },
+      { name: 'title', type: 'STRING' },
+    ],
+    rows: [
+      [
+        'Keanu Reeves',
+        {
+          id: 100,
+          start_node: personId,
+          end_node: movieId,
+          type: 'ACTED_IN',
+          properties: { roles: 'Neo' },
+        },
+        'The Matrix',
+      ],
+    ],
+    graph_summary: {
+      nodes: [],
+      edges: [
+        {
+          id: 100,
+          start_node: personId,
+          end_node: movieId,
+          type: 'ACTED_IN',
+          properties: { roles: 'Neo' },
+        },
+      ],
+    },
+  }
+  const els = extractElements(
+    resp as any,
+    'USE GRAPH movies; MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m.title LIMIT 25'
+  )
+  const person = els.find(
+    (e) => e.group === 'nodes' && (e.data as any).id === String(personId)
+  )
+  const movie = els.find(
+    (e) => e.group === 'nodes' && (e.data as any).id === String(movieId)
+  )
+  expect((person!.data as any).label).toBe('Keanu Reeves')
+  expect((movie!.data as any).label).toBe('The Matrix')
+})
+
 test('labelOptions surfaces property keys per node label', () => {
   const els = extractElements({
     columns: [{ name: 'm', type: 'NODE' }],
