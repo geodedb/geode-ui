@@ -53,4 +53,67 @@ describe('MatrixView', () => {
     )
     expect(screen.getByText(/no .*edges|nothing to show/i)).toBeInTheDocument()
   })
+
+  it('builds the matrix from a scalar-projection result when given the query', () => {
+    // MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m.title:
+    // the wire response carries only the edge in graph_summary; the
+    // endpoints are placeholders. Without the query the matrix is empty
+    // (regression: "the Matrix view never shows anything"); with it the
+    // placeholders are labelled from the MATCH pattern.
+    const scalarResp = {
+      columns: [
+        { name: 'name', type: 'STRING' },
+        { name: 'r', type: 'EDGE' },
+        { name: 'title', type: 'STRING' },
+      ],
+      rows: [
+        [
+          'Keanu Reeves',
+          {
+            id: 100,
+            start_node: 11,
+            end_node: 22,
+            type: 'ACTED_IN',
+            properties: {},
+          },
+          'The Matrix',
+        ],
+      ],
+      graph_summary: {
+        nodes: [],
+        edges: [
+          {
+            id: 100,
+            start_node: 11,
+            end_node: 22,
+            type: 'ACTED_IN',
+            properties: {},
+          },
+        ],
+      },
+    }
+    const q =
+      'USE GRAPH movies; MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m.title'
+
+    // No query → empty state (the bug).
+    const { unmount } = render(
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <MatrixView resp={scalarResp} />
+        </ThemeProvider>
+      </LocalizationProvider>
+    )
+    expect(screen.getByText(/no .*edges|nothing to show/i)).toBeInTheDocument()
+    unmount()
+
+    // With the query → a real adjacency table.
+    renderWith(<MatrixView resp={scalarResp} query={q} />)
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(
+      screen.getByRole('columnheader', { name: /Movie/ })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('rowheader', { name: /Person/ })
+    ).toBeInTheDocument()
+  })
 })

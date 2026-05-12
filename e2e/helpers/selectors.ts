@@ -85,6 +85,14 @@ export const sel = {
   graphHiddenList: (p: Page): Locator => p.getByTestId('graph-hidden-list'),
   graphCollapsedList: (p: Page): Locator =>
     p.getByTestId('graph-collapsed-list'),
+  // The GraphView sidebar (the 280px column holding the display
+  // controls + the property inspector), its collapse/expand toggle in
+  // the canvas toolbar, and the display-controls block inside it.
+  graphSidebar: (p: Page): Locator => p.getByTestId('graph-sidebar'),
+  graphSidebarToggle: (p: Page): Locator =>
+    p.getByTestId('graph-sidebar-toggle'),
+  graphDisplayControls: (p: Page): Locator =>
+    p.getByTestId('graph-display-controls'),
 
   // Workspace (21-workspace.spec.ts) — multi-pane query surface mounted
   // at /workspace. The "+ Add pane" button is disabled at MAX_PANES (4);

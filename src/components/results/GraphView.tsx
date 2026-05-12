@@ -210,11 +210,16 @@ const Wrap = styled.div<{ $fill: boolean; $sidebarCollapsed: boolean }>`
 // Holds the Cytoscape canvas plus any absolutely-positioned overlays
 // (empty-graph state, build-error banner). Position-relative so the
 // overlay can stack on top of the canvas without entering Cytoscape's
-// internal DOM tree.
+// internal DOM tree. `min-width: 0` lets this `1fr` grid track shrink
+// below the intrinsic width of the Cytoscape <canvas> — without it,
+// after the sidebar is collapsed (canvas sized to the full width) and
+// re-expanded the `1fr 280px` grid can't fit, so the 280px sidebar
+// (the property inspector lives there) is pushed off the right edge.
 const CanvasArea = styled.div`
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: ${({ theme }) => theme.spacing.xs};
 `
 const Toolbar = styled.div`
@@ -1762,7 +1767,11 @@ export const GraphView: React.FC<Props> = ({
         </div>
       </CanvasArea>
       {!sidebarCollapsed && (
-        <Side $height={effectiveHeight} $fill={fillHeight}>
+        <Side
+          data-testid="graph-sidebar"
+          $height={effectiveHeight}
+          $fill={fillHeight}
+        >
           {nodeLabelBuckets.size > 1 && (
             <ControlsBlock data-testid="graph-visibility-controls">
               <h5>{t('graph.visibilityHeading')}</h5>

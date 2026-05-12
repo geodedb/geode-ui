@@ -163,6 +163,60 @@ test('labels each edge endpoint from its own variable scalar (not the "name" col
   )
   expect((person!.data as any).label).toBe('Keanu Reeves')
   expect((movie!.data as any).label).toBe('The Matrix')
+  // The placeholder endpoints also carry the label they had in the
+  // MATCH pattern so the adjacency-matrix view can group them.
+  expect((person!.data as any).labels).toEqual(['Person'])
+  expect((movie!.data as any).labels).toEqual(['Movie'])
+})
+
+test('matrix can be built from a scalar-projection result via the query parse', () => {
+  // The Matrix view passes the query text to extractElements; for
+  //   MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m.title
+  // the placeholder endpoints now carry Person/Movie labels, so the
+  // adjacency matrix has a Person→Movie cell instead of being empty.
+  const resp = {
+    columns: [
+      { name: 'name', type: 'STRING' },
+      { name: 'r', type: 'EDGE' },
+      { name: 'title', type: 'STRING' },
+    ],
+    rows: [
+      [
+        'Keanu Reeves',
+        {
+          id: 100,
+          start_node: 11,
+          end_node: 22,
+          type: 'ACTED_IN',
+          properties: {},
+        },
+        'The Matrix',
+      ],
+    ],
+    graph_summary: {
+      nodes: [],
+      edges: [
+        {
+          id: 100,
+          start_node: 11,
+          end_node: 22,
+          type: 'ACTED_IN',
+          properties: {},
+        },
+      ],
+    },
+  }
+  const q =
+    'USE GRAPH movies; MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p.name, r, m.title'
+  const els = extractElements(resp as any, q)
+  // Without the query the matrix would be empty (placeholders had no
+  // labels); with it, both endpoints are labelled.
+  const labels = els
+    .filter((e) => e.group === 'nodes')
+    .map((e) => (e.data as any).labels?.[0])
+    .filter(Boolean)
+    .sort()
+  expect(labels).toEqual(['Movie', 'Person'])
 })
 
 test('labelOptions surfaces property keys per node label', () => {

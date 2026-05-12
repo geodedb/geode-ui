@@ -108,14 +108,22 @@ const MatrixCellTd: React.FC<{
   )
 }
 
-export const MatrixView: React.FC<{ resp: QueryRespLike }> = ({ resp }) => {
+export const MatrixView: React.FC<{ resp: QueryRespLike; query?: string }> = ({
+  resp,
+  query,
+}) => {
   const { t } = useTranslation()
   // Subscribe to the theme so the heatmap re-renders on a light/dark
   // flip even though the colours are read via styled-components props.
   useTheme()
+  // Pass the query text through so scalar-projection results
+  // (`RETURN p.name, r, m.title`, or anything in stream mode where the
+  // wire response carries no graph_summary) can still be reconstructed
+  // from the MATCH pattern — otherwise the matrix has no labelled
+  // nodes and renders the empty state for every such query.
   const matrix = useMemo(
-    () => buildAdjacencyMatrix(extractElements(resp)),
-    [resp]
+    () => buildAdjacencyMatrix(extractElements(resp, query)),
+    [resp, query]
   )
   const max = useMemo(() => {
     let m = 0

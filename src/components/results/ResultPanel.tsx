@@ -184,7 +184,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
             <GraphView resp={resp} query={query} fillHeight={maximized} />
           </Suspense>
         )}
-        {tab === 'matrix' && <MatrixView resp={resp} />}
+        {tab === 'matrix' && <MatrixView resp={resp} query={query} />}
       </div>
     </>
   )

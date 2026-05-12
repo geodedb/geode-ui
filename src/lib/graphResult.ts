@@ -170,6 +170,12 @@ export function extractElements(
   // takes the edge's from-variable column and end_node takes the
   // to-variable column.
   const placeholderLabels = new Map<number, string>()
+  // The GQL label a placeholder endpoint had in the MATCH pattern
+  // (e.g. `Movie` for the `m` in `(p)-[r]->(m:Movie)`), when the
+  // query parsed. Lets the adjacency-matrix view group placeholder
+  // endpoints — without it, scalar-projection queries produce a
+  // matrix with no labelled nodes, i.e. nothing to show.
+  const placeholderTypeLabels = new Map<number, string>()
   const rows = resp.rows
   const columns = resp.columns ?? []
   const parsed = query ? parseMatchAndReturn(query) : null
@@ -227,6 +233,10 @@ export function extractElements(
         const assign = (endpoint: number, varName?: string): void => {
           if (realNodeIds.has(endpoint)) return
           if (rowNodeIds.has(endpoint)) return
+          if (varName && parsed && !placeholderTypeLabels.has(endpoint)) {
+            const typeLabel = parsed.nodes.get(varName)?.label
+            if (typeLabel) placeholderTypeLabels.set(endpoint, typeLabel)
+          }
           if (placeholderLabels.has(endpoint)) return
           const byVar = varName ? varScalar.get(varName) : undefined
           const label = byVar ?? fallback
@@ -265,12 +275,13 @@ export function extractElements(
     })
     danglingIds.forEach((id) => {
       const label = placeholderLabels.get(id) ?? `#${id}`
+      const typeLabel = placeholderTypeLabels.get(id)
       els.push({
         group: 'nodes',
         data: {
           id: String(id),
           label,
-          labels: [],
+          labels: typeLabel ? [typeLabel] : [],
           props: {},
           placeholder: true,
         },
