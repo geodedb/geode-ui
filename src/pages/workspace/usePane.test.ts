@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { usePane } from './usePane'
+import { useQueryHistory } from '../../lib/useQueryHistory'
 
 type FakeHandle = {
   statement: string
@@ -37,6 +38,8 @@ function handleAt(i: number): FakeHandle {
 describe('usePane', () => {
   beforeEach(() => {
     handles.length = 0
+    localStorage.clear()
+    useQueryHistory.setState({ entries: [] })
   })
 
   it('run() opens a stream with the pane statement and exposes streamed rows', () => {
@@ -56,6 +59,11 @@ describe('usePane', () => {
     })
     expect(result.current.resp?.row_count).toBe(2)
     expect(result.current.resp?.rows).toHaveLength(2)
+    // Completing the run records the run-time statement into history.
+    expect(useQueryHistory.getState().entries[0]?.statement).toBe(
+      'MATCH (n) RETURN n LIMIT 2'
+    )
+    expect(useQueryHistory.getState().entries[0]?.ok).toBe(true)
   })
 
   it('cancel() cancels the active handle', () => {

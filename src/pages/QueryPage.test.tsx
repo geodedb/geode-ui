@@ -88,6 +88,7 @@ jest.mock('../api/client', () => ({
 }))
 
 import { QueryPage } from './QueryPage'
+import { useQueryHistory } from '../lib/useQueryHistory'
 
 function renderPage(): void {
   render(
@@ -281,6 +282,45 @@ describe('result panel maximize / fullscreen', () => {
     expect(getComputedStyle(overlay).position).toBe('fixed')
     const panel = within(overlay).getByRole('tabpanel')
     expect(panel.id).toBe('result-panel-graph')
+  })
+})
+
+// B1 — running a query records it into useQueryHistory. The sync path
+// (client.query resolves) is exercised here; the store is reset between
+// tests so the assertion isn't polluted by other runs in this file.
+describe('B1: running a query records it into the query history', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useQueryHistory.setState({ entries: [] })
+    queryMock.mockReset()
+    queryMock.mockResolvedValue({
+      columns: [{ name: 'n', type: 'STRING' }],
+      rows: [['alice'], ['bob']],
+      row_count: 2,
+      elapsed_ms: 3,
+    })
+  })
+
+  test('a successful sync run prepends a history entry with the run statement', async () => {
+    const view = render(
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <QueryPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    )
+    await waitFor(() =>
+      expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()
+    )
+    fireEvent.click(view.getByRole('button', { name: /run/i }))
+    await waitFor(() => expect(view.getByRole('tablist')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(useQueryHistory.getState().entries).toHaveLength(1)
+    )
+    const entry = useQueryHistory.getState().entries[0]
+    expect(entry?.statement).toContain('MATCH (n) RETURN n LIMIT 25')
+    expect(entry?.ok).toBe(true)
+    expect(entry?.rowCount).toBe(2)
   })
 })
 

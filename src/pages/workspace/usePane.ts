@@ -9,10 +9,18 @@
 //
 // Workspace panes always stream; there is no sync-vs-stream toggle here.
 
-import { useCallback, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react'
 
 import type { QueryResp } from '@api'
 import { streamQuery, type StreamHandle } from '../../lib/queryStream'
+import { useQueryHistory } from '../../lib/useQueryHistory'
 import {
   initialStreamState,
   streamReducer,
@@ -52,6 +60,10 @@ export function usePane(initialStatement: string = DEFAULT_STATEMENT): Pane {
   const [busy, setBusy] = useState(false)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
+  // The statement the in-flight run actually started with. `statement`
+  // (the editable pane state) can change between run() and completion,
+  // so the history entry is keyed off this run-time snapshot instead.
+  const runStmtRef = useRef('')
 
   const cancel = useCallback(() => {
     if (handleRef.current) {
@@ -66,6 +78,7 @@ export function usePane(initialStatement: string = DEFAULT_STATEMENT): Pane {
       handleRef.current.cancel()
       handleRef.current = null
     }
+    runStmtRef.current = statement
     dispatch({ type: 'reset' })
     dispatch({ type: 'start' })
     setBusy(true)
@@ -78,9 +91,26 @@ export function usePane(initialStatement: string = DEFAULT_STATEMENT): Pane {
       dispatch({ type: 'closed' })
       setBusy(false)
       handleRef.current = null
-      // TODO(B1): record into useQueryHistory
     })
   }, [statement])
+
+  // Record this run into the shared query history exactly once, when the
+  // reducer reaches a terminal status ('done' | 'error'). The h.done
+  // closure captures stale stream.* values, so we fire on the status
+  // transition instead and read the run-time statement from runStmtRef
+  // (a stable ref); rowCount/rows are settled by the time status flips.
+  useEffect(() => {
+    if (stream.status === 'done' || stream.status === 'error') {
+      useQueryHistory.getState().record({
+        statement: runStmtRef.current,
+        rowCount:
+          stream.status === 'done'
+            ? stream.rowCount || stream.rows.length
+            : null,
+        ok: stream.status === 'done',
+      })
+    }
+  }, [stream.status])
 
   // Memoize the QueryResp on the structurally-relevant stream fields so
   // its identity changes only when the underlying data does (mirrors

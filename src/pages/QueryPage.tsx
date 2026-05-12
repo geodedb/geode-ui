@@ -15,6 +15,7 @@ import { ResultPanel, type ResultTab } from '../components/results/ResultPanel'
 import { Button } from '../components/ui'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
+import { useQueryHistory } from '../lib/useQueryHistory'
 import { useQueryStore } from '../lib/queryStore'
 import {
   StreamState,
@@ -110,6 +111,12 @@ export const QueryPage: React.FC = () => {
   const maximizeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
+  // The statement that the in-flight stream run actually started with.
+  // The `stream` reducer state inside h.done.then(...) is the value at
+  // run-time but `stmt` (the editor state) can drift before the run
+  // completes — so we record from a useEffect keyed on the terminal
+  // status and read the run-time statement from this ref.
+  const runStmtRef = useRef('')
 
   // While maximized, Escape exits fullscreen. Restore focus to the
   // toggle button on exit so keyboard users land back where they were.
@@ -142,6 +149,28 @@ export const QueryPage: React.FC = () => {
     }
   }, [staged, clearStaged])
 
+  // Record a stream run into the query history exactly once, when the
+  // reducer reaches a terminal status ('done' | 'error'). We cannot read
+  // stream.* from the h.done.then() closure (it captures the run-time
+  // value), so this fires on the status transition instead and reads the
+  // run-time statement from runStmtRef. `dispatch({type:'reset'})` moves
+  // status back to 'idle', so the next run can re-fire on the next
+  // terminal transition. Keyed on stream.status so it runs once per
+  // terminal transition; rowCount/rows are read at fire time (they're
+  // settled by then) and runStmtRef is a stable ref.
+  useEffect(() => {
+    if (stream.status === 'done' || stream.status === 'error') {
+      useQueryHistory.getState().record({
+        statement: runStmtRef.current,
+        rowCount:
+          stream.status === 'done'
+            ? stream.rowCount || stream.rows.length
+            : null,
+        ok: stream.status === 'done',
+      })
+    }
+  }, [stream.status])
+
   // resetRunState clears every per-run piece of state so a previous
   // run's leftovers (rows, errors, an in-flight WebSocket) cannot
   // leak into the next click. Without this, two sync runs back-to-
@@ -160,6 +189,9 @@ export const QueryPage: React.FC = () => {
   }
 
   const runSync = async (): Promise<void> => {
+    // Capture the statement that this run started with so a later
+    // edit to `stmt` can't drift the history entry.
+    const ranStmt = stmt
     resetRunState()
     setBusy(true)
     try {
@@ -169,19 +201,28 @@ export const QueryPage: React.FC = () => {
       // omitting them yields "page_size: too small". Send sensible
       // defaults so the synchronous query path is usable.
       const r = await client.query({
-        statement: stmt,
+        statement: ranStmt,
         page_size: 1000,
         timeout_ms: 30000,
       })
       setResp(r)
+      useQueryHistory.getState().record({
+        statement: ranStmt,
+        rowCount: r.row_count ?? r.rows.length,
+        ok: true,
+      })
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : t('errors.queryFailed'))
+      useQueryHistory
+        .getState()
+        .record({ statement: ranStmt, rowCount: null, ok: false })
     } finally {
       setBusy(false)
     }
   }
 
   const runStream = (): void => {
+    runStmtRef.current = stmt
     resetRunState()
     dispatch({ type: 'start' })
     setBusy(true)
