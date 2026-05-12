@@ -25,8 +25,12 @@ var ErrInvalidRequest = errors.New("mcpx: invalid request")
 // ErrToolTimeout indicates a tool exceeded its allotted time.
 var ErrToolTimeout = errors.New("mcpx: tool timeout")
 
-// Tool is a function that takes params as raw JSON and returns result JSON.
-type Tool func(params jsontext.Value) (jsontext.Value, error)
+// Tool is a function that takes the request-scoped context plus params as
+// raw JSON and returns result JSON. The ctx carries any verifier-derived
+// values (e.g. JWT claims) so tool bodies can read them natively rather
+// than reaching for a per-goroutine stash. For STDIO the ctx is
+// context.Background() (no per-request enrichment is possible there).
+type Tool func(ctx context.Context, params jsontext.Value) (jsontext.Value, error)
 
 // AuditMCP provides hooks for auth and tool-call events.
 var AuditMCP = struct {
@@ -75,7 +79,7 @@ func (b *bucket) snapshot() (int, int, time.Time) {
 
 var toolBuckets map[string]*bucket
 var toolTimeout = 5 * time.Second
-var authVerifier func(*http.Request) error
+var authVerifier func(*http.Request) (context.Context, error)
 var wsOriginAllowlist []string
 var wsAllowAnyOrigin bool
 
@@ -107,8 +111,12 @@ func SetToolBuckets(tools map[string]Tool, rate, burst float64) {
 func SetToolTimeout(d time.Duration) { toolTimeout = d }
 
 // SetAuthVerifier configures MCP request authentication verification.
-// When unset, HandleHTTP/ServeWS fail closed.
-func SetAuthVerifier(v func(*http.Request) error) { authVerifier = v }
+// On success the verifier returns the request-scoped context to thread
+// into tool bodies (e.g. r.Context() after a JWT middleware has stashed
+// claims on it); on failure it returns (nil, err) and the request is
+// rejected with HTTP 401 before any dispatch. When unset,
+// HandleHTTP/ServeWS fail closed.
+func SetAuthVerifier(v func(*http.Request) (context.Context, error)) { authVerifier = v }
 
 // SetWSOriginAllowlist configures allowed Origin values for MCP WebSocket
 // upgrades. SEC-0008: an empty list now means fail-closed under
@@ -174,11 +182,15 @@ func HandleHTTP(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	if err := authVerifier(r); err != nil {
+	ctx, err := authVerifier(r)
+	if err != nil {
 		AuditMCP.AuthFail("http", "missing auth")
 		obsx.LogAudit("mcp_auth_fail", map[string]any{"transport": "http", "id": id, "reason": "missing auth"})
 		w.WriteHeader(http.StatusUnauthorized)
 		return
+	}
+	if ctx == nil {
+		ctx = r.Context()
 	}
 	AuditMCP.AuthOK("http", "")
 	obsx.LogAudit("mcp_auth_ok", map[string]any{"transport": "http", "id": id})
@@ -196,7 +208,7 @@ func HandleHTTP(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 		}
 		return
 	}
-	dispatchHTTP(w, body, tools)
+	dispatchHTTP(ctx, w, body, tools)
 }
 
 // errBodyTooLarge is returned by readBoundedBody when a request body
@@ -225,7 +237,10 @@ func readBoundedBody(r io.Reader, cap int64) ([]byte, error) {
 // dispatchHTTP variant of dispatch that sets http.StatusBadRequest for
 // malformed top-level JSON. Splitting from dispatch lets the STDIO/WS
 // paths stay header-agnostic.
-func dispatchHTTP(w http.ResponseWriter, body []byte, tools map[string]Tool) {
+func dispatchHTTP(ctx context.Context, w http.ResponseWriter, body []byte, tools map[string]Tool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	trimmed := bytesTrimSpace(body)
 	if len(trimmed) == 0 {
 		w.WriteHeader(http.StatusBadRequest)
@@ -248,7 +263,7 @@ func dispatchHTTP(w http.ResponseWriter, body []byte, tools map[string]Tool) {
 				}
 			}
 		}
-		res := handleRaw(env, tools, toolBuckets)
+		res := handleRaw(ctx, env, tools, toolBuckets)
 		if res == nil {
 			// notification: legacy behavior writes "null"
 			_, _ = w.Write([]byte("null"))
@@ -268,7 +283,7 @@ func dispatchHTTP(w http.ResponseWriter, body []byte, tools map[string]Tool) {
 			if err != nil {
 				continue
 			}
-			res := handleRaw(env, tools, toolBuckets)
+			res := handleRaw(ctx, env, tools, toolBuckets)
 			if res != nil {
 				out = append(out, res)
 			}
@@ -289,11 +304,15 @@ func ServeWS(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	if err := authVerifier(r); err != nil {
+	ctx, err := authVerifier(r)
+	if err != nil {
 		AuditMCP.AuthFail("ws", "missing auth")
 		obsx.LogAudit("mcp_auth_fail", map[string]any{"transport": "ws", "id": id, "reason": "missing auth"})
 		w.WriteHeader(http.StatusUnauthorized)
 		return
+	}
+	if ctx == nil {
+		ctx = r.Context()
 	}
 	AuditMCP.AuthOK("ws", "")
 	obsx.LogAudit("mcp_auth_ok", map[string]any{"transport": "ws", "id": id})
@@ -336,7 +355,7 @@ func ServeWS(w http.ResponseWriter, r *http.Request, tools map[string]Tool) {
 			_ = conn.WriteMessage(0x1, []byte(`{"jsonrpc":"2.0","error":{"code":-32600,"message":"invalid request"}}`))
 			continue
 		}
-		res := handleRaw(env, tools, toolBuckets)
+		res := handleRaw(ctx, env, tools, toolBuckets)
 		if res == nil {
 			continue
 		}
@@ -351,7 +370,12 @@ func ServeSTDIO(tools map[string]Tool) error {
 }
 
 // serveSTDIOWith is an internal helper to enable tests with pipes.
+// STDIO has no per-request enrichment hook, so tool bodies receive
+// context.Background(). This is the fail-safe default: a tool that
+// expects a verifier-derived value will see the zero value rather
+// than another request's leaked context.
 func serveSTDIOWith(in io.Reader, out io.Writer, tools map[string]Tool) error {
+	ctx := context.Background()
 	br := bufio.NewReader(in)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -375,7 +399,7 @@ func serveSTDIOWith(in io.Reader, out io.Writer, tools map[string]Tool) error {
 				_, _ = out.Write([]byte("\n"))
 				continue
 			}
-			res := handleRaw(env, tools, toolBuckets)
+			res := handleRaw(ctx, env, tools, toolBuckets)
 			if res == nil { // notification
 				_, _ = out.Write([]byte("null\n"))
 				continue
@@ -395,7 +419,7 @@ func serveSTDIOWith(in io.Reader, out io.Writer, tools map[string]Tool) error {
 				if e != nil {
 					continue
 				}
-				res := handleRaw(env, tools, toolBuckets)
+				res := handleRaw(ctx, env, tools, toolBuckets)
 				if res != nil {
 					outArr = append(outArr, res)
 				}
@@ -497,7 +521,10 @@ type rpcErrPayload struct {
 
 // handleRaw is the single-request dispatcher operating on a
 // minimally-decoded envelope. Returns nil for notifications.
-func handleRaw(env *rawEnvelope, tools map[string]Tool, buckets map[string]*bucket) any {
+func handleRaw(ctx context.Context, env *rawEnvelope, tools map[string]Tool, buckets map[string]*bucket) any {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if env.JSONRPC != "2.0" {
 		return objErrRaw(env.ID, -32600, "invalid request")
 	}
@@ -541,14 +568,14 @@ func handleRaw(env *rawEnvelope, tools map[string]Tool, buckets map[string]*buck
 		}
 		AuditMCP.ToolCall(call.Name)
 		obsx.LogAudit("mcp_tool_call", map[string]any{"tool": call.Name})
-		ctx, cancel := context.WithTimeout(context.Background(), toolTimeout)
+		timeoutCtx, cancel := context.WithTimeout(ctx, toolTimeout)
 		defer cancel()
 		ch := make(chan struct {
 			out jsontext.Value
 			err error
 		}, 1)
 		gen.SafeGo("mcp-tool-exec", func() {
-			o, e := fn(call.Params)
+			o, e := fn(timeoutCtx, call.Params)
 			ch <- struct {
 				out jsontext.Value
 				err error
@@ -560,7 +587,7 @@ func handleRaw(env *rawEnvelope, tools map[string]Tool, buckets map[string]*buck
 		case res := <-ch:
 			out = res.out
 			err = res.err
-		case <-ctx.Done():
+		case <-timeoutCtx.Done():
 			return objErrRaw(env.ID, -32000, ErrToolTimeout.Error())
 		}
 		if err != nil {

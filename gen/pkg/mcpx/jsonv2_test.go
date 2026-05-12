@@ -2,6 +2,7 @@ package mcpx
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
@@ -12,7 +13,7 @@ import (
 // newline-delimited (each response ends with \n).
 func TestSTDIO_NewlineDelimited(t *testing.T) {
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) { return p, nil },
 	}
 
 	req := `{"jsonrpc":"2.0","id":1,"method":"ping"}` + "\n"
@@ -43,7 +44,7 @@ func TestJsontextValue_RoundTrip(t *testing.T) {
 	payload := `{"key":"value","num":42,"nested":{"a":true}}`
 
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) { return p, nil },
 	}
 
 	req := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","params":` + payload + `}}` + "\n"

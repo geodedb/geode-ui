@@ -22,7 +22,7 @@ func FuzzJSONRPC(f *testing.F) {
 		{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": map[string]any{"name": "echo", "params": map[string]any{"msg": "x"}}},
 	}
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) { return p, nil },
 	}
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { HandleHTTP(w, r, tools) })
 	for _, s := range seed {

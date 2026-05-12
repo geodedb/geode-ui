@@ -22,22 +22,24 @@ var ErrNotImplemented = errors.New("not implemented")
 
 // MCPServerInterface defines the business logic contract for generated MCP tools.
 // Embed UnimplementedMCPServer and override only the tools you implement.
+// The ctx is the request-scoped context threaded from the MCP transport
+// (HTTP/WS carry the auth-verifier-enriched context; STDIO passes
+// context.Background()).
 type MCPServerInterface interface {
-	Query(params *types.QueryReq) (*types.QueryResp, error)
+	Query(ctx context.Context, params *types.QueryReq) (*types.QueryResp, error)
 }
 
 // UnimplementedMCPServer returns ErrNotImplemented for every MCP tool.
 type UnimplementedMCPServer struct{}
 
-func (UnimplementedMCPServer) Query(_ *types.QueryReq) (*types.QueryResp, error) {
+func (UnimplementedMCPServer) Query(_ context.Context, _ *types.QueryReq) (*types.QueryResp, error) {
 	return nil, ErrNotImplemented
 }
 
 // NewTools builds the MCP tool map backed by srv.
 func NewTools(srv MCPServerInterface) map[string]mcpx.Tool {
 	return map[string]mcpx.Tool{
-		"query": func(p jsontext.Value) (jsontext.Value, error) {
-			ctx := context.Background()
+		"query": func(ctx context.Context, p jsontext.Value) (jsontext.Value, error) {
 			ctx, _span := obsx.Tracer("genapi.mcp").Start(ctx, "MCP query",
 				trace.WithAttributes(attribute.String("mcp.tool", "query")))
 			defer _span.End()
@@ -45,7 +47,7 @@ func NewTools(srv MCPServerInterface) map[string]mcpx.Tool {
 			var req types.QueryReq
 			if err := json.Unmarshal(p, &req); err != nil { return nil, err }
 			if err := req.Valid(); err != nil { return nil, err }
-			resp, err := srv.Query(&req)
+			resp, err := srv.Query(ctx, &req)
 			_dur := float64(time.Since(_start).Milliseconds())
 			if err != nil {
 				_span.RecordError(err)

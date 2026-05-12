@@ -288,15 +288,15 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// unreachable to legitimate clients. AuthJWT enforces the same
 	// HS256 lockdown + role context that the REST handlers see.
 	//
-	// F-AUTH-1 (#132): use srv.MCPAuthVerifier (AuthJWT + per-request
-	// context stash) rather than bare srv.AuthJWT, and wrap the MCP
-	// handler with srv.WrapMCPHTTP so the stash is cleared after the
-	// request. Together these let the MCP `query` tool run against the
-	// caller's JWT `profile` claim instead of the "default" profile.
-	// Temporary mitigation pending genapi threading context.Context
-	// through MCPServerInterface.Query.
+	// F-AUTH-1 (#132): mcpx now threads context.Context through
+	// MCPServerInterface.Query, and the auth verifier returns the
+	// request-scoped context. srv.mcpAuthVerifier runs AuthJWT (which
+	// enriches *r's context with the profile/roles/subject claims) and
+	// hands that context to mcpx, which threads it straight into the
+	// `query` tool body. The MCP `query` tool therefore runs against the
+	// caller's JWT `profile` claim natively — no per-goroutine stash.
 	mcpx.SetAuthVerifier(srv.MCPAuthVerifier)
-	mux.Handle("/mcp", srv.WrapMCPHTTP(http.HandlerFunc(genmcp.HandleMCPHTTP)))
+	mux.Handle("/mcp", http.HandlerFunc(genmcp.HandleMCPHTTP))
 
 	uiHandler, err := ui.Handler()
 	if err != nil {

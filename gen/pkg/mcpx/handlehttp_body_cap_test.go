@@ -2,6 +2,7 @@ package mcpx
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,7 +26,7 @@ func TestHandleHTTP_RejectsBodyOverLimit(t *testing.T) {
 		SetMaxHTTPBodyBytes(prevLimit)
 	})
 
-	SetAuthVerifier(func(*http.Request) error { return nil })
+	SetAuthVerifier(func(r *http.Request) (context.Context, error) { return r.Context(), nil })
 	SetMaxHTTPBodyBytes(1024) // 1 KiB cap for this test
 
 	body := bytes.Repeat([]byte("x"), 4096) // 4 KiB > 1 KiB
@@ -53,7 +54,7 @@ func TestHandleHTTP_AcceptsBodyAtLimit(t *testing.T) {
 		SetMaxHTTPBodyBytes(prevLimit)
 	})
 
-	SetAuthVerifier(func(*http.Request) error { return nil })
+	SetAuthVerifier(func(r *http.Request) (context.Context, error) { return r.Context(), nil })
 
 	const cap = 1024
 	SetMaxHTTPBodyBytes(cap)

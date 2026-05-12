@@ -112,19 +112,19 @@ func mintProfileJWT(t *testing.T, iss *jwt.Issuer, sub, profile string, roles []
 }
 
 // runMCPQueryWithToken simulates the /mcp HTTP path: it runs
-// MCPAuthVerifier (which validates the token and stashes the request
-// context for this goroutine), invokes the MCP query tool, then clears
-// the stash — exactly what mcpx.HandleHTTP + WrapMCPHTTP do, minus the
-// JSON-RPC framing.
+// MCPAuthVerifier (which validates the token and returns the
+// JWT-enriched request context), then invokes the MCP query tool with
+// that context — exactly what mcpx.HandleHTTP does, minus the JSON-RPC
+// framing.
 func runMCPQueryWithToken(t *testing.T, mcp *MCPServer, srv *GraphServer, token string, req *gentypes.QueryReq) (*gentypes.QueryResp, error) {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	r.Header.Set("Authorization", "Bearer "+token)
-	if err := srv.MCPAuthVerifier(r); err != nil {
+	ctx, err := srv.MCPAuthVerifier(r)
+	if err != nil {
 		return nil, err
 	}
-	defer mcpRequestCtx.Delete(goID())
-	return mcp.Query(req)
+	return mcp.Query(ctx, req)
 }
 
 func TestMCPQuery_AppliesProfileClaim(t *testing.T) {
@@ -207,15 +207,15 @@ func TestMCPQuery_AuditAttributedToJWTProfile(t *testing.T) {
 }
 
 // TestMCPQuery_NoTokenFallsBackToDefault documents the unauthenticated /
-// stdio path: without a stashed context Query runs against "default",
-// matching the pre-mitigation behaviour. (The /mcp HTTP route still
-// rejects unauthenticated requests at the verifier; this only covers a
-// direct Query call with no MCPAuthVerifier having run.)
+// stdio path: with a bare context (no JWT-enriched profile claim) Query
+// runs against "default", matching the pre-mitigation behaviour. (The
+// /mcp HTTP route still rejects unauthenticated requests at the verifier;
+// this only covers a direct Query call with a context.Background().)
 func TestMCPQuery_NoTokenFallsBackToDefault(t *testing.T) {
 	pool := newProfileRoutingPool(t, "default")
 	srv := New(Config{Version: "test", Pool: pool})
 	mcp := NewMCPServer(srv)
-	if _, err := mcp.Query(&gentypes.QueryReq{Statement: "RETURN 1"}); err != nil {
+	if _, err := mcp.Query(context.Background(), &gentypes.QueryReq{Statement: "RETURN 1"}); err != nil {
 		t.Fatalf("MCP Query: %v", err)
 	}
 	if got := pool.drivers["default"].queries.Load(); got != 1 {
