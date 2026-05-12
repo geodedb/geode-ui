@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { useNavigate } from 'react-router-dom'
 import { client } from '../../api/client'
 import { useQueryStore } from '../../lib/queryStore'
+import { defaultSchemaCache, type SchemaCacheLike } from './schemaCache'
 
 // LabelList renders the node-label set returned by GET
 // /api/v1/graphs/{graph}/labels for the active graph. Clicking a label
@@ -15,6 +16,15 @@ import { useQueryStore } from '../../lib/queryStore'
 // backtick-quoted identifiers with `42000: expected identifier or
 // keyword, got 'invalid'`. If a future Geode supports backticks AND a
 // project starts using labels with reserved characters, revisit.
+//
+// PERF-2026-05-11-10 (#154): the per-graph label set is served from the
+// shared session cache (./schemaCache) — re-selecting a graph the
+// operator already visited is instant, zero wire round-trips. On a
+// cold miss a fresh AbortController arms cancellation so toggling
+// graphs faster than the network responds aborts the stale request
+// before it lands a setState. The Geode-side read is a full-graph
+// `MATCH (n)` scan; #128 (internal/server/schema_cache.go, 120s TTL) is
+// the cold-miss backstop on the server.
 const List = styled.ul`
   list-style: none;
   display: flex;
@@ -52,35 +62,65 @@ const Empty = styled.p`
   font-style: italic;
 `
 
-export const LabelList: React.FC<{ graph: string }> = ({ graph }) => {
+export const LabelList: React.FC<{
+  graph: string
+  cache?: SchemaCacheLike
+}> = ({ graph, cache }) => {
   const { t } = useTranslation()
   const [labels, setLabels] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
   const setStaged = useQueryStore((s) => s.setStaged)
   const nav = useNavigate()
 
+  // Keep the AbortController across renders so a pending labels fetch
+  // from the prior `graph` can be aborted when the operator switches
+  // graphs faster than the network responds. The generated client does
+  // not currently accept a signal, so we still gate every setState on
+  // `signal.aborted`; the AbortController is also the unambiguous
+  // signal the regression tests assert on.
+  const inflightAbort = useRef<AbortController | null>(null)
+  const effectiveCache = cache ?? defaultSchemaCache
+
   useEffect(() => {
     if (!graph) return undefined
-    let cancelled = false
+
+    // Cache hit: hydrate synchronously, no wire I/O.
+    const hit = effectiveCache.getLabels(graph)
+    if (hit) {
+      setLabels(hit)
+      setLoaded(true)
+      return undefined
+    }
+
+    // Cache miss: cancel any prior in-flight request, then fetch.
+    if (inflightAbort.current) inflightAbort.current.abort()
+    const controller = new AbortController()
+    inflightAbort.current = controller
+    const { signal } = controller
+
     setLoaded(false)
     client
       .labels({ graph })
       .then((r) => {
-        if (cancelled) return
-        setLabels(r.labels ?? [])
+        if (signal.aborted) return
+        const next = r.labels ?? []
+        setLabels(next)
         setLoaded(true)
+        effectiveCache.putLabels(graph, next)
       })
       .catch(() => {
         // The schema explorer presents an empty pane on failure; the
         // surrounding SchemaExplorer component already has the
         // graph-level error UI, and a transient label-fetch failure is
-        // not critical enough to surface a second error path here.
-        if (!cancelled) setLoaded(true)
+        // not critical enough to surface a second error path here. We
+        // do not cache a failure — the next selection retries.
+        if (signal.aborted) return
+        setLoaded(true)
       })
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [graph])
+  }, [graph, effectiveCache])
 
   if (loaded && labels.length === 0) {
     return <Empty>{t('schema.noLabels')}</Empty>

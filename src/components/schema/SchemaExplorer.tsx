@@ -7,57 +7,53 @@ import type { Theme } from '../../theme'
 import { below } from '../../theme'
 import { LabelList } from './LabelList'
 import { EdgeTypeList } from './EdgeTypeList'
+import {
+  createSchemaCache,
+  defaultSchemaCache,
+  type SchemaCacheLike,
+  type SchemaIndexConstraintEntry,
+} from './schemaCache'
 
-// PERF-F8 (#52): per-graph cache for the index+constraint pair so
-// re-selecting a graph the user has already viewed during this
-// session is instant — no second wire round-trip. Capped at
-// schemaCacheMaxEntries to avoid unbounded growth in long-lived
-// sessions; eviction is FIFO via insertion-order iteration over the
-// Map keys, which is well-defined per ECMAScript spec.
-type SchemaCacheEntry = {
-  indexes: Array<Record<string, unknown>>
-  constraints: Array<Record<string, unknown>>
-}
-const schemaCacheMaxEntries = 8
+// PERF-F8 (#52) / PERF-2026-05-11-10 (#154): per-graph cache for the
+// index+constraint pair so re-selecting a graph the operator has
+// already viewed this session is instant — no second wire round-trip.
+// The cache implementation now lives in ./schemaCache and is shared
+// with LabelList / EdgeTypeList (one bounded LRU across all four schema
+// reads). The server-side cache (#128, internal/server/schema_cache.go,
+// 120s TTL) backs the cold-miss case.
+type SchemaCacheEntry = SchemaIndexConstraintEntry
 
-// SchemaExplorerCache is exported as a small interface so tests can
-// inject a fresh cache (one per test) without having to reset
-// module-level state.
-export interface SchemaExplorerCacheLike {
+// SchemaExplorerCacheLike keeps the historical pair-accessor surface
+// (`get`/`put` on the indexes+constraints pair) on top of the shared
+// SchemaCacheLike, so existing call sites and tests (which import from
+// './SchemaExplorer' and call `cache.put(graph, { indexes, constraints
+// })`) keep working unchanged.
+export type SchemaExplorerCacheLike = SchemaCacheLike & {
   get(graph: string): SchemaCacheEntry | undefined
   put(graph: string, entry: SchemaCacheEntry): void
-  size(): number
 }
 
+// createSchemaExplorerCache wraps a fresh shared cache and adds the
+// pair-accessor shim. Production callers omit the `cache` prop and
+// inherit the module-level defaultSchemaCache; tests inject a fresh
+// instance per run.
 export function createSchemaExplorerCache(
-  maxEntries: number = schemaCacheMaxEntries
+  maxEntries?: number
 ): SchemaExplorerCacheLike {
-  const map = new Map<string, SchemaCacheEntry>()
+  const shared =
+    maxEntries === undefined
+      ? createSchemaCache()
+      : createSchemaCache(maxEntries)
   return {
+    ...shared,
     get(graph) {
-      return map.get(graph)
+      return shared.getIndexConstraints(graph)
     },
     put(graph, entry) {
-      // Reset insertion order to make re-hit promote to most-recent.
-      if (map.has(graph)) map.delete(graph)
-      map.set(graph, entry)
-      // Evict oldest while over capacity.
-      while (map.size > maxEntries) {
-        const firstKey = map.keys().next().value
-        if (firstKey === undefined) break
-        map.delete(firstKey)
-      }
-    },
-    size() {
-      return map.size
+      shared.putIndexConstraints(graph, entry)
     },
   }
 }
-
-// Module-level default cache. Lives across component remounts so a
-// user navigating away and back gets the cached result. Tests should
-// inject a fresh cache via the optional `cache` prop.
-const defaultSchemaCache = createSchemaExplorerCache()
 
 interface ActiveProps {
   theme: Theme
@@ -178,9 +174,11 @@ const ErrText = styled.p`
 
 // SchemaExplorerProps lets tests inject a fresh cache instance per
 // run; production callers omit the prop and inherit the module-level
-// defaultSchemaCache.
+// defaultSchemaCache. The prop accepts any SchemaCacheLike — the
+// pair-accessor superset returned by createSchemaExplorerCache is
+// assignable.
 export type SchemaExplorerProps = {
-  cache?: SchemaExplorerCacheLike
+  cache?: SchemaCacheLike
 }
 
 export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
@@ -233,7 +231,7 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
     if (!active) return undefined
 
     // Cache hit: return instantly with no wire I/O.
-    const hit = effectiveCache.get(active)
+    const hit = effectiveCache.getIndexConstraints(active)
     if (hit) {
       setIndexes(hit.indexes)
       setConstraints(hit.constraints)
@@ -256,7 +254,7 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
       // a partial result would surface a "ghost half" on the next
       // re-selection.
       if (nextIndexes !== null && nextConstraints !== null && !signal.aborted) {
-        effectiveCache.put(active, {
+        effectiveCache.putIndexConstraints(active, {
           indexes: nextIndexes,
           constraints: nextConstraints,
         })
