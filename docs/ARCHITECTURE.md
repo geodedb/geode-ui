@@ -45,3 +45,71 @@ openssl rand -hex 32
 
 The binary refuses to start without the flag set. Token TTL defaults
 to 8 hours and is bounded to `1m..24h` via `-jwt-ttl`.
+
+## Performance SLOs (assumed, pending real telemetry)
+
+> **These numbers are *assumed*, not measured.** There is no production
+> telemetry for geode-ui yet. They are the working assumptions inherited from
+> `docs/PERF_GAP_ANALYSIS.md` (Phase 3 of the 2026-05 audit) and are used to
+> size connection pools, batch sizes, and the like. Replace each value with a
+> measured SLO once real traffic data exists.
+
+Assumed workload / targets:
+
+- **Steady-state throughput**: ~2,000 rps on `POST /api/v1/query` (a mix of
+  cheap auth/schema reads and user-issued GQL).
+- **Burst concurrency**: ~400 concurrent users issuing simultaneous queries
+  (admin dashboards refreshing at once).
+- **Result-set distribution**: 10th–90th percentile ≈ 1–1,000 rows; long tail
+  to 100k+ rows on streamed `MATCH (n)`-style queries (hence the streaming
+  `/api/v1/query` codepath — TTFB ≪ TTLB for big result sets).
+- **Upstream query latency**: Geode driver (QUIC) p50 ≈ 10 ms.
+- **Graph render**: Cytoscape view should stay responsive at 400+ nodes (one
+  layout invocation per completed query, not per row batch).
+- **Webpack/Vite bundle budget**: `performance.hints: 'error'`, 1 MiB per
+  asset, 1.5 MiB per entrypoint — the SPA build fails if either is exceeded.
+
+### Open question — per-route rate limit vs throughput target (#159)
+
+`geode.json` sets `rateLimit: 200` on `POST /api/v1/query`, which is an order
+of magnitude below the assumed ~2,000 rps steady-state target above. This is
+**deliberately not changed** here: it's awaiting a product decision (is 2,000
+rps the real target? is the limit per-instance and meant to be multiplied by
+replica count? should it be raised, or is the assumption wrong?). Tracked as
+issue #159 (`PERF-2026-05-11-...`). If/when product clarifies, update both
+`geode.json` and the throughput assumption above together.
+
+### Regression net
+
+There is no continuous load-test rig. The regression net for the Go side is:
+
+- `make bench-gate` — runs the curated benchmark set (see
+  `scripts/bench-gate.sh`: `internal/conn`, `internal/server`, `internal/jwt`,
+  `gen/pkg/{wsx,oidcx,securex,gen}`) with `-count=6` and a bounded
+  `-benchtime`, then diffs against the committed `bench-baseline.txt` via
+  `benchstat`. Fails if any benchmark regressed > 10% in ns/op, B/op, or
+  allocs/op with a statistically significant delta.
+- `bench-baseline.txt` (repo root) — the committed reference, generated
+  post-#142 (audit-ring) / #150 (profilestore WAL split). It is the
+  like-for-like baseline the gate compares against, so the gate command and
+  the baseline must always cover the same package set.
+- CI job `bench-gate` (`test` stage, `allow_failure: true`) — runs
+  `make bench-gate` on MRs and on `main`. It's `allow_failure` on purpose:
+  shared CI runners are noisy. `-count=6` plus benchstat's significance test
+  suppress most false positives, but not all — a red gate means "go look", not
+  "you broke production". Promote to a hard gate once runner noise is
+  characterised against real telemetry.
+
+**Refreshing the baseline** after a deliberate, accepted perf change:
+
+```bash
+make bench-baseline   # alias: make bench-record
+git add bench-baseline.txt && git commit
+```
+
+### pprof / debug endpoints
+
+`net/http/pprof` and other debug surfaces are mounted **only** when
+`Observability.EnableDebug` is set; they are not exposed in the production
+configuration. Profiling in prod therefore requires an explicit opt-in, not a
+default-on endpoint.

@@ -4,7 +4,7 @@ GOTOOLCHAIN ?= go1.26.3
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
-.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
+.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
 
 all: lint test build
 
@@ -32,6 +32,21 @@ go-fmt:
 
 go-tidy:
 	$(GOENV) go mod tidy
+
+# ----- Performance regression gate -----
+# bench-gate runs the curated benchmark set (see scripts/bench-gate.sh) and
+# fails if any benchmark regresses by more than BENCH_GATE_THRESHOLD percent
+# (default 10%) in ns/op, B/op, or allocs/op versus the committed
+# bench-baseline.txt. It's informational-leaning — CI runners are noisy, so the
+# CI job is `allow_failure: true`. Refresh the baseline after a deliberate perf
+# change with `make bench-baseline` (alias: `make bench-record`).
+bench-gate:
+	$(GOENV) ./scripts/bench-gate.sh gate
+
+bench-baseline:
+	$(GOENV) ./scripts/bench-gate.sh record
+
+bench-record: bench-baseline
 
 # ----- Web build/test (delegates to npm scripts) -----
 web-install:

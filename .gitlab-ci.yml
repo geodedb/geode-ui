@@ -280,6 +280,36 @@ go:test:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Performance regression gate (PERF-2026-05-11-11 / #156).
+#
+# Runs `make bench-gate`, which executes the curated benchmark set
+# (scripts/bench-gate.sh — internal/conn, internal/server, internal/jwt,
+# gen/pkg/{wsx,oidcx,securex,gen}) with `-count=6` and a bounded `-benchtime`,
+# then diffs the result against the committed `bench-baseline.txt` via
+# `benchstat`. The job fails if any benchmark regressed > 10% in ns/op, B/op,
+# or allocs/op with a statistically significant delta.
+#
+# `allow_failure: true` on purpose: shared CI runners are noisy. The high
+# -count + benchstat's significance test suppress most false positives, but
+# not all — treat a red gate as "go investigate", not "you broke prod". After
+# a deliberate, accepted perf change, regenerate the baseline with
+# `make bench-baseline` and commit `bench-baseline.txt`. See docs/ARCHITECTURE.md
+# ("Performance SLOs"). Promote to `allow_failure: false` once runner noise is
+# characterised on real telemetry.
+bench-gate:
+  <<: *go_defaults
+  stage: test
+  needs: ['go:test']
+  script:
+    - apk add --no-cache git make bash
+    - go install golang.org/x/perf/cmd/benchstat@latest
+    - export PATH="$(go env GOPATH)/bin:$PATH"
+    - make bench-gate
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Builds the multi-stage Dockerfile in deploy/. The Dockerfile expects a
 # sibling geode-client-go/ checkout next to the geode-ui/ context root (see
 # deploy/Dockerfile header). For CI, fetch the sibling repo into a temporary
