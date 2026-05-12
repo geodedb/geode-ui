@@ -6,7 +6,12 @@ export type AdjacencyMatrix = {
   cells: Map<string, MatrixCell>
 }
 
-const SEP = ' '
+// NUL — a control character that cannot appear in a graph label, so
+// `matrixCellKey("Film Noir", "Movie")` can't collide with
+// `matrixCellKey("Film", "Noir Movie")`. Callers only ever round-trip
+// keys through matrixCellKey, so the exact separator is an implementation
+// detail.
+const SEP = '\0'
 
 export function matrixCellKey(row: string, col: string): string {
   return row + SEP + col

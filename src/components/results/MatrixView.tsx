@@ -95,7 +95,8 @@ const MatrixCellTd: React.FC<{
     count,
     types: edgeTypesSummary(cell),
   })
-  const label = count > 0 ? filledLabel : `${row} → ${col}: 0`
+  const label =
+    count > 0 ? filledLabel : t('matrix.cellTitleEmpty', { from: row, to: col })
   return (
     <Td
       $intensity={intensity}

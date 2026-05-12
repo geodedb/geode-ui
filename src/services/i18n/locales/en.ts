@@ -165,6 +165,7 @@ export const en = {
     empty: 'No edges between labelled nodes to show.',
     tableLabel: 'Label adjacency matrix',
     cellTitle: '{{from}} → {{to}}: {{count}} edges ({{types}})',
+    cellTitleEmpty: '{{from}} → {{to}}: 0 edges',
   },
 
   schema: {
