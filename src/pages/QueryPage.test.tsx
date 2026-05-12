@@ -273,3 +273,65 @@ describe('result panel maximize / fullscreen', () => {
     expect(panel.id).toBe('result-panel-graph')
   })
 })
+
+// Phase 3 — the Matrix result tab. It sits next to table/json/graph and
+// renders <MatrixView resp={activeResp}> (the adjacency heatmap). For a
+// result that carries a graph_summary with edges, switching to the tab
+// must surface the MatrixView's `role="table"` heatmap.
+describe('Matrix result tab', () => {
+  beforeEach(() => {
+    queryMock.mockReset()
+    queryMock.mockResolvedValue({
+      columns: [{ name: 'p', type: 'NODE' }],
+      rows: [],
+      row_count: 1,
+      elapsed_ms: 2,
+      graph_summary: {
+        nodes: [
+          { id: 1, labels: ['Person'], properties: {} },
+          { id: 2, labels: ['Movie'], properties: {} },
+        ],
+        edges: [
+          {
+            id: 12,
+            start_node: 1,
+            end_node: 2,
+            type: 'ACTED_IN',
+            properties: {},
+          },
+        ],
+      },
+    })
+  })
+
+  async function renderWithResults(): Promise<ReturnType<typeof render>> {
+    const view = render(
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <QueryPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    )
+    await waitFor(() =>
+      expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()
+    )
+    fireEvent.click(view.getByRole('button', { name: /run/i }))
+    await waitFor(() => expect(view.getByRole('tablist')).toBeInTheDocument())
+    return view
+  }
+
+  test('renders a Matrix tab in the result panel; clicking it shows the MatrixView', async () => {
+    const view = await renderWithResults()
+    const matrixTab = view.getByRole('tab', { name: /matrix/i })
+    expect(matrixTab).toBeInTheDocument()
+    fireEvent.click(matrixTab)
+    await waitFor(() => {
+      const panel = view.getByRole('tabpanel')
+      expect(panel.id).toBe('result-panel-matrix')
+    })
+    expect(view.getByRole('table')).toBeInTheDocument()
+    expect(
+      view.getByRole('columnheader', { name: /Movie/ })
+    ).toBeInTheDocument()
+  })
+})

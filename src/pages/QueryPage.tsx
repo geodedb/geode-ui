@@ -13,6 +13,7 @@ import styled from 'styled-components'
 import type { QueryResp } from '@api'
 import { TableView } from '../components/results/TableView'
 import { JsonView } from '../components/results/JsonView'
+import { MatrixView } from '../components/results/MatrixView'
 import { Button } from '../components/ui'
 import type { Theme } from '../theme'
 import { client } from '../api/client'
@@ -58,7 +59,7 @@ function tabBorder({ $active, theme }: TabProps): string {
   return $active ? theme.border.default : 'transparent'
 }
 
-type Tab = 'table' | 'json' | 'graph'
+type Tab = 'table' | 'json' | 'graph' | 'matrix'
 
 const Bar = styled.div`
   margin-top: ${({ theme }) => theme.spacing.sm};
@@ -345,6 +346,7 @@ export const QueryPage: React.FC = () => {
             ['table', t('query.tabTable')],
             ['json', t('query.tabJson')],
             ['graph', t('query.tabGraph')],
+            ['matrix', t('query.tabMatrix')],
           ] as const
         ).map(([kind, label]) => (
           <TabBtn
@@ -391,6 +393,7 @@ export const QueryPage: React.FC = () => {
             <GraphView resp={activeResp} query={stmt} fillHeight={maximized} />
           </Suspense>
         )}
+        {tab === 'matrix' && <MatrixView resp={activeResp} />}
       </div>
     </>
   )
