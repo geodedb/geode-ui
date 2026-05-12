@@ -1,3 +1,4 @@
+import type { CreateProfileReq } from '@api'
 import { client } from './client'
 
 export type Scope = 'system' | 'personal'
@@ -208,7 +209,7 @@ function poToWire(o?: PoolOverrides): WirePO | undefined {
 
 export function toWireCreateRequest(
   input: CreateProfileInput
-): Record<string, unknown> {
+): CreateProfileReq {
   return {
     scope: input.scope,
     name: input.name,
@@ -260,7 +261,7 @@ export async function listProfiles(): Promise<ProfileView[]> {
 export async function createProfile(
   input: CreateProfileInput
 ): Promise<ProfileView> {
-  const r = await client.postProfiles(toWireCreateRequest(input) as any)
+  const r = await client.postProfiles(toWireCreateRequest(input))
   return fromWireProfile(r)
 }
 
