@@ -58,6 +58,15 @@ type LoginLimiterConfig struct {
 	// Now returns the wall clock; injected for tests. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// TrustProxyXFF controls whether clientIP() honors the leading hop
+	// of X-Forwarded-For. Default false (S-NEW-5 #201 hardening): the
+	// per-IP rate-limit key is `net.SplitHostPort(r.RemoteAddr)` so a
+	// public-internet attacker cannot rotate the key on every request
+	// or trip lockouts against arbitrary innocent IPs. Set true only
+	// when the binary sits behind a TLS-terminating reverse proxy the
+	// operator controls and that proxy strips/normalises any inbound
+	// XFF header.
+	TrustProxyXFF bool
 }
 
 // LoginLimiterDefaults applies production defaults (5 rps per IP,
@@ -227,7 +236,7 @@ func WrapLoginLimit(l *LoginLimiter, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ip := clientIP(r)
+		ip := clientIP(r, l.cfg.TrustProxyXFF)
 		profile, username, err := peekLoginCreds(r)
 		if err != nil {
 			// Body unreadable — punt to the inner handler which will
@@ -329,18 +338,33 @@ func peekLoginCreds(r *http.Request) (profile, username string, err error) {
 	return vals.Get("profile"), vals.Get("username"), nil
 }
 
-// clientIP returns the best-guess remote IP for the request. Honours
-// the leading hop of X-Forwarded-For when set (geode-ui's deployment
-// model puts an L7 proxy in front of the binary), falling back to the
-// host portion of RemoteAddr otherwise. Returns "" if both are empty
-// or unparseable.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first hop, trim spaces.
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			xff = xff[:i]
+// clientIP returns the best-guess remote IP for the request.
+//
+// S-NEW-5 (#201) hardening: X-Forwarded-For is no longer trusted by
+// default. The caller passes trustProxyXFF=true only when the operator
+// has explicitly opted in via the `-trust-proxy-xff` CLI flag (which
+// they should only do when the binary sits behind a TLS-terminating
+// reverse proxy they control and that proxy strips/normalises the
+// inbound XFF header). Otherwise we fall back to the host portion of
+// RemoteAddr, which matches the global per-IP limiter's
+// IPSourceRemoteAddr default (cmd/server/app.go:373) and prevents an
+// attacker from:
+//
+//   - rotating the per-IP login-limiter key (5 rps) by sending a
+//     freshly-spoofed `X-Forwarded-For` on every request, and
+//   - tripping per-IP lockouts against arbitrary innocent IPs
+//     (DoS-by-lockout).
+//
+// Returns "" only if both transports are empty or unparseable.
+func clientIP(r *http.Request, trustProxyXFF bool) string {
+	if trustProxyXFF {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// Take the first hop, trim spaces.
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				xff = xff[:i]
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

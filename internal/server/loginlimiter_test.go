@@ -334,10 +334,51 @@ func TestClientIPFromXForwardedFor(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.Header = tc.h
 			req.RemoteAddr = tc.ra
-			got := clientIP(req)
+			// trustProxyXFF=true preserves the original
+			// (pre-S-NEW-5) behaviour: XFF first-hop wins, fall
+			// back to RemoteAddr host.
+			got := clientIP(req, true)
 			if got != tc.want {
 				t.Errorf("clientIP=%q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestClientIP_RemoteAddrOnly_WhenXFFNotTrusted pins the default
+// secure-by-default behaviour introduced by S-NEW-5 (#201): when the
+// operator has NOT opted into the proxied deployment model
+// (-trust-proxy-xff=false, which is the default), clientIP MUST ignore
+// X-Forwarded-For and return the host portion of RemoteAddr. This is
+// what stops an attacker on the public internet from rotating the
+// per-IP rate-limit key on every login attempt (limiter bypass) and
+// from tripping per-IP lockouts against arbitrary innocent IPs
+// (DoS-by-lockout).
+func TestClientIP_RemoteAddrOnly_WhenXFFNotTrusted(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	req.RemoteAddr = "10.0.0.1:443"
+
+	got := clientIP(req, false)
+	if got != "10.0.0.1" {
+		t.Errorf("clientIP(trustProxyXFF=false)=%q, want %q (XFF must be ignored when not trusted)", got, "10.0.0.1")
+	}
+}
+
+// TestClientIP_HonorsXFF_WhenTrusted pins the opt-in path: when the
+// operator has explicitly enabled -trust-proxy-xff=true (because the
+// binary sits behind a TLS-terminating reverse proxy they control),
+// clientIP returns the X-Forwarded-For first-hop, preserving the
+// original behaviour.
+func TestClientIP_HonorsXFF_WhenTrusted(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Forwarded-For", "1.2.3.4")
+	req.RemoteAddr = "10.0.0.1:443"
+
+	got := clientIP(req, true)
+	if got != "1.2.3.4" {
+		t.Errorf("clientIP(trustProxyXFF=true)=%q, want %q (XFF must be honoured when trusted)", got, "1.2.3.4")
 	}
 }

@@ -60,6 +60,12 @@ type ProfileLimiterConfig struct {
 	// Now returns the wall clock; injected for tests. Defaults to
 	// time.Now.
 	Now func() time.Time
+	// TrustProxyXFF controls whether clientIP() honors the leading hop
+	// of X-Forwarded-For when computing the per-IP fallback key
+	// (used when no valid JWT is presented). Default false (S-NEW-5
+	// #201 hardening). Set true only when the binary sits behind a
+	// TLS-terminating reverse proxy the operator controls.
+	TrustProxyXFF bool
 }
 
 // ProfileLimiterDefaults applies production defaults: 30 req/min per
@@ -177,7 +183,7 @@ func (l *ProfileLimiter) actorKey(r *http.Request) string {
 			}
 		}
 	}
-	return "ip\x00" + clientIP(r)
+	return "ip\x00" + clientIP(r, l.cfg.TrustProxyXFF)
 }
 
 // WrapProfileLimit wraps next so any POST /api/v1/profiles or
@@ -198,7 +204,7 @@ func WrapProfileLimit(l *ProfileLimiter, next http.Handler) http.Handler {
 				"key", key,
 				"method", r.Method,
 				"path", r.URL.Path,
-				"ip", clientIP(r),
+				"ip", clientIP(r, l.cfg.TrustProxyXFF),
 			)
 			return
 		}

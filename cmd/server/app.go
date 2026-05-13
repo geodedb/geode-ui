@@ -56,6 +56,7 @@ type appConfig struct {
 	passwordHIBPCheck bool
 	profileCRUDRPS    float64
 	profileCRUDBurst  float64
+	trustProxyXFF     bool
 }
 
 // parseFlags builds an appConfig from args[1:] using a private FlagSet
@@ -84,6 +85,15 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// the built-in default".
 	fs.Float64Var(&cfg.profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the built-in default (0.5 = 30/min)")
 	fs.Float64Var(&cfg.profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the built-in default (10)")
+	// S-NEW-5 (#201): X-Forwarded-For is no longer trusted by default.
+	// When this flag is false (the secure-by-default), the per-IP login
+	// limiter (5 rps) and the per-(profile,username) lockout counter
+	// key on RemoteAddr's host portion, so an attacker cannot rotate
+	// the limiter key on every request or trip lockouts against
+	// arbitrary innocent IPs (DoS-by-lockout). Enable only when the
+	// binary sits behind a TLS-terminating reverse proxy you control
+	// and that proxy strips/normalises any inbound XFF header.
+	fs.BoolVar(&cfg.trustProxyXFF, "trust-proxy-xff", false, "trust X-Forwarded-For header for per-IP rate limiting (enable only when behind a TLS-terminating reverse proxy you control)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return appConfig{}, err
 	}
@@ -377,7 +387,9 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// before the genapi-emitted route handler runs. The structural fix
 	// belongs in genapi (per-IP partitioning in gen/pkg/httpx); a
 	// follow-up issue is filed.
-	loginLimiter := server.NewLoginLimiter(server.LoginLimiterDefaults())
+	loginLimiterCfg := server.LoginLimiterDefaults()
+	loginLimiterCfg.TrustProxyXFF = cfg.trustProxyXFF
+	loginLimiter := server.NewLoginLimiter(loginLimiterCfg)
 	limited := server.WrapLoginLimit(loginLimiter, mux)
 	// Per-actor (JWT subject) profile-CRUD limiter (GAP-S7 #120).
 	// Wraps the post-login chain so authenticated POST/PATCH/DELETE on
@@ -387,6 +399,7 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// stops a flood of malformed POSTs from being free).
 	profileLimiterCfg := server.ProfileLimiterDefaults()
 	profileLimiterCfg.JWT = issuer
+	profileLimiterCfg.TrustProxyXFF = cfg.trustProxyXFF
 	if cfg.profileCRUDRPS > 0 {
 		profileLimiterCfg.PerActorRate = cfg.profileCRUDRPS
 	}

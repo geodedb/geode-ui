@@ -31,7 +31,7 @@ SECRET=$(openssl rand -hex 32)
 A single Go binary serves:
 
 - `/`              → SPA from `go:embed dist/` (`internal/ui/embed.go`)
-- `/api/v1/...`    → genapi-generated REST handlers (44 endpoints)
+- `/api/v1/...`    → genapi-generated REST handlers (see [`geode.json`](geode.json) for the full route list)
 - `/ws/query`      → streaming GQL query (WebSocket)
 - `/mcp`           → genapi-generated MCP HTTP transport (one `query` tool)
 - `/healthz`       → liveness
@@ -39,6 +39,8 @@ A single Go binary serves:
 Outbound, the server fans out to one or more Geode servers via the
 `geodedb.com/geode` driver, multiplexed through a profile-aware connection
 pool (`internal/conn`).
+
+The SPA exposes three top-level routes: `/` (single-pane query editor), `/workspace` (multi-pane query workspace — 1–4 tiled editor+result panes, each with its own WebSocket stream), and `/dashboard` (overview cards for graphs, recent queries, connection status, and on-demand graph stats). The result panel on every editor surface offers a Table / JSON / Graph / **Matrix** tab switcher; the Matrix view renders scalar-projection results (e.g. `RETURN n.name, n.age`) as a sortable matrix. A persisted FIFO **query history** (capped at 20 entries, stored in `localStorage` via `useQueryHistory`) backs the dashboard's "recent queries" card and lets users prefill the editor by clicking a past statement.
 
 ## Configuration
 
@@ -48,6 +50,17 @@ pool (`internal/conn`).
 | `-jwt-secret-hex` | (required) | hex-encoded HS256 secret, ≥32 bytes; generate with `openssl rand -hex 32` |
 | `-jwt-ttl` | `8h` | JWT TTL (1m..24h) |
 | `-profiles` | (none) | path to JSON profile config; defaults to a single `default` profile pointing at `quic://127.0.0.1:3141` |
+| `-trust-proxy-xff` | `false` | trust `X-Forwarded-For` for per-IP rate-limit keying (see security note below) |
+
+> **Security note — `-trust-proxy-xff`.** By default the per-IP login limiter
+> (5 rps) and the per-(profile, username) lockout counter key on
+> `RemoteAddr`, which makes the deployment secure-by-default against a
+> public-internet attacker who would otherwise rotate `X-Forwarded-For`
+> to bypass the limiter or trip per-IP lockouts against innocent IPs
+> (S-NEW-5 / [#201](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/201)).
+> Set `-trust-proxy-xff=true` **only** when the binary sits behind a
+> TLS-terminating reverse proxy you control and that proxy strips
+> any inbound `X-Forwarded-For` before appending the real client hop.
 
 Profiles JSON example:
 
