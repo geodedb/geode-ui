@@ -9,9 +9,17 @@ import {
 } from '../graphActions'
 import { client } from '../../../api/client'
 import { QueryRespLike, extractElements } from '../../../lib/graphResult'
-import { buildExploreStatement, graphNameOf, isRealNodeId } from './explore'
+import { graphNameOf, isRealNodeId } from './explore'
+import { buildExpandStatement } from './buildExpand'
+import type { ExpandDirection } from './buildExpand'
 import { layoutConfig } from './layouts'
 import type { LayoutName } from '../useGraphPrefs'
+
+export type ExploreOpts = {
+  direction?: ExpandDirection
+  labelFilter?: string
+  limit?: number
+}
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
@@ -47,7 +55,7 @@ export type UseGraphActionsResult = {
   onCollapseNode: (id: string) => void
   onRestoreHidden: (id: string) => void
   onExpandCollapsed: (id: string) => void
-  onExploreNeighbours: (id: string) => void
+  onExploreNeighbours: (id: string, opts?: ExploreOpts) => void
 }
 
 // useGraphActions owns the Phase-2 hide/collapse/expand bookkeeping
@@ -154,7 +162,7 @@ export function useGraphActions(
   )
 
   const onExploreNeighbours = useCallback(
-    (id: string): void => {
+    (id: string, opts?: ExploreOpts): void => {
       const cy = cyRef.current
       if (!cy || !id) return
       if (!isRealNodeId(id)) return
@@ -173,11 +181,26 @@ export function useGraphActions(
       })
       if (alreadyInFlight) return
       setError(null)
+      // Build the statement up front so any validation error surfaces
+      // synchronously via the banner (and doesn't leave exploringId
+      // pinned to this id).
+      let statement: string
+      try {
+        statement = buildExpandStatement({ id, ...(opts ?? {}) })
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(t('graph.exploreNeighboursFailed', { message: msg }))
+        setExploringId((cur) => (cur === id ? null : cur))
+        return
+      }
       client
         .query({
-          statement: buildExploreStatement(id),
+          statement,
           graph: graphNameOf(queryRef.current),
-          page_size: 200,
+          // Scale page_size with the requested limit (so a small expand
+          // doesn't pull a large window) but keep the legacy 200 default
+          // for unbounded callers.
+          page_size: opts?.limit ? Math.max(opts.limit, 1) * 2 : 200,
           timeout_ms: 30000,
         })
         .then((result) => {

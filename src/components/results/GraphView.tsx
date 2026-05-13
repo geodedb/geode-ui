@@ -25,6 +25,7 @@ import { respSignature } from './graph/cyHelpers'
 import type { Selected } from './graph/GraphInspector'
 import { NodeContextMenu, NodeContextMenuAction } from './graph/NodeContextMenu'
 import { useNodeContextMenu } from './graph/useNodeContextMenu'
+import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import {
   Canvas,
   CanvasArea,
@@ -255,6 +256,14 @@ export const GraphView: React.FC<Props> = ({
   // the stable ref identity), so the menu always tracks the live core.
   const menu = useNodeContextMenu({ cyRef, enabled: true, sig })
 
+  // Currently-open expand popover target node id (null = closed). The
+  // menu's 'expand' action sets this; the popover's onRun reads it +
+  // forwards the user's direction / labelFilter / limit choice through
+  // to onExploreNeighbours. Result-scoped to the live core: a sig-keyed
+  // rebuild doesn't reopen the popover, and the `key={expandFor}` on
+  // the rendered popover resets its internal useState between targets.
+  const [expandFor, setExpandFor] = useState<string | null>(null)
+
   // GAP-03: keyboard pickers — resolve typed/picked id back to data.
   const onPickNodeId = (rawId: string): void => {
     const id = rawId.trim()
@@ -329,9 +338,10 @@ export const GraphView: React.FC<Props> = ({
     if (!id) return
     switch (action) {
       case 'expand':
-        // Task 9 will replace this with the popover; for now fire the
-        // existing direct-explore so the menu is usable end-to-end.
-        onExploreNeighbours(id)
+        // Open the configurable popover. The user's chosen
+        // direction / labelFilter / limit is forwarded to
+        // onExploreNeighbours via onExpandRun below.
+        setExpandFor(id)
         break
       case 'hide':
         onHideNode(id)
@@ -356,6 +366,20 @@ export const GraphView: React.FC<Props> = ({
       }
     }
   }
+
+  // The popover's Run callback closes the popover and dispatches the
+  // explore with the chosen options. The `target` snapshot guards
+  // against the open id changing between the click and the dispatch.
+  const onExpandRun = (opts: ExpandRunOpts): void => {
+    if (!expandFor) return
+    const target = expandFor
+    setExpandFor(null)
+    onExploreNeighbours(target, opts)
+  }
+  // Label-filter dropdown options come from the live graph's node-label
+  // buckets — the set of labels actually present in the current canvas
+  // (so the user can only restrict to a label they can see).
+  const labelOptionList = Array.from(nodeLabelBuckets.keys()).filter(Boolean)
 
   const empty = elements.length === 0 && !error
   // Reuse the same hash + palette the canvas uses so swatches are
@@ -450,6 +474,20 @@ export const GraphView: React.FC<Props> = ({
         items={['expand', 'hide', 'collapse', 'focus', 'pin', 'copyId']}
         onSelect={onMenuSelect}
         onClose={menu.close}
+        t={t}
+      />
+      {/* `key={expandFor}` forces React to unmount/remount the popover
+          whenever the open target changes (close→open, open→close, or
+          one open node→another), which resets the popover's internal
+          useState defaults — preventing stale direction/limit values
+          from leaking between consecutive expands. */}
+      <ExpandQueryPopover
+        key={expandFor ?? '__closed__'}
+        open={expandFor !== null}
+        nodeId={expandFor ?? ''}
+        labelOptions={labelOptionList}
+        onRun={onExpandRun}
+        onCancel={() => setExpandFor(null)}
         t={t}
       />
     </Wrap>
