@@ -64,6 +64,12 @@ export type GraphSidebarContentsProps = {
   neighbors: Neighbor[]
   // Jump selection to this neighbor id.
   onJumpNeighbor: (id: string) => void
+  // Pin/unpin handler for the currently-selected node. Forwarded to
+  // GraphInspector; only meaningful when `selected.kind === 'node'`.
+  onPin: (id: string) => void
+  // Whether the currently-selected node is pinned. False for edges /
+  // when nothing is selected.
+  isPinned: boolean
 }
 
 // GraphSidebarContents renders the inner blocks of the graph sidebar:
@@ -103,6 +109,8 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
   collapsed,
   neighbors,
   onJumpNeighbor,
+  onPin,
+  isPinned,
 }) => {
   return (
     <>
@@ -303,6 +311,8 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
           }
           neighbors={neighbors}
           onJumpNeighbor={onJumpNeighbor}
+          onPin={onPin}
+          isPinned={isPinned}
           t={t}
         />
       ) : (

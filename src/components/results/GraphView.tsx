@@ -408,9 +408,11 @@ export const GraphView: React.FC<Props> = ({
           navigator.clipboard.writeText(id).catch(() => {})
         }
         break
-      case 'focus':
       case 'pin':
-        // Stubbed — Tasks 13 (pin) and 16 (focus) wire these up.
+        pinning.togglePin(id)
+        break
+      case 'focus':
+        // Stubbed — Task 16 wires this up.
         break
       default: {
         // Exhaustiveness check — adding a new action without a case
@@ -534,6 +536,11 @@ export const GraphView: React.FC<Props> = ({
             collapsed={collapsed}
             neighbors={neighbors}
             onJumpNeighbor={onJumpNeighbor}
+            onPin={(id) => pinning.togglePin(id)}
+            isPinned={
+              selected?.kind === 'node' &&
+              pinning.isPinned(String(selected.data.id ?? ''))
+            }
           />
         </GraphSidebar>
       )}

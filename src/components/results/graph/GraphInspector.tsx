@@ -195,6 +195,11 @@ export type GraphInspectorProps = {
   neighbors: Neighbor[]
   // Jump selection to this neighbor id (and emphasize it).
   onJumpNeighbor: (id: string) => void
+  // Pin/unpin handler for the currently-selected node. The button is
+  // rendered only for nodes (not edges).
+  onPin: (id: string) => void
+  // Whether the currently-selected node is pinned.
+  isPinned: boolean
   t: (key: string, opts?: Record<string, unknown>) => string
 }
 
@@ -217,6 +222,8 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
   collapsedCount,
   neighbors,
   onJumpNeighbor,
+  onPin,
+  isPinned,
   t,
 }) => {
   const { kind, data } = selected
@@ -294,6 +301,14 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
               {exploreLoading
                 ? t('graph.exploreNeighboursLoading')
                 : t('graph.actionExploreNeighbours')}
+            </button>
+            <button
+              type="button"
+              data-testid="graph-action-pin"
+              aria-pressed={isPinned}
+              onClick={() => onPin(id)}
+            >
+              {isPinned ? t('graph.menuUnpin') : t('graph.menuPin')}
             </button>
           </InspectorActions>
           {collapsedCount > 0 && (

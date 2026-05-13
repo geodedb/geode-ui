@@ -106,6 +106,11 @@ const makeColl = (
   coll.closedNeighborhood = chain
   coll.connectedEdges = () => makeColl([], classes, ctx)
   coll.select = chain
+  // Cytoscape's Collection.lock()/unlock() — used by usePinnedNodes to
+  // pin/unpin nodes against layout reflows. No-op in the mock since
+  // there are no positions to freeze; chainable to match the real API.
+  coll.lock = jest.fn(() => coll)
+  coll.unlock = jest.fn(() => coll)
   coll.dijkstra = jest.fn(() => ({
     // pathTo(target): the mock can't run a real shortest-path search
     // (no node positions in jsdom), so it returns a collection of every
@@ -1499,5 +1504,33 @@ describe('GraphView — inspector neighbors', () => {
 
     // After clicking the neighbor, the inspector should describe node 2.
     expect(view.getByTestId('graph-inspector')).toHaveTextContent(/Node 2/i)
+  })
+})
+
+describe('GraphView — pin action', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('Pin button toggles aria-pressed and locks the underlying node', () => {
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={hubGraphResp} query="MATCH (n) RETURN n" />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+
+    // Select node "1" via the existing id picker.
+    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+      target: { value: '1' },
+    })
+    const pin = view.getByTestId('graph-action-pin')
+    expect(pin).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(pin)
+    expect(pin).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(pin)
+    expect(pin).toHaveAttribute('aria-pressed', 'false')
   })
 })
