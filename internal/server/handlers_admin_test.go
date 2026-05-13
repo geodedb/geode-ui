@@ -278,9 +278,14 @@ func TestPolicies_Delete(t *testing.T) {
 	}
 }
 
-// TestGrants_Apply covers the four GRANT shapes — user vs role grantee,
-// with vs without resource — pinning the exact emitted statement for
-// each.
+// TestGrants_Apply pins the v0.5.15 GRANT emit:
+//
+//	GRANT <READ|WRITE|SCHEMA|ALL> [ ON GRAPH <graph> ] TO <user>
+//
+// Per-role grants and arbitrary `ON <resource>` paths are NOT in the
+// v0.5.15 grammar; those cases are pinned by
+// TestGrant_RoleGranteeUpstreamDeferred and the privilege-allowlist
+// tests below.
 func TestGrants_Apply(t *testing.T) {
 	cases := []struct {
 		name string
@@ -288,29 +293,34 @@ func TestGrants_Apply(t *testing.T) {
 		want string
 	}{
 		{
-			name: "role_no_resource",
-			in:   gentypes.GrantReq{Permission: "READ", Grantee: "auditor", GranteeKind: "role"},
-			want: "GRANT `READ` TO ROLE `auditor`",
-		},
-		{
 			name: "user_no_resource",
-			in:   gentypes.GrantReq{Permission: "ADMIN", Grantee: "alice", GranteeKind: "user"},
-			want: "GRANT `ADMIN` TO USER `alice`",
+			in:   gentypes.GrantReq{Permission: "READ", Grantee: "alice", GranteeKind: "user"},
+			want: "GRANT READ TO `alice`",
 		},
 		{
-			name: "role_with_resource",
-			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "writers", GranteeKind: "role", Resource: "Customer"},
-			want: "GRANT `WRITE` ON `Customer` TO ROLE `writers`",
+			name: "user_with_graph",
+			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
+			want: "GRANT WRITE ON GRAPH `movies` TO `alice`",
 		},
 		{
-			name: "user_with_resource",
-			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "alice", GranteeKind: "user", Resource: "Customer"},
-			want: "GRANT `WRITE` ON `Customer` TO USER `alice`",
+			name: "default_kind_is_user",
+			in:   gentypes.GrantReq{Permission: "READ", Grantee: "alice"},
+			want: "GRANT READ TO `alice`",
 		},
 		{
-			name: "default_kind_is_role",
-			in:   gentypes.GrantReq{Permission: "READ", Grantee: "auditor"},
-			want: "GRANT `READ` TO ROLE `auditor`",
+			name: "all_with_graph",
+			in:   gentypes.GrantReq{Permission: "ALL", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
+			want: "GRANT ALL ON GRAPH `movies` TO `alice`",
+		},
+		{
+			name: "schema_with_graph",
+			in:   gentypes.GrantReq{Permission: "SCHEMA", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
+			want: "GRANT SCHEMA ON GRAPH `movies` TO `alice`",
+		},
+		{
+			name: "lowercase_normalised_to_upper",
+			in:   gentypes.GrantReq{Permission: "read", Grantee: "alice", GranteeKind: "user"},
+			want: "GRANT READ TO `alice`",
 		},
 	}
 	for _, tc := range cases {
@@ -331,8 +341,9 @@ func TestGrants_Apply(t *testing.T) {
 	}
 }
 
-// TestGrants_Revoke covers REVOKE … FROM with one user and one role
-// case (with-resource and without).
+// TestGrants_Revoke mirrors TestGrants_Apply for the REVOKE path. v0.5.15
+// grammar is identical save for the preposition (`FROM` instead of
+// `TO`).
 func TestGrants_Revoke(t *testing.T) {
 	cases := []struct {
 		name string
@@ -340,14 +351,14 @@ func TestGrants_Revoke(t *testing.T) {
 		want string
 	}{
 		{
-			name: "role_no_resource",
-			in:   gentypes.GrantReq{Permission: "READ", Grantee: "auditor", GranteeKind: "role"},
-			want: "REVOKE `READ` FROM ROLE `auditor`",
+			name: "user_no_resource",
+			in:   gentypes.GrantReq{Permission: "READ", Grantee: "alice", GranteeKind: "user"},
+			want: "REVOKE READ FROM `alice`",
 		},
 		{
-			name: "user_with_resource",
-			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "alice", GranteeKind: "user", Resource: "Customer"},
-			want: "REVOKE `WRITE` ON `Customer` FROM USER `alice`",
+			name: "user_with_graph",
+			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
+			want: "REVOKE WRITE ON GRAPH `movies` FROM `alice`",
 		},
 	}
 	for _, tc := range cases {
@@ -368,17 +379,32 @@ func TestGrants_Revoke(t *testing.T) {
 	}
 }
 
-// TestGrants_RejectsBadIdentifier confirms backtick injection in any of
-// the three identifier slots (permission / resource / grantee) is
-// rejected with 400 before the driver sees anything.
+// TestGrants_RejectsBadIdentifier confirms backtick injection in the
+// grantee or resource (graph) slot is rejected with 400 before the
+// driver sees anything. The privilege slot is no longer an
+// identifier -- it is a whitelisted keyword token; injection attempts
+// in that field fail the allowlist check instead.
 func TestGrants_RejectsBadIdentifier(t *testing.T) {
 	cases := []struct {
-		name string
-		in   gentypes.GrantReq
+		name     string
+		in       gentypes.GrantReq
+		wantCode string
 	}{
-		{"bad_permission", gentypes.GrantReq{Permission: "READ`; DROP", Grantee: "auditor", GranteeKind: "role"}},
-		{"bad_grantee", gentypes.GrantReq{Permission: "READ", Grantee: "auditor`;", GranteeKind: "role"}},
-		{"bad_resource", gentypes.GrantReq{Permission: "READ", Grantee: "auditor", GranteeKind: "role", Resource: "Cus`tomer"}},
+		{
+			name:     "bad_permission_outside_allowlist",
+			in:       gentypes.GrantReq{Permission: "READ`; DROP", Grantee: "alice", GranteeKind: "user"},
+			wantCode: "invalid_permission",
+		},
+		{
+			name:     "bad_grantee",
+			in:       gentypes.GrantReq{Permission: "READ", Grantee: "alice`;", GranteeKind: "user"},
+			wantCode: "invalid_grantee",
+		},
+		{
+			name:     "bad_resource",
+			in:       gentypes.GrantReq{Permission: "READ", Grantee: "alice", GranteeKind: "user", Resource: "mov`ies"},
+			wantCode: "invalid_resource",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -397,8 +423,11 @@ func TestGrants_RejectsBadIdentifier(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
 			}
+			if !strings.Contains(rec.Body.String(), tc.wantCode) {
+				t.Errorf("body=%s want code=%s", rec.Body.String(), tc.wantCode)
+			}
 			if got := d.seen(); len(got) != 0 {
-				t.Fatalf("stmts=%v want none — driver should never see the bad identifier", got)
+				t.Fatalf("stmts=%v want none — driver should never see the bad input", got)
 			}
 		})
 	}
