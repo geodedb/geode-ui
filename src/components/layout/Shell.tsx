@@ -6,7 +6,7 @@ import {
   Outlet,
   useLocation,
 } from 'react-router-dom'
-import styled from 'styled-components'
+import styled, { DefaultTheme } from 'styled-components'
 
 import { useAuth } from '../../auth/AuthProvider'
 import { above, below } from '../../theme'
@@ -55,9 +55,12 @@ const Top = styled.nav`
   min-width: 0;
 
   ${below('lg')`
-    padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) =>
-      theme.spacing.md};
-    gap: ${({ theme }) => theme.spacing.sm};
+    padding: ${({ theme }: { theme: DefaultTheme }) => theme.spacing.sm} ${({
+      theme,
+    }: {
+      theme: DefaultTheme
+    }) => theme.spacing.md};
+    gap: ${({ theme }: { theme: DefaultTheme }) => theme.spacing.sm};
   `}
 `
 
@@ -79,7 +82,7 @@ const Body = styled.main`
   padding: ${({ theme }) => theme.spacing.lg};
 
   ${below('sm')`
-    padding: ${({ theme }) => theme.spacing.md};
+    padding: ${({ theme }: { theme: DefaultTheme }) => theme.spacing.md};
   `}
 `
 

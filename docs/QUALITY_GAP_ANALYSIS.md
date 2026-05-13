@@ -1,6 +1,6 @@
 # QUALITY_GAP_ANALYSIS.md
 
-Last updated: 2026-05-12 (gap-closure runs: Q02 #90 + Q27 #173 closed; error-code cross-check follow-up **Done** — `41ed5fa`/`312eee2`/`5598434`/`1660908`)
+Last updated: 2026-05-13 (audit cohort: 16 new findings filed #192–#208/#214–#215; #44 / #46 / #48 re-validated and re-comment-pinged)
 Repo: `devnw/codepros/geode/geode-ui`
 Source: `/codepros:audit` Phase 4 — quality-issue-tracker
 
@@ -512,3 +512,92 @@ Verified: `node --test scripts/check-error-codes.test.mjs` 4/4, `node scripts/ch
 docs-tracking commit sit on geode-ui `main` **unpushed** — the user decides on
 `git push origin main`. Full report:
 [`docs/gap-closure-reports/2026-05-12-top10-quality-batch-completion.md`](./gap-closure-reports/2026-05-12-top10-quality-batch-completion.md).
+
+---
+
+## 2026-05-13 audit cohort
+
+This cohort tracks the new quality findings produced by the Phase 3 deep-review on
+2026-05-13 against `main` (HEAD post-`c07668b`). Twelve findings are net-new
+(Q47–Q53, Q-NEW-A..I, omitting Q50 which was refuted as a duplicate of GAP-S5);
+three reconfirmations (Q12 #44, Q13 #46, Q14 #48) carry comment-pings only.
+
+PriorityScore = Impact × Likelihood × Reach / Effort, each 1–5.
+
+### Findings table (sorted PriorityScore desc)
+
+| Q-ID | Sev | Score | Issue | File:Line | Status | Brief |
+|------|-----|------:|-------|-----------|--------|-------|
+| Q48 | High | 32 | [#192](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/192) | `src/components/results/GraphView.tsx` (1–1982; 40 hooks) | **open** | Decompose: `useGraphElements` / `useFillHeight` / `GraphToolbar` / `GraphSidebar` / `GraphInspector` / `useGraphPathMode`. Supersedes Q18 / #164 (1257-LOC framing). |
+| Q49 | High | 24 | [#193](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/193) | `cmd/server/app.go:128-445` (`newApp` 317 LOC) | **open** | Split into `buildIssuer` / `openProfileStore` / `attachRevocation` / `mountAPI` / `buildLimiters` / `buildHTTPServer`. |
+| Q47 | High | 20 | [#194](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/194) | `tsconfig.json:8` + `jest.config.cjs:9` | **resolved** (Bundle C) | `noImplicitAny:false` removed from `tsconfig.json`; ts-jest deprecation flag moved into inline tsconfig — strict mode now uniformly enforced. |
+| Q52 | High | 18 | [#195](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/195) | `tsconfig.json` / `electron/tsconfig.json` / `e2e/tsconfig.json` | **resolved** (Bundle C) | Extracted `tsconfig.base.json`; web / electron / e2e configs now `extends` the shared base. |
+| Q-NEW-A | Med | 15 | [#197](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/197) | `internal/server/result_codec.go:118-122` | **open** | Mid-stream abort: SPA parses truncated body as 200 OK success — emit `error` trailer or switch to NDJSON. |
+| Q51 | Med | 15 | [#196](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/196) | `jest.config.cjs:9` | **resolved** (Bundle C) | Top-level `isolatedModules` removed from `ts-jest` transformer options; ts-jest v30 deprecation warning eliminated. |
+| Q53 | Med | 12 | [#198](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/198) | `internal/server/handlers_capabilities.go:30,41` | **open** | Hardcoded `admin_writable={false,false,false,false}` — wire to Geode build probe or env gate. |
+| Q-NEW-B | Med | 12 | [#199](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/199) | `cmd/server/app.go:282-289` | **open** | `WSServer.Config` partial duplicate of `server.Config` — drift risk on field additions. |
+| Q-NEW-C | Med | 10 | [#200](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/200) | `internal/server/ws_query.go:319-330` | **open** (suspected) | Inner relay goroutine in `readMsg` bounded only by 30 s frame deadline, not by context cancel. |
+| Q-NEW-D | Med | 10 | [#204](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/204) | `internal/server/ws_query.go:108-134` | **open** (suspected) | `rowBatcher.flush` stale `envelope.Rows[]` slice header — pin with `-benchmem` bench + clear before reset. |
+| Q-NEW-E | Med | 10 | [#203](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/203) | `internal/server/handlers_uploads.go:113-126` | **open** | Filename collisions silently overwrite via `os.Rename`; no per-tenant quota. |
+| Q-NEW-F | Med | 9 | [#207](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/207) | `internal/profilestore/sqlite.go:152` | **open** | Writer handle has no `busy_timeout` (only RO does). |
+| Q-NEW-G | Low | 8 | [#208](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/208) | `internal/server/handlers_users.go:189-192` | **open** | Empty PATCH fabricates a synthetic `User` response — should 400 `empty_patch` or treat as GET. |
+| Q-NEW-H | Low | 6 | [#214](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/214) | `src/pages/AdminPage.tsx:44` + `OpsPage.tsx:43` | **open** | `pathname.endsWith('/users')` is fragile — use `useMatch` or last-segment compare. |
+| Q-NEW-I | Low | 6 | [#215](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/215) | `src/services/i18n/LocalizationProvider.tsx` | **open** | 49.35% line coverage; untested fallback-locale + lazy-load failure branches. |
+| Q50 | — | — | (none) | `internal/profilestore/sqlite.go:569` | **refuted** | Reviewer flagged for split; justified by GAP-S5 envelope (no change). |
+
+### Re-validations (no status change vs prior cohort)
+
+| Q-ID | Issue | Status | Note |
+|------|-------|--------|------|
+| Q12 | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44)  | **open** | Both lockfiles still present (`package-lock.json` + `pnpm-lock.yaml`). Re-validation comment added 2026-05-13. |
+| Q13 | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46)  | **open** | Still no `.golangci.yml` at repo root; pre-push hook runs default set only. Comment added 2026-05-13. |
+| Q14 | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48)  | **open** | No Jest `coverageThreshold`; no Go coverage ratchet in CI. Comment added 2026-05-13. |
+
+### Counts (2026-05-13 cohort)
+
+- **High**: 4 (Q47, Q48, Q49, Q52) — all open.
+- **Medium**: 8 (Q51, Q53, Q-NEW-A..F) — all open. Q-NEW-C and Q-NEW-D carry `confidence::suspected`.
+- **Low**: 3 (Q-NEW-G, Q-NEW-H, Q-NEW-I) — all open.
+- **Refuted**: 1 (Q50).
+- **Re-validated open**: 3 (Q12 #44, Q13 #46, Q14 #48).
+- **Total new GitLab issues filed**: 15 (#192–#200, #203, #204, #207, #208, #214, #215).
+
+### Roadmap (2026-05-13 cohort)
+
+#### Quick wins (≤ 1 day)
+
+- Q47 (#194) — delete one tsconfig line + run `tsc`, move `isolatedModules` in jest config.
+- Q51 (#196) — single-line jest config delete.
+- Q-NEW-F (#207) — append `busy_timeout` pragma to writer DSN.
+- Q-NEW-G (#208) — pick 400 or fall-through and add one test.
+- Q-NEW-H (#214) — swap `endsWith` for `useMatch` (or last-segment compare).
+- Q-NEW-I (#215) — three new tests in `LocalizationProvider.test.tsx`.
+
+#### Medium (1–5 days)
+
+- Q49 (#193) — `newApp` decomposition (preserve `cmd/server` coverage ≥ 70.7%).
+- Q52 (#195) — extract `tsconfig.base.json` + `extends` (pair with Q47).
+- Q-NEW-A (#197) — emit error-trailer or switch to NDJSON on `/api/v1/query`.
+- Q-NEW-B (#199) — collapse `server.Config` duplication on WS surface.
+- Q-NEW-C (#200) — add inner-relay goroutine leak test; tighten if it fails.
+- Q-NEW-D (#204) — add `BenchmarkRowBatcher_Flush` with `-benchmem` + invariant comment.
+- Q-NEW-E (#203) — collision handling + optional upload-dir quota.
+- Q53 (#198) — Geode admin-DDL probe or env gate for `admin_writable`.
+
+#### Strategic (> 5 days)
+
+- Q48 (#192) — GraphView decomposition (≥ 6 new files, ~1400 LOC moved). Supersedes Q18 / #164.
+
+### Verdict (2026-05-13 cohort)
+
+Two structural cliffs (Q48 GraphView ~2k LOC, Q49 newApp 317 LOC) re-formed after
+their predecessor closures (Q18 / #164 at 1257 LOC; Q16 / #158's main.go
+decomposition). Together with the strict-mode defeat (Q47), they account for
+the cohort's three highest-score findings. The remaining cohort items are
+focused single-file fixes — the largest medium-scope item (Q-NEW-A
+mid-stream-abort client visibility) needs a wire-shape decision but is
+mechanically small once the contract is set.
+
+No release-blocker-grade findings in this cohort. The newly-filed items can be
+batched into the next sprint-sized closure run alongside the still-open
+Q14/#48 (coverage gate) and Q13/#46 (`.golangci.yml`) items that gap-sync owns.

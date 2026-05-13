@@ -1,4 +1,5 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "target": "ES2022",
     "module": "Node16",
@@ -6,11 +7,7 @@
     "lib": ["ES2022"],
     "outDir": "../internal/ui/electron-dist",
     "rootDir": ".",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "skipLibCheck": true,
     "declaration": false,
     "sourceMap": true,
     "isolatedModules": false,

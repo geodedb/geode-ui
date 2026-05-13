@@ -6,13 +6,12 @@ module.exports = {
     '^.+\\.tsx?$': [
       'ts-jest',
       {
-        isolatedModules: true,
         tsconfig: {
           jsx: 'react-jsx',
           esModuleInterop: true,
           allowSyntheticDefaultImports: true,
           strict: true,
-          noImplicitAny: false,
+          isolatedModules: true,
           noUncheckedIndexedAccess: true,
           skipLibCheck: true,
           moduleResolution: 'node',
