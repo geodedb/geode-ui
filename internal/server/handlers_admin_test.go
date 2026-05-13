@@ -54,8 +54,11 @@ func TestRoles_List(t *testing.T) {
 	}
 }
 
-// TestRoles_Create pins the CREATE ROLE statement, including the
-// optional DESCRIPTION and WITH PERMISSIONS clauses.
+// TestRoles_Create pins the CREATE ROLE statement to the v0.5.15
+// grammar: `CREATE ROLE <name> [ SET DESCRIPTION '<text>' ]`. The
+// optional `WITH PERMISSIONS [...]` clause was a pre-v0.5.15 emit that
+// never parsed upstream and is now rejected at the handler boundary
+// (covered by TestCreateRole_RejectsPermissionsClause).
 func TestRoles_Create(t *testing.T) {
 	d := &userDriver{}
 	s := newUserStubServer(t, "roles_create", d)
@@ -65,7 +68,6 @@ func TestRoles_Create(t *testing.T) {
 	resp, err := s.PostApiRoles(rec, req, &gentypes.RoleCreateReq{
 		Name:        "auditor",
 		Description: "read-only role",
-		Permissions: []string{"READ", "AUDIT"},
 	})
 	if err != nil {
 		t.Fatalf("PostApiRoles: %v", err)
@@ -74,14 +76,22 @@ func TestRoles_Create(t *testing.T) {
 		t.Fatalf("resp=%+v want name=auditor", resp)
 	}
 	stmts := d.seen()
-	want := "CREATE ROLE `auditor` DESCRIPTION 'read-only role' WITH PERMISSIONS [`READ`, `AUDIT`]"
+	want := "CREATE ROLE `auditor` SET DESCRIPTION 'read-only role'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
 }
 
-// TestRoles_Get covers the SHOW ROLE happy path and the row→Role
-// projection (name+description+permissions columns).
+// TestRoles_Get covers the SHOW ROLES + in-process filter happy path
+// and the row→Role projection. v0.5.15 has no singular SHOW ROLE
+// form; GetRole runs SHOW ROLES and matches the requested name
+// against the `role_name` (v0.5.15) / `name` / `role` (legacy)
+// column.
+//
+// This test uses the legacy multi-column shape (`name`, `description`,
+// `permissions`) to confirm back-compat with pre-v0.5.15 drivers that
+// still emit a wider catalog; v0.5.15 itself emits only `role_name`
+// (covered by TestGetRole_FiltersInProcess).
 func TestRoles_Get(t *testing.T) {
 	d := &userDriver{
 		cols: []string{"name", "description", "permissions"},
@@ -104,8 +114,8 @@ func TestRoles_Get(t *testing.T) {
 		t.Fatalf("perms=%v want [READ AUDIT]", resp.Permissions)
 	}
 	stmts := d.seen()
-	if len(stmts) != 1 || stmts[0] != "SHOW ROLE `auditor`" {
-		t.Fatalf("stmts=%v want [SHOW ROLE `auditor`]", stmts)
+	if len(stmts) != 1 || stmts[0] != "SHOW ROLES" {
+		t.Fatalf("stmts=%v want [SHOW ROLES] (no singular SHOW ROLE on v0.5.15)", stmts)
 	}
 }
 
@@ -129,7 +139,14 @@ func TestRoles_Get_NotFound(t *testing.T) {
 	}
 }
 
-// TestRoles_Delete pins DROP ROLE quoting.
+// TestRoles_Delete pins the v0.5.15 DROP ROLE emit:
+//
+//	DROP ROLE IF EXISTS <name>
+//
+// `IF EXISTS` is structurally a no-op upstream (handleRoleDelete uses
+// fetchRemove which is a no-op on missing keys, per Limitations #6)
+// but the handler emits it unconditionally to keep the parse surface
+// idempotent against a future upstream tightening.
 func TestRoles_Delete(t *testing.T) {
 	d := &userDriver{}
 	s := newUserStubServer(t, "roles_delete", d)
@@ -140,8 +157,9 @@ func TestRoles_Delete(t *testing.T) {
 		t.Fatalf("DeleteRole: %v", err)
 	}
 	stmts := d.seen()
-	if len(stmts) != 1 || stmts[0] != "DROP ROLE `auditor`" {
-		t.Fatalf("stmts=%v want [DROP ROLE `auditor`]", stmts)
+	want := "DROP ROLE IF EXISTS `auditor`"
+	if len(stmts) != 1 || stmts[0] != want {
+		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
 }
 
