@@ -23,6 +23,8 @@ import {
 } from './graph/layouts'
 import { respSignature } from './graph/cyHelpers'
 import type { Selected } from './graph/GraphInspector'
+import { NodeContextMenu, NodeContextMenuAction } from './graph/NodeContextMenu'
+import { useNodeContextMenu } from './graph/useNodeContextMenu'
 import {
   Canvas,
   CanvasArea,
@@ -247,6 +249,12 @@ export const GraphView: React.FC<Props> = ({
     t,
   })
 
+  // Right-click / long-press context menu on a node. Passing `sig`
+  // forces the hook's subscription effect to re-bind whenever the
+  // orchestrator rebuilds the cy core (cyRef.current changes underneath
+  // the stable ref identity), so the menu always tracks the live core.
+  const menu = useNodeContextMenu({ cyRef, enabled: true, sig })
+
   // GAP-03: keyboard pickers — resolve typed/picked id back to data.
   const onPickNodeId = (rawId: string): void => {
     const id = rawId.trim()
@@ -310,6 +318,44 @@ export const GraphView: React.FC<Props> = ({
   }
   const hiddenIds = Array.from(hidden)
   const collapsedEntries = Array.from(collapsed.entries())
+
+  // Route a NodeContextMenu action to the right orchestrator handler.
+  // Closes the menu first so the dismissal isn't blocked by a slow
+  // network call (e.g. Explore). Stubbed cases ('focus' and 'pin') are
+  // wired in Tasks 13 (pin) and 16 (focus).
+  const onMenuSelect = (action: NodeContextMenuAction): void => {
+    const id = menu.state.nodeId
+    menu.close()
+    if (!id) return
+    switch (action) {
+      case 'expand':
+        // Task 9 will replace this with the popover; for now fire the
+        // existing direct-explore so the menu is usable end-to-end.
+        onExploreNeighbours(id)
+        break
+      case 'hide':
+        onHideNode(id)
+        break
+      case 'collapse':
+        onCollapseNode(id)
+        break
+      case 'copyId':
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          navigator.clipboard.writeText(id).catch(() => {})
+        }
+        break
+      case 'focus':
+      case 'pin':
+        // Stubbed — Tasks 13 (pin) and 16 (focus) wire these up.
+        break
+      default: {
+        // Exhaustiveness check — adding a new action without a case
+        // here will fail to compile.
+        const exhaustive: never = action
+        return exhaustive
+      }
+    }
+  }
 
   const empty = elements.length === 0 && !error
   // Reuse the same hash + palette the canvas uses so swatches are
@@ -397,6 +443,15 @@ export const GraphView: React.FC<Props> = ({
           />
         </GraphSidebar>
       )}
+      <NodeContextMenu
+        open={menu.state.open}
+        x={menu.state.x}
+        y={menu.state.y}
+        items={['expand', 'hide', 'collapse', 'focus', 'pin', 'copyId']}
+        onSelect={onMenuSelect}
+        onClose={menu.close}
+        t={t}
+      />
     </Wrap>
   )
 }

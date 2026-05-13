@@ -12,6 +12,11 @@ export type NodeMenuState = {
 export type UseNodeContextMenuArgs = {
   cyRef: React.MutableRefObject<Core | null>
   enabled: boolean
+  // Rebuild key — the orchestrator's `sig`. Including this in the
+  // effect's deps forces re-subscription when the cy core is rebuilt
+  // (cyRef is a ref object whose identity is stable across rebuilds, so
+  // it alone won't trigger a re-effect).
+  sig?: string
 }
 
 export type UseNodeContextMenuResult = {
@@ -24,7 +29,7 @@ const CLOSED: NodeMenuState = { open: false, x: 0, y: 0, nodeId: null }
 export function useNodeContextMenu(
   args: UseNodeContextMenuArgs
 ): UseNodeContextMenuResult {
-  const { cyRef, enabled } = args
+  const { cyRef, enabled, sig } = args
   const [state, setState] = useState<NodeMenuState>(CLOSED)
 
   useEffect(() => {
@@ -65,7 +70,7 @@ export function useNodeContextMenu(
       cy.off('taphold', 'node', open as never)
       cy.off('tap', closeOnBg as never)
     }
-  }, [cyRef, enabled])
+  }, [cyRef, enabled, sig])
 
   const close = useCallback(() => setState(CLOSED), [])
   return { state, close }

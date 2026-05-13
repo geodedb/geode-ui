@@ -47,7 +47,7 @@ describe('useNodeContextMenu', () => {
     const core = makeCore()
     const cyRef = { current: core as unknown as cytoscape.Core }
     const { result } = renderHook(() =>
-      useNodeContextMenu({ cyRef, enabled: true })
+      useNodeContextMenu({ cyRef, enabled: true, sig: 's1' })
     )
     expect(result.current.state.open).toBe(false)
     const node: FakeNode = { id: () => 'n42', data: () => ({ id: 'n42' }) }
@@ -69,7 +69,7 @@ describe('useNodeContextMenu', () => {
     const core = makeCore()
     const cyRef = { current: core as unknown as cytoscape.Core }
     const { result } = renderHook(() =>
-      useNodeContextMenu({ cyRef, enabled: true })
+      useNodeContextMenu({ cyRef, enabled: true, sig: 's1' })
     )
     const node: FakeNode = { id: () => 'n7', data: () => ({ id: 'n7' }) }
     act(() => {
@@ -86,7 +86,7 @@ describe('useNodeContextMenu', () => {
     const core = makeCore()
     const cyRef = { current: core as unknown as cytoscape.Core }
     const { result } = renderHook(() =>
-      useNodeContextMenu({ cyRef, enabled: true })
+      useNodeContextMenu({ cyRef, enabled: true, sig: 's1' })
     )
     act(() => {
       core.__handlers.get('cxttap')!({
@@ -96,5 +96,24 @@ describe('useNodeContextMenu', () => {
     })
     act(() => result.current.close())
     expect(result.current.state.open).toBe(false)
+  })
+
+  it('re-subscribes when sig changes (e.g. cy core rebuilt)', () => {
+    const coreA = makeCore()
+    const cyRef = { current: coreA as unknown as cytoscape.Core }
+    const { rerender } = renderHook(
+      ({ sig }: { sig: string }) =>
+        useNodeContextMenu({ cyRef, enabled: true, sig }),
+      { initialProps: { sig: 's1' } }
+    )
+    expect(coreA.on).toHaveBeenCalledTimes(3)
+    // Simulate a rebuild: cyRef.current swaps to a fresh core, sig flips.
+    const coreB = makeCore()
+    cyRef.current = coreB as unknown as cytoscape.Core
+    rerender({ sig: 's2' })
+    // Old core received .off (cleanup) for all three subscriptions.
+    expect(coreA.off).toHaveBeenCalledTimes(3)
+    // New core received .on for all three.
+    expect(coreB.on).toHaveBeenCalledTimes(3)
   })
 })
