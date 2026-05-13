@@ -6,7 +6,7 @@ import {
   typeOptions as typeOptionsFn,
 } from '../../../lib/graphResult'
 import { ControlsBlock, RestoreList } from './styled'
-import { GraphInspector, Selected } from './GraphInspector'
+import { GraphInspector, Neighbor, Selected } from './GraphInspector'
 import type { InspectorView } from '../useGraphPrefs'
 import { isRealNodeId } from './explore'
 
@@ -59,6 +59,11 @@ export type GraphSidebarContentsProps = {
   onExploreNeighbours: (id: string) => void
   exploringId: string | null
   collapsed: Map<string, string[]>
+  // 1-hop neighbours of the currently-selected node, with display
+  // labels. Forwarded straight to GraphInspector.
+  neighbors: Neighbor[]
+  // Jump selection to this neighbor id.
+  onJumpNeighbor: (id: string) => void
 }
 
 // GraphSidebarContents renders the inner blocks of the graph sidebar:
@@ -96,6 +101,8 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
   onExploreNeighbours,
   exploringId,
   collapsed,
+  neighbors,
+  onJumpNeighbor,
 }) => {
   return (
     <>
@@ -294,6 +301,8 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
               ? (collapsed.get(String(selected.data.id ?? '')) ?? []).length
               : 0
           }
+          neighbors={neighbors}
+          onJumpNeighbor={onJumpNeighbor}
           t={t}
         />
       ) : (

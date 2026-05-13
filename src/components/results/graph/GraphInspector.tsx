@@ -11,6 +11,12 @@ export type Selected = {
   data: Record<string, unknown>
 }
 
+// A 1-hop neighbour of the currently-selected node — id plus the
+// display label resolved through useGraphPrefs.nodeLabelPrefs. Used to
+// render the chip list under the inspector actions and to jump
+// selection on click.
+export type Neighbor = { id: string; label: string }
+
 // Inspector block — the selected-element panel at the bottom of the
 // sidebar. It carries an identity header, a small segmented control to
 // switch between the structured property view (default) and the raw
@@ -91,6 +97,39 @@ const InspectorNote = styled.p`
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.secondary};
 `
+// 1-hop neighbours of the selected node rendered as a horizontal chip
+// row directly under the inspector actions. Each chip is a button that
+// jumps the selection to that neighbour. The leading `.hd` span is the
+// count heading ("3 neighbours") and wraps as its own row.
+const NeighborsList = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.spacing.xxs};
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
+
+  .hd {
+    width: 100%;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    color: ${({ theme }) => theme.text.secondary};
+  }
+  button {
+    font: inherit;
+    font-size: ${({ theme }) => theme.font.sizes.xs};
+    background: ${({ theme }) => theme.bg.canvas};
+    border: 1px solid ${({ theme }) => theme.border.default};
+    border-radius: ${({ theme }) => theme.radii.pill};
+    padding: 2px 8px;
+    cursor: pointer;
+    color: ${({ theme }) => theme.text.primary};
+  }
+  button:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+  code {
+    font-family: ${({ theme }) => theme.font.family.mono};
+    opacity: 0.7;
+  }
+`
 const IdentityHeader = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.secondary};
@@ -151,6 +190,11 @@ export type GraphInspectorProps = {
   // How many neighbours are currently collapsed behind this node (0 when
   // none / not a node). Surfaced as a small note under the actions row.
   collapsedCount: number
+  // Adjacent (1-hop) neighbors of the selected node, with display
+  // labels. Empty when the selection is an edge or has no adjacency.
+  neighbors: Neighbor[]
+  // Jump selection to this neighbor id (and emphasize it).
+  onJumpNeighbor: (id: string) => void
   t: (key: string, opts?: Record<string, unknown>) => string
 }
 
@@ -171,6 +215,8 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
   exploreLoading,
   exploreDisabled,
   collapsedCount,
+  neighbors,
+  onJumpNeighbor,
   t,
 }) => {
   const { kind, data } = selected
@@ -254,6 +300,23 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             <InspectorNote data-testid="graph-collapsed-count">
               {t('graph.collapsedCount', { count: collapsedCount })}
             </InspectorNote>
+          )}
+          {neighbors.length > 0 && (
+            <NeighborsList data-testid="graph-neighbors">
+              <span className="hd">
+                {t('graph.neighborsHeading', { count: neighbors.length })}
+              </span>
+              {neighbors.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  data-testid={`graph-neighbor-chip-${n.id}`}
+                  onClick={() => onJumpNeighbor(n.id)}
+                >
+                  {n.label} <code>#{n.id}</code>
+                </button>
+              ))}
+            </NeighborsList>
           )}
         </>
       )}

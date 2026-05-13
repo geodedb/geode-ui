@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import cytoscape, { Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
@@ -22,7 +22,7 @@ import {
   layoutLabel,
 } from './graph/layouts'
 import { respSignature } from './graph/cyHelpers'
-import type { Selected } from './graph/GraphInspector'
+import type { Neighbor, Selected } from './graph/GraphInspector'
 import { NodeContextMenu, NodeContextMenuAction } from './graph/NodeContextMenu'
 import { useNodeContextMenu } from './graph/useNodeContextMenu'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
@@ -319,6 +319,44 @@ export const GraphView: React.FC<Props> = ({
     cy.fit(undefined, 24)
   }
 
+  // 1-hop neighbours of the currently-selected node, read straight off
+  // the live cy core via `cyRef.current.$id(id).neighborhood('node')`.
+  // Returns [] when the selection is an edge, when the node is gone, or
+  // when there is no selection. `cyRef.current` isn't a reactive value
+  // so it's intentionally not a dep — when the cy core is rebuilt the
+  // sig-keyed reset effect clears `selected`, which retriggers this
+  // memo against the fresh core.
+  const neighbors: Neighbor[] = useMemo(() => {
+    const cy = cyRef.current
+    if (!cy || !selected || selected.kind !== 'node') return []
+    const id = String(selected.data.id ?? '')
+    if (!id) return []
+    const node = cy.$id(id)
+    if (node.empty()) return []
+    const out: Neighbor[] = []
+    node.neighborhood('node').forEach((n) => {
+      const nid = String(n.data('id') ?? '')
+      if (!nid) return
+      const label = resolveNodeLabel(
+        n.data() as Record<string, unknown>,
+        nodeLabelPrefs
+      )
+      out.push({ id: nid, label })
+    })
+    return out
+  }, [selected, nodeLabelPrefs])
+
+  // Inspector chip click → jump selection to that neighbour id. Reads
+  // the node's data bag from the same nodeDataById map the keyboard
+  // picker uses; falls back to the live cy core's emphasis call to
+  // visually mark the new selection.
+  const onJumpNeighbor = (id: string): void => {
+    const data = nodeDataById.get(id)
+    if (!data) return
+    setSelected({ kind: 'node', data })
+    cyRef.current?.$id(id).select()
+  }
+
   // Resolve a node id to a short display label for the restore lists.
   const nodeDisplayLabel = (id: string): string => {
     const data = nodeDataById.get(id)
@@ -464,6 +502,8 @@ export const GraphView: React.FC<Props> = ({
             onExploreNeighbours={onExploreNeighbours}
             exploringId={exploringId}
             collapsed={collapsed}
+            neighbors={neighbors}
+            onJumpNeighbor={onJumpNeighbor}
           />
         </GraphSidebar>
       )}

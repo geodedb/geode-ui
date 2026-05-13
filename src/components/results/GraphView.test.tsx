@@ -1466,3 +1466,38 @@ describe('GraphView — context menu wiring', () => {
     expect(writeText).toHaveBeenCalledWith('1')
   })
 })
+
+describe('GraphView — inspector neighbors', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('lists 1-hop neighbors of the selected node and jumps when clicked', () => {
+    // Use the hub graph (node 1 connects to 2/3/4) so node "1" has
+    // multiple real neighbours.
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={hubGraphResp} query="MATCH (n) RETURN n" />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+
+    // Pick node "1" via the existing graph-node-id-picker input.
+    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+      target: { value: '1' },
+    })
+
+    // Neighbors panel should appear with at least one chip.
+    const panel = view.getByTestId('graph-neighbors')
+    expect(panel).toBeInTheDocument()
+
+    // Click neighbor chip for node 2.
+    const chip = view.getByTestId('graph-neighbor-chip-2')
+    fireEvent.click(chip)
+
+    // After clicking the neighbor, the inspector should describe node 2.
+    expect(view.getByTestId('graph-inspector')).toHaveTextContent(/Node 2/i)
+  })
+})

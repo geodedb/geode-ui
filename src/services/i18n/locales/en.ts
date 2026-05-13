@@ -143,6 +143,8 @@ export const en = {
       'This node has no stable id to query — explore is unavailable for synthesised nodes.',
     collapsedCount_one: '{{count}} neighbour collapsed',
     collapsedCount_other: '{{count}} neighbours collapsed',
+    neighborsHeading_one: '{{count}} neighbor',
+    neighborsHeading_other: '{{count}} neighbors',
     hiddenHeading: 'Hidden ({{count}})',
     collapsedHeading: 'Collapsed ({{count}})',
     hiddenEmpty: 'No hidden nodes.',
