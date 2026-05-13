@@ -7,6 +7,7 @@ import {
   labelOptions,
   typeOptions,
 } from '../../../lib/graphResult'
+import { computeDegrees, degreeToSize } from './nodeDegree'
 
 // Node-label palette — duplicated lookup of cytoscapeStyle's hash so
 // the visibility-toggle row in the sidebar can show the matching
@@ -82,10 +83,20 @@ export function useGraphElements(
   // this is what the pickers / visibility buckets / display selectors
   // read. The *rendered* set (`elements`) is the same thing wrapped in
   // per-label compound parents when group-by-label is on.
-  const baseEls = useMemo<ElementDefinition[]>(
-    () => extractElements(resp, query),
-    [resp, query]
-  )
+  const baseEls = useMemo<ElementDefinition[]>(() => {
+    const raw = extractElements(resp, query)
+    const degrees = computeDegrees(raw)
+    // Stamp degree + size on every node. Edges pass through unchanged.
+    return raw.map((el) => {
+      const d = el.data as Record<string, unknown> | undefined
+      if (!d || d.id == null) return el
+      const isEdge = d.source !== undefined && d.target !== undefined
+      if (isEdge) return el
+      const id = String(d.id)
+      const degree = degrees.get(id) ?? 0
+      return { ...el, data: { ...d, degree, size: degreeToSize(degree) } }
+    })
+  }, [resp, query])
   const elements = useMemo<ElementDefinition[]>(
     () => (clusterByLabel ? buildCompoundElements(baseEls) : baseEls),
     [baseEls, clusterByLabel]
