@@ -32,6 +32,7 @@ import {
   typeOptions,
 } from '../../lib/graphResult'
 import { useGraphPathMode } from './graph/useGraphPathMode'
+import { useFillHeight } from './graph/useFillHeight'
 
 // Register the layout extensions once, at module load. cytoscape.use is
 // idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
@@ -834,12 +835,6 @@ const SelectedInspector: React.FC<{
   )
 }
 
-// Below the canvas chrome (toolbar) in fill mode this is the px the
-// canvas leaves for itself out of the viewport — the overlay padding,
-// the result tabs row, the graph toolbar, the stacked sidebar's first
-// glimpse. Heuristic; the ResizeObserver / fit pass corrects framing.
-const FILL_CANVAS_CHROME_PX = 320
-
 export const GraphView: React.FC<Props> = ({
   resp,
   query,
@@ -853,24 +848,7 @@ export const GraphView: React.FC<Props> = ({
   // The pixel height the Canvas / Side render at. In fill mode this
   // tracks the viewport (minus the overlay chrome); otherwise it's the
   // caller-provided `height`.
-  const [effectiveHeight, setEffectiveHeight] = useState<number>(
-    fillHeight && typeof window !== 'undefined'
-      ? Math.max(height, Math.round(window.innerHeight) - FILL_CANVAS_CHROME_PX)
-      : height
-  )
-  useEffect(() => {
-    const compute = (): number => {
-      if (!fillHeight) return height
-      const winH =
-        typeof window === 'undefined' ? 800 : Math.round(window.innerHeight)
-      return Math.max(height, winH - FILL_CANVAS_CHROME_PX)
-    }
-    setEffectiveHeight(compute())
-    if (!fillHeight || typeof window === 'undefined') return undefined
-    const onResize = (): void => setEffectiveHeight(compute())
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [fillHeight, height])
+  const effectiveHeight = useFillHeight({ fillHeight, height })
   const [selected, setSelected] = useState<Selected | null>(null)
   // Phase-2 hide/collapse workflow. `hidden` is the set of node ids the
   // operator has hidden individually (via the inspector "Hide" action or
