@@ -98,8 +98,14 @@ export function createCytoscapeStyle(
         'font-family': theme.font.family.body,
         'font-size': 12,
         'font-weight': 600,
-        width: 38,
-        height: 38,
+        // Width/height read from data.size, which is stamped by
+        // useGraphElements when the degree-sizing toggle is on
+        // (log-scaled in nodeDegree.ts). When the toggle is off the
+        // stamp is omitted and we fall back to the legacy flat 38px.
+        width: (e: cytoscape.NodeSingular) =>
+          (e.data('size') as number | undefined) ?? 38,
+        height: (e: cytoscape.NodeSingular) =>
+          (e.data('size') as number | undefined) ?? 38,
         'overlay-padding': 4,
       },
     },

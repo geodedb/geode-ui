@@ -164,6 +164,8 @@ export const en = {
     selectionModeBox: 'Box select',
     clusterByLabel: 'Group by label',
     clusterByLabelLabel: 'Group nodes by label',
+    degreeSizing: 'Size by edges',
+    degreeSizingLabel: 'Resize nodes by number of connections (log-scaled)',
     pathMode: 'Path',
     pathModeLabel: 'Find a path between two nodes',
     pathPickSource: 'Click the start node',

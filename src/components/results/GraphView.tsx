@@ -116,6 +116,10 @@ export const GraphView: React.FC<Props> = ({
   // set is buildCompoundElements(baseEls) and fcose is the auto-pick. Sticky.
   const clusterByLabel = useGraphPrefs((s) => s.clusterByLabel)
   const setClusterByLabel = useGraphPrefs((s) => s.setClusterByLabel)
+  // Whether node width/height scales with degree (log-scaled). When off,
+  // nodes render at the legacy flat 38px. Sticky.
+  const degreeSizing = useGraphPrefs((s) => s.degreeSizing)
+  const setDegreeSizing = useGraphPrefs((s) => s.setDegreeSizing)
   // Path-mode state machine + handlers. Result-scoped — `resetPath` is
   // invoked from the sig-keyed reset effect below.
   const {
@@ -143,7 +147,7 @@ export const GraphView: React.FC<Props> = ({
     nodeDataById,
     edgeDataById,
     nodeLabelBuckets,
-  } = useGraphElements({ resp, query, clusterByLabel })
+  } = useGraphElements({ resp, query, clusterByLabel, degreeSizing })
 
   // Refs the debounced build callback reads on fire — they always hold
   // the latest snapshot without re-creating the timer every render.
@@ -188,7 +192,7 @@ export const GraphView: React.FC<Props> = ({
   // text. Two queries with the same row count would otherwise leave a
   // stale graph on the canvas. Cluster toggle is folded in so toggling
   // group-by-label re-runs the build.
-  const sig = `${respSignature(resp)}|${query ?? ''}|${clusterByLabel ? 'c' : ''}`
+  const sig = `${respSignature(resp)}|${query ?? ''}|${clusterByLabel ? 'c' : ''}|${degreeSizing ? 'd' : ''}`
 
   // Auto-pick grid for large responses (cose would freeze the tab).
   // Only fires once per response — the user's manual layout choice is
@@ -332,6 +336,8 @@ export const GraphView: React.FC<Props> = ({
           onToggleSelectionMode={onToggleSelectionMode}
           clusterByLabel={clusterByLabel}
           onToggleClusterByLabel={onToggleClusterByLabel}
+          degreeSizing={degreeSizing}
+          onToggleDegreeSizing={() => setDegreeSizing(!degreeSizing)}
           pathActive={pathState.phase !== 'off'}
           onTogglePathMode={onTogglePathMode}
           onPathClear={exitPathMode}

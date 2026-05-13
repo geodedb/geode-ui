@@ -62,6 +62,9 @@ type GraphPrefsState = {
   selectionMode: SelectionMode
   // Whether nodes are grouped under per-label compound parent nodes.
   clusterByLabel: boolean
+  // Whether node width/height scales with degree (log-scaled). When off,
+  // nodes render at the legacy flat 38px. Sticky.
+  degreeSizing: boolean
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -70,6 +73,7 @@ type GraphPrefsState = {
   setInspectorView: (v: InspectorView) => void
   setSelectionMode: (m: SelectionMode) => void
   setClusterByLabel: (v: boolean) => void
+  setDegreeSizing: (v: boolean) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -82,6 +86,7 @@ type PersistedShape = {
   inspectorView: InspectorView
   selectionMode: SelectionMode
   clusterByLabel: boolean
+  degreeSizing: boolean
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -102,6 +107,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       inspectorView: DEFAULT_INSPECTOR_VIEW,
       selectionMode: DEFAULT_SELECTION_MODE,
       clusterByLabel: false,
+      degreeSizing: true,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -121,6 +127,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setInspectorView: (v) => set({ inspectorView: v }),
       setSelectionMode: (m) => set({ selectionMode: m }),
       setClusterByLabel: (v) => set({ clusterByLabel: v }),
+      setDegreeSizing: (v) => set({ degreeSizing: v }),
     }),
     {
       name: STORAGE_KEY,
@@ -133,6 +140,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         inspectorView: s.inspectorView,
         selectionMode: s.selectionMode,
         clusterByLabel: s.clusterByLabel,
+        degreeSizing: s.degreeSizing,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -149,6 +157,10 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           inspectorView: coerceInspectorView(p.inspectorView),
           selectionMode: coerceSelectionMode(p.selectionMode),
           clusterByLabel: p.clusterByLabel === true,
+          // Default to true for any missing/garbage persisted value so
+          // a stale persisted shape (pre-degree-sizing) lights up sizing
+          // on first read; only an explicit `false` opts out.
+          degreeSizing: p.degreeSizing !== false,
         }
       },
     }

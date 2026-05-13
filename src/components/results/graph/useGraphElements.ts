@@ -40,6 +40,11 @@ export type UseGraphElementsArgs = {
   // When true the rendered element set wraps `baseEls` in per-label
   // compound parents (fcose-friendly). Off by default; sticky.
   clusterByLabel: boolean
+  // When true the per-node log-scaled `size` is stamped on data so the
+  // stylesheet's width/height resolvers can read it. When false, only
+  // `degree` is stamped (cheap, harmless) and the stylesheet falls back
+  // to the legacy flat 38px.
+  degreeSizing: boolean
 }
 
 export type UseGraphElementsResult = {
@@ -77,7 +82,7 @@ export type UseGraphElementsResult = {
 export function useGraphElements(
   args: UseGraphElementsArgs
 ): UseGraphElementsResult {
-  const { resp, query, clusterByLabel } = args
+  const { resp, query, clusterByLabel, degreeSizing } = args
 
   // The plain element set for this resp (no synthetic cluster parents) —
   // this is what the pickers / visibility buckets / display selectors
@@ -86,7 +91,11 @@ export function useGraphElements(
   const baseEls = useMemo<ElementDefinition[]>(() => {
     const raw = extractElements(resp, query)
     const degrees = computeDegrees(raw)
-    // Stamp degree + size on every node. Edges pass through unchanged.
+    // Stamp `degree` on every node (cheap, used by later neighbor-count
+    // surfaces even when sizing is off). Stamp `size` only when the
+    // degree-sizing toggle is on — the stylesheet's width/height
+    // resolvers fall back to a flat 38px when the key is absent. Edges
+    // pass through unchanged.
     return raw.map((el) => {
       const d = el.data as Record<string, unknown> | undefined
       if (!d || d.id == null) return el
@@ -94,9 +103,13 @@ export function useGraphElements(
       if (isEdge) return el
       const id = String(d.id)
       const degree = degrees.get(id) ?? 0
-      return { ...el, data: { ...d, degree, size: degreeToSize(degree) } }
+      const size = degreeSizing ? degreeToSize(degree) : undefined
+      return {
+        ...el,
+        data: { ...d, degree, ...(size != null ? { size } : {}) },
+      }
     })
-  }, [resp, query])
+  }, [resp, query, degreeSizing])
   const elements = useMemo<ElementDefinition[]>(
     () => (clusterByLabel ? buildCompoundElements(baseEls) : baseEls),
     [baseEls, clusterByLabel]

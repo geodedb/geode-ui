@@ -288,6 +288,7 @@ import { GraphView } from './GraphView'
 import cytoscape from 'cytoscape'
 import type { ElementDefinition } from 'cytoscape'
 import type { QueryRespLike } from '../../lib/graphResult'
+import { useGraphPrefs } from './useGraphPrefs'
 
 import { testTheme as theme } from '../../test-utils/theme'
 
@@ -1009,6 +1010,26 @@ describe('Phase 1: group-by-label clustering', () => {
       )
     ).toBe(true)
     expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('GraphView — degree sizing toggle', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    useGraphPrefs.setState({ degreeSizing: true })
+  })
+
+  it('exposes a graph-size-toggle that flips the sticky pref', () => {
+    renderGV(twoNodeOneEdgeResp)
+    const toggle = screen.getByTestId('graph-size-toggle')
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    act(() => {
+      fireEvent.click(toggle)
+    })
+    expect(useGraphPrefs.getState().degreeSizing).toBe(false)
+    expect(
+      screen.getByTestId('graph-size-toggle').getAttribute('aria-pressed')
+    ).toBe('false')
   })
 })
 

@@ -26,7 +26,7 @@ describe('useGraphElements — degree stamp', () => {
 
   it('stamps data.degree and data.size on each node', () => {
     const { result } = renderHook(() =>
-      useGraphElements({ resp, clusterByLabel: false })
+      useGraphElements({ resp, clusterByLabel: false, degreeSizing: true })
     )
     const nodes = result.current.baseEls.filter(
       (e) => (e.data as { source?: unknown }).source === undefined

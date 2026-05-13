@@ -91,6 +91,9 @@ export type GraphToolbarProps = {
   onToggleSelectionMode: () => void
   clusterByLabel: boolean
   onToggleClusterByLabel: () => void
+  // Whether node width/height scales with degree (log-scaled).
+  degreeSizing: boolean
+  onToggleDegreeSizing: () => void
   // Path-mode controls. `pathActive` is true when path mode is in any
   // state other than 'off'. The clear button only renders when active.
   pathActive: boolean
@@ -120,6 +123,8 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onToggleSelectionMode,
   clusterByLabel,
   onToggleClusterByLabel,
+  degreeSizing,
+  onToggleDegreeSizing,
   pathActive,
   onTogglePathMode,
   onPathClear,
@@ -226,6 +231,16 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           onClick={onToggleClusterByLabel}
         >
           {t('graph.clusterByLabel')}
+        </button>
+        <button
+          type="button"
+          data-testid="graph-size-toggle"
+          aria-pressed={degreeSizing}
+          aria-label={t('graph.degreeSizingLabel')}
+          title={t('graph.degreeSizingLabel')}
+          onClick={onToggleDegreeSizing}
+        >
+          {t('graph.degreeSizing')}
         </button>
         <button
           type="button"
