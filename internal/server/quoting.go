@@ -33,11 +33,26 @@ var (
 	errInvalidString = errors.New("string literal contains forbidden characters")
 )
 
-// quoteIdent returns name wrapped in backticks, suitable for inlining into
-// a GQL admin statement that takes a quoted identifier (e.g. CREATE USER
-// `name`). It rejects any input containing a backtick or ASCII control
-// character — both would let the caller break out of the quoted span and
-// inject arbitrary syntax.
+// quoteIdent returns name in a form safe to inline into a GQL admin
+// statement that takes an identifier (e.g. CREATE USER name).
+//
+// Geode v0.5.15's lexer (src/gql/lexer.zig) currently has a
+// scanQuotedIdentifier function that is defined but UNREACHABLE -- the
+// dispatch path treats `"..."` as a string literal, not a delimited
+// identifier, and `parseName` only matches the `.identifier` token kind
+// for callers that go through it. Backtick is not part of the lexer's
+// dispatch table at all, so a backtick-delimited name surfaces as a
+// `expected a name (identifier)` 42000 parse error.
+//
+// That leaves no upstream-accepted delimiter we can use to escape an
+// arbitrary user-supplied name. The only safe form is a bare identifier
+// that already matches the upstream identifier-shape (the GQL/SQL
+// identifier-shape is `[A-Za-z_][A-Za-z_0-9-]*` -- letters, digits,
+// underscore, hyphen, starting with a letter or underscore). We
+// validate against that shape and emit the name verbatim. Any input
+// outside the shape (whitespace, punctuation, control, multi-byte) is
+// rejected at the handler boundary with a 400 invalid_<field> error
+// before the value reaches the wire.
 //
 // All B-series user/role/policy handlers that string-concatenate a
 // caller-controlled identifier into a GQL statement MUST route the value
@@ -46,12 +61,28 @@ func quoteIdent(name string) (string, error) {
 	if name == "" {
 		return "", errInvalidIdent
 	}
+	first := true
 	for _, r := range name {
-		if r == '`' || r < 0x20 || r == 0x7f {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r == '_':
+			// Always allowed.
+		case r >= '0' && r <= '9':
+			// Digits allowed anywhere (some upstream catalogs use
+			// digit-prefix names like `005_add_index` for migrations).
+		case r == '-':
+			// Hyphen allowed only after the first byte to avoid
+			// option-confusion if a downstream emitter splits args.
+			if first {
+				return "", errInvalidIdent
+			}
+		default:
 			return "", errInvalidIdent
 		}
+		first = false
 	}
-	return "`" + name + "`", nil
+	return name, nil
 }
 
 // quoteString returns s wrapped in single quotes, safe for inlining

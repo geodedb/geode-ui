@@ -76,7 +76,7 @@ func TestRoles_Create(t *testing.T) {
 		t.Fatalf("resp=%+v want name=auditor", resp)
 	}
 	stmts := d.seen()
-	want := "CREATE ROLE `auditor` SET DESCRIPTION 'read-only role'"
+	want := "CREATE ROLE auditor SET DESCRIPTION 'read-only role'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -157,7 +157,7 @@ func TestRoles_Delete(t *testing.T) {
 		t.Fatalf("DeleteRole: %v", err)
 	}
 	stmts := d.seen()
-	want := "DROP ROLE IF EXISTS `auditor`"
+	want := "DROP ROLE IF EXISTS auditor"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -210,7 +210,7 @@ func TestPolicies_Create(t *testing.T) {
 		t.Fatalf("resp=%+v want name=tenants_iso", resp)
 	}
 	stmts := d.seen()
-	want := "CREATE POLICY `tenants_iso` ON `Customer` AS 'row.tenant_id = ctx.tenant'"
+	want := "CREATE POLICY tenants_iso ON Customer AS 'row.tenant_id = ctx.tenant'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -231,7 +231,7 @@ func TestPolicies_Create_NoResource(t *testing.T) {
 		t.Fatalf("PostPolicies: %v", err)
 	}
 	stmts := d.seen()
-	want := "CREATE POLICY `global` AS 'true'"
+	want := "CREATE POLICY global AS 'true'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -257,8 +257,8 @@ func TestPolicies_Get(t *testing.T) {
 		t.Fatalf("resp=%+v missing fields", resp)
 	}
 	stmts := d.seen()
-	if len(stmts) != 1 || stmts[0] != "SHOW POLICY `tenants_iso`" {
-		t.Fatalf("stmts=%v want [SHOW POLICY `tenants_iso`]", stmts)
+	if len(stmts) != 1 || stmts[0] != "SHOW POLICY tenants_iso" {
+		t.Fatalf("stmts=%v want [SHOW POLICY tenants_iso]", stmts)
 	}
 }
 
@@ -273,8 +273,8 @@ func TestPolicies_Delete(t *testing.T) {
 		t.Fatalf("DeleteName: %v", err)
 	}
 	stmts := d.seen()
-	if len(stmts) != 1 || stmts[0] != "DROP POLICY `tenants_iso`" {
-		t.Fatalf("stmts=%v want [DROP POLICY `tenants_iso`]", stmts)
+	if len(stmts) != 1 || stmts[0] != "DROP POLICY tenants_iso" {
+		t.Fatalf("stmts=%v want [DROP POLICY tenants_iso]", stmts)
 	}
 }
 
@@ -295,32 +295,32 @@ func TestGrants_Apply(t *testing.T) {
 		{
 			name: "user_no_resource",
 			in:   gentypes.GrantReq{Permission: "READ", Grantee: "alice", GranteeKind: "user"},
-			want: "GRANT READ TO `alice`",
+			want: "GRANT READ TO alice",
 		},
 		{
 			name: "user_with_graph",
 			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
-			want: "GRANT WRITE ON GRAPH `movies` TO `alice`",
+			want: "GRANT WRITE ON GRAPH movies TO alice",
 		},
 		{
 			name: "default_kind_is_user",
 			in:   gentypes.GrantReq{Permission: "READ", Grantee: "alice"},
-			want: "GRANT READ TO `alice`",
+			want: "GRANT READ TO alice",
 		},
 		{
 			name: "all_with_graph",
 			in:   gentypes.GrantReq{Permission: "ALL", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
-			want: "GRANT ALL ON GRAPH `movies` TO `alice`",
+			want: "GRANT ALL ON GRAPH movies TO alice",
 		},
 		{
 			name: "schema_with_graph",
 			in:   gentypes.GrantReq{Permission: "SCHEMA", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
-			want: "GRANT SCHEMA ON GRAPH `movies` TO `alice`",
+			want: "GRANT SCHEMA ON GRAPH movies TO alice",
 		},
 		{
 			name: "lowercase_normalised_to_upper",
 			in:   gentypes.GrantReq{Permission: "read", Grantee: "alice", GranteeKind: "user"},
-			want: "GRANT READ TO `alice`",
+			want: "GRANT READ TO alice",
 		},
 	}
 	for _, tc := range cases {
@@ -353,12 +353,12 @@ func TestGrants_Revoke(t *testing.T) {
 		{
 			name: "user_no_resource",
 			in:   gentypes.GrantReq{Permission: "READ", Grantee: "alice", GranteeKind: "user"},
-			want: "REVOKE READ FROM `alice`",
+			want: "REVOKE READ FROM alice",
 		},
 		{
 			name: "user_with_graph",
 			in:   gentypes.GrantReq{Permission: "WRITE", Grantee: "alice", GranteeKind: "user", Resource: "movies"},
-			want: "REVOKE WRITE ON GRAPH `movies` FROM `alice`",
+			want: "REVOKE WRITE ON GRAPH movies FROM alice",
 		},
 	}
 	for _, tc := range cases {

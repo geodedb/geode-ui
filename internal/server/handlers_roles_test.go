@@ -36,7 +36,7 @@ func TestCreateRole_EmitsV0_5_15Grammar(t *testing.T) {
 			name: "name_only",
 			req:  &gentypes.RoleCreateReq{Name: "data_steward"},
 			wantStmts: []string{
-				"CREATE ROLE `data_steward`",
+				"CREATE ROLE data_steward",
 			},
 		},
 		{
@@ -46,7 +46,7 @@ func TestCreateRole_EmitsV0_5_15Grammar(t *testing.T) {
 				Description: "Owns data quality",
 			},
 			wantStmts: []string{
-				"CREATE ROLE `data_steward` SET DESCRIPTION 'Owns data quality'",
+				"CREATE ROLE data_steward SET DESCRIPTION 'Owns data quality'",
 			},
 		},
 	}
@@ -142,7 +142,7 @@ func TestCreateRole_BuiltinIsIdempotent(t *testing.T) {
 				t.Fatalf("status=%d want 200 for built-in role create", rec.Code)
 			}
 			got := d.seen()
-			want := "CREATE ROLE `" + name + "`"
+			want := "CREATE ROLE " + name
 			if len(got) != 1 || got[0] != want {
 				t.Errorf("stmts=%v want [%s]", got, want)
 			}
@@ -212,7 +212,7 @@ func TestDropRole_IfExistsSwallowed(t *testing.T) {
 		t.Fatalf("DeleteRole: %v", err)
 	}
 	got := d.seen()
-	want := "DROP ROLE IF EXISTS `data_steward`"
+	want := "DROP ROLE IF EXISTS data_steward"
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("stmts=%v want [%s]", got, want)
 	}

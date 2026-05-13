@@ -211,28 +211,46 @@ func consecutiveSingleQuoteRuns(s string) []int {
 }
 
 // TestQuoteIdent_Adversarial enumerates identifier-shaped payloads.
-// quoteIdent uses backticks and rejects any backtick / ASCII control
-// character in the input — there is no escape sequence inside a
-// backtick-quoted identifier, so any backtick MUST be rejected.
+// Geode v0.5.15 has no working delimited-identifier syntax in the
+// lexer (scanQuotedIdentifier is dead code; `"x"` parses as a string
+// literal, backticks parse as illegal). The only safe form is a bare
+// identifier that already matches the upstream identifier shape:
+//
+//	[A-Za-z_] (then any of letter / digit / underscore / hyphen)
+//
+// quoteIdent therefore validates the input against that shape and
+// returns it verbatim. Anything outside the shape is rejected at the
+// handler boundary with a 400 invalid_<field> error before reaching
+// the wire.
 func TestQuoteIdent_Adversarial(t *testing.T) {
 	cases := []struct {
 		name      string
 		in        string
 		mustError bool
 	}{
-		// Backtick injection — the only way to break out of a
-		// backtick-quoted identifier.
+		// Plain identifiers — accepted.
+		{"plain_alphanum", "alice", false},
+		{"with_underscore", "alice_bob", false},
+		{"with_hyphen", "alice-bob", false},
+		{"with_digit_mid", "alice42", false},
+		{"with_digit_start", "5oclock", false}, // digits at start allowed for migration names
+		{"leading_underscore", "_underscored", false},
+
+		// Delimiter / control / metacharacter shapes — rejected.
+		{"dquote_injection_basic", `alice"; DROP USER "bob`, true},
+		{"trailing_dquote", `alice"`, true},
+		{"leading_dquote", `"alice`, true},
 		{"backtick_injection_basic", "alice`; DROP USER `bob", true},
 		{"trailing_backtick", "alice`", true},
 		{"leading_backtick", "`alice", true},
-		{"double_backtick", "alice``bob", true},
-		{"escaped_backtick_unicode_lookalike", "alic‘e", false}, // not an ASCII backtick → allowed
+		{"leading_hyphen_blocked", "-alice", true}, // option-confusion guard
 
 		// Empty / whitespace
 		{"empty_string_rejected", "", true},
-		{"single_space_allowed_inside_backticks", " ", false},
+		{"single_space_rejected", " ", true},
+		{"space_inside_rejected", "with spaces", true},
 
-		// Control characters (rejected wholesale)
+		// Control characters — rejected wholesale.
 		{"nul_byte", "alice\x00", true},
 		{"tab", "alice\tbob", true},
 		{"newline", "alice\nbob", true},
@@ -240,15 +258,19 @@ func TestQuoteIdent_Adversarial(t *testing.T) {
 		{"escape", "alice\x1bbob", true},
 		{"delete", "alice\x7fbob", true},
 
-		// Unicode — allowed (non-control, non-backtick)
-		{"unicode_cjk", "用户名", false},
-		{"unicode_emoji", "alice🎯", false},
-		{"unicode_rtl_override", "alic\u202ee", false},
-		{"unicode_combining", "aliće", false},
+		// Punctuation — rejected (not in identifier shape).
+		{"dot_rejected", "alice.bob", true},
+		{"slash_rejected", "alice/bob", true},
+		{"semicolon_rejected", "alice;bob", true},
+		{"paren_rejected", "alice(bob)", true},
 
-		// Length stress
+		// Unicode — rejected (multi-byte not in identifier shape).
+		{"unicode_cjk", "用户名", true},
+		{"unicode_emoji", "alice🎯", true},
+
+		// Length — safe chars only.
 		{"oversized_safe_chars", strings.Repeat("a", 65536), false},
-		{"oversized_with_backtick_at_end", strings.Repeat("a", 65535) + "`", true},
+		{"oversized_with_dquote_at_end", strings.Repeat("a", 65535) + `"`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,19 +287,10 @@ func TestQuoteIdent_Adversarial(t *testing.T) {
 			if err != nil {
 				t.Fatalf("quoteIdent(%q): unexpected err %v", tc.in, err)
 			}
-			// Framing invariant.
-			if len(got) < 2 || got[0] != '`' || got[len(got)-1] != '`' {
-				t.Fatalf("quoteIdent(%q)=%q missing backtick framing", tc.in, got)
-			}
-			// Body invariant: no backtick anywhere inside the quoted span.
-			body := got[1 : len(got)-1]
-			if strings.ContainsRune(body, '`') {
-				t.Fatalf("quoteIdent(%q)=%q has interior backtick — escape gap", tc.in, got)
-			}
-			// Body equals the original input (identifier quoting does
-			// not transform the byte sequence — it only frames it).
-			if body != tc.in {
-				t.Fatalf("quoteIdent(%q)=%q body=%q does not match input verbatim", tc.in, got, body)
+			// quoteIdent emits bare (no framing) — input must round-trip
+			// byte-for-byte.
+			if got != tc.in {
+				t.Fatalf("quoteIdent(%q)=%q want verbatim", tc.in, got)
 			}
 		})
 	}

@@ -268,7 +268,7 @@ func TestUsers_Permissions_Typed(t *testing.T) {
 		t.Fatalf("first permission=%+v", resp.Permissions[0])
 	}
 	stmts := d.seen()
-	want := "SHOW PERMISSIONS FOR `alice`"
+	want := "SHOW PERMISSIONS FOR alice"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -312,9 +312,9 @@ func TestUsers_Create(t *testing.T) {
 	// clause so the user is created with its built-in role atomically.
 	// Subsequent roles run through a follow-up GRANT ROLE TO call.
 	want := []string{
-		"CREATE USER `alice` SET PASSWORD 'supersecret-pw-1' EMAIL 'alice@example.com' ROLE `admin`",
-		"GRANT ROLE `admin` TO `alice`",
-		"GRANT ROLE `auditor` TO `alice`",
+		"CREATE USER alice SET PASSWORD 'supersecret-pw-1' EMAIL 'alice@example.com' ROLE admin",
+		"GRANT ROLE admin TO alice",
+		"GRANT ROLE auditor TO alice",
 	}
 	if len(stmts) != len(want) {
 		t.Fatalf("stmts=%v want %v", stmts, want)
@@ -382,7 +382,7 @@ func TestUsers_Create_WithRole(t *testing.T) {
 	if len(stmts) < 1 {
 		t.Fatalf("stmts=%v want CREATE USER first", stmts)
 	}
-	wantFirst := "CREATE USER `alice` SET PASSWORD 'supersecret-pw-1' ROLE `readonly`"
+	wantFirst := "CREATE USER alice SET PASSWORD 'supersecret-pw-1' ROLE readonly"
 	if stmts[0] != wantFirst {
 		t.Errorf("stmt[0]=%q want %q", stmts[0], wantFirst)
 	}
@@ -433,7 +433,7 @@ func TestUsers_Delete(t *testing.T) {
 		t.Fatalf("DeleteUsername: %v", err)
 	}
 	stmts := d.seen()
-	want := "DROP USER IF EXISTS `alice`"
+	want := "DROP USER IF EXISTS alice"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -456,8 +456,8 @@ func TestUsers_AssignRole(t *testing.T) {
 		t.Fatalf("Roles: %v", err)
 	}
 	stmts := d.seen()
-	if len(stmts) != 1 || stmts[0] != "GRANT ROLE `admin` TO `alice`" {
-		t.Fatalf("stmts=%v want [GRANT ROLE `admin` TO `alice`]", stmts)
+	if len(stmts) != 1 || stmts[0] != "GRANT ROLE admin TO alice" {
+		t.Fatalf("stmts=%v want [GRANT ROLE admin TO alice]", stmts)
 	}
 }
 
@@ -477,7 +477,7 @@ func TestUsers_ChangePassword(t *testing.T) {
 		t.Fatalf("Password: %v", err)
 	}
 	stmts := d.seen()
-	want := "ALTER USER `alice` SET PASSWORD 'another''s secret'"
+	want := "ALTER USER alice SET PASSWORD 'another''s secret'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -607,7 +607,7 @@ func TestUsers_DisableEnable(t *testing.T) {
 		t.Fatalf("Enable: %v", err)
 	}
 	stmts := d.seen()
-	want := []string{"ALTER USER `alice` DISABLE", "ALTER USER `alice` ENABLE"}
+	want := []string{"ALTER USER alice DISABLE", "ALTER USER alice ENABLE"}
 	if len(stmts) != len(want) {
 		t.Fatalf("stmts=%v want %v", stmts, want)
 	}
@@ -626,12 +626,16 @@ func TestUsers_QuoteIdent(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{"alice", "`alice`", false},
-		{"alice-bob_42", "`alice-bob_42`", false},
-		{"with spaces", "`with spaces`", false}, // spaces are fine inside backticks
-		{"日本語", "`日本語`", false},                 // non-ASCII is fine — quoteIdent only blocks backticks/controls
+		{"alice", "alice", false},
+		{"alice-bob_42", "alice-bob_42", false},
+		{"_underscored", "_underscored", false}, // leading underscore allowed
+		{"5oclock", "5oclock", false},           // digit at start allowed (migration names)
 		{"", "", true},                          // empty rejected
+		{"-starts_with_hyphen", "", true},       // hyphen at start rejected
+		{"with spaces", "", true},               // spaces no longer accepted
+		{"日本語", "", true},                       // multi-byte no longer accepted
 		{"al`ice", "", true},                    // backtick rejected
+		{`al"ice`, "", true},                    // double-quote rejected
 		{"alice\nbob", "", true},                // newline rejected
 		{"alice\x00bob", "", true},              // NUL rejected
 		{"alice\x7fbob", "", true},              // DEL rejected
@@ -831,8 +835,8 @@ func TestWithConnDBAndIdent_TableDriven(t *testing.T) {
 			if err != nil {
 				t.Fatalf("err=%v want nil", err)
 			}
-			if gotIdent != "`alice`" {
-				t.Errorf("qname=%q want `alice`", gotIdent)
+			if gotIdent != "alice" {
+				t.Errorf("qname=%q want alice", gotIdent)
 			}
 		})
 	}
@@ -854,8 +858,8 @@ func TestQ9_CallsitesUnchanged(t *testing.T) {
 	); err != nil {
 		t.Fatalf("DeleteUsername after Q9: %v", err)
 	}
-	if got := d.seen(); len(got) != 1 || got[0] != "DROP USER IF EXISTS `alice`" {
-		t.Fatalf("post-Q9 stmts=%v want [DROP USER IF EXISTS `alice`]", got)
+	if got := d.seen(); len(got) != 1 || got[0] != "DROP USER IF EXISTS alice" {
+		t.Fatalf("post-Q9 stmts=%v want [DROP USER IF EXISTS alice]", got)
 	}
 }
 

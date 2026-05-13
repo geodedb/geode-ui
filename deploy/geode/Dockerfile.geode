@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 #
-# Builds geode:v0.5.11 for the geode-ui e2e test stack.
+# Builds geode:v0.5.15 for the geode-ui e2e test stack.
 #
 # Why a host-side build (not a from-source compile inside Docker)?
 # ----------------------------------------------------------------
@@ -27,10 +27,10 @@
 #   cd ../geode && zig build -Doptimize=ReleaseSafe
 #
 # Build (run from geode-ui/):
-#   docker build -f deploy/geode/Dockerfile.geode -t geode:v0.5.11 ..
+#   docker build -f deploy/geode/Dockerfile.geode -t geode:v0.5.15 ..
 #
 # Run:
-#   docker run --rm -p 3141:3141/udp geode:v0.5.11
+#   docker run --rm -p 3141:3141/udp geode:v0.5.15
 #
 # The image is intentionally minimal: ca-certificates, libssl3, tini,
 # and the geode binary. It mirrors upstream's Dockerfile.release layout
@@ -58,7 +58,7 @@ RUN apt-get update \
 # inside the container layer when run without `-v`.
 VOLUME ["/data"]
 
-# Copy the host-built v0.5.11 binary. Build context is the parent of
+# Copy the host-built v0.5.15 binary. Build context is the parent of
 # geode-ui (..), so geode/ resolves to the sibling Geode checkout.
 COPY geode/zig-out/bin/geode /usr/local/bin/geode
 

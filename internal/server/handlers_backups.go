@@ -140,7 +140,11 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 	if err := sanitizeBackupFile(req.File); err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
-	fname, err := quoteIdent(req.File)
+	// v0.5.15: BACKUP / RESTORE paths are string literals (single-quoted)
+	// per parseBackupStatement / parseRestoreStatement in
+	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
+	// identifier-shape rule rejects valid filenames containing `.`.
+	fname, err := quoteString(req.File)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
@@ -167,7 +171,11 @@ func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *ge
 	if err := sanitizeBackupFile(req.File); err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
-	fname, err := quoteIdent(req.File)
+	// v0.5.15: BACKUP / RESTORE paths are string literals (single-quoted)
+	// per parseBackupStatement / parseRestoreStatement in
+	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
+	// identifier-shape rule rejects valid filenames containing `.`.
+	fname, err := quoteString(req.File)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
@@ -217,7 +225,11 @@ func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *genty
 	if err := sanitizeBackupFile(req.File); err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
-	fname, err := quoteIdent(req.File)
+	// v0.5.15: BACKUP / RESTORE paths are string literals (single-quoted)
+	// per parseBackupStatement / parseRestoreStatement in
+	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
+	// identifier-shape rule rejects valid filenames containing `.`.
+	fname, err := quoteString(req.File)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}

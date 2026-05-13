@@ -135,9 +135,9 @@ func TestPatchUsername_HappyPath_AllUpdatesInOneTx(t *testing.T) {
 	//     real server would accept.
 	wantOrdered := []string{
 		"begin",
-		"exec:ALTER USER `alice` SET EMAIL 'alice@example.com'",
-		"exec:ALTER USER `alice` SET PASSWORD 'newsecret-pw1'",
-		"exec:GRANT ROLE `admin` TO `alice`",
+		"exec:ALTER USER alice SET EMAIL 'alice@example.com'",
+		"exec:ALTER USER alice SET PASSWORD 'newsecret-pw1'",
+		"exec:GRANT ROLE admin TO alice",
 		"commit",
 	}
 	if len(events) != len(wantOrdered) {

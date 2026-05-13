@@ -209,14 +209,16 @@ ensure_admin_password() {
     log "admin password rotated"
 }
 
-# Step 3: ensure e2e_admin exists. Best-effort: Geode v0.5.11 does NOT
-# expose CREATE USER on the wire (status_class=42000), so this is
-# expected to be a no-op on this build. The Playwright login fixture
-# falls back to the rotated admin in that case.
+# Step 3: ensure e2e_admin exists. Geode v0.5.15 supports CREATE USER over
+# the GQL wire per docs/GQL_AUTH_DDL.md grammar:
+#   CREATE USER <name> SET PASSWORD <string> [ EMAIL <string> ] [ ROLE <name> ]
+# The Playwright fixture authenticates as E2E_USER once this succeeds. If
+# the user already exists (idempotent re-runs of `e2e-up`), CREATE USER
+# returns a duplicate-key error and we trust the existing credentials.
 ensure_e2e_user() {
-    log "ensuring e2e user '${E2E_USER}' (best-effort)"
+    log "ensuring e2e user '${E2E_USER}'"
     local out
-    out=$(echo "CREATE USER ${E2E_USER} WITH EMAIL '${E2E_USER}@e2e.local' PASSWORD '${E2E_PASSWORD}'" \
+    out=$(echo "CREATE USER ${E2E_USER} SET PASSWORD '${E2E_PASSWORD}' EMAIL '${E2E_USER}@e2e.local' ROLE admin" \
         | query_admin - 2>&1 || true)
     if echo "RETURN 1" | geode query \
         --insecure-tls-skip-verify \
@@ -224,11 +226,11 @@ ensure_e2e_user() {
         -U "${E2E_USER}" -P "${E2E_PASSWORD}" - >/dev/null 2>&1; then
         log "e2e user '${E2E_USER}' authenticates over the wire"
     else
-        log "CREATE USER not available on the wire in this Geode build"
-        log "(Playwright fixture will use the rotated admin instead)"
-        # Surface the actual error code once for diagnostic value.
-        if printf '%s' "$out" | grep -qE 'status_class'; then
-            log "  server response: $(printf '%s' "$out" | head -c 200)"
+        log "WARNING: e2e user '${E2E_USER}' does not authenticate"
+        log "(Playwright fixture will fall back to the rotated admin)"
+        # Surface the actual CREATE USER response for diagnostic value.
+        if printf '%s' "$out" | grep -qE 'status_class|error'; then
+            log "  server response: $(printf '%s' "$out" | head -c 240)"
         fi
     fi
 }

@@ -33,7 +33,7 @@ func TestGrant_PerGraphReadGrant(t *testing.T) {
 		t.Fatalf("Grants: %v", err)
 	}
 	got := d.seen()
-	want := "GRANT READ ON GRAPH `movies` TO `alice`"
+	want := "GRANT READ ON GRAPH movies TO alice"
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("stmts=%v want [%s]", got, want)
 	}
@@ -70,7 +70,7 @@ func TestGrant_GlobalWriteReturnsExplanatoryNote(t *testing.T) {
 		t.Fatalf("resp=nil want non-nil Empty (global grant returns 200 with upstream note)")
 	}
 	got := d.seen()
-	want := "GRANT WRITE TO `alice`"
+	want := "GRANT WRITE TO alice"
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("stmts=%v want [%s]", got, want)
 	}
@@ -96,7 +96,7 @@ func TestRevoke_RemovesGrant(t *testing.T) {
 		t.Fatalf("Revoke: %v", err)
 	}
 	got := d.seen()
-	want := "REVOKE WRITE ON GRAPH `movies` FROM `alice`"
+	want := "REVOKE WRITE ON GRAPH movies FROM alice"
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("stmts=%v want [%s]", got, want)
 	}
@@ -215,7 +215,7 @@ func TestShowPermissions_Self(t *testing.T) {
 		t.Errorf("permissions=%+v want [read write]", resp.Permissions)
 	}
 	got := d.seen()
-	want := "SHOW PERMISSIONS FOR `alice`"
+	want := "SHOW PERMISSIONS FOR alice"
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("stmts=%v want [%s] (no USER keyword between FOR and the name on v0.5.15)", got, want)
 	}

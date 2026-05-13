@@ -3,72 +3,47 @@ import { sel } from '../helpers/selectors'
 
 const newUsername = `e2e_user_${Date.now()}`
 
-// Phase-1 reproduction: against the running v0.5.11 stack, the Admin
-// section must NOT surface an operable "+ New user" CTA, because the
-// connected Geode build rejects CREATE USER over the wire. The SPA
-// learns this from GET /api/v1/capabilities (admin_writable.users ===
-// false) and either hides the button or renders it `disabled` with an
-// explanatory title, plus an `admin-users-unsupported` note.
+// Geode v0.5.15 enables admin DDL (CREATE/ALTER/DROP USER, SHOW USERS) over
+// the GQL wire. The SPA learns this from GET /api/v1/capabilities
+// (admin_writable.users === true) and surfaces an operable "+ New user"
+// CTA. The unsupported affordance must NOT render.
 //
-// On the current (pre-fix) build this fails: the "+ New user" button
-// renders enabled and there is no capabilities-driven gating, so
-// `adminNewUserBtn` is enabled and `adminUsersUnsupported` is absent.
-test.describe('admin / users — Phase 1 CTA gating', () => {
-  test('"+ New user" is gated against the connected Geode build', async ({
+// Phase-1 history: against v0.5.11 these flows ran offline only and the SPA
+// rendered an `admin-users-unsupported` banner with a disabled CTA. Closing
+// the GAP-002/GAP-013 trail flips the expectation: with v0.5.15 wired,
+// the CTA is enabled and the banner is absent. See
+// docs/superpowers/plans/2026-05-13-geode-0-5-15-auth-ddl-integration.md.
+test.describe('admin / users — v0.5.15 CTA gating', () => {
+  test('"+ New user" is enabled and unsupported banner is absent', async ({
     authedPage: page,
   }) => {
     await page.goto('/admin/users')
-    // Let the page settle (table empty-state or rows).
     await page
       .getByText(/users \(\d+\)|No users|geode/i)
       .first()
       .waitFor({ timeout: 6_000 })
       .catch(() => undefined)
 
-    // The unsupported affordance must be present.
-    await expect(sel.adminUsersUnsupported(page)).toBeVisible({
-      timeout: 6_000,
-    })
+    // The unsupported affordance must NOT render under v0.5.15.
+    await expect(sel.adminUsersUnsupported(page)).toHaveCount(0)
 
-    // If the button still renders, it must be disabled with a title.
+    // The "+ New user" CTA must be visible and enabled.
     const btn = sel.adminNewUserBtn(page)
-    if (await btn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await expect(btn).toBeDisabled()
-      const title = await btn.getAttribute('title')
-      expect(title && title.length > 0).toBeTruthy()
-    }
+    await expect(btn).toBeVisible({ timeout: 6_000 })
+    await expect(btn).toBeEnabled()
   })
 })
 
 test.describe('admin / users', () => {
-  // The server returns an EMPTY user list (HTTP 200, users:[]) when the
-  // Geode wire dialect doesn't expose SHOW USERS yet (v0.5.11 is in this
-  // state) — the page renders cleanly with no banner. We detect that
-  // empty state and skip the rest of the suite gracefully.
-  const SHOW_USERS_GAP_RE =
-    /No users|insufficient role|http status 4\d\d|schema_error|parse error|expected token|not supported|unimplemented/i
-
   test('users page lists at least the admin user', async ({
     authedPage: page,
   }) => {
     await page.goto('/admin/users')
-    // Wait for either the page's empty-state, the admin row, or any
-    // engine-gap banner. All three are valid resting states.
     await page
-      .getByText(
-        /geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i
-      )
+      .getByText(/geode|users \(\d+\)/i)
       .first()
       .waitFor({ timeout: 6_000 })
-      .catch(() => undefined)
-    test.skip(
-      await page
-        .getByText(SHOW_USERS_GAP_RE)
-        .first()
-        .isVisible({ timeout: 1_000 })
-        .catch(() => false),
-      'SHOW USERS not on the Geode wire yet (v0.5.11) — page renders an empty list'
-    )
+    // v0.5.15: SHOW USERS returns a non-empty row set including the admin.
     await expect(page.getByText(/geode/)).toBeVisible()
   })
 
@@ -77,46 +52,33 @@ test.describe('admin / users', () => {
   }) => {
     await page.goto('/admin/users')
     await page
-      .getByText(
-        /geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i
-      )
+      .getByText(/geode|users \(\d+\)/i)
       .first()
       .waitFor({ timeout: 6_000 })
-      .catch(() => undefined)
-    test.skip(
-      await page
-        .getByText(SHOW_USERS_GAP_RE)
-        .first()
-        .isVisible({ timeout: 1_000 })
-        .catch(() => false),
-      'SHOW USERS / CREATE USER not on the Geode wire yet (v0.5.11)'
-    )
     await sel.newUserBtn(page).click()
-    await page.getByPlaceholder('username').fill(newUsername)
-    await page.getByPlaceholder('email').fill(`${newUsername}@e2e.local`)
-    await page.getByPlaceholder('password').fill('p4$$word!')
-    await page.getByRole('button', { name: /create/i }).click()
-    // Modal closes on success; the new row should appear.
-    await expect(page.getByText(newUsername)).toBeVisible({ timeout: 8_000 })
+    // CreateUserModal renders <Field label="Username|Email|Password">
+    // wrapping <Input id="cu-…"/>. There is no `placeholder` attribute,
+    // so the test drives by label association.
+    await page.getByLabel(/^username/i).fill(newUsername)
+    await page.getByLabel(/^email/i).fill(`${newUsername}@e2e.local`)
+    // Password must satisfy server policy: ≥12 chars, mixed character
+    // shape, no all-same / all-digit, no username substring (GAP-N4).
+    await page.getByLabel(/^password/i).fill('S3cure!E2E Pass 2026')
+    await page.getByRole('button', { name: /^create$/i }).click()
+    // Modal closes on success; the new row should appear in the table.
+    await expect(
+      page.getByRole('cell', { name: newUsername, exact: true })
+    ).toBeVisible({ timeout: 8_000 })
   })
 
   test('Delete row removes the user', async ({ authedPage: page }) => {
     await page.goto('/admin/users')
     await page
-      .getByText(
-        /geode|users \(\d+\)|No users|schema_error|parse error|insufficient role/i
-      )
+      .getByText(/geode|users \(\d+\)/i)
       .first()
       .waitFor({ timeout: 6_000 })
-      .catch(() => undefined)
-    test.skip(
-      await page
-        .getByText(SHOW_USERS_GAP_RE)
-        .first()
-        .isVisible({ timeout: 1_000 })
-        .catch(() => false),
-      'SHOW USERS / DROP USER not on the Geode wire yet (v0.5.11)'
-    )
+    // The previous test created the row; if it was not run in isolation
+    // we skip cleanly rather than fail on a missing fixture row.
     test.skip(
       !(await page
         .getByText(newUsername)
