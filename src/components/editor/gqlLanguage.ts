@@ -3,7 +3,11 @@ import type { Monaco } from '@monaco-editor/react'
 export const GQL_LANGUAGE_ID = 'gql'
 
 export function registerGqlLanguage(monaco: Monaco): void {
-  if (monaco.languages.getLanguages().some((l) => l.id === GQL_LANGUAGE_ID)) {
+  if (
+    monaco.languages
+      .getLanguages()
+      .some((l: { id: string }) => l.id === GQL_LANGUAGE_ID)
+  ) {
     return
   }
   monaco.languages.register({ id: GQL_LANGUAGE_ID })
