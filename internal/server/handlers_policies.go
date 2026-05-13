@@ -24,11 +24,40 @@ import (
 // is fine — the routes are exercised only via the generated mux and
 // the unit tests below.
 //
-// GQL syntax: `CREATE POLICY <name> [ON <resource>] AS '<expression>'`
-// is the forward-compatible form; Geode 0.3.8 ships a `policy create`
-// CLI subcommand that talks directly to the security graph rather than
-// accepting that statement over the wire. Handlers emit the statement
-// anyway so the UI picks up wire support automatically.
+// UPSTREAM STATUS (Geode v0.5.15): CREATE POLICY is NOT part of the
+// v0.5.15 grammar. The four upstream Limitations from
+// docs/GQL_AUTH_DDL.md @ v0.5.15 that apply here:
+//
+//   #3: "RLS policy persistence is not yet implemented. CREATE POLICY
+//       grammar and g_policies persistence are tracked separately --
+//       use CALL geode.fle.* for FLE management and the RLS engine
+//       API for row-level security until that lands."
+//   #7: "CREATE POLICY, FLE DDL, and tenant DDL are not part of this
+//       surface."
+//
+// Upstream notes the *future* CREATE POLICY grammar will look like:
+//
+//	CREATE POLICY <name> ON <Label>
+//	  [ FOR READ | WRITE | ALL ]
+//	  [ TO <role> [, <role>]* ]
+//	  USING (<expr>)
+//	  [ WITH CHECK (<expr>) ]
+//
+// matching the existing src/security/rls_core.zig Policy struct
+// (graph, table, operation, roles, using_expr, check_expr). The
+// geode-ui's current "CREATE POLICY <name> [ON <resource>] AS
+// '<expr>'" form may be supported as a forward-compat alias once the
+// parser path lands, but is NOT accepted by v0.5.15.
+//
+// Until then, calls to PostPolicies / DeleteName / GetName / GetPolicies
+// return 501 wire_feature_missing via the standard wireErr fallback when
+// the connected build is v0.5.15. The SPA gates the "+ New policy" CTA
+// on capabilities.admin_writable.policies which handlers_capabilities.go
+// reports as false against any build that reports policy_ddl=false in
+// SHOW CAPABILITIES (v0.5.15 reports false; Limitations #3 / #7 cover
+// this explicitly). Do not remove the wire_feature_missing fallback in
+// any of the handlers below -- it is the load-bearing degradation path
+// for the SPA's gate.
 
 // GetPolicies implements GET /api/v1/policies (list policies).
 func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.PolicyList, error) {
@@ -56,6 +85,18 @@ func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gen
 }
 
 // PostPolicies implements POST /api/v1/policies (create policy).
+//
+// CreatePolicy is a placeholder for the future GQL CREATE POLICY
+// syntax (see ~/src/devnw/codepros/geode/geode/docs/GQL_AUTH_DDL.md
+// "Future: CREATE POLICY"). Until Geode lands this, the call returns
+// 501 wire_feature_missing through the standard wireErr fallback and
+// the SPA gates the CTA via admin_writable.policies (which Task 3 of
+// the v0.5.15 plan reports as false on v0.5.15 -- see
+// handlers_capabilities.go). Do not remove the wire_feature_missing
+// fallback here -- it is the SPA's degradation signal.
+//
+// Tested by TestCreatePolicy_StaysWireFeatureMissingOnV0_5_15 in
+// handlers_policies_test.go.
 func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyCreateReq) (*gentypes.Policy, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
