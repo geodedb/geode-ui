@@ -29,6 +29,7 @@ import { useGraphPathMode } from './graph/useGraphPathMode'
 import { useFillHeight } from './graph/useFillHeight'
 import { GraphInspector, Selected } from './graph/GraphInspector'
 import { GraphToolbar } from './graph/GraphToolbar'
+import { GraphSidebar } from './graph/GraphSidebar'
 
 // Register the layout extensions once, at module load. cytoscape.use is
 // idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
@@ -260,34 +261,6 @@ const ErrorBanner = styled.div`
   border-radius: ${({ theme }) => theme.radii.md};
   font-size: ${({ theme }) => theme.font.sizes.sm};
   box-shadow: ${({ theme }) => theme.shadows.sm};
-`
-const Side = styled.aside<{ $height: number; $fill: boolean }>`
-  /* In fill mode the sidebar is stacked below the (full-width) canvas,
-     so a fixed canvas-tall height would be wasted space — cap it
-     instead and let it scroll. Otherwise it matches the canvas height
-     for the side-by-side layout. */
-  ${({ $height, $fill }) => {
-    return $fill ? 'height: auto; max-height: 40vh;' : `height: ${$height}px;`
-  }}
-  overflow: auto;
-  border: 1px solid ${({ theme }) => theme.border.subtle};
-  border-radius: ${({ theme }) => theme.radii.md};
-  padding: ${({ theme }) => theme.spacing.sm};
-  background: ${({ theme }) => theme.bg.surface};
-  color: ${({ theme }) => theme.text.primary};
-
-  pre {
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  /* Below the md breakpoint the sidebar follows the canvas in stacked
-     order; cap its height so a long property dump doesn't push the
-     editor and the rest of the page off-screen on phone form factors. */
-  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
-    height: auto;
-    max-height: 320px;
-  }
 `
 const ControlsBlock = styled.section`
   margin-bottom: ${({ theme }) => theme.spacing.sm};
@@ -1186,11 +1159,7 @@ export const GraphView: React.FC<Props> = ({
         </div>
       </CanvasArea>
       {!sidebarCollapsed && (
-        <Side
-          data-testid="graph-sidebar"
-          $height={effectiveHeight}
-          $fill={fillHeight}
-        >
+        <GraphSidebar height={effectiveHeight} fill={fillHeight}>
           {nodeLabelBuckets.size > 1 && (
             <ControlsBlock data-testid="graph-visibility-controls">
               <h5>{t('graph.visibilityHeading')}</h5>
@@ -1394,7 +1363,7 @@ export const GraphView: React.FC<Props> = ({
           ) : (
             <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
           )}
-        </Side>
+        </GraphSidebar>
       )}
     </Wrap>
   )
