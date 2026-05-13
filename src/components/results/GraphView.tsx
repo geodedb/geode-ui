@@ -26,6 +26,7 @@ import type { Neighbor, Selected } from './graph/GraphInspector'
 import { NodeContextMenu, NodeContextMenuAction } from './graph/NodeContextMenu'
 import { useNodeContextMenu } from './graph/useNodeContextMenu'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
+import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
 import {
   Canvas,
   CanvasArea,
@@ -419,6 +420,18 @@ export const GraphView: React.FC<Props> = ({
   // (so the user can only restrict to a label they can see).
   const labelOptionList = Array.from(nodeLabelBuckets.keys()).filter(Boolean)
 
+  // Keyboard navigation on the canvas: Tab / Shift+Tab (and ArrowRight /
+  // ArrowLeft aliases) walk the currently-selected node's neighbour
+  // list; Enter opens the expand popover for the selection. Mounted on
+  // the Canvas via tabIndex={0} + onKeyDown below.
+  const { handleKey } = useGraphKeyboardNav({
+    selectedId:
+      selected && selected.data.id != null ? String(selected.data.id) : null,
+    neighborIds: neighbors.map((n) => n.id),
+    onJump: onJumpNeighbor,
+    onExpand: (id) => setExpandFor(id),
+  })
+
   const empty = elements.length === 0 && !error
   // Reuse the same hash + palette the canvas uses so swatches are
   // exact-pixel matches to the node fills.
@@ -462,6 +475,8 @@ export const GraphView: React.FC<Props> = ({
             $height={effectiveHeight}
             role="img"
             aria-label={t('graph.canvasAria')}
+            tabIndex={0}
+            onKeyDown={handleKey}
           />
           {empty && (
             <Overlay data-testid="graph-empty-state">
