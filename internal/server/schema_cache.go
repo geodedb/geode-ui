@@ -54,12 +54,27 @@ type schemaCacheEntry struct {
 	expiry time.Time
 }
 
-// schemaCache is a small mutex-guarded TTL cache fronted by a
+// schemaCache is a small RWMutex-guarded TTL cache fronted by a
 // singleflight.Group. The stored []string slices are treated as
 // immutable once cached — callers must not mutate the returned slice
 // (Labels/EdgeTypes only read it).
+//
+// PERF-2026-05-13-07 (#223): read-heavy by design (singleflight already
+// collapses the upstream-query burst, so the mutex on cache HITS is
+// pure overhead under multi-reader load). The lock is sync.RWMutex so
+// every cache hit takes RLock and concurrent readers don't serialise.
+// set() and invalidateAll() take the writer lock; getOrLoad's
+// re-check-after-singleflight also uses get()'s RLock.
+//
+// The TTL-expired branch in get() degrades the read to a writer
+// promotion: when an entry is past expiry we delete it. To stay
+// race-free under RWMutex we release the RLock, take the Lock,
+// re-check (a concurrent writer may have already replaced the entry
+// with a fresh load), and only then delete. This costs one extra
+// trip through the lock for the rare expiry path; the steady-state
+// hit path stays single-RLock.
 type schemaCache struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	entries map[schemaCacheKey]schemaCacheEntry
 	sf      singleflight.Group
 	// now is a test seam for the TTL clock; nil means time.Now.
@@ -78,17 +93,28 @@ func (c *schemaCache) clock() time.Time {
 }
 
 // get returns the cached value for key when present and not expired.
+//
+// Hot path: RLock + map lookup + optional expiry check. Expired entries
+// are deleted under a Write-lock upgrade (rare path).
 func (c *schemaCache) get(key schemaCacheKey) ([]string, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
 	e, ok := c.entries[key]
 	if !ok {
+		c.mu.RUnlock()
 		return nil, false
 	}
 	if c.clock().After(e.expiry) {
-		delete(c.entries, key)
+		c.mu.RUnlock()
+		// Expired — drop it. Re-check under the writer lock because a
+		// concurrent set() may have just installed a fresh entry.
+		c.mu.Lock()
+		if cur, stillOK := c.entries[key]; stillOK && c.clock().After(cur.expiry) {
+			delete(c.entries, key)
+		}
+		c.mu.Unlock()
 		return nil, false
 	}
+	c.mu.RUnlock()
 	return e.value, true
 }
 
@@ -129,7 +155,7 @@ func (c *schemaCache) getOrLoad(key schemaCacheKey, loader func() ([]string, err
 // (create/update/delete) lands, since the connection-profile -> graph
 // mapping is not 1:1 with profilestore record IDs and scoping the
 // invalidation would be error-prone; clearing all is cheap (the cache is
-// tiny) and correctness-preserving.
+// tiny) and correctness-preserving. Takes the writer lock.
 func (c *schemaCache) invalidateAll() {
 	c.mu.Lock()
 	if len(c.entries) != 0 {
