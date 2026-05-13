@@ -123,7 +123,7 @@ test.describe('mcp', () => {
     expect(toolsResp, 'tools/list response missing').toBeDefined()
     test.skip(
       Boolean(toolsResp?.error),
-      `MCP tools/list returned error: ${JSON.stringify(toolsResp?.error)}`
+      `MCP tools/list not in Geode v0.5.15 (auth-DDL/CI release); tracked GAP-005 / GAP-016 -- upstream response: ${JSON.stringify(toolsResp?.error)}`
     )
     const tools = (toolsResp?.result as { tools?: unknown[] } | undefined)
       ?.tools
