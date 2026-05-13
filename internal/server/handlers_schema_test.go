@@ -39,6 +39,25 @@ type fakeConn struct{ d *fakeDriver }
 
 func (d *fakeDriver) Open(_ string) (driver.Conn, error) { return &fakeConn{d: d}, nil }
 
+// swappableDriver is a driver.Driver wrapper registered exactly once per
+// name with database/sql. It delegates every Open call to the current
+// target *fakeDriver. Tests can swap the target via registerFakeDriver
+// (or its synonym setFakeDriver) without re-invoking sql.Register, which
+// would panic on duplicate names. The atomic.Pointer makes the swap
+// race-detector clean across iterations (-count=N) and concurrent reads
+// from the database/sql pool.
+type swappableDriver struct {
+	target atomic.Pointer[fakeDriver]
+}
+
+func (s *swappableDriver) Open(name string) (driver.Conn, error) {
+	d := s.target.Load()
+	if d == nil {
+		return nil, errors.New("fakeDriver: no target driver bound")
+	}
+	return d.Open(name)
+}
+
 func (c *fakeConn) Prepare(string) (driver.Stmt, error) { return nil, errors.New("not used") }
 func (c *fakeConn) Close() error                        { return nil }
 func (c *fakeConn) Begin() (driver.Tx, error)           { return nil, errors.New("not used") }
@@ -81,16 +100,45 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 }
 
 var (
+	// registerOnce gates one-shot sql.Register calls for fixed-driver
+	// helpers (e.g. registerTxDriver, newUserStubServer) that don't need
+	// the per-iteration swap semantics. database/sql.Register panics on
+	// duplicate names. Tests that rely on `d.queries` being reset between
+	// -count=N iterations must use registerFakeDriver instead (see
+	// fakeDriverRegistry below).
 	registerOnce sync.Map // driverName -> struct{}
+
+	// fakeDriverRegistry maps driverName -> *swappableDriver. Each unique
+	// name is registered with database/sql exactly once per process; the
+	// inner *fakeDriver target is hot-swapped on each registerFakeDriver
+	// call. This keeps `go test -race -count=N` clean for the schema-cache
+	// test family: the second and later iterations see their own fresh
+	// *fakeDriver (queries counter reset) instead of accidentally reusing
+	// iteration 1's driver because sql.Register is a one-shot.
+	fakeDriverRegistry sync.Map // driverName -> *swappableDriver
 )
 
-// registerFakeDriver registers d under name with database/sql at most once
-// per process. database/sql.Register panics on duplicate names.
+// registerFakeDriver binds d as the active *fakeDriver for the given
+// driver name. The underlying database/sql registration happens at most
+// once per name per process (database/sql.Register panics on duplicate
+// names). Subsequent calls swap the live target so each test iteration
+// sees its own driver instance — required for -count>=2 stress runs.
 func registerFakeDriver(name string, d *fakeDriver) {
-	if _, loaded := registerOnce.LoadOrStore(name, struct{}{}); loaded {
+	if existing, loaded := fakeDriverRegistry.Load(name); loaded {
+		existing.(*swappableDriver).target.Store(d)
 		return
 	}
-	sql.Register(name, d)
+	sd := &swappableDriver{}
+	sd.target.Store(d)
+	// LoadOrStore guards against a concurrent first-time registration of
+	// the same name. The losing goroutine just swaps its target into the
+	// winner's wrapper.
+	actual, loaded := fakeDriverRegistry.LoadOrStore(name, sd)
+	if loaded {
+		actual.(*swappableDriver).target.Store(d)
+		return
+	}
+	sql.Register(name, sd)
 }
 
 // stubPool implements server.Pool returning a *sql.DB tied to a fakeDriver.
