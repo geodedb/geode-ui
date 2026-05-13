@@ -174,6 +174,18 @@ export function createCytoscapeStyle(
       },
     },
     {
+      // Pinned nodes get a doubled border in the theme's warning color so
+      // they read as "locked" without overpowering the per-label fill.
+      // Distinct from the selected/emphasized border (solid, primary) so
+      // a node that's both pinned and selected stays distinguishable.
+      selector: 'node.gv-pinned',
+      style: {
+        'border-width': 3,
+        'border-style': 'double',
+        'border-color': theme.colors.warning,
+      },
+    },
+    {
       selector: '.gv-faded',
       style: {
         opacity: fadedOpacity,

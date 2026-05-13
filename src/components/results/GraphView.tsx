@@ -15,6 +15,7 @@ import { GraphSidebarContents } from './graph/GraphSidebarContents'
 import { useGraphElements } from './graph/useGraphElements'
 import { useGraphActions } from './graph/useGraphActions'
 import { useGraphCytoscape } from './graph/useGraphCytoscape'
+import { usePinnedNodes } from './graph/usePinnedNodes'
 import {
   COSE_NODE_LIMIT,
   LAYOUTS,
@@ -192,6 +193,12 @@ export const GraphView: React.FC<Props> = ({
     t,
   })
 
+  // Result-scoped pin bookkeeping. The hook owns the locked-id Set; the
+  // sig-keyed reset effect below clears it on a new query result, and
+  // useGraphCytoscape calls `reapplyAll` after a rebuild / layout swap
+  // so the lock survives a fresh cy core.
+  const pinning = usePinnedNodes({ cyRef })
+
   // GAP-01 / GAP-07: rebuild key combines row_count with the query
   // text. Two queries with the same row count would otherwise leave a
   // stale graph on the canvas. Cluster toggle is folded in so toggling
@@ -214,6 +221,13 @@ export const GraphView: React.FC<Props> = ({
     setHidden(new Set())
     setCollapsed(new Map())
     setExploringId(null)
+    // Pinned ids belong to the graph being replaced — drop them too.
+    // `clear()` calls apply() per id; cyRef may be null (build effect
+    // has torn down the old core but not built the new one yet) or it
+    // may point at the fresh core. Either is fine — apply() is null-safe
+    // and the new core won't contain any of those ids yet anyway, so
+    // node.empty() short-circuits.
+    pinning.clear()
     if (
       layoutRef.current === DEFAULT_LAYOUT &&
       elementsRef.current.length > COSE_NODE_LIMIT
@@ -248,6 +262,7 @@ export const GraphView: React.FC<Props> = ({
     setSelected,
     setError,
     setCounts,
+    reapplyPins: pinning.reapplyAll,
     t,
   })
 

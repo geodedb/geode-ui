@@ -48,6 +48,11 @@ export type UseGraphCytoscapeArgs = {
   setSelected: React.Dispatch<React.SetStateAction<Selected | null>>
   setError: (msg: string | null) => void
   setCounts: (counts: { nodes: number; edges: number }) => void
+  // Optional hook into the pinned-node bookkeeping. Fires after a
+  // rebuild (fresh core has no `locked` memory) and after a layout
+  // rerun (defensive — Cytoscape preserves lock on the same core, but
+  // re-applying is a cheap idempotent op).
+  reapplyPins?: () => void
   t: TFn
 }
 
@@ -81,6 +86,7 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     setSelected,
     setError,
     setCounts,
+    reapplyPins,
     t,
   } = args
 
@@ -147,6 +153,9 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
         applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
         applySelectionMode(cy, selectionModeRef.current)
         setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
+        // Re-apply pinned-node bookkeeping against the fresh core —
+        // Cytoscape doesn't carry `locked` state across teardown/rebuild.
+        reapplyPins?.()
       } catch (e: unknown) {
         // GAP-04: surface the failure as a visible banner instead of an
         // uncaught console rejection.
@@ -193,7 +202,12 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     if (!cy) return
     cy.layout(layoutConfig(layout)).run()
     cy.fit(undefined, 24)
-  }, [cyRef, layout])
+    // Defensive: re-apply pins after a layout switch. Cytoscape keeps
+    // `locked` across .layout().run() on the same core, so this is
+    // typically a no-op — but it's a cheap idempotent guard and keeps
+    // the .gv-pinned class glued to its node.
+    reapplyPins?.()
+  }, [cyRef, layout, reapplyPins])
 
   // Canvas interaction-mode changes — cheap; just flips two cy flags.
   useEffect(() => {
