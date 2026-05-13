@@ -13,6 +13,12 @@ const skipIfNoAdmin = async (page: Page): Promise<void> => {
   )
 }
 
+// Geode v0.5.15 enables CREATE / DROP ROLE and GRANT / REVOKE over the
+// GQL wire. CREATE POLICY remains upstream-deferred per
+// `geode/docs/GQL_AUTH_DDL.md` Limitations #3 (RLS policy DDL is parsed
+// but `handlePolicyCreate` still returns wire_feature_missing). The
+// policies describe block is therefore fixme'd against the upstream
+// gap, while roles + grants run live.
 authedTest.describe('admin / roles', () => {
   authedTest(
     'roles page renders and exposes the New role button',
@@ -27,6 +33,10 @@ authedTest.describe('admin / roles', () => {
 })
 
 authedTest.describe('admin / policies', () => {
+  authedTest.fixme(
+    true,
+    'policies (CREATE POLICY) still upstream-deferred per docs/GQL_AUTH_DDL.md Limitations #3'
+  )
   authedTest(
     'policies page renders and exposes the New policy button',
     async ({ authedPage: page }) => {
@@ -52,18 +62,13 @@ authedTest.describe('admin / grants', () => {
   )
 })
 
-// Phase-1 reproduction: against the running v0.5.11 stack, the connected
-// Geode build does not accept CREATE ROLE / CREATE POLICY / GRANT over
-// the wire. The SPA learns this from GET /api/v1/capabilities and gates
-// the "+ New role", "+ New policy", and Grants Apply/Revoke CTAs (hide,
-// or render disabled with an explanatory title) plus an inline
-// "unsupported" note on each panel.
-//
-// On the current (pre-fix) build these fail: the CTAs render enabled and
-// there is no capabilities-driven gating.
-authedTest.describe('admin / RBAC CTA gating (Phase 1)', () => {
+// Geode v0.5.15: capabilities reports admin_writable.{roles,grants}=true.
+// The SPA must NOT render the unsupported affordance and the New role /
+// Apply / Revoke CTAs must be operable. Policies remain gated because
+// admin_writable.policies=false (CREATE POLICY upstream-deferred).
+authedTest.describe('admin / RBAC CTA gating (v0.5.15)', () => {
   authedTest(
-    '"+ New role" is gated against the connected Geode build',
+    '"+ New role" is enabled and unsupported banner is absent',
     async ({ authedPage: page }) => {
       await page.goto('/admin/roles')
       await page
@@ -71,15 +76,10 @@ authedTest.describe('admin / RBAC CTA gating (Phase 1)', () => {
         .first()
         .waitFor({ timeout: 6_000 })
         .catch(() => undefined)
-      await expect(sel.adminRolesUnsupported(page)).toBeVisible({
-        timeout: 6_000,
-      })
+      await expect(sel.adminRolesUnsupported(page)).toHaveCount(0)
       const btn = sel.adminNewRoleBtn(page)
-      if (await btn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await expect(btn).toBeDisabled()
-        const title = await btn.getAttribute('title')
-        expect(title && title.length > 0).toBeTruthy()
-      }
+      await expect(btn).toBeVisible({ timeout: 6_000 })
+      await expect(btn).toBeEnabled()
     }
   )
 
@@ -105,20 +105,16 @@ authedTest.describe('admin / RBAC CTA gating (Phase 1)', () => {
   )
 
   authedTest(
-    'Grants Apply/Revoke are gated against the connected Geode build',
+    'Grants Apply/Revoke are enabled under v0.5.15',
     async ({ authedPage: page }) => {
       await page.goto('/admin/grants')
-      await expect(sel.adminGrantsUnsupported(page)).toBeVisible({
-        timeout: 6_000,
-      })
+      await expect(sel.adminGrantsUnsupported(page)).toHaveCount(0)
       const apply = sel.adminGrantsApplyBtn(page)
       const revoke = sel.adminGrantsRevokeBtn(page)
-      if (await apply.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await expect(apply).toBeDisabled()
-      }
-      if (await revoke.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await expect(revoke).toBeDisabled()
-      }
+      await expect(apply).toBeVisible({ timeout: 6_000 })
+      await expect(revoke).toBeVisible()
+      await expect(apply).toBeEnabled()
+      await expect(revoke).toBeEnabled()
     }
   )
 })
