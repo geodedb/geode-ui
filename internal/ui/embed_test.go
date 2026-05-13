@@ -9,8 +9,47 @@ import (
 	"net/http/httptest"
 	"path"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
+
+// countingFS wraps an fs.FS and counts every Stat() call, keyed by
+// requested path. Used by TestEmbedHandler_CachesStat to assert that
+// the second HTTP request for a static asset does NOT call fs.Stat a
+// second time (the FileInfo is cached).
+type countingFS struct {
+	inner fs.FS
+	stats sync.Map // key: string path, value: *atomic.Int64
+}
+
+func (c *countingFS) statCount(name string) int64 {
+	if v, ok := c.stats.Load(name); ok {
+		return v.(*atomic.Int64).Load()
+	}
+	return 0
+}
+
+func (c *countingFS) Open(name string) (fs.File, error) {
+	return c.inner.Open(name)
+}
+
+// fs.StatFS optimisation: fs.Stat dispatches to StatFS.Stat if
+// implemented, avoiding an Open+Stat+Close round trip. Implementing
+// StatFS lets us count the package-level fs.Stat(c, name) calls
+// directly.
+func (c *countingFS) Stat(name string) (fs.FileInfo, error) {
+	var n *atomic.Int64
+	if v, ok := c.stats.Load(name); ok {
+		n = v.(*atomic.Int64)
+	} else {
+		ni := &atomic.Int64{}
+		actual, _ := c.stats.LoadOrStore(name, ni)
+		n = actual.(*atomic.Int64)
+	}
+	n.Add(1)
+	return fs.Stat(c.inner, name)
+}
 
 func TestHandlerServesIndexForUnknownPaths(t *testing.T) {
 	h, err := Handler()
@@ -250,6 +289,93 @@ func TestAcceptsGzip(t *testing.T) {
 				t.Fatalf("acceptsGzip(%q) = %v, want %v", c.hdr, got, c.want)
 			}
 		})
+	}
+}
+
+// TestEmbedHandler_CachesStat pins PERF-2026-05-13-02 / GAP-022 /
+// PSR-F5 (#103): the embed FS is immutable post-build, so a fs.Stat
+// for a static asset path should hit on the first request and serve
+// out of an in-memory cache thereafter. Two requests for the same
+// existing path must produce exactly ONE fs.Stat call to the
+// underlying FS.
+//
+// Negative results (missing-asset 404s) are NOT cached — caching them
+// would let attacker-shaped URLs grow the map unboundedly. The
+// 404 path is exercised separately in TestEmbedHandler_DoesNotCache404.
+//
+// The test exercises /favicon.ico (a real shipped asset whose path is
+// stable across builds and which avoids http.FileServer's index.html
+// → / redirect quirk).
+func TestEmbedHandler_CachesStat(t *testing.T) {
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		t.Fatalf("fs.Sub: %v", err)
+	}
+	cfs := &countingFS{inner: sub}
+	h, err := handlerFS(cfs)
+	if err != nil {
+		t.Fatalf("handlerFS: %v", err)
+	}
+	const assetURL = "/favicon.ico"
+	const assetPath = "favicon.ico"
+	// First request — must Stat the underlying FS at least once.
+	req := httptest.NewRequest(http.MethodGet, assetURL, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("first request status=%d want 200", rec.Code)
+	}
+	first := cfs.statCount(assetPath)
+	if first < 1 {
+		t.Fatalf("first request expected ≥1 Stat call, got %d", first)
+	}
+
+	// Second request to the same path. The cache must hit; no new
+	// Stat call on the underlying FS.
+	req = httptest.NewRequest(http.MethodGet, assetURL, nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second request status=%d want 200", rec.Code)
+	}
+	second := cfs.statCount(assetPath)
+	if second != first {
+		t.Fatalf("second request Stat count=%d want %d (cache must hit; no new Stat)",
+			second, first)
+	}
+}
+
+// TestEmbedHandler_DoesNotCache404 guards the negative-result cache
+// boundary: missing asset-shaped paths must 404 every time and must
+// NOT add an entry to the Stat cache. Caching 404s would let an
+// attacker grow the map without bound by requesting random
+// `*.js`/`*.css` filenames.
+func TestEmbedHandler_DoesNotCache404(t *testing.T) {
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		t.Fatalf("fs.Sub: %v", err)
+	}
+	cfs := &countingFS{inner: sub}
+	h, err := handlerFS(cfs)
+	if err != nil {
+		t.Fatalf("handlerFS: %v", err)
+	}
+	const missing = "/totally-not-a-real-asset-abc123.js"
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, missing, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("iter %d: status=%d want 404", i, rec.Code)
+		}
+	}
+	// Each 404 request should have hit the underlying FS (no caching of
+	// missing entries). Allow >=3, no exact equality, because internal
+	// implementation may make small adjustments — what matters is that
+	// the count is NOT 1 (which would indicate negative caching).
+	got := cfs.statCount(strings.TrimPrefix(missing, "/"))
+	if got < 3 {
+		t.Fatalf("missing asset Stat count=%d want ≥3 (negative results must not be cached)", got)
 	}
 }
 

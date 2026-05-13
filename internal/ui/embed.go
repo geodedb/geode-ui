@@ -98,18 +98,56 @@ var gzipWriterPool = sync.Pool{
 //     `Accept-Encoding: gzip`; the response then carries
 //     `Content-Encoding: gzip` + `Vary: Accept-Encoding`. The gzip
 //     writers are pooled so a hot path doesn't churn allocations.
+//   - PERF-2026-05-13-02 / GAP-022 / PSR-F5 (#103): the embed FS is
+//     immutable post-build, so the per-request `fs.Stat` lookups are
+//     cached in a `sync.Map`. POSITIVE results only — 404s are not
+//     cached to keep attacker-shaped URLs from growing the map
+//     unboundedly.
 func Handler() (http.Handler, error) {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return nil, err
 	}
+	return handlerFS(sub)
+}
+
+// handlerFS is the implementation factory of Handler split out so tests
+// can inject an instrumented fs.FS to observe the Stat-cache contract.
+// The cache (sync.Map of cleaned-path -> fs.FileInfo) is closed over
+// by the returned handler so each Handler/handlerFS construction gets
+// its own cache (and the cache is GC'd when the handler is dropped).
+func handlerFS(sub fs.FS) (http.Handler, error) {
 	fileServer := http.FileServer(http.FS(sub))
+	// statCache holds POSITIVE Stat results only. The embed.FS is
+	// immutable post-build (compiled in at link time), so a successful
+	// FileInfo is valid forever. We never cache a miss — a missing
+	// entry must re-Stat so a future positive result is not shadowed
+	// by a stale negative, and (more importantly for security) so an
+	// attacker cannot grow the map without bound by requesting random
+	// `*.js` / `*.css` filenames.
+	var statCache sync.Map // key: string (cleaned path) → value: fs.FileInfo
+	statCached := func(name string) (fs.FileInfo, error) {
+		if v, ok := statCache.Load(name); ok {
+			return v.(fs.FileInfo), nil
+		}
+		info, err := fs.Stat(sub, name)
+		if err != nil {
+			return nil, err
+		}
+		// First-write-wins is fine: two concurrent callers may both
+		// Stat the same path on a cold miss; the second's LoadOrStore
+		// keeps the first's *fs.FileInfo. The FileInfo is read-only
+		// for all callers (we only inspect Size()), so this is safe.
+		actual, _ := statCache.LoadOrStore(name, info)
+		return actual.(fs.FileInfo), nil
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := strings.TrimPrefix(r.URL.Path, "/")
 
-		// Resolve the on-disk target and its size in one stat. For SPA
-		// fallback paths the target is index.html.
-		info, statErr := fs.Stat(sub, clean)
+		// Resolve the on-disk target and its size in one Stat (cached
+		// on subsequent hits). For SPA fallback paths the target is
+		// index.html.
+		info, statErr := statCached(clean)
 		if statErr != nil {
 			ext := strings.ToLower(path.Ext(clean))
 			if _, isAsset := assetExts[ext]; isAsset {
@@ -117,7 +155,7 @@ func Handler() (http.Handler, error) {
 				return
 			}
 			r.URL.Path = "/"
-			info, _ = fs.Stat(sub, "index.html")
+			info, _ = statCached("index.html")
 		}
 
 		// Defeat HTML caching so the bundle filenames in the served
