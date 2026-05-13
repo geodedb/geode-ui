@@ -122,6 +122,11 @@ export const en = {
     actionHide: 'Hide',
     actionCollapse: 'Collapse',
     actionExploreNeighbours: 'Explore neighbours',
+    menuExpand: 'Expand neighbours…',
+    menuFocus: 'Focus on this node',
+    menuPin: 'Pin position',
+    menuUnpin: 'Unpin',
+    menuCopyId: 'Copy id',
     exploreNeighboursLoading: 'Exploring…',
     exploreNeighboursFailed: 'Could not load neighbours: {{message}}',
     exploreNeighboursUnavailable:
