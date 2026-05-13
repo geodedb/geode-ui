@@ -129,7 +129,14 @@ make web-dev         # webpack dev server (port 3000, proxies to :8080)
 ## E2E testing
 
 The repo ships a docker-compose stack and a Playwright suite that drives the
-full UI surface against a real Geode v0.5.11 database.
+full UI surface against a real Geode database. **Minimum: v0.5.15 for admin
+DDL + role + grant management; v0.5.x is sufficient for read-only query
+flows.** The SPA gates admin CTAs from the upstream `SHOW CAPABILITIES` probe
+(surfaced via `GET /api/v1/capabilities`), so older engines render with the
+admin write affordances disabled and an inline "not supported" note instead
+of failing outright. See [docs/ARCHITECTURE.md → Server-side admin DDL
+(Geode v0.5.15+)](docs/ARCHITECTURE.md) for the supported operations and
+the upstream divergences (e.g. CREATE POLICY remains upstream-deferred).
 
 ```bash
 make e2e-deps        # build geode binary on the host (one-time, ~5 min cold)
@@ -143,7 +150,7 @@ Services brought up by the stack:
 
 | Service     | Port           | Purpose                          |
 |-------------|----------------|----------------------------------|
-| geode       | 3141/udp       | Geode v0.5.11 graph database     |
+| geode       | 3141/udp       | Geode v0.5.15 graph database     |
 | geode-init  | one-shot       | Bootstraps admin + seeds movies  |
 | geode-ui    | 8080           | Go API + embedded React SPA      |
 | geode-mcp   | 8090           | MCP TCP bridge (socat to stdio)  |
@@ -167,9 +174,11 @@ specs / 31 tests:
 - `09-ops.spec.ts` — backups/migrations/audit/restore
 - `10-mcp-endpoint.spec.ts` — MCP TCP bridge JSON-RPC smoke
 
-Some tests gracefully skip when Geode v0.5.11 returns
-`securex: insufficient role` for admin endpoints — this is a known
-engine gap, not a UI regression.
+Some tests gracefully skip on upstream-deferred surfaces -- CREATE
+POLICY (admin_writable.policies=false on v0.5.15), the dedicated `audit`
+role (not in the v0.5.15 built-in set), and MCP `tools/list`. Each skip
+emits the GAP-### tracking id so dashboard reviewers can match the trace
+output against `docs/GAP_ANALYSIS.md` without spelunking the spec.
 
 ## Documentation
 

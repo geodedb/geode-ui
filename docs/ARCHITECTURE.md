@@ -46,6 +46,96 @@ openssl rand -hex 32
 The binary refuses to start without the flag set. Token TTL defaults
 to 8 hours and is bounded to `1m..24h` via `-jwt-ttl`.
 
+### Server-side admin DDL (Geode v0.5.15+)
+
+The 2026-05-13 v0.5.15 auth-DDL integration pass landed wire-side admin
+operations over GQL. The handler layer (`internal/server/handlers_users.go`,
+`handlers_roles.go`, `handlers_grants.go`, `handlers_policies.go`) emits
+the v0.5.15 grammar (see upstream
+[`geode/docs/GQL_AUTH_DDL.md`](https://gitlab.com/devnw/codepros/geode/-/blob/main/docs/GQL_AUTH_DDL.md))
+and the SPA gates CTAs via the typed `GET /api/v1/capabilities` probe
+(`admin_writable.{users,roles,grants,policies}`). On older Geode builds
+the probe returns `false` for unsupported surfaces and the affordances
+render disabled with an inline "not supported" note instead of failing
+on first click.
+
+Supported on v0.5.15:
+
+- `CREATE USER <name> SET PASSWORD '<pw>' [EMAIL '<email>'] [ROLE <role>]`
+- `ALTER USER <name> SET PASSWORD '<pw>'`
+- `ALTER USER <name> SET ROLE <role>`
+- `ALTER USER <name> SET EMAIL '<email>'`
+- `ALTER USER <name> ENABLE` / `DISABLE`
+- `DROP USER [IF EXISTS] <name>`
+- `SHOW USERS` -- columns: `username, email, role, active`
+- `CREATE ROLE <name> [SET DESCRIPTION '<text>']`
+- `DROP ROLE [IF EXISTS] <name>`
+- `SHOW ROLES` -- single column `role_name` (v0.5.15) plus legacy
+  multi-column emit (`name, description, permissions`) for back-compat
+- `GRANT ROLE <role> TO <user>`
+- `GRANT {READ|WRITE|SCHEMA|ALL} [ON GRAPH <graph>] TO <user>`
+- `REVOKE {...} [ON GRAPH <graph>] FROM <user>`
+- `SHOW PERMISSIONS [FOR <user>]` -- bare `FOR <user>`, no `USER` keyword
+
+Persistence: `User`/`Role`/`Permission` nodes live in the internal
+`__geode_security` graph and survive restarts. The HMAC chain protects
+each record so a tampered row fails verification at server start
+(`AuthGraphManager::verifyChain` at `src/server/server_init.zig`).
+
+Upstream-truth divergences from this integration run that future
+maintainers should know about:
+
+1. **No working delimited-identifier delimiter on the GQL wire.** v0.5.15's
+   `src/gql/lexer.zig` defines `scanQuotedIdentifier` but the dispatch
+   table never calls it -- `"x"` is parsed as `string_lit`, backticks
+   are illegal. `quoteIdent` therefore validates inputs against the
+   identifier shape `[A-Za-z_0-9][A-Za-z_0-9-]*` and emits bare. Anything
+   outside the shape (whitespace, dots, slashes, multi-byte) is rejected
+   at the handler boundary with 400 `invalid_<field>`.
+2. **Bootstrap password violates the wire-side passphrase policy.**
+   `geode auth init` generates a 32-hex bootstrap admin password, but
+   `geode_auth_lib.zig::geodeSecure` enforces ≥20 chars, ≥3 words, mixed
+   case after the first successful auth. Result: the bootstrap auth path
+   succeeds, then `checkStoredPasswordMeetsCurrentPolicy` flips
+   `password_reset_required = true` and returns `error.PasswordResetRequired`
+   with no session -- locking the operator out of any wire-side `ALTER
+   USER`. The e2e stack works around this by running the offline
+   `geode user reset-password` in the container entrypoint (clears the
+   reset flag, applies the relaxed CLI password policy).
+3. **`SHOW USERS` `role` is singular.** The handler lifts the singular
+   `role` column from upstream `geode.auth.user_list` into the typed
+   `[]Roles` slice the SPA expects.
+4. **`SHOW USERS` uses `active` (bool), not `disabled`.** The handler
+   inverts on projection.
+5. **`SHOW ROLES` may emit one column (`role_name`) or many.** The
+   handler accepts both shapes and normalises to `{name, description,
+   permissions}` for the SPA.
+6. **`SHOW PERMISSIONS FOR` takes a bare username**, no `USER` keyword.
+7. **CREATE POLICY is upstream-deferred.** `admin_writable.policies=false`
+   on v0.5.15 -- `handlePolicyCreate` (`src/execution/auth_dispatch.zig`)
+   still returns `wire_feature_missing`. SPA gates the New Policy CTA;
+   e2e spec marks the policies describe block as `test.fixme`.
+8. **`GRANT <priv> TO <user>` without an `ON GRAPH` clause parses but
+   does not persist.** Upstream `handleGrantRevoke` returns an
+   explanatory status row instead of an error. SPA treats this as a
+   200 (audit log captures the no-op).
+9. **No dedicated `audit` role.** Built-in v0.5.15 role set is
+   `{admin, user, readwrite, readonly}`. `/api/v1/audit` may 403 even
+   for admins because the audit permissions are gated by the missing
+   role. Tracked under GAP-004 / GAP-015.
+10. **Login `roles` is `null` for non-bootstrap admins.**
+    `authenticateUpstream` (`internal/server/handlers_auth.go`) does not
+    yet query `SHOW USERS` to populate the JWT `roles` claim. The
+    `-admin-users` CLI flag is the working fallback -- supply a
+    comma-separated list of usernames that should receive the `admin`
+    role on login.
+11. **Login expects `application/x-www-form-urlencoded`**, not JSON. The
+    `LoginReq` schema is form-encoded per genapi `BodyMode: "form"`.
+
+Open follow-ups: re-emit `roles` from `SHOW USERS` on login (close
+divergence #10), wire-side delimited-identifier support upstream
+(divergence #1), CREATE POLICY persistence (divergence #7).
+
 ## Performance SLOs (assumed, pending real telemetry)
 
 > **These numbers are *assumed*, not measured.** There is no production
