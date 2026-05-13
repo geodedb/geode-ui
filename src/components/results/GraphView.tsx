@@ -31,6 +31,7 @@ import {
   resolveNodeLabel,
   typeOptions,
 } from '../../lib/graphResult'
+import { useGraphPathMode } from './graph/useGraphPathMode'
 
 // Register the layout extensions once, at module load. cytoscape.use is
 // idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
@@ -612,23 +613,6 @@ function applySelectionMode(cy: Core, mode: 'pan' | 'box'): void {
   }
 }
 
-// ----- path mode -----
-//
-// Path mode lets the operator click two nodes; GraphView runs Cytoscape's
-// built-in Dijkstra on the *rendered* graph and highlights the shortest
-// path between them (dimming everything else). State machine:
-//   off → pickSource → pickTarget → shown → (Clear) → off
-type PathState =
-  | { phase: 'off' }
-  | { phase: 'pickSource' }
-  | { phase: 'pickTarget'; sourceId: string }
-  | { phase: 'shown'; from: string; to: string; hops: number | null }
-
-// Strip the path-highlight classes from every element. Idempotent.
-function clearPathHighlight(cy: Core): void {
-  cy.elements().removeClass('highlighted').removeClass('dimmed')
-}
-
 function applyLabels(
   cy: Core,
   nodePrefs: Record<string, string>,
@@ -901,11 +885,6 @@ export const GraphView: React.FC<Props> = ({
   // "Explore neighbours" (null when idle). Used to show a per-button
   // loading state and to ignore overlapping clicks.
   const [exploringId, setExploringId] = useState<string | null>(null)
-  // Path-mode state machine (off / pickSource / pickTarget / shown).
-  // Result-scoped — a new query result resets it to 'off'.
-  const [pathState, setPathState] = useState<PathState>({ phase: 'off' })
-  const pathStateRef = useRef(pathState)
-  pathStateRef.current = pathState
   // Whether the inspector/controls sidebar is collapsed. Session-local
   // (defaults expanded); not persisted. Useful in both layouts but most
   // impactful in fill mode where it lets the canvas claim the full
@@ -947,6 +926,18 @@ export const GraphView: React.FC<Props> = ({
   // and the auto-pick layout is fcose (best with compound graphs). Sticky.
   const clusterByLabel = useGraphPrefs((s) => s.clusterByLabel)
   const setClusterByLabel = useGraphPrefs((s) => s.setClusterByLabel)
+  // Path-mode state machine + handlers (off / pickSource / pickTarget /
+  // shown). Result-scoped — `resetPath` is invoked from the sig-keyed
+  // reset effect below alongside the other per-result resets. The hook
+  // closes over the cyRef so the tap-handler ref tracks the latest cy.
+  const {
+    pathState,
+    pathTapRef,
+    onTogglePathMode,
+    exitPathMode,
+    resetPath,
+    pathStatusText,
+  } = useGraphPathMode({ cyRef, t })
   // Live counts surfaced in the toolbar. Reflect what's actually in
   // the Cytoscape core (post-build, post-filter), not the raw resp,
   // so users see the effect of layout/filter changes.
@@ -1053,7 +1044,7 @@ export const GraphView: React.FC<Props> = ({
     // A new query result drops any in-progress / shown path. The old
     // core (which carried the highlight classes) is torn down by the
     // build effect, so just reset the state machine here.
-    setPathState({ phase: 'off' })
+    resetPath()
     // …and the hide/collapse bookkeeping — those node ids belong to the
     // graph that's being replaced.
     setHidden(new Set())
@@ -1348,65 +1339,6 @@ export const GraphView: React.FC<Props> = ({
     if (next) setLayout('fcose')
   }
 
-  // Path mode — enter / exit and the per-node-tap state advance. The
-  // tap handler registered in the build effect calls handlePathNodeTap
-  // via pathTapRef so it always reads the current pathState; when path
-  // mode is off it returns false and the tap falls through to the
-  // normal "select for inspector" behaviour.
-  const enterPathMode = (): void => {
-    const cy = cyRef.current
-    if (cy) clearPathHighlight(cy)
-    setPathState({ phase: 'pickSource' })
-  }
-  const exitPathMode = (): void => {
-    const cy = cyRef.current
-    if (cy) clearPathHighlight(cy)
-    setPathState({ phase: 'off' })
-  }
-  const onTogglePathMode = (): void => {
-    if (pathState.phase === 'off') {
-      enterPathMode()
-    } else {
-      exitPathMode()
-    }
-  }
-  const handlePathNodeTap = (nodeId: string): boolean => {
-    const state = pathStateRef.current
-    if (state.phase === 'off') return false
-    const cy = cyRef.current
-    if (!cy) return true
-    if (state.phase === 'pickSource' || state.phase === 'shown') {
-      clearPathHighlight(cy)
-      setPathState({ phase: 'pickTarget', sourceId: nodeId })
-      return true
-    }
-    // pickTarget — run Dijkstra from the recorded source to this node.
-    const src = cy.getElementById(state.sourceId)
-    const dst = cy.getElementById(nodeId)
-    clearPathHighlight(cy)
-    const dij = cy.elements().dijkstra({ root: src, directed: false })
-    const path = dij.pathTo(dst)
-    if (!path || path.length === 0) {
-      setPathState({
-        phase: 'shown',
-        from: state.sourceId,
-        to: nodeId,
-        hops: null,
-      })
-      return true
-    }
-    cy.elements().difference(path).addClass('dimmed')
-    path.addClass('highlighted')
-    setPathState({
-      phase: 'shown',
-      from: state.sourceId,
-      to: nodeId,
-      hops: path.edges().length,
-    })
-    return true
-  }
-  const pathTapRef = useRef(handlePathNodeTap)
-  pathTapRef.current = handlePathNodeTap
   const onPickEdgeId = (rawId: string): void => {
     const id = rawId.trim()
     if (!id) return
@@ -1598,25 +1530,6 @@ export const GraphView: React.FC<Props> = ({
   // the visibility row are exact-pixel matches to the node fills.
   const swatchFor = (label: string): string =>
     labelToColor(label, theme.variant)
-
-  // Path-mode status text for the line under the toolbar.
-  let pathStatusText: string | null = null
-  if (pathState.phase === 'pickSource') {
-    pathStatusText = t('graph.pathPickSource')
-  } else if (pathState.phase === 'pickTarget') {
-    pathStatusText = t('graph.pathPickTarget')
-  } else if (pathState.phase === 'shown' && pathState.hops === null) {
-    pathStatusText = t('graph.pathNone', {
-      from: pathState.from,
-      to: pathState.to,
-    })
-  } else if (pathState.phase === 'shown') {
-    pathStatusText = t('graph.pathResult', {
-      from: pathState.from,
-      to: pathState.to,
-      hops: pathState.hops,
-    })
-  }
 
   return (
     <Wrap $fill={fillHeight} $sidebarCollapsed={sidebarCollapsed}>
