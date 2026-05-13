@@ -76,4 +76,36 @@ describe('useGraphKeyboardNav', () => {
     // Backward from cursor=0 wraps to last (= '3').
     expect(onJump).toHaveBeenLastCalledWith('3')
   })
+
+  it('Escape blurs the focused element and resets the cursor', () => {
+    const onJump = jest.fn()
+    const onExpand = jest.fn()
+    const { result } = renderHook(() =>
+      useGraphKeyboardNav({
+        selectedId: '1',
+        neighborIds: ['2', '3'],
+        onJump,
+        onExpand,
+      })
+    )
+    // Step forward once so the cursor != -1.
+    act(() => result.current.handleKey(makeEvent({ key: 'Tab' })))
+    expect(onJump).toHaveBeenLastCalledWith('2')
+
+    // Build a fake event whose target.blur is observable.
+    const blur = jest.fn()
+    const escEvent = {
+      key: 'Escape',
+      preventDefault: jest.fn(),
+      currentTarget: { blur } as unknown as HTMLElement,
+    } as unknown as KeyboardEvent
+
+    act(() => result.current.handleKey(escEvent))
+    expect(blur).toHaveBeenCalled()
+
+    // After Escape, the cursor is back at -1 — next Tab again jumps to
+    // neighbor[0] = '2', not neighbor[1] = '3'.
+    act(() => result.current.handleKey(makeEvent({ key: 'Tab' })))
+    expect(onJump).toHaveBeenLastCalledWith('2')
+  })
 })

@@ -23,7 +23,15 @@ export type UseGraphKeyboardNavResult = {
 // walk forward modulo len; Shift+Tab walks backward modulo len. Enter
 // fires onExpand on the currently-selected node (NOT a neighbour at
 // cursor). ArrowRight / ArrowLeft are aliases for Tab / Shift+Tab so
-// the canvas reads naturally for users not used to Tab-as-walk.
+// the canvas reads naturally for users not used to Tab-as-walk. Escape
+// is the focus-escape hatch — because Tab is hijacked to walk
+// neighbours, a keyboard-only user could otherwise be trapped on the
+// canvas. Pressing Escape blurs the focused element (releasing focus
+// back to the browser's normal Tab order on the next keypress) and
+// resets the internal cursor to -1 so the next Tab restarts from
+// neighbor[0]. Escape does NOT call preventDefault (its default is a
+// no-op anyway, and we want browser-native Escape behavior to apply
+// to anything else listening).
 export function useGraphKeyboardNav(
   args: UseGraphKeyboardNavArgs
 ): UseGraphKeyboardNavResult {
@@ -42,7 +50,22 @@ export function useGraphKeyboardNav(
       const isArrowFwd = e.key === 'ArrowRight'
       const isArrowBack = e.key === 'ArrowLeft'
       const isEnter = e.key === 'Enter'
-      if (!isTab && !isArrowFwd && !isArrowBack && !isEnter) return
+      const isEscape = e.key === 'Escape'
+      if (!isTab && !isArrowFwd && !isArrowBack && !isEnter && !isEscape) {
+        return
+      }
+      if (isEscape) {
+        // Focus-escape hatch: blur the canvas and reset the cursor so
+        // the next Tab restarts from neighbor[0]. Guard against test
+        // events that lack currentTarget.
+        cursorRef.current = -1
+        const raw = (e as { currentTarget?: unknown }).currentTarget
+        const target = raw as HTMLElement | null | undefined
+        if (target && typeof target.blur === 'function') {
+          target.blur()
+        }
+        return
+      }
       if (isEnter) {
         if (selectedId) {
           e.preventDefault()
