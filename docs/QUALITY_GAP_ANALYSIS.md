@@ -534,7 +534,7 @@ PriorityScore = Impact × Likelihood × Reach / Effort, each 1–5.
 | Q52 | High | 18 | [#195](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/195) | `tsconfig.json` / `electron/tsconfig.json` / `e2e/tsconfig.json` | **resolved** (Bundle C — `1c57b0c`) | Extracted `tsconfig.base.json`; web / electron / e2e configs now `extends` the shared base. |
 | Q-NEW-A | Med | 15 | [#197](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/197) | `internal/server/result_codec.go:118-122` | **open** | Mid-stream abort: SPA parses truncated body as 200 OK success — emit `error` trailer or switch to NDJSON. |
 | Q51 | Med | 15 | [#196](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/196) | `jest.config.cjs:9` | **resolved** (Bundle C — `1c57b0c`) | Top-level `isolatedModules` removed from `ts-jest` transformer options; ts-jest v30 deprecation warning eliminated. |
-| Q53 | Med | 12 | [#198](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/198) | `internal/server/handlers_capabilities.go:30,41` | **open** | Hardcoded `admin_writable={false,false,false,false}` — wire to Geode build probe or env gate. |
+| Q53 | Med | 12 | [#198](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/198) | `internal/server/handlers_capabilities.go:30,41` | **resolved** (v0.5.15 Task 3) | `GetCapabilities` now probes `SHOW VERSION` + `SHOW CAPABILITIES` (upstream features `auth_ddl`/`role_ddl`/`grant_ddl`/`policy_ddl` per `src/execution/admin_ddl.zig` @ v0.5.15). `admin_writable.{users,roles,grants}` reflect the connected build; `policies` follows upstream `policy_ddl` (still `false` until CREATE POLICY ships). Legacy <=v0.5.11 builds trip `isWireFeatureMissing` and degrade to all-false + `cfg.Version`. Tests: `TestGetCapabilities_PopulatesFromShowCapabilities`, `TestGetCapabilities_PopulatesGeodeVersion`, `TestGetCapabilities_LegacyServerGetsAllFalse`, `TestGetCapabilities_PolicyFlagFollowsUpstream`. |
 | Q-NEW-B | Med | 12 | [#199](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/199) | `cmd/server/app.go:282-289` | **open** | `WSServer.Config` partial duplicate of `server.Config` — drift risk on field additions. |
 | Q-NEW-C | Med | 10 | [#200](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/200) | `internal/server/ws_query.go:319-330` | **open** (suspected) | Inner relay goroutine in `readMsg` bounded only by 30 s frame deadline, not by context cancel. |
 | Q-NEW-D | Med | 10 | [#204](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/204) | `internal/server/ws_query.go:108-134` | **open** (suspected) | `rowBatcher.flush` stale `envelope.Rows[]` slice header — pin with `-benchmem` bench + clear before reset. |
@@ -556,7 +556,7 @@ PriorityScore = Impact × Likelihood × Reach / Effort, each 1–5.
 ### Counts (2026-05-13 cohort)
 
 - **High**: 4 (Q47, Q48, Q49, Q52) — Q47/Q52 closed Bundle C; Q48 closed Bundle D; Q49 open.
-- **Medium**: 8 (Q51, Q53, Q-NEW-A..F) — all open. Q-NEW-C and Q-NEW-D carry `confidence::suspected`.
+- **Medium**: 8 (Q51, Q53, Q-NEW-A..F) — Q51 closed Bundle C; Q53 closed v0.5.15 Task 3; rest open. Q-NEW-C and Q-NEW-D carry `confidence::suspected`.
 - **Low**: 3 (Q-NEW-G, Q-NEW-H, Q-NEW-I) — all open.
 - **Refuted**: 1 (Q50).
 - **Re-validated open**: 3 (Q12 #44, Q13 #46, Q14 #48).
@@ -582,7 +582,7 @@ PriorityScore = Impact × Likelihood × Reach / Effort, each 1–5.
 - Q-NEW-C (#200) — add inner-relay goroutine leak test; tighten if it fails.
 - Q-NEW-D (#204) — add `BenchmarkRowBatcher_Flush` with `-benchmem` + invariant comment.
 - Q-NEW-E (#203) — collision handling + optional upload-dir quota.
-- Q53 (#198) — Geode admin-DDL probe or env gate for `admin_writable`.
+- ~~Q53 (#198) — Geode admin-DDL probe or env gate for `admin_writable`.~~ **resolved** v0.5.15 Task 3 (`SHOW VERSION` + `SHOW CAPABILITIES` probe in `handlers_capabilities.go`).
 
 #### Strategic (> 5 days)
 
