@@ -2,8 +2,8 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-12 (gap-closure runs: GAP-020 / #90 closed [genapi+medium batch]; 13 more issues closed [top-10 quality/perf/CI batch — #125, #126, #127, #134, #136, #143, #144, #146, #149, #151, #153, #168, #180 — none carry a `GAP-NNN` ID]; #159 closed + error-code cross-check follow-up done [errorcode-crosscheck + #159 batch — `41ed5fa`/`312eee2`/`5598434`/`1660908`, `eefd896`/`f1c6064`/`1a2016f`/`5a5e89c`])
-- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); two 2026-05-12 `/codepros:gap-close` runs
+- **Last refreshed:** 2026-05-13 (audit Phase 4 sync — 5 docs-only gaps added (GAP-023..027), GAP-028 verified-wired and moved to RESOLVED, GAP-017..022 re-validated open against HEAD `c07668b`, 5 short re-validation comments posted to GitLab issues #44/#46/#48/#102/#103; 3 atomic doc fixes landed in this same run — see "2026-05-13 audit run" section below; **same-day gap-close pipeline run closed 8 issues across 13 commits** — S-NEW-5 #201, Bundle B #220/#223/#103, Bundle C #194/#195/#196, Bundle D #192 — see "Closure batch 2026-05-13" sub-section)
+- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); 2026-05-13 audit run + 2026-05-13 `/codepros:gap-close` pipeline run; two 2026-05-12 `/codepros:gap-close` runs
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors them.
 
 ## Methodology
@@ -20,7 +20,7 @@ Phase 3 ran the gap-detector against the project's requirements set and current 
 | Low      |    7 |           0 |        0 |        0 |     7 |
 | **Total**|**7** |       **0** |    **1** |    **0** | **8** |
 
-No release-blocking gaps. Of the 7 still-open Low gaps, 4 are blocked on upstream Geode v0.6+ (GAP-013..016); GAP-017 (dual lockfile), GAP-018 (`.golangci.yml`), GAP-019 (coverage thresholds), GAP-021 (dup public-profiles effect), GAP-022 (`embed.go` `fs.Stat`) are in-repo backlog. GAP-020 (`as unknown as` path-param casts, #90) **Resolved 2026-05-12** via `9b0a423` + genapi `55c79d2`. 2 CI verification gaps closed 2026-05-10; 1 stale-comment cleanup closed earlier. (Most quality/perf/security closures of the 2026-05-11/2026-05-12 cohorts are tracked by domain ID in the sibling `*GAP_ANALYSIS.md` docs, not by `GAP-NNN` here.)
+No release-blocking gaps. Of the 6 still-open Low gaps, 4 are blocked on upstream Geode v0.6+ (GAP-013..016); GAP-017 (dual lockfile), GAP-018 (`.golangci.yml`), GAP-019 (coverage thresholds), GAP-021 (dup public-profiles effect) are in-repo backlog. GAP-020 (`as unknown as` path-param casts, #90) **Resolved 2026-05-12** via `9b0a423` + genapi `55c79d2`. **GAP-022 (`embed.go` `fs.Stat`) Resolved 2026-05-13** via `a3c9552` (gap-close pipeline run, closing #103). 2 CI verification gaps closed 2026-05-10; 1 stale-comment cleanup closed earlier. (Most quality/perf/security closures of the 2026-05-11/2026-05-12/2026-05-13 cohorts are tracked by domain ID in the sibling `*GAP_ANALYSIS.md` docs, not by `GAP-NNN` here.)
 
 ## Severity Rubric
 
@@ -260,7 +260,7 @@ The 2026-05-11 audit Phase 3 (gap-detector) re-ran against HEAD `d3e5de1`. The f
 | GAP-019 | No coverage thresholds (Jest + Go) | Open | Low | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/48) (canonical; #23 closed as dup) | `jest.config.cjs` has no `coverageThreshold` block; CI `go test` invocations lack `-coverprofile` floors. | Wire Jest `coverageThreshold` (~75% statements floor) + Go `-coverprofile` floor (~68.7% server). |
 | GAP-020 | ~~2 `as unknown as` casts in `src/api/profiles.ts` (was 5)~~ | **Closed** 2026-05-12 | Medium | [#90](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/90) | **Closed `9b0a423`** (geode-ui) + genapi `55c79d2` — genapi `expandPath`/`expandRoute` map URL path tokens to snake_case schema keys (`[["profileId","profile_id"]]`) and `delete` them from the body before sending; `geode.json` `UpdateProfileReq` gains required `profile_id`; regen `gen/`; `src/api/profiles.ts` `updateProfile`/`deleteProfile` call the typed client directly (no cast). Upstream `cmd/genapi/path_params_test.go` cases added. genapi `55c79d2` is on genapi `main` unpushed. | Done. Follow-up (small, not yet ticketed): `createProfile`'s `as any` body-shape cast remains — a different cast. |
 | GAP-021 | Duplicate fetchPublicProfiles+getStoredPassword effect across LoginPage and AddConnectionModal | Open | Low | [#102](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/102) | `src/pages/LoginPage.tsx:101-128` and `src/components/layout/AddConnectionModal.tsx:60-77,136` both run the public-profiles + saved-password effect with near-identical shape. | Extract `usePublicProfilesWithStoredPasswords` hook; migrate both call sites. |
-| GAP-022 | PSR-F5 hot-path: `fs.Stat` per request in embed.go (mis-credited as closed) | Open | Low | [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/103) | `internal/ui/embed.go:112` (`fs.Stat(sub, clean)`) and `embed.go:120` (`fs.Stat(sub, "index.html")`) still call per request. The 2026-05-11 gzip commit `d5126ad` was mis-credited as closing PSR-F5; gzip is the partial closure, the precompute-asset-path-set acceptance criterion remains open. | **Decision pending** (per audit Phase 4 comment on #103): (a) precompute the asset path set at init, or (b) reclassify as won't-do because `fs.Stat` on `embed.FS` is in-memory and not measurably hot. |
+| GAP-022 | PSR-F5 hot-path: `fs.Stat` per request in embed.go (mis-credited as closed) | **Closed** 2026-05-13 | Low | [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/103) | **Closed `a3c9552`** — `internal/ui/embed.go` `Handler()` now delegates to `handlerFS(fs.FS)` which closes over a per-handler `sync.Map` of cleaned-path → `fs.FileInfo`. Positive cache only; 404 paths re-Stat every call (pinned by `TestEmbedHandler_DoesNotCache404` so attacker-shaped URLs cannot grow the map unboundedly). `TestEmbedHandler_CachesStat` injects an instrumented `countingFS` and asserts the second `/favicon.ico` request adds zero new Stat calls. Bench: `BenchmarkEmbedHandler_StaticHit` 10355→9697 ns/op (-6.4%), 19→17 allocs/op (-2 allocs == the exact pair of `fs.Stat` calls eliminated). | Done. |
 
 ### Gap-closure run — 2026-05-12 (genapi + medium-cohort batch)
 
@@ -355,3 +355,56 @@ The following older issues use early-audit titles (`[Quality] ...` / `[Perf] ...
 A `/codepros:gap-close` run on 2026-05-11 implemented and closed 12 audit-cohort findings tracked in the domain docs (`SECURITY_GAP_ANALYSIS.md`, `PERF_GAP_ANALYSIS.md`, `QUALITY_GAP_ANALYSIS.md`). None of these carry a `GAP-NNN` ID in this file — they are tracked by their domain IDs (F-SUP-1, F-INPUT-1, F-SUP-4, PERF-2026-05-11-01/02/04/08, Q35, Q36, Q25, Q16, Q26) and GitLab issues. The one crossover here is **GAP-009** (electron CI job), which the same run hardened — `allow_failure` removed via `f444c70`, electron pulled into devDeps. See `docs/gap-closure-reports/2026-05-11-audit-cohort-completion.md` for the full report.
 
 Closed (GitLab): #148, #131, #129, #140, #128, #130, #137, #147, #170, #160, #158, #172 — commit SHAs `d464fe6`, `210133e`, `790cdcb`, `454d0ba`, `c4ef58c`, `4698645` (×3), `f444c70` (×2), `adf6b6f` (×2). Deferred-but-mitigated: #132 (F-AUTH-1, mitigated `c46e77e`, stays open pending upstream genapi context-threading). Deferred-to-upstream-genapi (stay open): #133 (obsx audit allocs), #135 (MCP per-tool role gate). Trivial follow-up after `adf6b6f`: #180 (Q38 shutdown error).
+
+## 2026-05-13 audit run
+
+A `/codepros:audit` Phase 3 (gap-detector) → Phase 4 (sync) re-ran against HEAD `c07668b` on 2026-05-13. The detector surfaced **5 new docs-only gaps** (GAP-023..GAP-027) and **1 verified-wired item** (GAP-028, moved to `GAP_ANALYSIS_RESOLVED.md`). Existing in-repo backlog items GAP-017..022 were re-validated open against current code; upstream-blocked items GAP-002..005 / GAP-013..016 remain open pending Geode v0.6+.
+
+No new GitLab issues were filed in this run — GAP-023..027 are documentation drift (stale endpoint count, missing route mentions in README/ARCH, e2e specs 21/22/23 not yet recorded as CI-run, the 2026-05-12 workspace+dashboard plan still showing unchecked task boxes despite the shipping commits), all repaired in the same atomic audit edit (see "Doc fixes landed in this run" below). The detector's docs-only recommendation was honored.
+
+### Newly tracked gaps (2026-05-13)
+
+| Gap-ID  | Title | Status | Severity | Issue | Evidence (verified at HEAD `c07668b`) | Action |
+|---------|-------|--------|----------|-------|----------------------------------------|--------|
+| GAP-023 | README endpoint count drift — "44 endpoints" stale (geode.json has 58) | Open (docs-only) | Low | — (no issue) | `README.md:34` said "44 endpoints"; `grep -c '"path"' geode.json` → `58`. | Fixed in this audit run: README.md:34 now references `geode.json` for the full route list. |
+| GAP-024 | README/ARCH missing `/dashboard` + `/workspace` routes | Open (docs-only) | Low | — (no issue) | `src/App.tsx` declares `/dashboard` and `/workspace` route nodes; `README.md` Architecture section only described `/`. | Fixed: README.md Architecture paragraph now names all three SPA routes. |
+| GAP-025 | README/ARCH missing MatrixView + query-history | Open (docs-only) | Low | — (no issue) | `src/components/results/MatrixView.tsx` + `src/lib/useQueryHistory.ts` ship; neither named in README/ARCH. | Fixed: README.md Architecture paragraph now names the Matrix tab and `useQueryHistory`. |
+| GAP-026 | e2e specs 21/22/23 exist on disk but no CI-run record in this doc | Open (docs-only) | Low | — (no issue) | `e2e/specs/21-workspace.spec.ts`, `22-dashboard.spec.ts`, `23-graph-sidebar-responsive.spec.ts` present; this `GAP_ANALYSIS.md` had no entry tying them to a pipeline run. | This audit-run entry is the record. Next pipeline sample will be appended here (analogous to GAP-006). |
+| GAP-027 | `2026-05-12-geode-ui-workspace-and-dashboard.md` had 64 unchecked task boxes despite shipped code | Open (docs-only) | Low | — (no issue) | `docs/superpowers/plans/2026-05-12-geode-ui-workspace-and-dashboard.md` opened with the standard agentic-worker preamble and 64 `- [ ]` items; commits `a90cb62` / `c07668b` / `b614d20` / `ce40930` / `a4a787b` had already shipped the work. | Fixed: a "Status: shipped" header pointing at those five commits added at the top of the plan; checkboxes retained as historical notes. |
+
+### Re-validated open in 2026-05-13 (no row change)
+
+The in-repo backlog rows in the 2026-05-11 table above (GAP-017 #44 dual lockfile, GAP-018 #46 `.golangci.yml`, GAP-019 #48 coverage gates, GAP-021 #102 dup public-profiles effect, GAP-022 #103 `fs.Stat` per request in `embed.go`) were each re-checked against HEAD `c07668b` on 2026-05-13 — all still match the evidence recorded there. Short re-validation comments were posted to each GitLab issue (#44, #46, #48, #102, #103) noting "Re-validated open in 2026-05-13 audit" with a one-line evidence pointer. Upstream-blocked rows (GAP-002..005 / GAP-013..016) remain open pending Geode v0.6+; no change. **Update post-gap-close pipeline (same day):** GAP-022 / #103 was subsequently closed by `a3c9552` (embed FS Stat cache); the table row above is now marked Closed. See "Closure batch 2026-05-13" below.
+
+### Verified wired (moved to RESOLVED)
+
+| Gap-ID  | Title | Status | Severity | Evidence (verified at HEAD `c07668b`) |
+|---------|-------|--------|----------|----------------------------------------|
+| GAP-028 | `useQueryHistory` recording on every query completion | **Verified 2026-05-13** — moved to `GAP_ANALYSIS_RESOLVED.md` | n/a (no defect) | `src/pages/QueryPage.tsx:11` (`useSearchParams` import), `:19` (`useQueryHistory` import), `:159-167` (mount-only `?statement=` consumer that strips the param on read), `:180-191` (terminal-status `useQueryHistory.record(...)` for stream runs), `:228-237` (sync-run success + error `record(...)` calls). |
+
+### Doc fixes landed in this run
+
+Three atomic documentation edits in the same audit run (no separate PR — these are docs-only one-liners flagged by the detector):
+
+- `README.md:34` — "44 endpoints" → "see [`geode.json`](geode.json) for the full route list".
+- `README.md` Architecture section — added a paragraph naming `/`, `/workspace`, `/dashboard`, the Table/JSON/Graph/**Matrix** result tab switcher, and the `useQueryHistory` FIFO history (capped at 20, `localStorage`-persisted).
+- `docs/superpowers/plans/2026-05-12-geode-ui-workspace-and-dashboard.md` — top-of-file "Status: shipped (commits `a90cb62`, `c07668b`, `b614d20`, `ce40930`, `a4a787b`)" header added; the 64 unchecked task boxes were retained as historical implementation notes (not flipped to checked — the plan post-mortem still reads as planning intent, just now annotated with the closure).
+
+### Closure batch 2026-05-13 (gap-close pipeline run)
+
+A `/codepros:gap-close` pipeline run on 2026-05-13 (same day as the audit above) implemented and closed **8 issues across 13 commits**, all sitting on local `main` **unpushed**. The user-selected scope was four priorities: (1) land the highest-risk security finding S-NEW-5 (#201), (2) Bundle B quick-wins (#220 / #223 / #103), (3) Bundle C tsconfig consolidation (#194 / #195 / #196), (4) Bundle D `GraphView.tsx` decomposition (#192). Verifier returned PASS on all 8 closures.
+
+| SHA | Closes | Type | Brief |
+|-----|--------|------|-------|
+| `6f75a74` | #201 (S-NEW-5) | security | `-trust-proxy-xff` flag (default off) gates XFF parsing in `clientIP()`; closes auth-limiter-bypass + DoS-by-lockout chain. 2 new unit tests under `-race`. |
+| `cca498b` | #220 (PERF-2026-05-13-06) | perf | 2-map `atomic.Pointer[map]` COW design on `LoginLimiter` + `ProfileLimiter` — global mutex off the hot path. `Allow_Parallel` 800.9→9.84 ns/op (**~81×**) and 957.4→7.33 ns/op (**~131×**); 0 allocs/op both. `-race -count=10` clean. |
+| `04a199e` | #223 (PERF-2026-05-13-07) | perf | `schema_cache` `sync.Mutex` → `sync.RWMutex`. `Get_Parallel` 404.1→92.93 ns/op (**~4.3×**); 0 allocs/op. New `TestSchemaCache_ConcurrentReadersAndWriters` (32 readers / 4 writers / 1 invalidator × 500 iters under `-race -count=10` clean). |
+| `a3c9552` | #103 / GAP-022 (PERF-2026-05-13-02 / PSR-F5) | perf | `sync.Map` cache of cleaned-path → `fs.FileInfo` in `internal/ui/embed.Handler()`; positive results only (`TestEmbedHandler_DoesNotCache404` pins this so attacker-shaped URLs cannot grow the map unboundedly). -2 allocs/op per static asset hit. |
+| `7e5c008` | (doc fixup) | perf docs | Records B3 closure SHA in `PERF_GAP_ANALYSIS.md`. Not a code change. |
+| `1c57b0c` | #194 / #195 / #196 (Q47 / Q52 / Q51) | quality | Bundle C: extracted `tsconfig.base.json`; web / electron / e2e all `extends` the base; dropped `noImplicitAny:false` loophole from `tsconfig.json`; moved `isolatedModules` into inline tsconfig (ts-jest v30 deprecation warning gone). |
+| `a562788` | #194 follow-up | quality | Annotated `Shell.tsx` + `gqlLanguage.ts` parameters to satisfy the now-strict mode (Bundle C strict-mode follow-up). |
+| `ac486ad` `ff130d2` `9c46ae8` `0a4f36b` `eb3a910` `6b45ac5` | #192 (Q48) | quality | Bundle D — 6 seam commits decomposing `src/components/results/GraphView.tsx` from **1982 LOC → 396 LOC** across 11 new modules under `src/components/results/graph/`. `GraphView.test.tsx` + `ResultPanel.test.tsx` pass unchanged; public contract preserved. |
+
+**Coverage deltas (post-baseline):** `internal/server` 78.3% → 78.8% (+0.5pp); `internal/ui` 86.1% → 87.6% (+1.5pp); `internal/conn` / `internal/jwt` / `internal/profilestore` unchanged; jest 540/540 (unchanged).
+
+**Full report:** [`docs/gap-closure-reports/2026-05-13-gap-close-pipeline.md`](./gap-closure-reports/2026-05-13-gap-close-pipeline.md).

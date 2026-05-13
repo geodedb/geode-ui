@@ -1,7 +1,7 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-12 (errorcode cross-check + #159 closure run added)
+- **Last updated:** 2026-05-13 (gap-close pipeline run — 8 closures appended: S-NEW-5 #201, Bundle B #220/#223/#103, Bundle C #194/#195/#196, Bundle D #192; audit Phase 4 sync — GAP-028 verified-wired query history moved here from `GAP_ANALYSIS.md`)
 - **Sibling docs:** [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) (open requirement gaps), [PERF_GAP_ANALYSIS.md](./PERF_GAP_ANALYSIS.md), [QUALITY_GAP_ANALYSIS.md](./QUALITY_GAP_ANALYSIS.md), [SECURITY_GAP_ANALYSIS.md](./SECURITY_GAP_ANALYSIS.md)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors closed issues across the perf / quality / security tracking files.
 
@@ -334,6 +334,27 @@ Verifier returned SAFE-TO-CLOSE for all 9 commits. Three Security (1 cross-close
 - **2026-05-12 (top-10 quality/perf/CI batch — 13 issues + 1 no-issue follow-up):** Quality Q9 (#125, `a42a792`), Q39 (#134, `a42a792`), Q23 (#126, `df3fd51`), Q41 (#136, `1fea7ba`), Q10 (#144, `6abde32`), Q12 (#146, `e510cb5`), Q13 (#149, `0d629bf`), Q40 (#151, `0d629bf`), Q22 (#168, `03b6ec1`), Q38 (#180, `ea3f681`), Q32 (#127, `d35d3c7`). Performance PERF-2026-05-11-07 (#145, `a42a792`; `bench-baseline.txt` refreshed `6c14368`). Security F-SUP-3 (#153, `d35d3c7`), F-INPUT-2 (#143, `ea3f681`). No-issue follow-up: `createProfile` `as any` body cast removed (#— , `2c5895d`). Deviation: `codesign-windows-ssl@~latest` pin pending an upstream ci-catalog release (tracked via the `# ci-pins-allow:` marker + #127's `TODO`). 11 geode-ui implementation commits + 1 docs-tracking, **unpushed**.
 - **2026-05-12 (errorcode cross-check + #159 — 1 issue + 1 no-issue follow-up):** Performance PERF-2026-05-11-12 (#159, `f1c6064`; pinned `eefd896`; documented `1a2016f`+`5a5e89c`) — `/api/v1/query` `rateLimit` 200→2000. No-issue follow-up: frontend↔`internal/server/errorcodes.go` error-code cross-check (no GitLab issue — was an untracked note in `QUALITY_GAP_ANALYSIS.md`; `41ed5fa`/`312eee2`/`5598434`/`1660908`). Latent genapi gap noted (not ticketed at the time): `APIOptions.GlobalRate` set-but-unused in `RegisterGeneratedAPI` — **resolved** in the GlobalRate run below. 8 implementation commits + 1 plan-doc + 1 docs-tracking, **unpushed**.
 - **2026-05-12 (GlobalRate cross-route aggregate limiter — 0 GitLab issues, 1 no-issue latent gap):** the previously-noted "`APIOptions.GlobalRate`/`global_rps` set-but-unused" latent genapi gap — resolved via option A (wire it as a real aggregate ceiling): genapi `2eabc11` (template + doc + tests + self-hosted regen) + `b1ac670` (review fix: Snapshot/Allow ordering aligned + template test tightened), recommended tag `v0.3.1`; geode-ui `949d705` (regen + `internal/server/global_ratelimit_test.go` + `docs/ARCHITECTURE.md`) + `2f3c695` (regen with the aligned ordering). No GitLab issue ever existed (`glab issue list --search "GlobalRate"/"global_rps"/"aggregate rate"` → nothing). Review APPROVE-WITH-MINOR-NITS → both nits fixed in `b1ac670`/`2f3c695`. 2 geode-ui implementation commits + 1 docs-tracking, **unpushed**; genapi `main` 2 commits ahead of origin (needs push + `v0.3.1` tag).
+- **2026-05-13 (audit verification — 0 GitLab issues, 1 verified-wired GAP):** GAP-028 (`useQueryHistory` recording on every query completion) verified-wired at `src/pages/QueryPage.tsx:11,19,159-191,228-237`. Recorded below (not a closure-via-commit — the feature shipped earlier in `a90cb62`/`c07668b`/`ce40930`; this audit row simply confirms the wiring against HEAD `c07668b`).
+- **2026-05-13 (gap-close pipeline run — 8 issues + 13 commits):** Security S-NEW-5 (#201, `6f75a74`). Performance PERF-2026-05-13-06 (#220, `cca498b` — ~81×/131× faster limiters), PERF-2026-05-13-07 (#223, `04a199e` — ~4.3× faster schema_cache), PERF-2026-05-13-02 / GAP-022 / PSR-F5 (#103, `a3c9552` — -2 allocs/op on embed static hits; doc fixup `7e5c008`). Quality Q47 (#194, `1c57b0c` + `a562788` follow-up), Q52 (#195, `1c57b0c`), Q51 (#196, `1c57b0c`), Q48 (#192, `ac486ad`/`ff130d2`/`9c46ae8`/`0a4f36b`/`eb3a910`/`6b45ac5` — GraphView 1982→396 LOC). Verifier PASS on all 8 closures. Coverage: server +0.5pp, ui +1.5pp; jest 540/540. **13 commits on `main`, unpushed.** Full record in the "Closure batch 2026-05-13" section below.
+
+---
+
+### 2026-05-13 audit run — verified-wired query history
+
+#### GAP-028: `useQueryHistory` recording on every query completion [VERIFIED]
+
+- **Issue:** — (no GitLab issue; surfaced by the 2026-05-13 audit Phase 3 gap-detector as a potential gap, then **verified wired** in the same pass and never filed)
+- **Domain:** Feature / Requirement
+- **Severity at close:** n/a (verification, not a defect)
+- **Closure commit(s):** `a90cb62` (feat: workspace + dashboard with persisted query history), `c07668b` (responsive sidebar + matrix view), `ce40930` (e2e: dashboard renders cards and surfaces recent queries) — shipped earlier; **verified in this audit run**, not closed by it
+- **Resolution:** The `useQueryHistory` zustand store (`src/lib/useQueryHistory.ts`) is wired into `QueryPage` for **all three terminal paths**: (1) stream-run terminal status (`stream.status === 'done' | 'error'`) records once per terminal transition, keyed on `runStmtRef.current` so a later edit to `stmt` can't drift the entry; (2) sync-run success records on a 2xx response with `r.row_count ?? r.rows.length`; (3) sync-run error records with `rowCount: null, ok: false`. The dashboard's "Recent queries" card reads from the same persisted store and prefills the editor on click via `/?statement=<encoded>`, which `QueryPage` consumes mount-only via `useSearchParams` and strips immediately on read.
+- **Evidence:**
+  - `src/pages/QueryPage.tsx:11` — `useSearchParams` import.
+  - `src/pages/QueryPage.tsx:19` — `useQueryHistory` import.
+  - `src/pages/QueryPage.tsx:159-167` — mount-only `?statement=` consumer (`setStmt(s)` + `setSearchParams(next, { replace: true })`).
+  - `src/pages/QueryPage.tsx:180-191` — terminal-status `useQueryHistory.getState().record({ statement: runStmtRef.current, rowCount: stream.status === 'done' ? stream.rowCount || stream.rows.length : null, ok: stream.status === 'done' })`.
+  - `src/pages/QueryPage.tsx:228-237` — sync-run success + error `record(...)` calls.
+- **Resolved date:** 2026-05-13 (verified; feature shipped earlier between 2026-05-12 and 2026-05-13)
 
 ---
 
@@ -1115,3 +1136,104 @@ A `/codepros:gap-close` run on the previously-untracked "`APIOptions.GlobalRate`
 - **genapi commits unpushed:** `2eabc11` + `b1ac670` sit on genapi `main` ahead of `origin/main` (`origin/main` == `55c79d2` == tag `v0.3.0`). **Recommended tag: `v0.3.1`** (additive minor). Not pushed, not tagged -- the user decides on both.
 - **geode-ui commits unpushed:** `949d705` + `2f3c695` + the docs-tracking commit for this run sit on `main` ahead of origin, on top of all prior 2026-05-12 runs (~24+ commits total unpushed) -- the user decides on `git push origin main`.
 - **`server_bootstrap_test.go` `GlobalBurst` 1→200** -- recorded in the `2eabc11` commit message: a test-config knob bump, not a semantics change; the shared acceptance server now has a non-trivial aggregate burst so cross-route requests in the suite don't trip the now-active aggregate bucket.
+
+---
+
+## Closure batch 2026-05-13 (gap-close pipeline run)
+
+User-selected four-priority `/codepros:gap-close` pipeline run on 2026-05-13: (1) S-NEW-5 #201 (highest-risk security finding), (2) Bundle B quick-wins #220 / #223 / #103, (3) Bundle C tsconfig consolidation #194 / #195 / #196, (4) Bundle D `GraphView.tsx` decomposition #192. **Verifier returned PASS on all 8 closures across 13 commits**, all sitting on local `main` **unpushed**. Plan: [`docs/superpowers/plans/2026-05-13-gap-close-pipeline.md`](./superpowers/plans/2026-05-13-gap-close-pipeline.md) (if checked in; otherwise tracked in the completion report below).
+
+### Headline metrics
+
+- **Coverage:** `internal/server` 78.3% → 78.8% (+0.5pp), `internal/ui` 86.1% → 87.6% (+1.5pp); `internal/conn` / `internal/jwt` / `internal/profilestore` unchanged; jest 540/540 unchanged.
+- **Benchmarks (Bundle B):** `LoginLimiter.Allow_Parallel` 800.9 → **9.84 ns/op (~81× faster)**; `ProfileLimiter.Allow_Parallel` 957.4 → **7.33 ns/op (~131× faster)**; `schema_cache.get` 404.1 → **92.93 ns/op (~4.3× faster)**; `EmbedHandler_StaticHit` 10355 → 9697 ns/op (-6.4%) with `-2 allocs/op`.
+- **GraphView.tsx (Bundle D):** **1982 LOC → 396 LOC** across 11 new modules in `src/components/results/graph/`.
+- **Tests:** `make go-test -race -count=10` clean on new race tests (`TestLoginLimiter_ConcurrentInsertRace`, `TestProfileLimiter_ConcurrentInsertRace`, `TestSchemaCache_ConcurrentReadersAndWriters`); jest 540/540; `GraphView.test.tsx` + `ResultPanel.test.tsx` pass unchanged.
+
+### Closures (SHA → issue)
+
+#### S-NEW-5 / #201 — XFF gating behind `-trust-proxy-xff` flag [SECURITY]
+
+- **Issue:** [#201](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/201) — auth-bypass chain via XFF spoofing + DoS-by-lockout against arbitrary IPs (confidential).
+- **Domain:** Security (A07 / CWE-290, CWE-348, CWE-799)
+- **Severity at close:** High (risk score 20).
+- **Closure commit:** `6f75a74` — `fix(security): close S-NEW-5 (#201) — gate XFF parsing behind -trust-proxy-xff flag`.
+- **Resolution:** `clientIP()` no longer honors `X-Forwarded-For` by default. New `-trust-proxy-xff` boolean CLI flag (default `false`) threaded through `LoginLimiterConfig.TrustProxyXFF` + `ProfileLimiterConfig.TrustProxyXFF`. Both limiters key on `net.SplitHostPort(r.RemoteAddr)` unless the operator explicitly opts in for a trusted-proxy deployment.
+- **Evidence:** `internal/server/loginlimiter.go:337-350` (`clientIP()` body); `TestClientIP_RemoteAddrOnly_WhenXFFNotTrusted` + `TestClientIP_HonorsXFF_WhenTrusted` in `internal/server/loginlimiter_test.go` (both pass under `-race`). README + `docs/SECURITY_GAP_ANALYSIS.md` updated.
+- **Out of scope (deferred):** Trusted-proxy CIDR enforcement — flag is binary / operator-opt-in; deployments behind multi-hop proxies revisited if/when needed.
+- **Resolved date:** 2026-05-13
+
+#### PERF-2026-05-13-06 / #220 — 2-map limiter design [PERFORMANCE]
+
+- **Issue:** [#220](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/220) — coarse `sync.Mutex` on read-mostly limiter maps; global lock on the hot path.
+- **Domain:** Performance (P2 / PerfScore 6.00)
+- **Closure commit:** `cca498b` — `perf: close #220 — 2-map limiter design removes global mutex from hot path`.
+- **Resolution:** Per-IP and per-actor maps now use `atomic.Pointer[map[string]*bucket]` with copy-on-write inserts under a small writer mutex; per-bucket `tokens`/`last`/`count`/`lastFail` are guarded by a per-bucket `sync.Mutex`. The cache-hit fast path holds zero global locks.
+- **Bench evidence:** `BenchmarkLoginLimiter_Allow_Parallel` 800.9 → **9.84 ns/op (~81× faster)**; `BenchmarkProfileLimiter_Allow_Parallel` 957.4 → **7.33 ns/op (~131× faster)**; 0 allocs/op both. `TestLoginLimiter_ConcurrentInsertRace` + `TestProfileLimiter_ConcurrentInsertRace` drive 64 goroutines × 200 iters under `-race -count=10` clean.
+- **Files:** `internal/server/loginlimiter.go`, `internal/server/profilelimiter.go`, `internal/server/loginlimiter_test.go`, `internal/server/profilelimiter_test.go`, `internal/server/loginlimiter_bench_test.go`.
+- **Resolved date:** 2026-05-13
+
+#### PERF-2026-05-13-07 / #223 — schema_cache `RWMutex` [PERFORMANCE]
+
+- **Issue:** [#223](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/223) — `Mutex` → `RWMutex` on read-heavy `schema_cache`.
+- **Domain:** Performance (P3 / PerfScore 2.40)
+- **Closure commit:** `04a199e` — `perf: close #223 — RWMutex on schema_cache for concurrent reads`.
+- **Resolution:** `schemaCache.mu` is now `sync.RWMutex`. `get()` takes `RLock` on the hot path and only upgrades to `Lock` on the rare expiry-delete branch (with a re-check under the writer lock to avoid racing a concurrent `set()`). `set()` and `invalidateAll()` keep the writer lock.
+- **Bench evidence:** `BenchmarkSchemaCache_Get_Parallel` 404.1 → **92.93 ns/op (~4.3× faster)**, 0 allocs/op. New `TestSchemaCache_ConcurrentReadersAndWriters` (32 readers / 4 writers / 1 invalidator × 500 iters) under `-race -count=10` clean.
+- **Files:** `internal/server/schema_cache.go`, `internal/server/schema_cache_test.go`.
+- **Known caveat (out of scope, tracked separately):** The pre-existing `TestSchemaCache_*HitDoesNotQueryDB` family has a process-scoped `sql.Register` that makes `-count>1` flaky regardless of cache locking — not caused by #223.
+- **Resolved date:** 2026-05-13
+
+#### PERF-2026-05-13-02 / GAP-022 / PSR-F5 / #103 — embed FS Stat cache [PERFORMANCE]
+
+- **Issue:** [#103](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/103) — `fs.Stat` per static-asset request in `internal/ui/embed.go`. Same as GAP-022 in `GAP_ANALYSIS.md` (mis-credited as closed by the earlier gzip commit `d5126ad`).
+- **Domain:** Performance (P1 / PerfScore 8.00) + GAP-022 cross-link
+- **Closure commit:** `a3c9552` — `perf: close #103/GAP-022 — cache embed FS Stat for static asset hits`. Doc fixup: `7e5c008`.
+- **Resolution:** `Handler()` now delegates to `handlerFS(fs.FS)` which closes over a per-handler `sync.Map` of cleaned-path → `fs.FileInfo`. **Positive results only:** 404 paths re-Stat every call (`TestEmbedHandler_DoesNotCache404` pins this so attacker-shaped URLs cannot grow the map unboundedly).
+- **Bench evidence:** `BenchmarkEmbedHandler_StaticHit` (full `/favicon.ico` HTTP path): 10355 → 9697 ns/op (-6.4%); 3420 → 3388 B/op; **19 → 17 allocs/op (-2 allocs)** — exactly the per-request `fs.Stat(sub, clean)` round trip eliminated.
+- **Pinning tests:** `TestEmbedHandler_CachesStat` injects an instrumented `countingFS` and asserts the second request adds zero new Stat calls; `TestEmbedHandler_DoesNotCache404`.
+- **Files:** `internal/ui/embed.go`, `internal/ui/embed_test.go`, `internal/ui/embed_bench_test.go`.
+- **Resolved date:** 2026-05-13
+
+#### Q47 / #194 — `noImplicitAny:false` removed [QUALITY]
+
+- **Issue:** [#194](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/194) — strict-mode defeat at `tsconfig.json:8` + `jest.config.cjs:9`.
+- **Domain:** Quality (High, score 20)
+- **Closure commits:** `1c57b0c` (Bundle C consolidation) + `a562788` (review follow-up annotating `Shell.tsx` + `gqlLanguage.ts` parameters to satisfy strict mode).
+- **Resolution:** `noImplicitAny:false` deleted from `tsconfig.json`. Bundle C also extracted `tsconfig.base.json` (see #195) and moved ts-jest `isolatedModules` into inline tsconfig (see #196).
+- **Files:** `tsconfig.base.json` (new), `tsconfig.json`, `jest.config.cjs`, `electron/tsconfig.json`, `e2e/tsconfig.json`, `src/components/Shell.tsx`, `src/lib/gqlLanguage.ts`.
+- **Resolved date:** 2026-05-13
+
+#### Q52 / #195 — tsconfig consolidation [QUALITY]
+
+- **Issue:** [#195](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/195) — duplicated compiler-options across `tsconfig.json` / `electron/tsconfig.json` / `e2e/tsconfig.json`.
+- **Domain:** Quality (High, score 18)
+- **Closure commit:** `1c57b0c`.
+- **Resolution:** New `tsconfig.base.json` carries the shared compiler options; web / electron / e2e configs `extends` the base. No drift surface.
+- **Files:** `tsconfig.base.json` (new), `tsconfig.json`, `electron/tsconfig.json`, `e2e/tsconfig.json`.
+- **Resolved date:** 2026-05-13
+
+#### Q51 / #196 — ts-jest `isolatedModules` deprecation [QUALITY]
+
+- **Issue:** [#196](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/196) — ts-jest v30 deprecation warning at `jest.config.cjs:9`.
+- **Domain:** Quality (Med, score 15)
+- **Closure commit:** `1c57b0c`.
+- **Resolution:** Top-level `isolatedModules` removed from `ts-jest` transformer options; moved into inline tsconfig. ts-jest v30 deprecation warning eliminated.
+- **Files:** `jest.config.cjs`.
+- **Resolved date:** 2026-05-13
+
+#### Q48 / #192 — `GraphView.tsx` decomposition [QUALITY]
+
+- **Issue:** [#192](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/192) — `src/components/results/GraphView.tsx` was 1982 LOC (supersedes Q18 / #164's 1257-LOC framing).
+- **Domain:** Quality (High, score 32)
+- **Closure commits (6-commit seam):** `ac486ad` (`useGraphPathMode`), `ff130d2` (`useFillHeight`), `9c46ae8` (`GraphInspector`), `0a4f36b` (`GraphToolbar`), `eb3a910` (`GraphSidebar`), `6b45ac5` (`useGraphElements` + finalize <400 LOC orchestrator).
+- **Resolution:** **`GraphView.tsx` 1982 LOC → 396 LOC.** Decomposed across **11 new modules** under `src/components/results/graph/`: `useGraphPathMode`, `useFillHeight`, `useGraphElements`, `useGraphActions`, `useGraphCytoscape`, `GraphInspector`, `GraphToolbar`, `GraphSidebar`, `GraphSidebarContents`, `layouts`, `explore`, `cyHelpers`, `styled`. Public contract preserved; `GraphView.test.tsx` + `ResultPanel.test.tsx` pass unchanged.
+- **Files (new modules):** under `src/components/results/graph/` — see commits for the full list.
+- **Resolved date:** 2026-05-13
+
+### PR / branch context
+
+- **Branch:** `main` — 13 commits ahead of `origin/main` (**not pushed**).
+- **Verifier verdict:** PASS on all 8 closures (jest 540/540; `go test -race`; `make bench-gate`; `make go-lint`; `make generate` clean).
+- **GitLab issues closed:** #201, #220, #223, #103, #194, #195, #196, #192 — all closed in the same run with evidence comments referencing the closure SHA(s).
+- **Full report:** [`docs/gap-closure-reports/2026-05-13-gap-close-pipeline.md`](./gap-closure-reports/2026-05-13-gap-close-pipeline.md).
