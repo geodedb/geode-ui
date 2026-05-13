@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -84,20 +85,60 @@ func LoginLimiterDefaults() LoginLimiterConfig {
 
 // LoginLimiter holds per-IP token buckets and per-(profile, username)
 // lockout counters. Concurrent-safe.
+//
+// PERF-2026-05-13-06 (#220): the perIP and perUserFails maps are
+// read-mostly and the original single-Mutex design serialised every
+// Allow() / NoteFail() / NoteSuccess() call across the entire process.
+// The 2-map redesign uses an atomic.Pointer[map] for each cache so the
+// hot path (lookup of an existing key) is lock-free at the map level,
+// and a per-bucket mutex on the bucket itself guards the token / counter
+// fields. Inserts (cold path: first request from a new IP / first fail
+// against a new (profile, user) pair) take a small "writer" mutex,
+// copy-on-write the map, and atomically publish the new pointer.
+//
+// Correctness notes:
+//
+//   - Reads via atomic.Load see an immutable snapshot — the slot at
+//     the lookup key cannot vanish underneath the reader because
+//     entries are never removed except (a) under writeMu (deleteLockout
+//     on expiry) and (b) the writer ALWAYS COWs into a new map. Stale
+//     reads return a still-valid *bucket pointer; subsequent mutations
+//     under the bucket's own mutex remain correct even if the bucket
+//     was concurrently dropped from a newer map snapshot — the bucket
+//     itself is still a real allocation, and the next request from
+//     that key will simply observe an empty newer snapshot and insert
+//     fresh.
+//
+//   - The two-map redesign trades a tiny insert-path overhead (COW the
+//     whole map) for a much smaller hot-path overhead (single atomic
+//     load + map lookup + per-bucket mutex). Insert is rare; lookup
+//     dominates.
 type LoginLimiter struct {
 	cfg LoginLimiterConfig
 
-	mu           sync.Mutex
-	perIP        map[string]*ipBucket
-	perUserFails map[string]*userLockout
+	// perIP holds *map[string]*ipBucket. Reads via atomic.Load,
+	// inserts via copy-on-write under perIPWriteMu.
+	perIP        atomic.Pointer[map[string]*ipBucket]
+	perIPWriteMu sync.Mutex
+
+	// perUserFails holds *map[string]*userLockout. Same COW pattern as
+	// perIP.
+	perUserFails   atomic.Pointer[map[string]*userLockout]
+	perUserWriteMu sync.Mutex
 }
 
 type ipBucket struct {
+	// mu guards tokens + last. Held only during the short
+	// refill/decrement window per Allow() call. Per-bucket scope means
+	// concurrent goroutines on DIFFERENT keys never contend.
+	mu     sync.Mutex
 	tokens float64
 	last   time.Time
 }
 
 type userLockout struct {
+	// mu guards count + lastFail.
+	mu       sync.Mutex
 	count    int
 	lastFail time.Time
 }
@@ -122,11 +163,12 @@ func NewLoginLimiter(cfg LoginLimiterConfig) *LoginLimiter {
 	if cfg.Now == nil {
 		cfg.Now = def.Now
 	}
-	return &LoginLimiter{
-		cfg:          cfg,
-		perIP:        make(map[string]*ipBucket),
-		perUserFails: make(map[string]*userLockout),
-	}
+	l := &LoginLimiter{cfg: cfg}
+	emptyIP := make(map[string]*ipBucket)
+	l.perIP.Store(&emptyIP)
+	emptyUser := make(map[string]*userLockout)
+	l.perUserFails.Store(&emptyUser)
+	return l
 }
 
 // canonicalProfile normalises an empty profile to "default" so the
@@ -150,32 +192,44 @@ func userKey(profile, username string) string {
 // Allow reports whether a login attempt from `ip` for (profile, user)
 // can proceed. On reject it returns the recommended Retry-After and a
 // short reason string for audit logging.
+//
+// Hot path: atomic.Load both maps, look up the keys, take per-bucket
+// mutexes. No global lock on cache-hit traffic.
 func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration, string) {
 	now := l.cfg.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	// 1) Per-(profile, user) lockout — checked first so the per-IP
 	//    bucket is not consumed by an already-locked account.
 	key := userKey(profile, username)
-	if u, ok := l.perUserFails[key]; ok {
-		// Has the lockout already expired?
-		if u.count >= l.cfg.FailThreshold {
+	userMap := *l.perUserFails.Load()
+	if u, ok := userMap[key]; ok {
+		u.mu.Lock()
+		locked := u.count >= l.cfg.FailThreshold
+		if locked {
 			elapsed := now.Sub(u.lastFail)
 			if elapsed < l.cfg.LockoutWindow {
-				return false, l.cfg.LockoutWindow - elapsed, "user_locked"
+				retry := l.cfg.LockoutWindow - elapsed
+				u.mu.Unlock()
+				return false, retry, "user_locked"
 			}
-			// Expired; reset the counter.
-			delete(l.perUserFails, key)
+			// Lockout window expired. Reset the counter in place so
+			// the next fail stream starts fresh; the entry is left in
+			// the map (cheap COW avoidance). A future PERF item (#225)
+			// adds a TTL janitor for true eviction.
+			u.count = 0
+			u.lastFail = time.Time{}
 		}
+		u.mu.Unlock()
 	}
 
-	// 2) Per-IP rate limit.
-	bkt, ok := l.perIP[ip]
+	// 2) Per-IP rate limit. Look up under atomic snapshot; if missing,
+	//    COW-insert under the writer mutex.
+	ipMap := *l.perIP.Load()
+	bkt, ok := ipMap[ip]
 	if !ok {
-		bkt = &ipBucket{tokens: l.cfg.PerIPBurst, last: now}
-		l.perIP[ip] = bkt
+		bkt = l.insertIPBucket(ip, now)
 	}
+	bkt.mu.Lock()
 	dt := now.Sub(bkt.last).Seconds()
 	if dt < 0 {
 		dt = 0
@@ -187,14 +241,56 @@ func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration,
 	bkt.last = now
 	if bkt.tokens < 1 {
 		// One token's worth of seconds = 1/rate.
-		retry := time.Duration((1.0 - bkt.tokens) / l.cfg.PerIPRate * float64(time.Second))
+		shortfall := 1.0 - bkt.tokens
+		bkt.mu.Unlock()
+		retry := time.Duration(shortfall / l.cfg.PerIPRate * float64(time.Second))
 		if retry < time.Second {
 			retry = time.Second
 		}
 		return false, retry, "ip_rate_limited"
 	}
 	bkt.tokens -= 1
+	bkt.mu.Unlock()
 	return true, 0, ""
+}
+
+// insertIPBucket COW-inserts a new bucket for ip. Returns the inserted
+// bucket (or, if a concurrent caller raced us and inserted first, the
+// existing bucket so we both converge on the same instance).
+func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
+	l.perIPWriteMu.Lock()
+	defer l.perIPWriteMu.Unlock()
+	// Re-check under the writer mutex.
+	current := *l.perIP.Load()
+	if bkt, ok := current[ip]; ok {
+		return bkt
+	}
+	bkt := &ipBucket{tokens: l.cfg.PerIPBurst, last: now}
+	next := make(map[string]*ipBucket, len(current)+1)
+	for k, v := range current {
+		next[k] = v
+	}
+	next[ip] = bkt
+	l.perIP.Store(&next)
+	return bkt
+}
+
+// insertUserLockout COW-inserts a new userLockout for key.
+func (l *LoginLimiter) insertUserLockout(key string) *userLockout {
+	l.perUserWriteMu.Lock()
+	defer l.perUserWriteMu.Unlock()
+	current := *l.perUserFails.Load()
+	if u, ok := current[key]; ok {
+		return u
+	}
+	u := &userLockout{}
+	next := make(map[string]*userLockout, len(current)+1)
+	for k, v := range current {
+		next[k] = v
+	}
+	next[key] = u
+	l.perUserFails.Store(&next)
+	return u
 }
 
 // NoteFail records one authentication failure against (profile, user).
@@ -202,27 +298,36 @@ func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration,
 // account for LockoutWindow.
 func (l *LoginLimiter) NoteFail(profile, username string) {
 	now := l.cfg.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	key := userKey(profile, username)
-	u, ok := l.perUserFails[key]
+	current := *l.perUserFails.Load()
+	u, ok := current[key]
 	if !ok {
-		u = &userLockout{}
-		l.perUserFails[key] = u
+		u = l.insertUserLockout(key)
 	}
-	// If we are within an existing lockout window, tick the counter
-	// without resetting the lastFail; otherwise this is a fresh failure
-	// stream.
+	u.mu.Lock()
 	u.count++
 	u.lastFail = now
+	u.mu.Unlock()
 }
 
 // NoteSuccess clears the lockout counter for (profile, user). Called on
 // any 2xx login response.
+//
+// Implementation note: we zero the counter in-place under the
+// per-bucket mutex rather than COW-deleting from the map. This avoids
+// the COW cost on the success path (which is hotter than the lockout
+// path) and keeps the test contract identical: a fresh Allow() after
+// NoteSuccess sees count=0, not threshold. Eviction of the map entry
+// itself is deferred to the TTL janitor follow-up (#225).
 func (l *LoginLimiter) NoteSuccess(profile, username string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.perUserFails, userKey(profile, username))
+	key := userKey(profile, username)
+	current := *l.perUserFails.Load()
+	if u, ok := current[key]; ok {
+		u.mu.Lock()
+		u.count = 0
+		u.lastFail = time.Time{}
+		u.mu.Unlock()
+	}
 }
 
 // WrapLoginLimit wraps next so any POST /api/v1/auth/login traffic

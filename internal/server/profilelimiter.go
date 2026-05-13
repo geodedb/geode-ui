@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"geodedb.com/geode-ui/internal/jwt"
@@ -81,11 +82,17 @@ func ProfileLimiterDefaults() ProfileLimiterConfig {
 }
 
 // ProfileLimiter holds per-actor token buckets. Concurrent-safe.
+//
+// PERF-2026-05-13-06 (#220): same 2-map redesign as LoginLimiter. The
+// perActor map is read-mostly; reads via atomic.Load + map lookup hit
+// only a per-bucket mutex on the cache-hit path. Inserts (cold path)
+// take a writer mutex and copy-on-write a new map. See the
+// LoginLimiter comment for the full correctness argument.
 type ProfileLimiter struct {
 	cfg ProfileLimiterConfig
 
-	mu       sync.Mutex
-	perActor map[string]*ipBucket
+	perActor atomic.Pointer[map[string]*ipBucket]
+	writeMu  sync.Mutex
 }
 
 // NewProfileLimiter constructs a ProfileLimiter, applying defaults for
@@ -102,25 +109,27 @@ func NewProfileLimiter(cfg ProfileLimiterConfig) *ProfileLimiter {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &ProfileLimiter{
-		cfg:      cfg,
-		perActor: make(map[string]*ipBucket),
-	}
+	l := &ProfileLimiter{cfg: cfg}
+	empty := make(map[string]*ipBucket)
+	l.perActor.Store(&empty)
+	return l
 }
 
 // Allow reports whether a profile-CRUD attempt for actor `key` may
 // proceed. On reject it returns the recommended Retry-After. The key
 // is opaque -- the wrapper composes it from the JWT subject (or an
 // "ip\x00<ip>" fallback for unauthenticated callers).
+//
+// Hot path: atomic.Load map → lookup → per-bucket mutex. No global
+// lock on cache-hit traffic.
 func (l *ProfileLimiter) Allow(key string) (bool, time.Duration) {
 	now := l.cfg.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	bkt, ok := l.perActor[key]
+	current := *l.perActor.Load()
+	bkt, ok := current[key]
 	if !ok {
-		bkt = &ipBucket{tokens: l.cfg.PerActorBurst, last: now}
-		l.perActor[key] = bkt
+		bkt = l.insertBucket(key, now)
 	}
+	bkt.mu.Lock()
 	dt := now.Sub(bkt.last).Seconds()
 	if dt < 0 {
 		dt = 0
@@ -131,14 +140,36 @@ func (l *ProfileLimiter) Allow(key string) (bool, time.Duration) {
 	}
 	bkt.last = now
 	if bkt.tokens < 1 {
-		retry := time.Duration((1.0 - bkt.tokens) / l.cfg.PerActorRate * float64(time.Second))
+		shortfall := 1.0 - bkt.tokens
+		bkt.mu.Unlock()
+		retry := time.Duration(shortfall / l.cfg.PerActorRate * float64(time.Second))
 		if retry < time.Second {
 			retry = time.Second
 		}
 		return false, retry
 	}
 	bkt.tokens -= 1
+	bkt.mu.Unlock()
 	return true, 0
+}
+
+// insertBucket COW-inserts a new bucket for key. Returns the inserted
+// bucket (or, on a race, the bucket the winner installed).
+func (l *ProfileLimiter) insertBucket(key string, now time.Time) *ipBucket {
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	current := *l.perActor.Load()
+	if bkt, ok := current[key]; ok {
+		return bkt
+	}
+	bkt := &ipBucket{tokens: l.cfg.PerActorBurst, last: now}
+	next := make(map[string]*ipBucket, len(current)+1)
+	for k, v := range current {
+		next[k] = v
+	}
+	next[key] = bkt
+	l.perActor.Store(&next)
+	return bkt
 }
 
 // isProfileCRUDPath reports whether (method, path) targets the
