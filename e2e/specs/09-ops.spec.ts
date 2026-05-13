@@ -31,17 +31,20 @@ test.describe('ops', () => {
     // Navigate so the SPA mounts (some assertions later depend on this).
     await page.goto('/')
     expect(authToken).toBeTruthy()
-    // Probe the audit endpoint directly. Geode v0.5.11 returns 403
-    // `securex: insufficient role` for /api/v1/audit even for the
-    // bootstrap admin, so we skip the entry-content assertion when the
-    // engine refuses to surface audit logs at all. Use Bearer auth
-    // (CSRF middleware skips the Authorization-header path).
+    // Probe the audit endpoint directly. Geode v0.5.15's built-in roles
+    // are {admin, user, readwrite, readonly} -- there is no dedicated
+    // `audit` role (tracked under GAP-004 / GAP-015). Even the bootstrap
+    // admin sometimes receives 403 `securex: insufficient role` on
+    // /api/v1/audit because the upstream `geode.audit.*` permission set
+    // is gated by the missing role. Skip the entry-content assertion
+    // when the engine refuses to surface audit logs at all. Use Bearer
+    // auth (CSRF middleware skips the Authorization-header path).
     const probe = await request.get('/api/v1/audit?limit=1', {
       headers: { authorization: `Bearer ${authToken}` },
     })
     test.skip(
       !probe.ok(),
-      `audit endpoint not readable on this Geode build (status ${probe.status()})`
+      `audit endpoint not readable on Geode v0.5.15 (status ${probe.status()}); audit role not in built-in set {admin,user,readwrite,readonly} -- tracked GAP-004 / GAP-015`
     )
     await request.post('/api/v1/query', {
       headers: {
