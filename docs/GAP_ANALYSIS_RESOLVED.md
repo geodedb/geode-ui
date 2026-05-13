@@ -1237,3 +1237,57 @@ User-selected four-priority `/codepros:gap-close` pipeline run on 2026-05-13: (1
 - **Verifier verdict:** PASS on all 8 closures (jest 540/540; `go test -race`; `make bench-gate`; `make go-lint`; `make generate` clean).
 - **GitLab issues closed:** #201, #220, #223, #103, #194, #195, #196, #192 — all closed in the same run with evidence comments referencing the closure SHA(s).
 - **Full report:** [`docs/gap-closure-reports/2026-05-13-gap-close-pipeline.md`](./gap-closure-reports/2026-05-13-gap-close-pipeline.md).
+
+## Closure batch 2026-05-13 (Geode v0.5.15 auth-DDL integration plan)
+
+Implementation pass driven by [`docs/superpowers/plans/2026-05-13-geode-0-5-15-auth-ddl-integration.md`](./superpowers/plans/2026-05-13-geode-0-5-15-auth-ddl-integration.md). Closed two upstream-blocked e2e probes (GAP-002 / GAP-003, also duplicated as GAP-013 / GAP-014 in the 2026-05-11 audit sync rows), refreshed the upstream-deferred skip reasons on the remaining two e2e gaps (GAP-004 / GAP-015 audit role, GAP-005 / GAP-016 MCP `tools/list`), and shipped the Geode v0.5.15 grammar across the user / role / grant / policy handlers.
+
+### GAP-002 / GAP-013 — admin-users [RESOLVED]
+
+- **Issue:** [#2](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/2)
+- **Severity:** Low (upstream-blocked)
+- **Resolution:** Bumped the e2e docker stack from `geode:v0.5.11` → `geode:v0.5.15` (4 service refs in `deploy/docker-compose.test.yml`, plus the Dockerfile.geode tag), rewrote `geode-entrypoint.sh` to rotate the bootstrap admin via offline `geode user reset-password` (the v0.5.15 passphrase policy rejects the auth-init-generated bootstrap hex), re-aligned `seed-bootstrap.sh::ensure_e2e_user` to the v0.5.15 `CREATE USER <name> SET PASSWORD '<pw>' EMAIL '<email>' ROLE admin` grammar, and pinned `-admin-users geode,e2e_admin` on geode-ui so e2e_admin's JWT carries the admin role on login (login-side role discovery via `SHOW USERS` is tracked as a follow-up). The handler layer (`internal/server/handlers_users.go`) had already landed v0.5.15 emit in commit `ac3b929` (plan Task 4); this run replaced the legacy must-be-gated `07-admin-users.spec.ts` assertions with the v0.5.15 expectation (CTA enabled + unsupported banner absent) and pinned the modal field selectors against the SPA's `<Field label>` shape.
+- **Files:** `deploy/docker-compose.test.yml`, `deploy/geode/Dockerfile.geode`, `deploy/geode/geode-entrypoint.sh`, `deploy/geode/seed-bootstrap.sh`, `internal/server/quoting.go`, `internal/server/handlers_backups.go`, all `internal/server/handlers_*_test.go`, `e2e/specs/07-admin-users.spec.ts`.
+- **Commits:** `ac3b929` (Task 4, handler grammar), `ceba02c` (Task 8, e2e stack + un-skip).
+- **Resolved date:** 2026-05-13
+
+### GAP-003 / GAP-014 — admin-roles-policies [RESOLVED for roles + grants]
+
+- **Issue:** [#3](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/3)
+- **Severity:** Low (upstream-blocked)
+- **Resolution:** Inverted the Phase-1 RBAC CTA-gating assertions in `08-admin-roles-policies.spec.ts` for the roles and grants describe blocks: `admin_writable.{roles,grants}=true` under v0.5.15, so the unsupported affordance must NOT render and `+New role` / `Apply` / `Revoke` must be visible+enabled. Policies remain `test.fixme(true, 'policies (CREATE POLICY) still upstream-deferred per docs/GQL_AUTH_DDL.md Limitations #3')` -- v0.5.15 parses `CREATE POLICY` but `handlePolicyCreate` in `src/execution/auth_dispatch.zig` returns `wire_feature_missing`. Handler-side grammar updates landed in commit `677fc47` (CREATE/DROP ROLE) and `4a2da5e` (GRANT/REVOKE/SHOW PERMISSIONS).
+- **Files:** `e2e/specs/08-admin-roles-policies.spec.ts`, `internal/server/handlers_roles.go`, `internal/server/handlers_grants.go`.
+- **Commits:** `677fc47` (Task 5 roles), `4a2da5e` (Task 6 grants + SHOW PERMISSIONS), `155a387` (Task 9 e2e un-skip).
+- **Open follow-up:** CREATE POLICY persistence -- tracked separately. SPA wiring is already correct (capabilities-gated CTA).
+- **Resolved date:** 2026-05-13
+
+### GAP-004 / GAP-015 — ops audit-role [REFRESHED, still upstream-blocked]
+
+- **Issue:** [#4](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/4)
+- **Severity:** Low (upstream-blocked)
+- **Status:** Open. Skip reason refreshed in commit `0d4a252` to cite the v0.5.15 built-in role set explicitly (`{admin, user, readwrite, readonly}` -- no dedicated `audit` role). The 09-ops audit-content assertion runs unconditionally when `/api/v1/audit` returns 2xx; on 4xx the runtime skip now emits a structured reason ("audit endpoint not readable on Geode v0.5.15 (status N); audit role not in built-in set ... -- tracked GAP-004 / GAP-015").
+- **Files:** `e2e/specs/09-ops.spec.ts`.
+- **Commits:** `0d4a252` (Task 10).
+- **Unblock condition:** Upstream Geode introduces `geode.auth.role_audit` (or similar) and the bootstrap admin / configured `-admin-users` can resolve it.
+
+### GAP-005 / GAP-016 — MCP tools/list [REFRESHED, still upstream-blocked]
+
+- **Issue:** [#5](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/5)
+- **Severity:** Low (upstream-blocked)
+- **Status:** Open. Skip reason refreshed in commit `7c47ea2` to cite v0.5.15 explicitly ("MCP tools/list not in Geode v0.5.15 (auth-DDL/CI release); tracked GAP-005 / GAP-016 -- upstream response: ..."). The probe pins the response shape so a future server-side regression is immediately visible.
+- **Files:** `e2e/specs/10-mcp-endpoint.spec.ts`.
+- **Commits:** `7c47ea2` (Task 11).
+- **Unblock condition:** Upstream MCP server implements the `tools/list` JSON-RPC method.
+
+### Q53 / #198 — SHOW CAPABILITIES probe [VERIFIED]
+
+- **Issue:** [#198](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/198)
+- **Resolution:** Already closed by commit `599a88b` in this same run (plan Task 3). Verified in `QUALITY_GAP_ANALYSIS.md` Q53 row: capabilities handler at `internal/server/handlers_capabilities.go` probes upstream `SHOW CAPABILITIES` once per server start, falls back to `SHOW VERSION` on the legacy emit, and surfaces `geode_version` + `admin_writable.{users,roles,grants,policies}` on `GET /api/v1/capabilities`. SPA gates admin CTAs from the four flags.
+- **Resolved date:** 2026-05-13
+
+### PR / branch context
+
+- **Branch:** `main` -- 27 commits ahead of `origin/main` (**not pushed**).
+- **Plan:** [`docs/superpowers/plans/2026-05-13-geode-0-5-15-auth-ddl-integration.md`](./superpowers/plans/2026-05-13-geode-0-5-15-auth-ddl-integration.md).
+- **Verifier verdict:** `make go-test` green; 07-admin-users (3 passed, 1 skipped on delete-row dependency), 08-admin-roles-policies (5 passed, 1 fixme), 09-ops (5 passed), 10-mcp (1 passed, 1 skipped on upstream-deferred `tools/list`).
+- **Upstream divergences uncovered:** 11 (catalogued in `docs/ARCHITECTURE.md` "Server-side admin DDL (Geode v0.5.15+)" -- dead `scanQuotedIdentifier`, passphrase-policy vs bootstrap-password collision, SHOW USERS column shape drift, CREATE POLICY upstream-deferred, missing audit role, JWT roles null on login, form-encoded LoginReq body mode, ...).
