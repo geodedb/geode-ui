@@ -28,6 +28,7 @@ import {
 import { useGraphPathMode } from './graph/useGraphPathMode'
 import { useFillHeight } from './graph/useFillHeight'
 import { GraphInspector, Selected } from './graph/GraphInspector'
+import { GraphToolbar } from './graph/GraphToolbar'
 
 // Register the layout extensions once, at module load. cytoscape.use is
 // idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
@@ -216,71 +217,6 @@ const CanvasArea = styled.div`
   flex-direction: column;
   min-width: 0;
   gap: ${({ theme }) => theme.spacing.xs};
-`
-const Toolbar = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: ${({ theme }) => theme.spacing.xs};
-  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
-  background: ${({ theme }) => theme.bg.surface};
-  border: 1px solid ${({ theme }) => theme.border.subtle};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.xs};
-  color: ${({ theme }) => theme.text.secondary};
-
-  .group {
-    display: flex;
-    align-items: center;
-    gap: ${({ theme }) => theme.spacing.xxs};
-  }
-
-  .label {
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-    color: ${({ theme }) => theme.text.muted};
-  }
-
-  select,
-  button {
-    font-family: inherit;
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    color: ${({ theme }) => theme.text.primary};
-    background: ${({ theme }) => theme.bg.canvas};
-    border: 1px solid ${({ theme }) => theme.border.default};
-    border-radius: ${({ theme }) => theme.radii.sm};
-    padding: 2px 8px;
-    line-height: 1.6;
-    cursor: pointer;
-  }
-
-  button {
-    min-width: 28px;
-  }
-
-  button:hover:not(:disabled) {
-    border-color: ${({ theme }) => theme.border.strong};
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  select:focus-visible,
-  button:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-    border-color: ${({ theme }) => theme.border.focus};
-  }
-
-  .stats {
-    margin-left: auto;
-    font-variant-numeric: tabular-nums;
-    color: ${({ theme }) => theme.text.muted};
-  }
 `
 const Canvas = styled.div<{ $height: number }>`
   height: ${({ $height }) => $height}px;
@@ -1208,131 +1144,27 @@ export const GraphView: React.FC<Props> = ({
   return (
     <Wrap $fill={fillHeight} $sidebarCollapsed={sidebarCollapsed}>
       <CanvasArea>
-        <Toolbar data-testid="graph-toolbar" role="toolbar">
-          <div className="group">
-            <button
-              type="button"
-              data-testid="graph-sidebar-toggle"
-              aria-pressed={sidebarCollapsed}
-              aria-label={
-                sidebarCollapsed
-                  ? t('graph.expandSidebar')
-                  : t('graph.collapseSidebar')
-              }
-              title={
-                sidebarCollapsed
-                  ? t('graph.expandSidebar')
-                  : t('graph.collapseSidebar')
-              }
-              onClick={() => setSidebarCollapsed((c) => !c)}
-            >
-              {sidebarCollapsed ? '⮜' : '⮞'}
-            </button>
-          </div>
-          <div className="group">
-            <span className="label">{t('graph.layoutLabel')}</span>
-            <select
-              data-testid="graph-layout-picker"
-              aria-label={t('graph.layoutLabel')}
-              value={layout}
-              onChange={(e) => setLayout(e.target.value as LayoutName)}
-            >
-              {LAYOUTS.map((name) => (
-                <option key={name} value={name}>
-                  {layoutLabel(name, t)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="group">
-            <button
-              type="button"
-              data-testid="graph-zoom-in"
-              aria-label={t('graph.zoomIn')}
-              title={t('graph.zoomIn')}
-              onClick={onZoomIn}
-            >
-              +
-            </button>
-            <button
-              type="button"
-              data-testid="graph-zoom-out"
-              aria-label={t('graph.zoomOut')}
-              title={t('graph.zoomOut')}
-              onClick={onZoomOut}
-            >
-              −
-            </button>
-            <button
-              type="button"
-              data-testid="graph-fit"
-              aria-label={t('graph.fit')}
-              title={t('graph.fit')}
-              onClick={onFit}
-            >
-              {t('graph.fit')}
-            </button>
-            <button
-              type="button"
-              data-testid="graph-reset-view"
-              aria-label={t('graph.resetView')}
-              title={t('graph.resetView')}
-              onClick={onResetView}
-            >
-              {t('graph.resetView')}
-            </button>
-          </div>
-          <div className="group">
-            <button
-              type="button"
-              data-testid="graph-selection-mode"
-              aria-pressed={selectionMode === 'box'}
-              aria-label={t('graph.selectionModeLabel')}
-              title={
-                selectionMode === 'box'
-                  ? t('graph.selectionModeBox')
-                  : t('graph.selectionModePan')
-              }
-              onClick={onToggleSelectionMode}
-            >
-              {selectionMode === 'box'
-                ? t('graph.selectionModeBox')
-                : t('graph.selectionModePan')}
-            </button>
-            <button
-              type="button"
-              data-testid="graph-cluster-toggle"
-              aria-pressed={clusterByLabel}
-              aria-label={t('graph.clusterByLabelLabel')}
-              title={t('graph.clusterByLabelLabel')}
-              onClick={onToggleClusterByLabel}
-            >
-              {t('graph.clusterByLabel')}
-            </button>
-            <button
-              type="button"
-              data-testid="graph-path-mode"
-              aria-pressed={pathState.phase !== 'off'}
-              aria-label={t('graph.pathModeLabel')}
-              title={t('graph.pathModeLabel')}
-              onClick={onTogglePathMode}
-            >
-              {t('graph.pathMode')}
-            </button>
-            {pathState.phase !== 'off' && (
-              <button
-                type="button"
-                data-testid="graph-path-clear"
-                onClick={exitPathMode}
-              >
-                {t('graph.pathClear')}
-              </button>
-            )}
-          </div>
-          <span className="stats" aria-live="polite">
-            {t('graph.stats', { nodes: counts.nodes, edges: counts.edges })}
-          </span>
-        </Toolbar>
+        <GraphToolbar
+          t={t}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+          layout={layout}
+          onChangeLayout={setLayout}
+          layouts={LAYOUTS}
+          layoutLabel={layoutLabel}
+          onZoomIn={onZoomIn}
+          onZoomOut={onZoomOut}
+          onFit={onFit}
+          onResetView={onResetView}
+          selectionMode={selectionMode}
+          onToggleSelectionMode={onToggleSelectionMode}
+          clusterByLabel={clusterByLabel}
+          onToggleClusterByLabel={onToggleClusterByLabel}
+          pathActive={pathState.phase !== 'off'}
+          onTogglePathMode={onTogglePathMode}
+          onPathClear={exitPathMode}
+          counts={counts}
+        />
         {pathStatusText && (
           <PathStatus data-testid="graph-path-status" role="status">
             {pathStatusText}
