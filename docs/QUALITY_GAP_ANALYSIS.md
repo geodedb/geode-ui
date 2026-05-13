@@ -528,7 +528,7 @@ PriorityScore = Impact × Likelihood × Reach / Effort, each 1–5.
 
 | Q-ID | Sev | Score | Issue | File:Line | Status | Brief |
 |------|-----|------:|-------|-----------|--------|-------|
-| Q48 | High | 32 | [#192](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/192) | `src/components/results/GraphView.tsx` (1–1982; 40 hooks) | **open** | Decompose: `useGraphElements` / `useFillHeight` / `GraphToolbar` / `GraphSidebar` / `GraphInspector` / `useGraphPathMode`. Supersedes Q18 / #164 (1257-LOC framing). |
+| Q48 | High | 32 | [#192](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/192) | `src/components/results/GraphView.tsx` (1–396 orchestrator) | **resolved** (Bundle D) | Decomposed across 11 new modules under `src/components/results/graph/` (`useGraphPathMode`, `useFillHeight`, `useGraphElements`, `useGraphActions`, `useGraphCytoscape`, `GraphInspector`, `GraphToolbar`, `GraphSidebar`, `GraphSidebarContents`, `layouts`, `explore`, `cyHelpers`, `styled`). Orchestrator now 396 LOC (was 1982). Supersedes Q18 / #164 (1257-LOC framing). |
 | Q49 | High | 24 | [#193](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/193) | `cmd/server/app.go:128-445` (`newApp` 317 LOC) | **open** | Split into `buildIssuer` / `openProfileStore` / `attachRevocation` / `mountAPI` / `buildLimiters` / `buildHTTPServer`. |
 | Q47 | High | 20 | [#194](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/194) | `tsconfig.json:8` + `jest.config.cjs:9` | **resolved** (Bundle C) | `noImplicitAny:false` removed from `tsconfig.json`; ts-jest deprecation flag moved into inline tsconfig — strict mode now uniformly enforced. |
 | Q52 | High | 18 | [#195](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/195) | `tsconfig.json` / `electron/tsconfig.json` / `e2e/tsconfig.json` | **resolved** (Bundle C) | Extracted `tsconfig.base.json`; web / electron / e2e configs now `extends` the shared base. |
@@ -555,7 +555,7 @@ PriorityScore = Impact × Likelihood × Reach / Effort, each 1–5.
 
 ### Counts (2026-05-13 cohort)
 
-- **High**: 4 (Q47, Q48, Q49, Q52) — all open.
+- **High**: 4 (Q47, Q48, Q49, Q52) — Q47/Q52 closed Bundle C; Q48 closed Bundle D; Q49 open.
 - **Medium**: 8 (Q51, Q53, Q-NEW-A..F) — all open. Q-NEW-C and Q-NEW-D carry `confidence::suspected`.
 - **Low**: 3 (Q-NEW-G, Q-NEW-H, Q-NEW-I) — all open.
 - **Refuted**: 1 (Q50).

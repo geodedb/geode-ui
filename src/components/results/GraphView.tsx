@@ -1,35 +1,36 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import cytoscape, { Core, ElementDefinition } from 'cytoscape'
+import cytoscape, { Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import dagre from 'cytoscape-dagre'
-import styled, { useTheme } from 'styled-components'
-import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
-import {
-  collapseNode,
-  expandCollapsed,
-  hideNode,
-  mergeSubgraph,
-  restoreNode,
-} from './graphActions'
-import { client } from '../../api/client'
-import { DEFAULT_LAYOUT, LayoutName, useGraphPrefs } from './useGraphPrefs'
-import {
-  EDGE_TYPE_DEFAULT,
-  NODE_LABEL_DEFAULT,
-  QueryRespLike,
-  buildCompoundElements,
-  extractElements,
-  labelOptions,
-  resolveEdgeLabel,
-  resolveNodeLabel,
-  typeOptions,
-} from '../../lib/graphResult'
+import { useTheme } from 'styled-components'
+import { labelToColor } from './cytoscapeStyle'
+import { DEFAULT_LAYOUT, useGraphPrefs } from './useGraphPrefs'
+import { QueryRespLike, resolveNodeLabel } from '../../lib/graphResult'
 import { useGraphPathMode } from './graph/useGraphPathMode'
 import { useFillHeight } from './graph/useFillHeight'
-import { GraphInspector, Selected } from './graph/GraphInspector'
 import { GraphToolbar } from './graph/GraphToolbar'
 import { GraphSidebar } from './graph/GraphSidebar'
+import { GraphSidebarContents } from './graph/GraphSidebarContents'
+import { useGraphElements } from './graph/useGraphElements'
+import { useGraphActions } from './graph/useGraphActions'
+import { useGraphCytoscape } from './graph/useGraphCytoscape'
+import {
+  COSE_NODE_LIMIT,
+  LAYOUTS,
+  layoutConfig,
+  layoutLabel,
+} from './graph/layouts'
+import { respSignature } from './graph/cyHelpers'
+import type { Selected } from './graph/GraphInspector'
+import {
+  Canvas,
+  CanvasArea,
+  ErrorBanner,
+  Overlay,
+  PathStatus,
+  Wrap,
+} from './graph/styled'
 
 // Register the layout extensions once, at module load. cytoscape.use is
 // idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
@@ -40,118 +41,6 @@ import { GraphSidebar } from './graph/GraphSidebar'
 // (Task 1.4).
 cytoscape.use(fcose)
 cytoscape.use(dagre)
-
-// Layouts offered in the picker. `cose` is the only force-directed
-// option shipped with cytoscape core; `fcose` (faster force layout,
-// handles compound/clustered graphs) and `dagre` (layered DAG layout
-// for directed / hierarchical shapes) are registered as extensions at
-// module load above. The rest are core layouts useful for known shapes
-// (chains, clusters, time-ordered scans). LayoutName / DEFAULT_LAYOUT
-// live in useGraphPrefs (the sticky-prefs store).
-
-const LAYOUTS: readonly LayoutName[] = [
-  'cose',
-  'fcose',
-  'dagre',
-  'breadthfirst',
-  'circle',
-  'concentric',
-  'grid',
-]
-
-// Static dispatch — keeps the validate-translations script happy by
-// using literal graph.layout.* keys instead of a template-literal
-// lookup the AST-free script can't trace.
-function layoutLabel(name: LayoutName, t: (key: string) => string): string {
-  switch (name) {
-    case 'cose':
-      return t('graph.layout.cose')
-    case 'fcose':
-      return t('graph.layout.fcose')
-    case 'dagre':
-      return t('graph.layout.dagre')
-    case 'breadthfirst':
-      return t('graph.layout.breadthfirst')
-    case 'circle':
-      return t('graph.layout.circle')
-    case 'concentric':
-      return t('graph.layout.concentric')
-    case 'grid':
-      return t('graph.layout.grid')
-    default:
-      return name
-  }
-}
-
-// Per-layout option object passed to cytoscape({ layout }) and
-// cy.layout(...). The fcose/dagre branches set the extension-specific
-// tuning knobs; everything else gets the shared base. The casts to
-// cytoscape.LayoutOptions are needed because @types/cytoscape doesn't
-// know about the extension layouts' option shapes.
-function layoutConfig(name: LayoutName): cytoscape.LayoutOptions {
-  const base = { animate: false, padding: 24, fit: true } as const
-  switch (name) {
-    case 'fcose':
-      return {
-        name: 'fcose',
-        ...base,
-        quality: 'default',
-        nodeSeparation: 75,
-        idealEdgeLength: 80,
-        nestingFactor: 0.1,
-      } as unknown as cytoscape.LayoutOptions
-    case 'dagre':
-      return {
-        name: 'dagre',
-        ...base,
-        rankDir: 'TB',
-        nodeSep: 40,
-        rankSep: 60,
-      } as unknown as cytoscape.LayoutOptions
-    case 'cose':
-      return { name: 'cose', ...base } as cytoscape.LayoutOptions
-    default:
-      return { name, ...base } as cytoscape.LayoutOptions
-  }
-}
-
-// Above this node count the cose force-directed layout becomes
-// noticeably sluggish (O(N²) repulsion sums). Fall back to grid as a
-// safer auto default; users can still pick cose explicitly via the
-// dropdown.
-const COSE_NODE_LIMIT = 400
-
-// ----- "Explore neighbours" (Phase 2 / Task 2.4) -----
-//
-// The selected node's 1-hop subgraph is fetched by re-querying the
-// connected graph. Geode GQL supports the `id(n)` predicate (see the
-// geode docs / shell test suite — e.g. `MATCH (e:Employee) WHERE id(e) =
-// nodeId`), so the statement is the id-keyed form below. Only valid for
-// nodes that carry a real (numeric) Geode id — synthesised nodes from a
-// scalar-only RETURN don't have one, so the inspector disables the
-// action for them.
-
-// True when `id` looks like a real Geode node id (a non-negative
-// integer in string form, which is what extractElements emits for
-// graph_summary nodes and edge-endpoint placeholders).
-function isRealNodeId(id: string): boolean {
-  return /^\d+$/.test(id)
-}
-
-// Build the 1-hop subgraph statement for a real node id. Undirected
-// match (`-[r]-`) so both incoming and outgoing edges come back.
-function buildExploreStatement(nodeId: string): string {
-  return `MATCH (n)-[r]-(m) WHERE id(n) = ${nodeId} RETURN n, r, m LIMIT 100;`
-}
-
-// Pull the graph name out of a leading `USE GRAPH <name>;` so the
-// explore query targets the same graph. Returns undefined when the
-// original query has no such prefix (server falls back to the default).
-function graphNameOf(query: string | undefined): string | undefined {
-  if (!query) return undefined
-  const m = query.match(/^\s*USE\s+GRAPH\s+([A-Za-z_][\w-]*)\s*;/i)
-  return m ? m[1] : undefined
-}
 
 // Props.resp is a QueryRespLike from the row stream, which under streaming
 // is a freshly minted object every row. Building a Cytoscape Core +
@@ -174,272 +63,6 @@ type Props = {
   fillHeight?: boolean
 }
 
-const REBUILD_DEBOUNCE_MS = 250
-
-// P-NEW-2 / Q-NEW-3: cap the datalist option count rendered by the
-// keyboard pickers. A 5k-node graph would otherwise materialise 5k
-// <option> elements unconditionally, wasting DOM, retained memory,
-// and an extra style/layout pass on every <input> focus. Datalists
-// behave like type-ahead suggestions: 1000 entries is more than any
-// human will scroll, and the input still accepts an exact id beyond
-// the cap (the lookup Maps are NOT capped, so resolving a typed-in id
-// always works).
-const ID_PICKER_OPTION_CAP = 1000
-
-const Wrap = styled.div<{ $fill: boolean; $sidebarCollapsed: boolean }>`
-  display: grid;
-  /* In fill mode the sidebar stacks below the canvas (single column)
-     so the graph canvas claims the full width of the overlay. The
-     side-by-side 1fr/280px layout — and its below-md collapse — is
-     kept for the inline result panel. When the sidebar is collapsed
-     the grid is a single 1fr column regardless of mode (the Side isn't
-     rendered) so the canvas takes the whole width. */
-  grid-template-columns: ${({ $fill, $sidebarCollapsed }) => {
-    return $sidebarCollapsed || $fill ? '1fr' : '1fr 280px'
-  }};
-  gap: ${({ theme }) => theme.spacing.sm};
-  ${({ $fill }) => ($fill ? 'height: 100%;' : '')}
-
-  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
-    grid-template-columns: 1fr;
-  }
-`
-// Holds the Cytoscape canvas plus any absolutely-positioned overlays
-// (empty-graph state, build-error banner). Position-relative so the
-// overlay can stack on top of the canvas without entering Cytoscape's
-// internal DOM tree. `min-width: 0` lets this `1fr` grid track shrink
-// below the intrinsic width of the Cytoscape <canvas> — without it,
-// after the sidebar is collapsed (canvas sized to the full width) and
-// re-expanded the `1fr 280px` grid can't fit, so the 280px sidebar
-// (the property inspector lives there) is pushed off the right edge.
-const CanvasArea = styled.div`
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: ${({ theme }) => theme.spacing.xs};
-`
-const Canvas = styled.div<{ $height: number }>`
-  height: ${({ $height }) => $height}px;
-  border: 1px solid ${({ theme }) => theme.border.subtle};
-  border-radius: ${({ theme }) => theme.radii.md};
-  background: ${({ theme }) => theme.bg.graphCanvas};
-`
-// Path-mode status line — shown under the toolbar while path mode is
-// active ("Click the start node" / "Click the end node" / the result).
-const PathStatus = styled.div`
-  padding: ${({ theme }) => theme.spacing.xxs}
-    ${({ theme }) => theme.spacing.sm};
-  font-size: ${({ theme }) => theme.font.sizes.xs};
-  color: ${({ theme }) => theme.text.secondary};
-  background: ${({ theme }) => theme.bg.subtle};
-  border: 1px solid ${({ theme }) => theme.border.subtle};
-  border-radius: ${({ theme }) => theme.radii.sm};
-`
-const Overlay = styled.div`
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: ${({ theme }) => theme.spacing.md};
-  pointer-events: none;
-  color: ${({ theme }) => theme.text.muted};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  font-style: italic;
-  text-align: center;
-`
-const ErrorBanner = styled.div`
-  position: absolute;
-  inset: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.sm}
-    auto;
-  background: ${({ theme }) => theme.bg.surface};
-  border: 1px solid ${({ theme }) => theme.colors.danger};
-  border-left-width: 3px;
-  color: ${({ theme }) => theme.text.danger};
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  box-shadow: ${({ theme }) => theme.shadows.sm};
-`
-const ControlsBlock = styled.section`
-  margin-bottom: ${({ theme }) => theme.spacing.sm};
-  padding-bottom: ${({ theme }) => theme.spacing.sm};
-  border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
-
-  h5 {
-    margin: 0 0 ${({ theme }) => theme.spacing.xs};
-    font-family: ${({ theme }) => theme.font.family.display};
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: ${({ theme }) => theme.text.secondary};
-  }
-  .row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: ${({ theme }) => theme.spacing.xs};
-    align-items: center;
-    margin-bottom: ${({ theme }) => theme.spacing.xxs};
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-  }
-  select,
-  input[list] {
-    font-family: inherit;
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    padding: 2px 6px;
-    background: ${({ theme }) => theme.bg.surface};
-    color: ${({ theme }) => theme.text.primary};
-    border: 1px solid ${({ theme }) => theme.border.default};
-    border-radius: ${({ theme }) => theme.radii.sm};
-    min-width: 0;
-  }
-  select:focus-visible,
-  input[list]:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-    border-color: ${({ theme }) => theme.border.focus};
-  }
-  .empty {
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    color: ${({ theme }) => theme.text.muted};
-  }
-  .toggle-row {
-    display: flex;
-    align-items: center;
-    gap: ${({ theme }) => theme.spacing.xs};
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    margin-bottom: ${({ theme }) => theme.spacing.xxs};
-  }
-  .swatch {
-    width: 12px;
-    height: 12px;
-    border-radius: ${({ theme }) => theme.radii.sm};
-    flex-shrink: 0;
-    border: 1px solid ${({ theme }) => theme.border.subtle};
-  }
-  .toggle-label {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-`
-
-// Restore-list (Hidden / Collapsed) — a compact <ul> with one row per
-// affected node: a label/id span on the left, a Restore/Expand button on
-// the right. Empty state is a single muted line.
-const RestoreList = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-
-  li {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: ${({ theme }) => theme.spacing.xs};
-    align-items: center;
-    margin-bottom: ${({ theme }) => theme.spacing.xxs};
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-  }
-  .restore-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .restore-id {
-    color: ${({ theme }) => theme.text.muted};
-    font-family: ${({ theme }) => theme.font.family.mono};
-  }
-  button {
-    font-family: inherit;
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    padding: 1px 6px;
-    color: ${({ theme }) => theme.text.primary};
-    background: ${({ theme }) => theme.bg.canvas};
-    border: 1px solid ${({ theme }) => theme.border.default};
-    border-radius: ${({ theme }) => theme.radii.sm};
-    cursor: pointer;
-  }
-  button:hover {
-    border-color: ${({ theme }) => theme.border.strong};
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-  button:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-  }
-`
-
-function respSignature(resp: QueryRespLike & { row_count?: number }): number {
-  // Stream messages do NOT include row_count until the summary frame; for
-  // the streaming case we fall back to rows.length so the signature
-  // changes monotonically as rows arrive. Single-shot resps include
-  // row_count once and the signature is stable thereafter.
-  if (typeof resp.row_count === 'number') return resp.row_count
-  return resp.rows ? resp.rows.length : 0
-}
-
-// Apply the canvas interaction mode to a Cytoscape core. 'box' enables
-// the built-in box selection (drag-rectangle to multi-select) and turns
-// off viewport panning so the drag doesn't fight it; 'pan' restores the
-// default (drag-pans, no box select).
-function applySelectionMode(cy: Core, mode: 'pan' | 'box'): void {
-  if (mode === 'box') {
-    cy.userPanningEnabled(false)
-    cy.boxSelectionEnabled(true)
-  } else {
-    cy.userPanningEnabled(true)
-    cy.boxSelectionEnabled(false)
-  }
-}
-
-function applyLabels(
-  cy: Core,
-  nodePrefs: Record<string, string>,
-  edgePrefs: Record<string, string>
-): void {
-  cy.batch(() => {
-    cy.nodes().forEach((n) => {
-      const label = resolveNodeLabel(
-        n.data() as Record<string, unknown>,
-        nodePrefs
-      )
-      n.data('label', label)
-    })
-    cy.edges().forEach((e) => {
-      const label = resolveEdgeLabel(
-        e.data() as Record<string, unknown>,
-        edgePrefs
-      )
-      e.data('type', label)
-    })
-  })
-}
-
-// Node-label palette — duplicated lookup of cytoscapeStyle's hash so
-// the visibility-toggle row in the sidebar can show the matching
-// swatch without going through Cytoscape.
-function nodeLabelOf(data: Record<string, unknown>): string {
-  // The graph data carries a top-level `label` (one or many) on each
-  // node; we use the first as the bucketing key for visibility.
-  const labelField = data.label
-  if (typeof labelField === 'string' && labelField) return labelField
-  if (Array.isArray(labelField) && labelField.length > 0) {
-    const first = labelField[0]
-    if (typeof first === 'string') return first
-  }
-  // Some shapes carry `labels` (plural) instead.
-  const labels = data.labels
-  if (Array.isArray(labels) && labels.length > 0) {
-    const first = labels[0]
-    if (typeof first === 'string') return first
-  }
-  return ''
-}
-
 export const GraphView: React.FC<Props> = ({
   resp,
   query,
@@ -455,19 +78,6 @@ export const GraphView: React.FC<Props> = ({
   // caller-provided `height`.
   const effectiveHeight = useFillHeight({ fillHeight, height })
   const [selected, setSelected] = useState<Selected | null>(null)
-  // Phase-2 hide/collapse workflow. `hidden` is the set of node ids the
-  // operator has hidden individually (via the inspector "Hide" action or
-  // the explore-neighbours merge being undone — currently just Hide).
-  // `collapsed` maps a node id → the ids of the leaf neighbours folded
-  // behind it by "Collapse", so Expand can restore exactly that set.
-  // Both are result-scoped — a new query result clears them in the
-  // sig-keyed effect below (same place path mode resets).
-  const [hidden, setHidden] = useState<Set<string>>(new Set())
-  const [collapsed, setCollapsed] = useState<Map<string, string[]>>(new Map())
-  // The node id whose 1-hop subgraph is currently being fetched by
-  // "Explore neighbours" (null when idle). Used to show a per-button
-  // loading state and to ignore overlapping clicks.
-  const [exploringId, setExploringId] = useState<string | null>(null)
   // Whether the inspector/controls sidebar is collapsed. Session-local
   // (defaults expanded); not persisted. Useful in both layouts but most
   // impactful in fill mode where it lets the canvas claim the full
@@ -491,28 +101,23 @@ export const GraphView: React.FC<Props> = ({
   const setNodeLabelPref = useGraphPrefs((s) => s.setNodePref)
   const edgeLabelPrefs = useGraphPrefs((s) => s.edgeLabelPrefs)
   const setEdgeLabelPref = useGraphPrefs((s) => s.setEdgePref)
-  // Set of node-label buckets (e.g. 'Movie', 'Person') the user has
-  // hidden. Toggled by the visibility checkboxes in the sidebar.
+  // Set of node-label buckets the user has hidden. Toggled by the
+  // visibility checkboxes in the sidebar.
   const hiddenLabels = useGraphPrefs((s) => s.hiddenLabels)
   const toggleHiddenLabel = useGraphPrefs((s) => s.toggleHiddenLabel)
   const setHiddenLabels = useGraphPrefs((s) => s.setHiddenLabels)
-  // Which selected-element inspector view ('props' | 'json') the
-  // operator last picked. Sticky so it outlives a re-run remount.
+  // Sticky inspector view ('props' | 'json') so it outlives a re-run remount.
   const inspectorView = useGraphPrefs((s) => s.inspectorView)
   const setInspectorView = useGraphPrefs((s) => s.setInspectorView)
-  // Canvas interaction mode ('pan' | 'box'). 'box' enables Cytoscape's
-  // built-in box selection and disables panning while it's on. Sticky.
+  // Canvas interaction mode ('pan' | 'box'). Sticky.
   const selectionMode = useGraphPrefs((s) => s.selectionMode)
   const setSelectionMode = useGraphPrefs((s) => s.setSelectionMode)
-  // Whether nodes are grouped under per-label compound parent nodes.
-  // When on, the rendered element set is buildCompoundElements(baseEls)
-  // and the auto-pick layout is fcose (best with compound graphs). Sticky.
+  // Group nodes under per-label compound parents. When on, the rendered
+  // set is buildCompoundElements(baseEls) and fcose is the auto-pick. Sticky.
   const clusterByLabel = useGraphPrefs((s) => s.clusterByLabel)
   const setClusterByLabel = useGraphPrefs((s) => s.setClusterByLabel)
-  // Path-mode state machine + handlers (off / pickSource / pickTarget /
-  // shown). Result-scoped — `resetPath` is invoked from the sig-keyed
-  // reset effect below alongside the other per-result resets. The hook
-  // closes over the cyRef so the tap-handler ref tracks the latest cy.
+  // Path-mode state machine + handlers. Result-scoped — `resetPath` is
+  // invoked from the sig-keyed reset effect below.
   const {
     pathState,
     pathTapRef,
@@ -521,30 +126,31 @@ export const GraphView: React.FC<Props> = ({
     resetPath,
     pathStatusText,
   } = useGraphPathMode({ cyRef, t })
-  // Live counts surfaced in the toolbar. Reflect what's actually in
-  // the Cytoscape core (post-build, post-filter), not the raw resp,
-  // so users see the effect of layout/filter changes.
+  // Live counts surfaced in the toolbar — what's actually in the
+  // Cytoscape core (post-build, post-filter), not the raw resp.
   const [counts, setCounts] = useState<{ nodes: number; edges: number }>({
     nodes: 0,
     edges: 0,
   })
 
-  // Track the resp + query by reference so the debounced rebuild
-  // always reads the latest snapshot when it fires (without
-  // re-creating the timer every render).
-  const respRef = useRef(resp)
-  respRef.current = resp
+  // Element-set + derived indices (memoized on resp/query/cluster).
+  const {
+    elements,
+    nodeOptions,
+    edgeOptions,
+    nodeIds,
+    edgeIds,
+    nodeDataById,
+    edgeDataById,
+    nodeLabelBuckets,
+  } = useGraphElements({ resp, query, clusterByLabel })
+
+  // Refs the debounced build callback reads on fire — they always hold
+  // the latest snapshot without re-creating the timer every render.
   const queryRef = useRef(query)
   queryRef.current = query
-  // P-NEW-5: hold the same `elements` snapshot the option / id maps
-  // are built from so the build effect doesn't re-walk extractElements
-  // a second time. The rebuild trigger (sig) gates on (row_count|query),
-  // so when the build callback fires the latest memoized `elements`
-  // is the one to render.
-  const elementsRef = useRef<ElementDefinition[]>([])
-
-  // Track the latest preference maps so the build effect picks them
-  // up without rebuilding when only the preference changes.
+  const elementsRef = useRef(elements)
+  elementsRef.current = elements
   const nodePrefsRef = useRef(nodeLabelPrefs)
   nodePrefsRef.current = nodeLabelPrefs
   const edgePrefsRef = useRef(edgeLabelPrefs)
@@ -554,72 +160,39 @@ export const GraphView: React.FC<Props> = ({
   const selectionModeRef = useRef(selectionMode)
   selectionModeRef.current = selectionMode
 
+  // Phase-2 hide/collapse workflow + the "Explore neighbours" fetch flow.
+  // Result-scoped state — the sig-keyed reset effect below clears all
+  // three setters on a new query result.
+  const {
+    hidden,
+    collapsed,
+    exploringId,
+    setHidden,
+    setCollapsed,
+    setExploringId,
+    onHideNode,
+    onCollapseNode,
+    onRestoreHidden,
+    onExpandCollapsed,
+    onExploreNeighbours,
+  } = useGraphActions({
+    cyRef,
+    layoutRef,
+    queryRef,
+    setSelected,
+    setError,
+    t,
+  })
+
   // GAP-01 / GAP-07: rebuild key combines row_count with the query
-  // text. Two queries that happen to return the same row count would
-  // previously fail to trigger the rebuild and leave a stale graph
-  // on the canvas. The clusterByLabel flag is folded in so toggling
-  // group-by-label re-runs the build (the rendered element set changes).
+  // text. Two queries with the same row count would otherwise leave a
+  // stale graph on the canvas. Cluster toggle is folded in so toggling
+  // group-by-label re-runs the build.
   const sig = `${respSignature(resp)}|${query ?? ''}|${clusterByLabel ? 'c' : ''}`
 
-  // The plain element set for this resp (no synthetic cluster parents) —
-  // this is what the pickers / visibility buckets / display selectors
-  // read. The *rendered* set (`elements`) is the same thing wrapped in
-  // per-label compound parents when group-by-label is on.
-  const baseEls = useMemo<ElementDefinition[]>(
-    () => extractElements(resp, query),
-    [resp, query]
-  )
-  const elements = useMemo<ElementDefinition[]>(
-    () => (clusterByLabel ? buildCompoundElements(baseEls) : baseEls),
-    [baseEls, clusterByLabel]
-  )
-  elementsRef.current = elements
-  // Options / id index are derived from the plain set so the cluster
-  // parents never leak into the dropdowns.
-  const nodeOptions = useMemo(() => labelOptions(baseEls), [baseEls])
-  const edgeOptions = useMemo(() => typeOptions(baseEls), [baseEls])
-
-  // Per-element id index for the keyboard pickers (GAP-03). Built from
-  // the plain element set (`baseEls`) so synthetic cluster parents
-  // never show up in the id pickers or visibility buckets.
-  const { nodeIds, edgeIds, nodeDataById, edgeDataById, nodeLabelBuckets } =
-    useMemo(() => {
-      const nIds: string[] = []
-      const eIds: string[] = []
-      const nMap = new Map<string, Record<string, unknown>>()
-      const eMap = new Map<string, Record<string, unknown>>()
-      const buckets = new Map<string, number>()
-      baseEls.forEach((el) => {
-        const data = el.data as Record<string, unknown> | undefined
-        if (!data) return
-        const id = data.id != null ? String(data.id) : ''
-        if (!id) return
-        // Cytoscape v3 marks edges by the presence of `source` + `target`
-        // on the data bag.
-        const isEdge = data.source !== undefined && data.target !== undefined
-        if (isEdge) {
-          eIds.push(id)
-          eMap.set(id, data)
-        } else {
-          nIds.push(id)
-          nMap.set(id, data)
-          const bucket = nodeLabelOf(data)
-          buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1)
-        }
-      })
-      return {
-        nodeIds: nIds,
-        edgeIds: eIds,
-        nodeDataById: nMap,
-        edgeDataById: eMap,
-        nodeLabelBuckets: buckets,
-      }
-    }, [baseEls])
-
-  // Auto-pick a saner default layout when the response is large enough
-  // that cose would freeze the tab. Only fires once per response —
-  // the user's manual layout choice is preserved across non-resize
-  // re-renders.
+  // Auto-pick grid for large responses (cose would freeze the tab).
+  // Only fires once per response — the user's manual layout choice is
+  // preserved across non-resize re-renders.
   const lastSigRef = useRef<string>('')
   useEffect(() => {
     if (lastSigRef.current === sig) return
@@ -639,269 +212,38 @@ export const GraphView: React.FC<Props> = ({
     ) {
       setLayout('grid')
     }
+    // resetPath/setLayout are stable in practice; sig is the real trigger.
   }, [sig])
 
-  // Apply visibility filter — doesn't rebuild the core. Toggling
-  // `.gv-hidden` is cheap because Cytoscape special-cases display:none
-  // to skip layout/render passes for those elements.
-  const applyVisibility = useCallback((cy: Core, hidden: Set<string>): void => {
-    cy.batch(() => {
-      cy.nodes().forEach((n) => {
-        const data = n.data() as Record<string, unknown>
-        const bucket = nodeLabelOf(data)
-        if (hidden.has(bucket)) {
-          n.addClass('gv-hidden')
-        } else {
-          n.removeClass('gv-hidden')
-        }
-      })
-      // Edges adjacent to hidden nodes: hide them as well so the
-      // canvas isn't littered with arrows pointing into nothing.
-      cy.edges().forEach((e) => {
-        const src = e.source()
-        const tgt = e.target()
-        if (src.hasClass('gv-hidden') || tgt.hasClass('gv-hidden')) {
-          e.addClass('gv-hidden')
-        } else {
-          e.removeClass('gv-hidden')
-        }
-      })
-    })
-  }, [])
+  // All cytoscape lifecycle effects — debounced rebuild keyed on sig,
+  // theme / layout / selection-mode / visibility / hidden-set / emphasis
+  // side-effects, and the ResizeObserver re-fit. See useGraphCytoscape
+  // for the per-effect rationale.
+  useGraphCytoscape({
+    sig,
+    containerRef: ref,
+    cyRef,
+    elementsRef,
+    layoutRef,
+    nodePrefsRef,
+    edgePrefsRef,
+    selectionModeRef,
+    pathTapRef,
+    theme,
+    nodeLabelPrefs,
+    edgeLabelPrefs,
+    layout,
+    selectionMode,
+    hiddenLabels,
+    hidden,
+    selected,
+    setSelected,
+    setError,
+    setCounts,
+    t,
+  })
 
-  // Apply 1-hop neighborhood emphasis around the selected element.
-  // No-ops the .gv-faded / .gv-emphasized classes when nothing is
-  // selected so the canvas reads at full saturation by default.
-  const applyEmphasis = useCallback((cy: Core, sel: Selected | null): void => {
-    cy.batch(() => {
-      cy.elements().removeClass('gv-faded').removeClass('gv-emphasized')
-      if (!sel) return
-      const id = String(sel.data.id ?? '')
-      if (!id) return
-      const target = cy.$id(id)
-      if (target.empty()) return
-      const neighborhood =
-        sel.kind === 'node'
-          ? target.closedNeighborhood()
-          : target.union(target.connectedNodes())
-      cy.elements().difference(neighborhood).addClass('gv-faded')
-      neighborhood.addClass('gv-emphasized')
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!ref.current) return undefined
-    let canceled = false
-
-    const build = (): void => {
-      if (canceled || !ref.current) return
-      // GAP-02 / GAP-06: drop the previous selection so the inspector
-      // doesn't keep showing data from a graph that was just torn
-      // down. Reset before any throw so the side panel never shows
-      // stale state.
-      setSelected(null)
-      setError(null)
-      // Tear down a previous core if any. We accept this cost because
-      // the rebuild is gated by row_count + debounce (PERF-F9), so a
-      // streaming run produces exactly one teardown+rebuild instead of
-      // one per row.
-      if (cyRef.current) {
-        cyRef.current.destroy()
-        cyRef.current = null
-      }
-      try {
-        // P-NEW-5: reuse the memoized snapshot from `elements` instead
-        // of re-walking the full resp here. extractElements on a 5k-
-        // element resp is non-trivial; we already paid the cost in
-        // the useMemo that drives `nodeOptions` / `edgeOptions`.
-        const els = elementsRef.current
-        // GAP-05: when the response has no graph elements (e.g. a
-        // scalar projection like RETURN p.name), skip the cytoscape
-        // mount entirely. The render pass shows an empty-state
-        // overlay over the bare Canvas.
-        if (els.length === 0) {
-          setCounts({ nodes: 0, edges: 0 })
-          return
-        }
-        const cy = cytoscape({
-          container: ref.current,
-          elements: els,
-          style: createCytoscapeStyle(theme),
-          layout: layoutConfig(layoutRef.current),
-          wheelSensitivity: 0.2,
-        })
-        cy.on('tap', 'node', (ev) => {
-          const id = ev.target.id() as string
-          // In path mode the first/second tap pick the path endpoints;
-          // the handler returns true to swallow the tap. Otherwise fall
-          // through to the normal inspector-select behaviour.
-          if (pathTapRef.current(id)) return
-          const data = ev.target.data() as Record<string, unknown>
-          setSelected({ kind: 'node', data })
-        })
-        cy.on('tap', 'edge', (ev) => {
-          const data = ev.target.data() as Record<string, unknown>
-          setSelected({ kind: 'edge', data })
-        })
-        cy.on('tap', (ev) => {
-          if (ev.target === cy) setSelected(null)
-        })
-        cyRef.current = cy
-        // Apply current label preferences to this fresh core. Subsequent
-        // pref changes are handled by the dedicated effect below without
-        // re-running the layout.
-        applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
-        // Seed the canvas interaction mode (pan / box select) on the
-        // fresh core; later toggles are handled by the dedicated effect.
-        applySelectionMode(cy, selectionModeRef.current)
-        setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
-      } catch (e: unknown) {
-        // GAP-04: surface the failure as a visible banner instead of
-        // an uncaught console rejection. The build is best-effort —
-        // the rest of the page (sidebar, picker) still works. `error`
-        // holds the fully-formatted banner text (the ErrorBanner renders
-        // it verbatim) so explore failures can use their own framing.
-        const buildErr = e instanceof Error ? e.message : String(e)
-        setError(t('graph.errorBanner', { message: buildErr }))
-      }
-    }
-
-    const timer = setTimeout(build, REBUILD_DEBOUNCE_MS)
-
-    return () => {
-      canceled = true
-      clearTimeout(timer)
-      if (cyRef.current) {
-        cyRef.current.destroy()
-        cyRef.current = null
-      }
-    }
-    // theme is intentionally NOT a dep — theme flips swap the stylesheet
-    // via the dedicated effect below without rebuilding the core.
-  }, [sig])
-
-  // Re-apply labels when preferences change. This does NOT rebuild
-  // the core or run the layout — it just rewrites data.label on the
-  // existing nodes/edges so cytoscape's style binding picks up the
-  // new value.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    applyLabels(cy, nodeLabelPrefs, edgeLabelPrefs)
-  }, [nodeLabelPrefs, edgeLabelPrefs])
-
-  // Live theme swap: rebuild the stylesheet when light↔dark flips.
-  // No layout rerun — Cytoscape recomputes node fills, label colors,
-  // and edge styles from the new tokens against existing positions.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.style(createCytoscapeStyle(theme)).update()
-  }, [theme])
-
-  // Re-run the layout when the user picks a different one. We do NOT
-  // tear down the core; .layout().run() re-positions in place.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.layout(layoutConfig(layout)).run()
-    cy.fit(undefined, 24)
-  }, [layout])
-
-  // Canvas interaction-mode changes — apply to the live core. Cheap;
-  // just flips two Cytoscape flags.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    applySelectionMode(cy, selectionMode)
-  }, [selectionMode])
-
-  // Visibility filter changes — re-run the apply pass against the
-  // current core. Cheap; just toggles a class.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    applyVisibility(cy, hiddenLabels)
-  }, [hiddenLabels, applyVisibility])
-
-  // Phase-2 per-node hide set changes — re-assert the `.hidden-node`
-  // class on every tracked id. The Hide/Collapse handlers already add
-  // the class directly; this effect is the idempotent backstop so the
-  // `hidden` set is the source of truth (and a future re-render path
-  // that re-derives classes can't drop a hide). Cheap — addClass on an
-  // already-classed element is a no-op.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.batch(() => {
-      hidden.forEach((nodeId) => {
-        cy.getElementById(nodeId).addClass('hidden-node')
-      })
-    })
-  }, [hidden])
-
-  // When the canvas box changes size — the maximize toggle flips, the
-  // window resizes, the sidebar collapses/expands, or the container
-  // reflows for any other reason — Cytoscape needs to recompute its
-  // renderer viewport and re-fit the graph to the new box; otherwise
-  // the graph stays drawn at the old size in the corner of a now-larger
-  // (or clipped in a now-smaller) canvas. A ResizeObserver on the
-  // Canvas element catches *all* of those, not just the discrete
-  // `effectiveHeight`-prop changes the previous height-keyed effect
-  // saw. The callback is rAF-debounced so a burst of resize entries
-  // collapses to a single resize()+fit(). Guarded for jsdom (the unit
-  // tests get a no-op ResizeObserver stub from polyfills.js, so the
-  // observer simply never fires there — those tests assert on markup,
-  // not on cy.fit calls).
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return undefined
-    if (typeof ResizeObserver === 'undefined') return undefined
-    let raf = 0
-    const refit = (): void => {
-      raf = 0
-      const cy = cyRef.current
-      if (!cy) return
-      cy.resize()
-      cy.fit(undefined, 24)
-    }
-    const schedule = (): void => {
-      if (typeof requestAnimationFrame !== 'function') {
-        refit()
-        return
-      }
-      if (raf) return
-      raf = requestAnimationFrame(refit)
-    }
-    const ro = new ResizeObserver(schedule)
-    ro.observe(el)
-    return () => {
-      ro.disconnect()
-      if (raf && typeof cancelAnimationFrame === 'function') {
-        cancelAnimationFrame(raf)
-      }
-    }
-  }, [])
-
-  // Selected element changes — drive the emphasis (1-hop) styling.
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    applyEmphasis(cy, selected)
-  }, [selected, applyEmphasis])
-
-  const setNodePref = (label: string, key: string): void => {
-    setNodeLabelPref(label, key)
-  }
-  const setEdgePref = (type: string, key: string): void => {
-    setEdgeLabelPref(type, key)
-  }
-
-  // GAP-03: keyboard-only operators can't tap on the canvas. The id
-  // pickers below let them select a node or edge via the Display
-  // panel; this handler resolves the typed/picked id back to the
-  // element's data and updates the inspector. We also call cy.$id
-  // when the core is mounted so the canvas highlights the selection.
+  // GAP-03: keyboard pickers — resolve typed/picked id back to data.
   const onPickNodeId = (rawId: string): void => {
     const id = rawId.trim()
     if (!id) return
@@ -910,18 +252,6 @@ export const GraphView: React.FC<Props> = ({
     setSelected({ kind: 'node', data })
     cyRef.current?.$id(id).select()
   }
-  const onToggleSelectionMode = (): void => {
-    setSelectionMode(selectionMode === 'box' ? 'pan' : 'box')
-  }
-  const onToggleClusterByLabel = (): void => {
-    const next = !clusterByLabel
-    setClusterByLabel(next)
-    // Switching clustering ON auto-picks fcose (it lays out compound
-    // graphs best). We don't force it back off when clustering is
-    // turned off, and a subsequent manual layout pick is respected.
-    if (next) setLayout('fcose')
-  }
-
   const onPickEdgeId = (rawId: string): void => {
     const id = rawId.trim()
     if (!id) return
@@ -930,20 +260,22 @@ export const GraphView: React.FC<Props> = ({
     setSelected({ kind: 'edge', data })
     cyRef.current?.$id(id).select()
   }
-
-  const toggleLabelVisibility = (label: string): void => {
-    toggleHiddenLabel(label)
+  const onToggleSelectionMode = (): void => {
+    setSelectionMode(selectionMode === 'box' ? 'pan' : 'box')
   }
-
+  const onToggleClusterByLabel = (): void => {
+    const next = !clusterByLabel
+    setClusterByLabel(next)
+    // Clustering ON auto-picks fcose (best for compound graphs); off
+    // doesn't force a layout change, so a manual pick is respected.
+    if (next) setLayout('fcose')
+  }
   const onZoomIn = (): void => {
     const cy = cyRef.current
     if (!cy) return
     cy.zoom({
       level: cy.zoom() * 1.25,
-      renderedPosition: {
-        x: cy.width() / 2,
-        y: cy.height() / 2,
-      },
+      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
     })
   }
   const onZoomOut = (): void => {
@@ -951,10 +283,7 @@ export const GraphView: React.FC<Props> = ({
     if (!cy) return
     cy.zoom({
       level: cy.zoom() / 1.25,
-      renderedPosition: {
-        x: cy.width() / 2,
-        y: cy.height() / 2,
-      },
+      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
     })
   }
   const onFit = (): void => {
@@ -969,137 +298,7 @@ export const GraphView: React.FC<Props> = ({
     cy.fit(undefined, 24)
   }
 
-  // ----- Phase-2 hide / collapse handlers -----
-
-  // Hide the selected node. Adds the `.hidden-node` class on the core,
-  // records the id, and deselects (the node is gone from the canvas, so
-  // keeping it in the inspector would be confusing).
-  const onHideNode = (id: string): void => {
-    const cy = cyRef.current
-    if (!cy || !id) return
-    hideNode(cy, id)
-    setHidden((prev) => {
-      const next = new Set(prev)
-      next.add(id)
-      return next
-    })
-    setSelected(null)
-  }
-
-  // Collapse the selected node — fold its degree-1 leaf neighbours
-  // behind it. Records (id → hiddenLeafIds); the leaves also go into the
-  // `hidden` set (so the Hidden list can restore an individual one) but
-  // are tracked under `collapsed` so an Expand restores the whole group.
-  // The node stays selected; the inspector shows "N neighbours collapsed".
-  const onCollapseNode = (id: string): void => {
-    const cy = cyRef.current
-    if (!cy || !id) return
-    const leaves = collapseNode(cy, id)
-    if (leaves.length === 0) return
-    setCollapsed((prev) => {
-      const next = new Map(prev)
-      const existing = next.get(id) ?? []
-      next.set(id, Array.from(new Set([...existing, ...leaves])))
-      return next
-    })
-    setHidden((prev) => {
-      const next = new Set(prev)
-      leaves.forEach((l) => next.add(l))
-      return next
-    })
-  }
-
-  // Restore an individually-hidden node — un-hide on the core, drop it
-  // from `hidden`, and also drop it from any collapsed group it belonged
-  // to (so the group's count stays accurate; an emptied group is removed).
-  const onRestoreHidden = (id: string): void => {
-    const cy = cyRef.current
-    if (cy) restoreNode(cy, id)
-    setHidden((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-    setCollapsed((prev) => {
-      let changed = false
-      const next = new Map<string, string[]>()
-      prev.forEach((leaves, nodeId) => {
-        const filtered = leaves.filter((l) => l !== id)
-        if (filtered.length !== leaves.length) changed = true
-        if (filtered.length > 0) next.set(nodeId, filtered)
-        else changed = true
-      })
-      return changed ? next : prev
-    })
-  }
-
-  // Expand a collapsed node — un-hide every leaf in its stored group,
-  // drop them from `hidden`, and remove the group from `collapsed`.
-  const onExpandCollapsed = (nodeId: string): void => {
-    const cy = cyRef.current
-    const leaves = collapsed.get(nodeId) ?? []
-    if (cy) expandCollapsed(cy, leaves)
-    setHidden((prev) => {
-      const next = new Set(prev)
-      leaves.forEach((l) => next.delete(l))
-      return next
-    })
-    setCollapsed((prev) => {
-      if (!prev.has(nodeId)) return prev
-      const next = new Map(prev)
-      next.delete(nodeId)
-      return next
-    })
-  }
-
-  // "Explore neighbours" — fetch the selected node's 1-hop subgraph via
-  // a fresh GQL query against the connected graph and merge the new
-  // elements into the live core, then re-run the current layout so they
-  // get positioned. No-ops for a node without a real Geode id (the
-  // inspector disables the action for those). Errors surface via the
-  // existing canvas error banner.
-  const onExploreNeighbours = (id: string): void => {
-    const cy = cyRef.current
-    if (!cy || !id || exploringId) return
-    if (!isRealNodeId(id)) return
-    // Snapshot the core before the await: if a fresh query result lands
-    // and the graph is rebuilt while this request is in flight, the
-    // explore result is for the *old* graph — bail rather than merging
-    // stale neighbours into the new core. The `!live` guard alone only
-    // covers the brief teardown window.
-    const capturedCy = cy
-    setExploringId(id)
-    setError(null)
-    client
-      .query({
-        statement: buildExploreStatement(id),
-        graph: graphNameOf(queryRef.current),
-        page_size: 200,
-        timeout_ms: 30000,
-      })
-      .then((result) => {
-        const live = cyRef.current
-        if (!live || live !== capturedCy) return
-        const newEls = extractElements(result as QueryRespLike)
-        const added = mergeSubgraph(live, newEls)
-        if (added.length > 0) {
-          live.layout(layoutConfig(layoutRef.current)).run()
-          live.fit(undefined, 24)
-        }
-      })
-      .catch((e: unknown) => {
-        const msg = e instanceof Error ? e.message : String(e)
-        setError(t('graph.exploreNeighboursFailed', { message: msg }))
-      })
-      .finally(() => {
-        setExploringId((cur) => (cur === id ? null : cur))
-      })
-  }
-
-  // Resolve a node id to a short display label for the restore lists —
-  // the per-bucket label-field preference if set, else the label name /
-  // the id. Falls back to the id when the node isn't in the index (e.g.
-  // an explore-neighbours merge added it and the index hasn't caught up).
+  // Resolve a node id to a short display label for the restore lists.
   const nodeDisplayLabel = (id: string): string => {
     const data = nodeDataById.get(id)
     if (!data) return id
@@ -1109,8 +308,8 @@ export const GraphView: React.FC<Props> = ({
   const collapsedEntries = Array.from(collapsed.entries())
 
   const empty = elements.length === 0 && !error
-  // Reuse the same hash + palette the canvas uses so the swatches in
-  // the visibility row are exact-pixel matches to the node fills.
+  // Reuse the same hash + palette the canvas uses so swatches are
+  // exact-pixel matches to the node fills.
   const swatchFor = (label: string): string =>
     labelToColor(label, theme.variant)
 
@@ -1160,209 +359,36 @@ export const GraphView: React.FC<Props> = ({
       </CanvasArea>
       {!sidebarCollapsed && (
         <GraphSidebar height={effectiveHeight} fill={fillHeight}>
-          {nodeLabelBuckets.size > 1 && (
-            <ControlsBlock data-testid="graph-visibility-controls">
-              <h5>{t('graph.visibilityHeading')}</h5>
-              {Array.from(nodeLabelBuckets.entries())
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([label, count]) => {
-                  const id = `gv-vis-${label || 'unlabeled'}`
-                  return (
-                    <label
-                      key={label || 'unlabeled'}
-                      className="toggle-row"
-                      htmlFor={id}
-                    >
-                      <input
-                        id={id}
-                        type="checkbox"
-                        checked={!hiddenLabels.has(label)}
-                        onChange={() => toggleLabelVisibility(label)}
-                      />
-                      <span
-                        className="swatch"
-                        style={{ background: swatchFor(label) }}
-                        aria-hidden="true"
-                      />
-                      <span className="toggle-label">
-                        {label || `(${t('graph.unlabeledNode')})`}
-                      </span>
-                      <span className="empty">{count}</span>
-                    </label>
-                  )
-                })}
-            </ControlsBlock>
-          )}
-          {(nodeIds.length > 0 || edgeIds.length > 0) && (
-            <ControlsBlock data-testid="graph-selection-controls">
-              <h5>{t('graph.selectionHeading')}</h5>
-              {nodeIds.length > 0 && (
-                <div className="row">
-                  <span>{t('graph.selectNodeById')}</span>
-                  <input
-                    list="graph-node-ids"
-                    data-testid="graph-node-id-picker"
-                    aria-label={t('graph.selectNodeById')}
-                    placeholder={t('graph.nodeIdPlaceholder')}
-                    onChange={(e) => onPickNodeId(e.target.value)}
-                  />
-                  <datalist id="graph-node-ids">
-                    {nodeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
-                      <option key={id} value={id}>
-                        {id}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
-              )}
-              {edgeIds.length > 0 && (
-                <div className="row">
-                  <span>{t('graph.selectEdgeById')}</span>
-                  <input
-                    list="graph-edge-ids"
-                    data-testid="graph-edge-id-picker"
-                    aria-label={t('graph.selectEdgeById')}
-                    placeholder={t('graph.edgeIdPlaceholder')}
-                    onChange={(e) => onPickEdgeId(e.target.value)}
-                  />
-                  <datalist id="graph-edge-ids">
-                    {edgeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
-                      <option key={id} value={id}>
-                        {id}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
-              )}
-            </ControlsBlock>
-          )}
-          <ControlsBlock data-testid="graph-display-controls">
-            <h5>{t('graph.displayHeading')}</h5>
-            {nodeOptions.size === 0 ? (
-              <p className="empty">{t('graph.noNodesToConfigure')}</p>
-            ) : (
-              Array.from(nodeOptions.entries()).map(([label, opts]) => (
-                <div className="row" key={`n-${label}`}>
-                  <span>{label || `(${t('graph.unlabeledNode')})`}</span>
-                  <select
-                    aria-label={t('graph.nodeFieldLabel', {
-                      label: label || t('graph.unlabeledNode'),
-                    })}
-                    value={nodeLabelPrefs[label] ?? NODE_LABEL_DEFAULT}
-                    onChange={(e) => setNodePref(label, e.target.value)}
-                  >
-                    {opts.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt === NODE_LABEL_DEFAULT
-                          ? `(${t('graph.optionLabelName')})`
-                          : opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))
-            )}
-            {edgeOptions.size > 0 &&
-              Array.from(edgeOptions.entries()).map(([type, opts]) => (
-                <div className="row" key={`e-${type}`}>
-                  <span>{type}</span>
-                  <select
-                    aria-label={t('graph.edgeFieldLabel', { type })}
-                    value={edgeLabelPrefs[type] ?? EDGE_TYPE_DEFAULT}
-                    onChange={(e) => setEdgePref(type, e.target.value)}
-                  >
-                    {opts.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt === EDGE_TYPE_DEFAULT
-                          ? `(${t('graph.optionType')})`
-                          : opt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-          </ControlsBlock>
-          <ControlsBlock data-testid="graph-hidden-list">
-            <h5>{t('graph.hiddenHeading', { count: hiddenIds.length })}</h5>
-            {hiddenIds.length === 0 ? (
-              <p className="empty">{t('graph.hiddenEmpty')}</p>
-            ) : (
-              <RestoreList>
-                {hiddenIds.map((id) => {
-                  const label = nodeDisplayLabel(id)
-                  return (
-                    <li key={id}>
-                      <span className="restore-label">
-                        {label !== id && <span>{label} </span>}
-                        <span className="restore-id">{id}</span>
-                      </span>
-                      <button type="button" onClick={() => onRestoreHidden(id)}>
-                        {t('graph.restore')}
-                      </button>
-                    </li>
-                  )
-                })}
-              </RestoreList>
-            )}
-          </ControlsBlock>
-          <ControlsBlock data-testid="graph-collapsed-list">
-            <h5>
-              {t('graph.collapsedHeading', { count: collapsedEntries.length })}
-            </h5>
-            {collapsedEntries.length === 0 ? (
-              <p className="empty">{t('graph.collapsedEmpty')}</p>
-            ) : (
-              <RestoreList>
-                {collapsedEntries.map(([id, leaves]) => {
-                  const label = nodeDisplayLabel(id)
-                  return (
-                    <li key={id}>
-                      <span className="restore-label">
-                        {label !== id && <span>{label} </span>}
-                        <span className="restore-id">{id}</span>
-                        <span> · </span>
-                        <span>
-                          {t('graph.collapsedCount', { count: leaves.length })}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => onExpandCollapsed(id)}
-                      >
-                        {t('graph.expand')}
-                      </button>
-                    </li>
-                  )
-                })}
-              </RestoreList>
-            )}
-          </ControlsBlock>
-          {selected ? (
-            <GraphInspector
-              selected={selected}
-              view={inspectorView}
-              onSetView={setInspectorView}
-              onHide={onHideNode}
-              onCollapse={onCollapseNode}
-              onExplore={onExploreNeighbours}
-              exploreLoading={
-                selected.kind === 'node' &&
-                exploringId === String(selected.data.id ?? '')
-              }
-              exploreDisabled={
-                selected.kind === 'node' &&
-                !isRealNodeId(String(selected.data.id ?? ''))
-              }
-              collapsedCount={
-                selected.kind === 'node'
-                  ? (collapsed.get(String(selected.data.id ?? '')) ?? []).length
-                  : 0
-              }
-              t={t}
-            />
-          ) : (
-            <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
-          )}
+          <GraphSidebarContents
+            t={t}
+            nodeLabelBuckets={nodeLabelBuckets}
+            hiddenLabels={hiddenLabels}
+            toggleHiddenLabel={toggleHiddenLabel}
+            swatchFor={swatchFor}
+            nodeIds={nodeIds}
+            edgeIds={edgeIds}
+            onPickNodeId={onPickNodeId}
+            onPickEdgeId={onPickEdgeId}
+            nodeOptions={nodeOptions}
+            edgeOptions={edgeOptions}
+            nodeLabelPrefs={nodeLabelPrefs}
+            edgeLabelPrefs={edgeLabelPrefs}
+            setNodeLabelPref={setNodeLabelPref}
+            setEdgeLabelPref={setEdgeLabelPref}
+            hiddenIds={hiddenIds}
+            collapsedEntries={collapsedEntries}
+            onRestoreHidden={onRestoreHidden}
+            onExpandCollapsed={onExpandCollapsed}
+            nodeDisplayLabel={nodeDisplayLabel}
+            selected={selected}
+            inspectorView={inspectorView}
+            setInspectorView={setInspectorView}
+            onHideNode={onHideNode}
+            onCollapseNode={onCollapseNode}
+            onExploreNeighbours={onExploreNeighbours}
+            exploringId={exploringId}
+            collapsed={collapsed}
+          />
         </GraphSidebar>
       )}
     </Wrap>
