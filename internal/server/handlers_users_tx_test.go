@@ -123,11 +123,21 @@ func TestPatchUsername_HappyPath_AllUpdatesInOneTx(t *testing.T) {
 	}
 
 	events := d.seen()
+	// NOTE on grammar:
+	//   - GRANT ROLE pinned to the v0.5.15 form `TO <user>` (no `USER`
+	//     keyword).
+	//   - ALTER USER SET EMAIL is NOT part of the v0.5.15 grammar
+	//     (upstream supports SET PASSWORD / SET ROLE / ENABLE / DISABLE
+	//     only). The handler still emits it so older Geode builds that
+	//     accept the legacy form keep working; on v0.5.15+ this trips
+	//     the wire_feature_missing fallback and the email update is a
+	//     no-op. The recorded statement here is the emit, not what the
+	//     real server would accept.
 	wantOrdered := []string{
 		"begin",
 		"exec:ALTER USER `alice` SET EMAIL 'alice@example.com'",
 		"exec:ALTER USER `alice` SET PASSWORD 'newsecret-pw1'",
-		"exec:GRANT ROLE `admin` TO USER `alice`",
+		"exec:GRANT ROLE `admin` TO `alice`",
 		"commit",
 	}
 	if len(events) != len(wantOrdered) {

@@ -38,15 +38,43 @@ import (
 // fallback paths). The header-mediated re-parse in the genapi
 // wrapper enforces required_roles before this file's handlers run.
 //
-// GQL admin syntax: Geode 0.3.8 only supports `ALTER USER <name> SET
-// PASSWORD '<pw>'` over the wire (verified with a live server during B4).
-// The other admin DDL forms used here (`CREATE USER`, `DROP USER`,
-// `SHOW USERS`, `GRANT ROLE`, etc.) parse-error in 0.3.8 — `geode user *`
-// CLI subcommands talk directly to the security graph data dir today.
-// The handlers still emit those statements so that as Geode grows the
-// admin DDL surface, the UI picks them up without code changes; the
-// quoting helpers in util.go make sure the string-concatenated
-// statements stay injection-safe.
+// GQL admin syntax (Geode v0.5.15+). Upstream parser is
+// `src/gql/parser.zig` and the execution path is
+// `src/execution/admin_ddl.zig`; both at tag v0.5.15. The handlers
+// below emit:
+//
+//	CREATE USER <name> SET PASSWORD '<pw>' [ EMAIL '<email>' ] [ ROLE <role> ]
+//	ALTER  USER <name> SET PASSWORD '<pw>'
+//	ALTER  USER <name> SET ROLE <role>
+//	ALTER  USER <name> ENABLE | DISABLE
+//	DROP   USER [ IF EXISTS ] <name>
+//	GRANT  ROLE <role> TO <user>
+//	SHOW   USERS
+//	SHOW   PERMISSIONS [ FOR <user> ]
+//
+// Notes on divergence from older geode-ui forms:
+//
+//   - `CREATE USER ... WITH EMAIL ...` (pre-v0.5.15 emit) was never
+//     accepted upstream; the canonical grammar uses `SET PASSWORD`
+//     followed by optional `EMAIL` and `ROLE` clauses.
+//   - `GRANT ROLE <role> TO USER <user>` (pre-v0.5.15 emit) tripped a
+//     parse error -- the v0.5.15 grammar uses bare `TO <user>`.
+//   - `SHOW PERMISSIONS FOR USER <user>` (pre-v0.5.15 emit) similarly
+//     tripped a parse error -- v0.5.15 expects bare `FOR <user>`.
+//   - `ALTER USER ... SET EMAIL ...` is NOT in v0.5.15. The
+//     PatchUsername handler still emits it for forward-compat with a
+//     future Geode release; on v0.5.15 the email update returns
+//     wire_feature_missing through the standard fallback. Tracked for
+//     follow-up against the next Geode release.
+//   - `SHOW USER <name>` (singular) is NOT in v0.5.15. GetUsername now
+//     runs `SHOW USERS` and filters the result rows server-side to
+//     surface the requested user, since the upstream parser only
+//     accepts plural `SHOW USERS`.
+//
+// Quoting: all caller-supplied identifiers go through `quoteIdent` and
+// all string literals through `quoteString` (internal/server/quoting.go).
+// Direct `fmt.Sprintf` of untrusted input into a GQL statement is a
+// known injection sink and is not permitted.
 
 // GetUsers implements GET /api/v1/users (list users).
 //
@@ -79,32 +107,68 @@ func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentyp
 }
 
 // PostUsers implements POST /api/v1/users (create user).
+//
+// Emits the v0.5.15 CREATE USER grammar:
+//
+//	CREATE USER <name> SET PASSWORD '<pw>' [ EMAIL '<email>' ] [ ROLE <role> ]
+//
+// Password is REQUIRED -- v0.5.15's `parseCreateUser` expects `SET
+// PASSWORD '<pw>'` immediately after the username. A request without a
+// password is rejected with 400 invalid_password before any driver work
+// runs (rather than letting the parse error surface as 422 wire_feature_missing).
+//
+// If the request carries one or more roles, the FIRST role is inlined
+// via the `ROLE <name>` clause so the user is created with its built-in
+// role atomically. Any additional roles run through `assignRole` after
+// CREATE USER returns. Upstream `user_assign_role` is idempotent on
+// re-assigning the current role -- no version bump and no audit row --
+// so emitting the post-create GRANT ROLE keeps the audit trail visible
+// to clients that key on the wire trace.
 func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gentypes.UserCreateReq) (*gentypes.User, error) {
 	var resp *gentypes.User
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
-		email, qErr := quoteString(req.Email)
-		if qErr != nil {
-			return badRequest(ErrCodeInvalidEmail, qErr.Error())
+		// Password is mandatory on v0.5.15. Reject early with a 400 so
+		// the client gets a clear actionable error rather than a 422
+		// wire_feature_missing after the parse failure.
+		if req.Password == "" {
+			return badRequest(ErrCodeInvalidPassword, "password is required for CREATE USER (Geode v0.5.15 grammar)")
 		}
-		stmt := "CREATE USER " + uname + " WITH EMAIL " + email
-		if req.Password != "" {
-			// GAP-N4 (#72): enforce server-side password policy before
-			// the value reaches the wire. Returns a stable 400 shape
-			// (`password_too_short` / `password_too_weak` / etc.) so
-			// clients can branch on the reason.
-			if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
-				return passwordPolicyEndpointError(vErr)
+		// GAP-N4 (#72): enforce server-side password policy before the
+		// value reaches the wire. Returns a stable 400 shape
+		// (`password_too_short` / `password_too_weak` / etc.) so clients
+		// can branch on the reason.
+		if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
+			return passwordPolicyEndpointError(vErr)
+		}
+		pw, pErr := quoteString(req.Password)
+		if pErr != nil {
+			return badRequest(ErrCodeInvalidPassword, pErr.Error())
+		}
+		stmt := "CREATE USER " + uname + " SET PASSWORD " + pw
+		if req.Email != "" {
+			email, qErr := quoteString(req.Email)
+			if qErr != nil {
+				return badRequest(ErrCodeInvalidEmail, qErr.Error())
 			}
-			pw, pErr := quoteString(req.Password)
-			if pErr != nil {
-				return badRequest(ErrCodeInvalidPassword, pErr.Error())
+			stmt += " EMAIL " + email
+		}
+		// Inline the first role so the user is created with its
+		// built-in role atomically. Remaining roles are GRANTed after
+		// CREATE USER so the audit trail is unchanged.
+		inlineRole := ""
+		if len(req.Roles) > 0 {
+			roleIdent, rErr := quoteIdent(req.Roles[0])
+			if rErr != nil {
+				return badRequest(ErrCodeInvalidRole, rErr.Error())
 			}
-			stmt += " PASSWORD " + pw
+			stmt += " ROLE " + roleIdent
+			inlineRole = req.Roles[0]
 		}
 		if _, err := runStatement(r.Context(), db, stmt); err != nil {
 			return wireErr(err)
 		}
 		for _, role := range req.Roles {
+			_ = inlineRole // already inlined; user_assign_role is idempotent.
 			if err := assignRole(r.Context(), db, uname, role); err != nil {
 				return err
 			}
@@ -124,22 +188,53 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 }
 
 // GetUsername implements GET /api/v1/users/{username}.
+//
+// v0.5.15 does not have a singular `SHOW USER <name>` form -- only
+// plural `SHOW USERS`. The handler runs `SHOW USERS` and filters the
+// result rows server-side by username (the upstream column is
+// `username`; older drivers may emit `name`). Cost is O(n) in the
+// user count which is acceptable -- a Geode instance is not expected
+// to host millions of admin users, and the alternative (a per-name
+// catalog query) is not in the v0.5.15 grammar.
 func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.User, error) {
 	var resp *gentypes.User
-	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
-		rows, cols, qErr := runQuery(r.Context(), db, "SHOW USER "+uname)
+	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, _ string) error {
+		rows, cols, qErr := runQuery(r.Context(), db, "SHOW USERS")
 		if qErr != nil {
 			return wireErr(qErr)
 		}
-		if len(rows) == 0 {
+		// Locate the column index that names the user. v0.5.15 emits
+		// `username`; legacy drivers may emit `name`.
+		nameCol := -1
+		for i, c := range cols {
+			if c == "username" || c == "name" {
+				nameCol = i
+				break
+			}
+		}
+		if nameCol < 0 {
+			// No way to filter -> treat as not found rather than
+			// silently returning the first row.
 			return &endpointError{
 				status:      http.StatusNotFound,
 				code:        ErrCodeUserNotFound,
 				description: "user " + req.Username + " does not exist",
 			}
 		}
-		resp = userFromRow(cols, rows[0])
-		return nil
+		for _, row := range rows {
+			if nameCol >= len(row) {
+				continue
+			}
+			if asStr(row[nameCol]) == req.Username {
+				resp = userFromRow(cols, row)
+				return nil
+			}
+		}
+		return &endpointError{
+			status:      http.StatusNotFound,
+			code:        ErrCodeUserNotFound,
+			description: "user " + req.Username + " does not exist",
+		}
 	})
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -220,7 +315,9 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			if qErr != nil {
 				return badRequest(ErrCodeInvalidRole, qErr.Error())
 			}
-			if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO USER "+uname); execErr != nil {
+			// v0.5.15: `GRANT ROLE <role> TO <user>` -- no USER
+			// keyword (see file-level grammar note).
+			if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO "+uname); execErr != nil {
 				return wireErr(execErr)
 			}
 		}
@@ -248,9 +345,16 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 }
 
 // DeleteUsername implements DELETE /api/v1/users/{username}.
+//
+// Emits `DROP USER IF EXISTS <name>` per the v0.5.15 grammar. Upstream
+// `handleUserDelete` already degrades gracefully on a missing user --
+// it logs and returns "deleted <name>" -- so `IF EXISTS` is structurally
+// a no-op safeguard today (see Limitations #6). Emitting it anyway
+// keeps the parse surface idempotent and shields the SPA from a future
+// upstream tightening that elevates "user not found" to a 422.
 func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
-		if _, err := runStatement(r.Context(), db, "DROP USER "+uname); err != nil {
+		if _, err := runStatement(r.Context(), db, "DROP USER IF EXISTS "+uname); err != nil {
 			return wireErr(err)
 		}
 		emitAudit(auditEventUserDeleted,
@@ -356,13 +460,21 @@ func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, 
 //
 // GAP-Q8 (#38): returns the typed `[]gentypes.Permission` (the
 // PermissionList.permissions schema is `array<Permission>`) projected
-// from the runtime-discovered `SHOW PERMISSIONS FOR USER` columns via
+// from the runtime-discovered `SHOW PERMISSIONS FOR` columns via
 // permissionFromRow (known columns: permission, resource, scope;
 // unknowns dropped with a drift warning).
+//
+// v0.5.15 grammar: `SHOW PERMISSIONS [ FOR <user> ]` -- bare `FOR
+// <user>`, no `USER` keyword. Upstream `parseShowStatement` in
+// `src/gql/parser.zig` (v0.5.15) consumes only the user name after
+// `FOR`. Admin gate is enforced upstream by `handleUserPermissions`:
+// SHOW PERMISSIONS FOR a non-self user requires the caller to have the
+// admin role -- the geode-ui side relies on the genapi
+// `required_roles:["admin"]` route gate for the same check.
 func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.PermissionList, error) {
 	var resp *gentypes.PermissionList
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
-		rows, cols, qErr := runQuery(r.Context(), db, "SHOW PERMISSIONS FOR USER "+uname)
+		rows, cols, qErr := runQuery(r.Context(), db, "SHOW PERMISSIONS FOR "+uname)
 		if qErr != nil {
 			return wireErr(qErr)
 		}
@@ -394,16 +506,21 @@ func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, use
 	return &gentypes.Empty{}, nil
 }
 
-// assignRole runs `GRANT ROLE <role> TO USER <uname>`. uname MUST be
-// pre-quoted by the caller via quoteIdent — assignRole only quotes the
-// role name. The caller pre-quotes so duplicate quoting is avoided when
+// assignRole runs `GRANT ROLE <role> TO <user>` per the v0.5.15
+// grammar (no `USER` keyword after `TO`). uname MUST be pre-quoted by
+// the caller via quoteIdent — assignRole only quotes the role name.
+// The caller pre-quotes so duplicate quoting is avoided when
 // PostUsers/PatchUsername loop over a slice of roles for one user.
+//
+// Upstream routes `GRANT ROLE ... TO <user>` to
+// `geode.auth.user_assign_role`, which is idempotent on re-assigning
+// the user's current role (no auth_version bump, no audit row).
 func assignRole(ctx context.Context, db *sql.DB, uname, role string) error {
 	roleIdent, err := quoteIdent(role)
 	if err != nil {
 		return badRequest(ErrCodeInvalidRole, err.Error())
 	}
-	if _, err := runStatement(ctx, db, "GRANT ROLE "+roleIdent+" TO USER "+uname); err != nil {
+	if _, err := runStatement(ctx, db, "GRANT ROLE "+roleIdent+" TO "+uname); err != nil {
 		return wireErr(err)
 	}
 	return nil
@@ -470,6 +587,22 @@ func rowToMap(cols []string, row []any) map[string]any {
 // dropped (with a one-line drift warning so a future Geode column
 // addition surfaces in logs rather than being silently lost — see
 // GAP-Q8 #38).
+//
+// Recognised columns:
+//
+//   - `username` / `name` (string) -> Username
+//   - `email` (string)             -> Email
+//   - `role` (string, v0.5.15)     -> Roles[0]   (singular -> singleton slice)
+//   - `roles` (list-shaped, legacy)-> Roles
+//   - `active` (bool, v0.5.15)     -> Disabled = !active
+//   - `disabled` (bool, legacy)    -> Disabled
+//   - `mfa_enrolled` (bool, legacy)-> MfaEnrolled
+//
+// The v0.5.15 SHOW USERS shape is sourced from `handleUserList` in
+// `src/execution/auth_dispatch.zig`: ("username", "email", "role",
+// "active"). Pre-v0.5.15 column names are kept for back-compat with
+// stub drivers and any older Geode build that still emits the legacy
+// shape over the wire.
 func userFromRow(cols []string, row []any) *gentypes.User {
 	u := &gentypes.User{}
 	for i, c := range cols {
@@ -481,8 +614,21 @@ func userFromRow(cols []string, row []any) *gentypes.User {
 			u.Username = asStr(row[i])
 		case "email":
 			u.Email = asStr(row[i])
+		case "role":
+			// v0.5.15: SHOW USERS emits a single `role` column with the
+			// built-in role name (admin / user / readwrite / readonly).
+			// Lift into the typed []Roles slice so the SPA continues to
+			// consume a list. Empty role -> no entry (zero-value slice).
+			if v := asStr(row[i]); v != "" {
+				u.Roles = []string{v}
+			}
 		case "roles":
 			u.Roles = asStrs(row[i])
+		case "active":
+			// v0.5.15 inverts the polarity: the catalog tracks "is_active",
+			// the typed schema tracks "disabled". Invert so SPA gates
+			// (Disable button hidden when already disabled) keep working.
+			u.Disabled = !asBool(row[i])
 		case "disabled":
 			u.Disabled = asBool(row[i])
 		case "mfa_enrolled":
