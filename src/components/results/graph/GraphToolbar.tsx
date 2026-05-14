@@ -196,42 +196,46 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </select>
       </div>
       <div className="group">
-        <button
-          type="button"
+        <wa-button
+          appearance="outlined"
+          size="small"
           data-testid="graph-zoom-in"
           aria-label={t('graph.zoomIn')}
           title={t('graph.zoomIn')}
           onClick={onZoomIn}
         >
           +
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance="outlined"
+          size="small"
           data-testid="graph-zoom-out"
           aria-label={t('graph.zoomOut')}
           title={t('graph.zoomOut')}
           onClick={onZoomOut}
         >
           −
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance="outlined"
+          size="small"
           data-testid="graph-fit"
           aria-label={t('graph.fit')}
           title={t('graph.fit')}
           onClick={onFit}
         >
           {t('graph.fit')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance="outlined"
+          size="small"
           data-testid="graph-reset-view"
           aria-label={t('graph.resetView')}
           title={t('graph.resetView')}
           onClick={onResetView}
         >
           {t('graph.resetView')}
-        </button>
+        </wa-button>
       </div>
       <div className="group">
         <button
