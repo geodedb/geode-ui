@@ -37,28 +37,6 @@ const InspectorToggle = styled.div`
   border: 1px solid ${({ theme }) => theme.border.default};
   border-radius: ${({ theme }) => theme.radii.sm};
   overflow: hidden;
-
-  button {
-    font-family: inherit;
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    padding: 2px 8px;
-    border: none;
-    background: ${({ theme }) => theme.bg.surface};
-    color: ${({ theme }) => theme.text.secondary};
-    cursor: pointer;
-  }
-  button + button {
-    border-left: 1px solid ${({ theme }) => theme.border.default};
-  }
-  button[aria-pressed='true'] {
-    background: ${({ theme }) => theme.bg.subtle};
-    color: ${({ theme }) => theme.text.primary};
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-  }
-  button:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-  }
 `
 // Actions row inside the inspector — Hide / Collapse / Explore-neighbours
 // for the selected node. Sits between the props/json segmented control
@@ -68,29 +46,6 @@ const InspectorActions = styled.div`
   flex-wrap: wrap;
   gap: ${({ theme }) => theme.spacing.xxs};
   margin-bottom: ${({ theme }) => theme.spacing.xs};
-
-  button {
-    font-family: inherit;
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    padding: 2px 8px;
-    color: ${({ theme }) => theme.text.primary};
-    background: ${({ theme }) => theme.bg.canvas};
-    border: 1px solid ${({ theme }) => theme.border.default};
-    border-radius: ${({ theme }) => theme.radii.sm};
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) {
-    border-color: ${({ theme }) => theme.border.strong};
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  button:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-  }
 `
 const InspectorNote = styled.p`
   margin: 0 0 ${({ theme }) => theme.spacing.xs};
@@ -111,19 +66,6 @@ const NeighborsList = styled.div`
     width: 100%;
     font-size: ${({ theme }) => theme.font.sizes.xs};
     color: ${({ theme }) => theme.text.secondary};
-  }
-  button {
-    font: inherit;
-    font-size: ${({ theme }) => theme.font.sizes.xs};
-    background: ${({ theme }) => theme.bg.canvas};
-    border: 1px solid ${({ theme }) => theme.border.default};
-    border-radius: ${({ theme }) => theme.radii.pill};
-    padding: 2px 8px;
-    cursor: pointer;
-    color: ${({ theme }) => theme.text.primary};
-  }
-  button:hover {
-    background: ${({ theme }) => theme.bg.subtle};
   }
   code {
     font-family: ${({ theme }) => theme.font.family.mono};

@@ -10,15 +10,6 @@ const Wrap = styled.div`
   align-items: center;
   gap: 4px;
 
-  input {
-    font: inherit;
-    color: ${({ theme }) => theme.text.primary};
-    background: ${({ theme }) => theme.bg.canvas};
-    border: 1px solid ${({ theme }) => theme.border.default};
-    border-radius: ${({ theme }) => theme.radii.sm};
-    padding: 2px 8px;
-    min-width: 140px;
-  }
   .count {
     color: ${({ theme }) => theme.text.muted};
     font-size: ${({ theme }) => theme.font.sizes.xs};
