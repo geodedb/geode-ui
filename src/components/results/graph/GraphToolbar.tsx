@@ -121,6 +121,15 @@ export type GraphToolbarProps = {
   onFindPick: (id: string) => void
   // Live counts surfaced in the stats span.
   counts: { nodes: number; edges: number }
+  // Phase-0 / Task 1 of the cytoscape→reagraph migration: which graph
+  // renderer is currently mounted by GraphView. `cytoscape` is the
+  // incumbent canvas renderer; `reagraph` is the WebGL challenger.
+  // The toolbar only surfaces the toggle — the dispatch (which
+  // component actually renders) lives in GraphView. Sticky via
+  // useGraphPrefs so the choice survives a re-run remount and a page
+  // reload.
+  renderer: 'cytoscape' | 'reagraph'
+  onToggleRenderer: () => void
 }
 
 // GraphToolbar is the top action bar of the graph view. It owns the
@@ -157,6 +166,8 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   findNodes,
   onFindPick,
   counts,
+  renderer,
+  onToggleRenderer,
 }) => {
   return (
     <Toolbar data-testid="graph-toolbar" role="toolbar">
@@ -331,6 +342,34 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           onClick={onToggleDomNodes}
         >
           {t('graph.domNodes')}
+        </wa-button>
+        {/*
+          Phase-0 / Task 1 of the cytoscape→reagraph migration: surfaces
+          a sticky toggle between the canvas (cytoscape) and WebGL
+          (reagraph) renderers. Clicking it flips the persisted
+          useGraphPrefs.renderer value; the dispatch lives in GraphView,
+          so this button only changes localStorage state here (the
+          renderer swap is wired in a later task). aria-pressed is the
+          canonical signal that this is a toggle, and aria-label spells
+          out the *current* renderer for assistive tech because the
+          visible label ('Canvas' / 'WebGL') is intentionally terse.
+        */}
+        <wa-button
+          appearance={renderer === 'reagraph' ? 'filled' : 'outlined'}
+          size="s"
+          data-testid="graph-renderer-toggle"
+          aria-pressed={renderer === 'reagraph' ? 'true' : 'false'}
+          aria-label={
+            renderer === 'reagraph'
+              ? t('graph.rendererLabelReagraph')
+              : t('graph.rendererLabelCytoscape')
+          }
+          title={t('graph.rendererTitle')}
+          onClick={onToggleRenderer}
+        >
+          {renderer === 'reagraph'
+            ? t('graph.rendererWebGL')
+            : t('graph.rendererCanvas')}
         </wa-button>
       </div>
       <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />

@@ -238,3 +238,40 @@ test('focusHops defaults to 1 for non-finite persisted values', async () => {
   const { result } = renderHook(() => useGraphPrefs())
   expect(result.current.focusHops).toBe(1)
 })
+
+// Phase-0 / Task 1: the renderer pref ('cytoscape' | 'reagraph',
+// default 'cytoscape'). Sticky so switching survives a re-run remount
+// and a page reload — the toggle lives in the graph toolbar and lets
+// the user (and the perf harness) flip between renderers without
+// changing code. Pre-flip the canvas keeps rendering cytoscape; the
+// dispatch step (rendering different components based on renderer)
+// happens in a later task. This task only pins the pref + persistence
+// contract.
+describe('useGraphPrefs renderer pref', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    // Reset the in-memory singleton so a leftover renderer value from
+    // an earlier test doesn't contaminate this one.
+    useGraphPrefs.getState().setRenderer('cytoscape')
+  })
+
+  it('defaults to cytoscape', () => {
+    expect(useGraphPrefs.getState().renderer).toBe('cytoscape')
+  })
+
+  it('switches to reagraph and persists', () => {
+    useGraphPrefs.getState().setRenderer('reagraph')
+    expect(useGraphPrefs.getState().renderer).toBe('reagraph')
+    const raw = window.localStorage.getItem('geode-ui.graph-prefs')
+    expect(raw).not.toBeNull()
+    const parsed = JSON.parse(raw as string)
+    expect(parsed.state.renderer).toBe('reagraph')
+  })
+
+  it('coerces garbage values back to cytoscape on rehydrate', async () => {
+    // Simulate a stale persisted shape with a bogus renderer string.
+    writePersisted({ renderer: 'totally-not-a-renderer' })
+    await rehydrate()
+    expect(useGraphPrefs.getState().renderer).toBe('cytoscape')
+  })
+})

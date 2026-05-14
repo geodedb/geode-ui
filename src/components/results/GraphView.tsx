@@ -158,6 +158,23 @@ export const GraphView: React.FC<Props> = ({
   // scale than the native canvas painter, so opt-in only.
   const domNodes = useGraphPrefs((s) => s.domNodes)
   const setDomNodes = useGraphPrefs((s) => s.setDomNodes)
+  // Phase-0 / Task 1 of the cytoscape→reagraph migration: sticky pref
+  // selecting which graph renderer the dispatcher mounts (cytoscape
+  // canvas vs reagraph WebGL). For Task 1 the canvas keeps rendering
+  // cytoscape regardless — clicking the toolbar toggle just flips the
+  // localStorage value. The dispatch step lives in a later task; this
+  // wiring isolates the pref + toolbar toggle from the renderer swap
+  // so a regression in either is bisectable.
+  const renderer = useGraphPrefs((s) => s.renderer)
+  const setRenderer = useGraphPrefs((s) => s.setRenderer)
+  // Toggle handler hoisted into a callback so the <GraphToolbar /> JSX
+  // doesn't need an arrow-with-implicit-return — prettier wants the
+  // body on its own line, eslint's react/jsx-curly-newline rule
+  // forbids the resulting newline before `}`. Easier to lift the
+  // handler than to fight the two rules in a single expression.
+  const onToggleRenderer = useCallback(() => {
+    setRenderer(renderer === 'reagraph' ? 'cytoscape' : 'reagraph')
+  }, [renderer, setRenderer])
   // Path-mode state machine + handlers. Result-scoped — `resetPath` is
   // invoked from the sig-keyed reset effect below.
   const {
@@ -659,6 +676,8 @@ export const GraphView: React.FC<Props> = ({
           findNodes={findNodes}
           onFindPick={onFindPick}
           counts={counts}
+          renderer={renderer}
+          onToggleRenderer={onToggleRenderer}
         />
         {pathStatusText && (
           <PathStatus data-testid="graph-path-status" role="status">

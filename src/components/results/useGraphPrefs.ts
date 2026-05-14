@@ -47,6 +47,16 @@ export type SelectionMode = 'pan' | 'box'
 
 export const DEFAULT_SELECTION_MODE: SelectionMode = 'pan'
 
+// Which graph renderer to use. `cytoscape` is the incumbent canvas
+// renderer (current default). `reagraph` is the WebGL challenger being
+// validated under the cytoscape→reagraph migration (Phase 0). Sticky so
+// switching survives a re-run remount and a page reload — the toggle
+// lives in the graph toolbar and lets the user (and the perf harness)
+// flip between renderers without changing code.
+export type Renderer = 'cytoscape' | 'reagraph'
+
+export const DEFAULT_RENDERER: Renderer = 'cytoscape'
+
 const STORAGE_KEY = 'geode-ui.graph-prefs'
 
 type GraphPrefsState = {
@@ -83,6 +93,9 @@ type GraphPrefsState = {
   // native canvas-painted nodes; surfaces the CustomNodeTemplate React
   // tree per node which enables richer styling and future interactivity.
   domNodes: boolean
+  // See Renderer type above. Sticky pref selecting which graph renderer
+  // (cytoscape canvas vs reagraph WebGL) the dispatcher mounts.
+  renderer: Renderer
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -96,6 +109,7 @@ type GraphPrefsState = {
   setMiniMap: (v: boolean) => void
   setLasso: (v: boolean) => void
   setDomNodes: (v: boolean) => void
+  setRenderer: (r: Renderer) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -113,6 +127,7 @@ type PersistedShape = {
   miniMap: boolean
   lasso: boolean
   domNodes: boolean
+  renderer: Renderer
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -121,6 +136,14 @@ function coerceInspectorView(v: unknown): InspectorView {
 
 function coerceSelectionMode(v: unknown): SelectionMode {
   return v === 'box' ? 'box' : DEFAULT_SELECTION_MODE
+}
+
+// Anything other than the literal string 'reagraph' coerces back to
+// the default ('cytoscape') — guards against a stale persisted shape
+// from an older build, a hand-edited localStorage value, or a typo
+// from another branch.
+function coerceRenderer(v: unknown): Renderer {
+  return v === 'reagraph' ? 'reagraph' : DEFAULT_RENDERER
 }
 
 export const useGraphPrefs = create<GraphPrefsState>()(
@@ -138,6 +161,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       miniMap: false,
       lasso: false,
       domNodes: false,
+      renderer: DEFAULT_RENDERER,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -162,6 +186,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setMiniMap: (v) => set({ miniMap: v }),
       setLasso: (v) => set({ lasso: v }),
       setDomNodes: (v) => set({ domNodes: v }),
+      setRenderer: (r) => set({ renderer: r }),
     }),
     {
       name: STORAGE_KEY,
@@ -179,6 +204,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         miniMap: s.miniMap,
         lasso: s.lasso,
         domNodes: s.domNodes,
+        renderer: s.renderer,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -218,6 +244,12 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // Same strict-true coercion for the HTML-nodes toggle — opt-in,
           // a missing/garbage persisted value keeps DOM-node rendering off.
           domNodes: p.domNodes === true,
+          // Coerce the persisted renderer through the same defensive
+          // helper used elsewhere — anything that isn't 'reagraph' (a
+          // stale shape, a typo, a missing field) falls back to the
+          // incumbent 'cytoscape' renderer so a bad persisted value
+          // can never trap the user on a partial / broken renderer.
+          renderer: coerceRenderer(p.renderer),
         }
       },
     }
