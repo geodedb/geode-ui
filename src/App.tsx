@@ -24,6 +24,7 @@ import { MigrationsPage } from './components/ops/MigrationsPage'
 import { AuditLogPage } from './components/ops/AuditLogPage'
 import { LocalizationProvider } from './services/i18n'
 import { ThemeProvider } from './theme'
+import { ThemeStyleSheet } from './services/webawesome/ThemeStyleSheet'
 
 const GlobalStyle = createGlobalStyle`
   *, *::before, *::after {
@@ -99,6 +100,7 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
   <LocalizationProvider>
     <ThemeProvider>
       <GlobalStyle />
+      <ThemeStyleSheet />
       <ConnectionsProvider
         initialConnections={initialConnections}
         lazyHydrate={lazyHydrate}
