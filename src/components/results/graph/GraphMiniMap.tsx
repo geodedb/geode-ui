@@ -10,6 +10,14 @@ import styled from 'styled-components'
 import cytoscape, { Core } from 'cytoscape'
 import navigator from 'cytoscape-navigator'
 
+// Side-effect import — the package ships its panner / viewport-rect
+// styles in this file. Without it the navigator div renders empty
+// (no visible rectangle, no draggable handle), which looks exactly
+// like a broken mini-map. The Jest CSS stub (jest.config.cjs's
+// moduleNameMapper for "\\.css$") returns an empty module so this
+// import is a no-op in tests.
+import 'cytoscape-navigator/cytoscape.js-navigator.css'
+
 // Idempotent registration — cytoscape.use is a no-op on second call, so
 // re-importing this module (e.g. across tests) doesn't double-register.
 // `cytoscape-navigator` predates the modern Ext typing, so we cast through
