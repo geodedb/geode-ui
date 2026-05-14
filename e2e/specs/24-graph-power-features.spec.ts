@@ -155,9 +155,13 @@ test.describe('graph power features', () => {
   test('find-node input picks a match on Enter', async ({
     authedPage: page,
   }) => {
-    await page.getByTestId('graph-find-input').fill('Movie')
+    // FindNodeInput is now a <wa-input data-testid="graph-find-input">.
+    // .fill()/.press() must target the real <input> inside its shadow
+    // DOM — Playwright pierces shadow roots when chaining a locator.
+    const input = page.getByTestId('graph-find-input').locator('input')
+    await input.fill('Movie')
     await expect(page.getByTestId('graph-find-count')).toContainText(/\d/)
-    await page.getByTestId('graph-find-input').press('Enter')
+    await input.press('Enter')
     await expect(page.getByTestId('graph-inspector')).toBeVisible()
   })
 
@@ -232,6 +236,21 @@ test.describe('graph power features', () => {
     // No stray .cytoscape-navigator pinned to body (the bug).
     const strayCount = await page.locator('body > .cytoscape-navigator').count()
     expect(strayCount).toBe(0)
+  })
+
+  test('wa-button renders with non-zero size (foundation CSS loaded)', async ({
+    authedPage: page,
+  }) => {
+    // The toolbar contains multiple <wa-button> instances. If the
+    // foundation CSS (dist/styles/webawesome.css) isn't imported,
+    // these render as unstyled custom elements with collapsed
+    // bounding boxes. Pin at least one button has a positive box.
+    const button = page.getByTestId('graph-zoom-in')
+    await expect(button).toBeVisible()
+    const box = await button.boundingBox()
+    expect(box).not.toBeNull()
+    expect((box?.width ?? 0)).toBeGreaterThan(8)
+    expect((box?.height ?? 0)).toBeGreaterThan(8)
   })
 
   test('typing in the editor after run does not reset the graph', async ({
