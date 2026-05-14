@@ -90,29 +90,47 @@ export type UseCxtMenuArgs = {
 export function useCxtMenu(args: UseCxtMenuArgs): void {
   const { cyRef, handlers, t, theme, sig } = args
   useEffect(() => {
-    const cy = cyRef.current as CoreWithCxt | null
-    if (!cy || typeof cy.cxtmenu !== 'function') return undefined
-    const inst = cy.cxtmenu({
-      selector: 'node',
-      openMenuEvents: 'cxttap taphold',
-      commands: buildCommands({ handlers, t }),
-      fillColor: theme.bg.overlay,
-      activeFillColor: theme.colors.primary,
-      activePadding: 4,
-      indicatorSize: 18,
-      separatorWidth: 2,
-      spotlightPadding: 4,
-      minSpotlightRadius: 18,
-      maxSpotlightRadius: 36,
-      itemColor: theme.text.onPrimary,
-      itemTextShadowColor: 'transparent',
-      zIndex: 9999,
-    })
+    // useGraphCytoscape's rebuild is debounced via setTimeout, so when
+    // sig changes this effect runs BEFORE the new cy is constructed and
+    // cyRef.current is null. A simple !cyRef.current return-early would
+    // miss the cxtmenu factory call forever. Poll instead until cy is
+    // mounted (or the effect is torn down).
+    let mounted: { destroy: () => void } | null = null
+    let cancelled = false
+    const tryMount = (): void => {
+      if (cancelled || mounted) return
+      const cy = cyRef.current as CoreWithCxt | null
+      if (!cy || typeof cy.cxtmenu !== 'function') {
+        // Re-check after the debounced build is likely to have run.
+        setTimeout(tryMount, 50)
+        return
+      }
+      mounted = cy.cxtmenu({
+        selector: 'node',
+        openMenuEvents: 'cxttap taphold',
+        commands: buildCommands({ handlers, t }),
+        fillColor: theme.bg.overlay,
+        activeFillColor: theme.colors.primary,
+        activePadding: 4,
+        indicatorSize: 18,
+        separatorWidth: 2,
+        spotlightPadding: 4,
+        minSpotlightRadius: 18,
+        maxSpotlightRadius: 36,
+        itemColor: theme.text.onPrimary,
+        itemTextShadowColor: 'transparent',
+        zIndex: 9999,
+      })
+    }
+    tryMount()
     return () => {
-      try {
-        inst.destroy()
-      } catch {
-        // cy may already be destroyed during rebuild teardown.
+      cancelled = true
+      if (mounted) {
+        try {
+          mounted.destroy()
+        } catch {
+          // cy may already be destroyed during rebuild teardown.
+        }
       }
     }
     // handlers + t identities churn each render; re-mounting cxtmenu

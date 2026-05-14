@@ -24,9 +24,6 @@ export function useNodeTooltip(args: UseNodeTooltipArgs): UseNodeTooltipResult {
   const [targetData, setTargetData] = useState<TooltipTargetData | null>(null)
 
   useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return undefined
-
     const resolveLabel = (raw: unknown): string => {
       if (typeof raw === 'string') return raw
       if (Array.isArray(raw) && typeof raw[0] === 'string') return raw[0]
@@ -48,11 +45,35 @@ export function useNodeTooltip(args: UseNodeTooltipArgs): UseNodeTooltipResult {
     }
     const onLeave = (): void => setTargetData(null)
 
-    cy.on('mouseover', 'node', onEnter as never)
-    cy.on('mouseout', 'node', onLeave as never)
+    // useGraphCytoscape's rebuild is debounced via setTimeout, so when
+    // sig changes this effect runs BEFORE the new cy is constructed and
+    // cyRef.current is null. Poll until cy is mounted (or the effect is
+    // torn down) so the mouseover/mouseout listeners always bind to the
+    // live core.
+    let bound: { cy: Core } | null = null
+    let cancelled = false
+    const tryBind = (): void => {
+      if (cancelled || bound) return
+      const cy = cyRef.current
+      if (!cy) {
+        setTimeout(tryBind, 50)
+        return
+      }
+      cy.on('mouseover', 'node', onEnter as never)
+      cy.on('mouseout', 'node', onLeave as never)
+      bound = { cy }
+    }
+    tryBind()
     return () => {
-      cy.off('mouseover', 'node', onEnter as never)
-      cy.off('mouseout', 'node', onLeave as never)
+      cancelled = true
+      if (bound) {
+        try {
+          bound.cy.off('mouseover', 'node', onEnter as never)
+          bound.cy.off('mouseout', 'node', onLeave as never)
+        } catch {
+          // cy may already be destroyed; off() is best-effort.
+        }
+      }
     }
   }, [cyRef, sig])
 

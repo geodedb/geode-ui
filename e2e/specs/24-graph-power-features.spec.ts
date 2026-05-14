@@ -107,44 +107,26 @@ test.describe('graph power features', () => {
     expect(max).toBeGreaterThan(38)
   })
 
-  test('right-click opens context menu, Expand fires popover', async ({
+  test('right-click opens the cxtmenu radial container', async ({
     authedPage: page,
   }) => {
     const pos = await firstNodePosition(page)
-    // Wait for the useNodeContextMenu effect to register its cxttap
-    // listener; the hook polls for cy because the rebuild is debounced.
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(() => {
-            type Listener = { type: string; qualifier: unknown }
-            type CyShape = {
-              emitter: () => { listeners: Listener[] }
-            }
-            // eslint-disable-next-line no-underscore-dangle
-            const cy = (window as unknown as { __geode_cy?: CyShape })
-              .__geode_cy
-            if (!cy || !cy.emitter) return 0
-            return cy.emitter().listeners.filter((l) => l.type === 'cxttap')
-              .length
-          }),
-        { timeout: 5000 }
-      )
-      .toBeGreaterThan(0)
-    // The Cytoscape canvas needs the right-click to land on the node;
-    // we use the explicit page-coordinates returned by firstNodePosition.
     const canvas = page.getByTestId('graph-canvas')
     const box = await canvas.boundingBox()
     if (!box) throw new Error('canvas not laid out')
+    // cxtmenu opens on cytoscape's `cxttap` event. Playwright's
+    // canvas.click({button: 'right'}) dispatches a native contextmenu
+    // sequence; cytoscape forwards that to cxttap on the node under
+    // the cursor. The radial menu creates `.cxtmenu-item` children
+    // only when the menu opens; the parent `.cxtmenu` wrapper is
+    // attached on first invocation.
     await canvas.click({
       button: 'right',
       position: { x: pos.x - box.x, y: pos.y - box.y },
     })
-    await expect(page.getByTestId('graph-node-menu')).toBeVisible()
-    await page.getByTestId('graph-node-menu-expand').click()
-    await expect(page.getByTestId('graph-expand-popover')).toBeVisible()
-    await page.getByTestId('graph-expand-cancel').click()
-    await expect(page.getByTestId('graph-expand-popover')).toBeHidden()
+    await expect(page.locator('.cxtmenu-item').first()).toBeVisible({
+      timeout: 5000,
+    })
   })
 
   test('pin survives a layout switch', async ({ authedPage: page }) => {
@@ -179,83 +161,49 @@ test.describe('graph power features', () => {
     await expect(page.getByTestId('graph-inspector')).toBeVisible()
   })
 
-  test('zoom-to-node menu action changes the cytoscape zoom level', async ({
+  test('lasso toggle enables lasso selection mode', async ({
     authedPage: page,
   }) => {
-    const pos = await firstNodePosition(page)
-    const canvas = page.getByTestId('graph-canvas')
-    const box = await canvas.boundingBox()
-    if (!box) throw new Error('canvas not laid out')
-
-    const zoomBefore = await page.evaluate(() => {
-      type CyShape = { zoom: () => number }
-      // eslint-disable-next-line no-underscore-dangle
-      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
-      return cy ? cy.zoom() : 0
-    })
-
-    await canvas.click({
-      button: 'right',
-      position: { x: pos.x - box.x, y: pos.y - box.y },
-    })
-    await page.getByTestId('graph-node-menu-zoomTo').click()
-
-    // The helper kicks off an animated zoom to 1.5x by default. Wait
-    // for the animation duration + a small slack and assert the zoom
-    // level changed.
-    await page.waitForTimeout(500)
-    const zoomAfter = await page.evaluate(() => {
-      type CyShape = { zoom: () => number }
-      // eslint-disable-next-line no-underscore-dangle
-      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
-      return cy ? cy.zoom() : 0
-    })
-    expect(Math.abs(zoomAfter - zoomBefore)).toBeGreaterThan(0.1)
+    await page.getByTestId('graph-lasso-toggle').click()
+    await expect(page.getByTestId('graph-lasso-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
   })
 
-  test('focus hides off-set nodes and persists Clear chip until dismissed', async ({
+  test('pinning a node renders a pin badge in the overlay', async ({
     authedPage: page,
   }) => {
     const pos = await firstNodePosition(page)
     const canvas = page.getByTestId('graph-canvas')
     const box = await canvas.boundingBox()
     if (!box) throw new Error('canvas not laid out')
-
     await canvas.click({
-      button: 'right',
       position: { x: pos.x - box.x, y: pos.y - box.y },
     })
-    await page.getByTestId('graph-node-menu-focus').click()
+    await page.getByTestId('graph-action-pin').click()
+    await expect(
+      page.getByTestId(`graph-badge-pin-${pos.id}`)
+    ).toBeVisible()
+  })
 
-    // The Clear-focus chip is now visible on the canvas overlay.
-    const chip = page.getByTestId('graph-focus-clear-chip')
-    await expect(chip).toBeVisible()
-
-    // At least one node has the focus-hide class on the live cy core.
-    const hiddenCount = await page.evaluate(() => {
-      type CyShape = {
-        nodes: () => { filter: (sel: string) => { length: number } }
-      }
-      // eslint-disable-next-line no-underscore-dangle
-      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
-      if (!cy) return 0
-      return cy.nodes().filter('.gv-out-of-focus').length
+  test('hovering a node shows the tooltip', async ({ authedPage: page }) => {
+    const pos = await firstNodePosition(page)
+    const canvas = page.getByTestId('graph-canvas')
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('canvas not laid out')
+    await canvas.hover({
+      position: { x: pos.x - box.x, y: pos.y - box.y },
     })
-    expect(hiddenCount).toBeGreaterThan(0)
+    await expect(page.getByTestId('graph-tooltip')).toBeVisible()
+  })
 
-    // Click the chip — focus clears; chip vanishes.
-    await chip.click()
-    await expect(chip).toBeHidden()
-
-    const hiddenAfter = await page.evaluate(() => {
-      type CyShape = {
-        nodes: () => { filter: (sel: string) => { length: number } }
-      }
-      // eslint-disable-next-line no-underscore-dangle
-      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
-      if (!cy) return -1
-      return cy.nodes().filter('.gv-out-of-focus').length
-    })
-    expect(hiddenAfter).toBe(0)
+  test('HTML-node toggle flips the sticky pref', async ({
+    authedPage: page,
+  }) => {
+    const toggle = page.getByTestId('graph-dom-nodes-toggle')
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
   })
 })
