@@ -1534,3 +1534,42 @@ describe('GraphView — pin action', () => {
     expect(pin).toHaveAttribute('aria-pressed', 'false')
   })
 })
+
+describe('GraphView — focus action', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('Focus action dims nodes more than N hops from the selection', () => {
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={hubGraphResp} query="MATCH (n) RETURN n" />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    // Select node "1" via the existing id picker.
+    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+      target: { value: '1' },
+    })
+    const focusBtn = view.getByTestId('graph-action-focus')
+    expect(focusBtn).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(focusBtn)
+    expect(focusBtn).toHaveAttribute('aria-pressed', 'true')
+    // The slider/label is visible when focus is active.
+    expect(view.getByTestId('graph-focus-hops')).toBeInTheDocument()
+    // The canvas reflects the active state for e2e/visual assertions.
+    expect(view.getByTestId('graph-canvas')).toHaveAttribute(
+      'data-focus-active',
+      'true'
+    )
+    // Clicking again clears.
+    fireEvent.click(focusBtn)
+    expect(focusBtn).toHaveAttribute('aria-pressed', 'false')
+    expect(view.getByTestId('graph-canvas')).toHaveAttribute(
+      'data-focus-active',
+      'false'
+    )
+  })
+})

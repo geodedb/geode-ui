@@ -16,6 +16,7 @@ import { useGraphElements } from './graph/useGraphElements'
 import { useGraphActions } from './graph/useGraphActions'
 import { useGraphCytoscape } from './graph/useGraphCytoscape'
 import { usePinnedNodes } from './graph/usePinnedNodes'
+import { useFocusMode } from './graph/useFocusMode'
 import {
   COSE_NODE_LIMIT,
   LAYOUTS,
@@ -199,6 +200,16 @@ export const GraphView: React.FC<Props> = ({
   // so the lock survives a fresh cy core.
   const pinning = usePinnedNodes({ cyRef })
 
+  // Result-scoped focus-mode bookkeeping. Mirrors `pinning`: the hook
+  // owns the { id, hops } state; the sig-keyed reset effect below clears
+  // it on a new query result; useGraphCytoscape calls `reapply` after a
+  // rebuild / layout swap so the .gv-out-of-focus class set survives a
+  // fresh cy core. The hops *slider value* is sticky via useGraphPrefs
+  // (the focal node id is genuinely result-scoped).
+  const focusMode = useFocusMode({ cyRef })
+  const focusHops = useGraphPrefs((s) => s.focusHops)
+  const setFocusHops = useGraphPrefs((s) => s.setFocusHops)
+
   // GAP-01 / GAP-07: rebuild key combines row_count with the query
   // text. Two queries with the same row count would otherwise leave a
   // stale graph on the canvas. Cluster toggle is folded in so toggling
@@ -228,6 +239,12 @@ export const GraphView: React.FC<Props> = ({
     // and the new core won't contain any of those ids yet anyway, so
     // node.empty() short-circuits.
     pinning.clear()
+    // Same rationale for the focus-mode state — the focal node id
+    // belongs to the graph that's being replaced. Clearing here also
+    // removes any .gv-out-of-focus class from the (still-mounted) old
+    // core, though useGraphCytoscape's teardown will obliterate it
+    // moments later.
+    focusMode.clear()
     if (
       layoutRef.current === DEFAULT_LAYOUT &&
       elementsRef.current.length > COSE_NODE_LIMIT
@@ -263,6 +280,7 @@ export const GraphView: React.FC<Props> = ({
     setError,
     setCounts,
     reapplyPins: pinning.reapplyAll,
+    reapplyFocus: focusMode.reapply,
     t,
   })
 
@@ -412,7 +430,7 @@ export const GraphView: React.FC<Props> = ({
         pinning.togglePin(id)
         break
       case 'focus':
-        // Stubbed — Task 16 wires this up.
+        focusMode.focus({ id, hops: focusHops })
         break
       default: {
         // Exhaustiveness check — adding a new action without a case
@@ -494,6 +512,8 @@ export const GraphView: React.FC<Props> = ({
             aria-label={t('graph.canvasAria')}
             tabIndex={0}
             onKeyDown={handleKey}
+            data-testid="graph-canvas"
+            data-focus-active={focusMode.state !== null ? 'true' : 'false'}
           />
           {empty && (
             <Overlay data-testid="graph-empty-state">
@@ -541,6 +561,11 @@ export const GraphView: React.FC<Props> = ({
               selected?.kind === 'node' &&
               pinning.isPinned(String(selected.data.id ?? ''))
             }
+            onFocus={(id, hops) => focusMode.focus({ id, hops })}
+            onClearFocus={() => focusMode.clear()}
+            focusActive={focusMode.state !== null}
+            focusHops={focusHops}
+            setFocusHops={setFocusHops}
           />
         </GraphSidebar>
       )}

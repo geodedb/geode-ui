@@ -70,6 +70,13 @@ export type GraphSidebarContentsProps = {
   // Whether the currently-selected node is pinned. False for edges /
   // when nothing is selected.
   isPinned: boolean
+  // Focus mode: forwarded straight to GraphInspector. `focusActive`
+  // derives from `useFocusMode.state !== null` in the orchestrator.
+  onFocus: (id: string, hops: number) => void
+  onClearFocus: () => void
+  focusActive: boolean
+  focusHops: number
+  setFocusHops: (n: number) => void
 }
 
 // GraphSidebarContents renders the inner blocks of the graph sidebar:
@@ -111,6 +118,11 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
   onJumpNeighbor,
   onPin,
   isPinned,
+  onFocus,
+  onClearFocus,
+  focusActive,
+  focusHops,
+  setFocusHops,
 }) => {
   return (
     <>
@@ -313,6 +325,11 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
           onJumpNeighbor={onJumpNeighbor}
           onPin={onPin}
           isPinned={isPinned}
+          onFocus={onFocus}
+          onClearFocus={onClearFocus}
+          focusActive={focusActive}
+          focusHops={focusHops}
+          setFocusHops={setFocusHops}
           t={t}
         />
       ) : (

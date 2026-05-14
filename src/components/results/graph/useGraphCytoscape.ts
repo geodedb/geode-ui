@@ -53,6 +53,10 @@ export type UseGraphCytoscapeArgs = {
   // rerun (defensive — Cytoscape preserves lock on the same core, but
   // re-applying is a cheap idempotent op).
   reapplyPins?: () => void
+  // Optional hook into the focus-mode bookkeeping. Same shape as
+  // reapplyPins — fires after a rebuild (fresh core has no .gv-out-of-
+  // focus class memory) and after a layout rerun (defensive, idempotent).
+  reapplyFocus?: () => void
   t: TFn
 }
 
@@ -87,6 +91,7 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     setError,
     setCounts,
     reapplyPins,
+    reapplyFocus,
     t,
   } = args
 
@@ -156,6 +161,9 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
         // Re-apply pinned-node bookkeeping against the fresh core —
         // Cytoscape doesn't carry `locked` state across teardown/rebuild.
         reapplyPins?.()
+        // Same for the focus-mode .gv-out-of-focus class set — a fresh
+        // core has no class memory, so re-apply the active focal node.
+        reapplyFocus?.()
       } catch (e: unknown) {
         // GAP-04: surface the failure as a visible banner instead of an
         // uncaught console rejection.
@@ -207,7 +215,9 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     // typically a no-op — but it's a cheap idempotent guard and keeps
     // the .gv-pinned class glued to its node.
     reapplyPins?.()
-  }, [cyRef, layout, reapplyPins])
+    // Same idempotent guard for the focus dim class.
+    reapplyFocus?.()
+  }, [cyRef, layout, reapplyPins, reapplyFocus])
 
   // Canvas interaction-mode changes — cheap; just flips two cy flags.
   useEffect(() => {

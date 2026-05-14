@@ -200,6 +200,13 @@ export type GraphInspectorProps = {
   onPin: (id: string) => void
   // Whether the currently-selected node is pinned.
   isPinned: boolean
+  // Focus mode: toggle on the currently-selected node, with `hops` as
+  // the slider value (kept sticky via useGraphPrefs in the orchestrator).
+  onFocus: (id: string, hops: number) => void
+  onClearFocus: () => void
+  focusActive: boolean
+  focusHops: number
+  setFocusHops: (n: number) => void
   t: (key: string, opts?: Record<string, unknown>) => string
 }
 
@@ -224,6 +231,11 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
   onJumpNeighbor,
   onPin,
   isPinned,
+  onFocus,
+  onClearFocus,
+  focusActive,
+  focusHops,
+  setFocusHops,
   t,
 }) => {
   const { kind, data } = selected
@@ -310,7 +322,44 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             >
               {isPinned ? t('graph.menuUnpin') : t('graph.menuPin')}
             </button>
+            <button
+              type="button"
+              data-testid="graph-action-focus"
+              aria-pressed={focusActive}
+              onClick={() => {
+                if (focusActive) onClearFocus()
+                else onFocus(id, focusHops)
+              }}
+            >
+              {focusActive ? t('graph.focusClear') : t('graph.focus')}
+            </button>
           </InspectorActions>
+          {focusActive && (
+            <label
+              data-testid="graph-focus-hops"
+              htmlFor="graph-focus-hops-input"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              {t('graph.focusHops')}
+              <input
+                id="graph-focus-hops-input"
+                type="range"
+                min={0}
+                max={3}
+                value={focusHops}
+                onChange={(e) => {
+                  const next = Number.parseInt(e.target.value, 10)
+                  setFocusHops(next)
+                  onFocus(id, next)
+                }}
+              />
+              <span>{focusHops}</span>
+            </label>
+          )}
           {collapsedCount > 0 && (
             <InspectorNote data-testid="graph-collapsed-count">
               {t('graph.collapsedCount', { count: collapsedCount })}
