@@ -10,19 +10,6 @@ const SwitcherWrap = styled.div`
   position: relative;
 `
 
-const Trigger = styled.button`
-  background: ${({ theme }) => theme.bg.surface};
-  color: ${({ theme }) => theme.text.primary};
-  border: 1px solid ${({ theme }) => theme.border.default};
-  border-radius: ${({ theme }) => theme.radii.md};
-  padding: 4px 10px;
-  font-size: 0.9em;
-  cursor: pointer;
-  &:hover {
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-`
-
 // The switcher trigger sits on the LEFT side of the header (right after
 // the brand logo, before the desktop nav). Anchoring the menu's left
 // edge to the trigger's left edge keeps it on-screen across viewports;
@@ -108,14 +95,17 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   if (loading) {
     return (
       <SwitcherWrap>
-        <Trigger
-          type="button"
+        <wa-button
+          appearance="outlined"
+          size="small"
+          role="button"
+          data-testid="connection-trigger"
           aria-busy="true"
           aria-label={t('connection.noActive')}
           disabled
         >
           {t('connection.noActive')}
-        </Trigger>
+        </wa-button>
       </SwitcherWrap>
     )
   }
@@ -123,27 +113,33 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   if (connections.size === 0) {
     return (
       <SwitcherWrap>
-        <Trigger
-          type="button"
+        <wa-button
+          appearance="outlined"
+          size="small"
+          role="button"
+          data-testid="connection-trigger"
           onClick={onAddRequested}
           aria-label={t('connection.connect')}
         >
           {t('connection.noActive')}
-        </Trigger>
+        </wa-button>
       </SwitcherWrap>
     )
   }
 
   return (
     <SwitcherWrap>
-      <Trigger
-        type="button"
+      <wa-button
+        appearance="outlined"
+        size="small"
+        role="button"
+        data-testid="connection-trigger"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={open ? 'true' : 'false'}
       >
         {active?.profileName ?? t('connection.noActive')}
-      </Trigger>
+      </wa-button>
       {open && (
         <Menu role="menu">
           {[...connections.values()].map((c) => (
