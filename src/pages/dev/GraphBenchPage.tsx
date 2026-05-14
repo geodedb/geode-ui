@@ -23,6 +23,17 @@ function readQuery(): { n: number; renderer: 'cytoscape' | 'reagraph' } {
   return { n, renderer }
 }
 
+// Strip the `seededGraph` `'n'` id prefix and parse to a number.
+// `extractElements` in graphResult.ts requires GqlNode.id and
+// GqlEdge.start_node / end_node to be NUMERIC (`typeof === 'number'`,
+// per `isEdgeShape`); a string id silently falls through `isEdgeShape`
+// and the edge is dropped, leaving the cytoscape branch rendering
+// nodes-only and skewing the benchmark.
+function nodeIdNum(id: string): number {
+  const n = parseInt(id.slice(1), 10)
+  return Number.isFinite(n) ? n : 0
+}
+
 function toQueryRespLike(
   graph: ReturnType<typeof seededGraph>
 ): QueryRespLike & { row_count: number } {
@@ -32,15 +43,21 @@ function toQueryRespLike(
     row_count: graph.nodes.length + graph.edges.length,
     graph_summary: {
       nodes: graph.nodes.map((node) => ({
-        id: node.id,
+        id: nodeIdNum(node.id),
         labels: [node.label],
         properties: node.properties,
       })),
-      edges: graph.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
+      // GqlEdge shape: numeric id + start_node + end_node + type + properties.
+      // `type` is a top-level field on GqlEdge (graphResult.ts:19), separate
+      // from `properties.type`. `extractElements` uses the top-level `type`
+      // as the edge's label fallback, so populating it is what gives the
+      // benchmark edges visible labels on both renderers.
+      edges: graph.edges.map((edge, idx) => ({
+        id: idx,
+        start_node: nodeIdNum(edge.source),
+        end_node: nodeIdNum(edge.target),
         type: edge.type,
+        properties: {},
       })),
     },
   }
