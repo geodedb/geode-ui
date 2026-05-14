@@ -1,35 +1,24 @@
 import React, { useId, useState } from 'react'
-import { createPortal } from 'react-dom'
 import styled from 'styled-components'
 import { buildExpandStatement, ExpandDirection } from './buildExpand'
+import {
+  Dialog,
+  Input as WaInput,
+  Option as WaOption,
+  Select as WaSelect,
+} from '../../../services/webawesome/components'
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  z-index: ${({ theme }) => theme.zIndex.modal};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: ${({ theme }) => theme.bg.overlay};
-`
-const Card = styled.div`
-  background: ${({ theme }) => theme.bg.surface};
-  border: 1px solid ${({ theme }) => theme.border.default};
-  border-radius: ${({ theme }) => theme.radii.md};
-  padding: ${({ theme }) => theme.spacing.md};
-  min-width: 360px;
-  max-width: 560px;
+// The dialog is portalled by <wa-dialog> itself, so we only need a small
+// content wrapper to lay out the form rows + preview consistently with
+// the rest of the app. The bespoke <Modal>/<Card> overlay + styled
+// backdrop are gone — WA owns scrim, focus trap, Escape, and stacking.
+const DialogBody = styled.div`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.sm};
 
-  h4 {
-    margin: 0;
-    font-size: ${({ theme }) => theme.font.sizes.md};
-    color: ${({ theme }) => theme.text.primary};
-  }
   .row {
     display: flex;
     align-items: center;
@@ -46,16 +35,6 @@ const Card = styled.div`
     font-size: ${({ theme }) => theme.font.sizes.xs};
     overflow-x: auto;
     margin: 0;
-  }
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: ${({ theme }) => theme.spacing.xs};
-  }
-  button.primary {
-    background: ${({ theme }) => theme.colors.primary};
-    color: ${({ theme }) => theme.text.onPrimary};
-    border: 1px solid ${({ theme }) => theme.colors.primary};
   }
 `
 
@@ -90,9 +69,12 @@ export const ExpandQueryPopover: React.FC<ExpandQueryPopoverProps> = ({
   const dirBothId = `${reactId}-dir-both`
   const dirOutId = `${reactId}-dir-out`
   const dirInId = `${reactId}-dir-in`
-  const labelFilterId = `${reactId}-label-filter`
-  const limitId = `${reactId}-limit`
 
+  // <wa-dialog open> drives its own show/hide. Keep the React-level
+  // early-return so the test's "renders nothing when open=false" case
+  // still finds zero matches for the testid — without it, the dialog
+  // node lives in the DOM even when hidden and screen.queryByTestId
+  // would resolve. WA hides the chrome but keeps the host element.
   if (!open) return null
 
   const parsedLimit = Number.parseInt(limit, 10)
@@ -111,10 +93,14 @@ export const ExpandQueryPopover: React.FC<ExpandQueryPopoverProps> = ({
 
   const runDisabled = preview.startsWith('# ')
 
-  return createPortal(
-    <Modal role="dialog" aria-modal="true" data-testid="graph-expand-popover">
-      <Card>
-        <h4>{t('graph.expandTitle', { id: nodeId })}</h4>
+  return (
+    <Dialog
+      open={open}
+      label={t('graph.expandTitle', { id: nodeId })}
+      data-testid="graph-expand-popover"
+      onWaAfterHide={onCancel}
+    >
+      <DialogBody>
         <div
           className="row"
           role="radiogroup"
@@ -152,63 +138,69 @@ export const ExpandQueryPopover: React.FC<ExpandQueryPopoverProps> = ({
           </label>
         </div>
         <div className="row">
-          <label htmlFor={labelFilterId}>
-            <span>{t('graph.expandLabelFilter')}</span>
-            <select
-              id={labelFilterId}
-              data-testid="graph-expand-label-filter"
-              value={labelFilter}
-              onChange={(e) => setLabelFilter(e.target.value)}
-            >
-              <option value="">{t('graph.expandLabelAny')}</option>
-              {labelOptions.map((l) => (
-                <option key={l} value={l}>
-                  {l}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label htmlFor={limitId}>
-            <span>{t('graph.expandLimit')}</span>
-            <input
-              id={limitId}
-              type="number"
-              data-testid="graph-expand-limit"
-              min={1}
-              max={10000}
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              style={{ width: 80 }}
-            />
-          </label>
-        </div>
-        <pre data-testid="graph-expand-preview">{preview}</pre>
-        <div className="actions">
-          <button
-            type="button"
-            data-testid="graph-expand-cancel"
-            onClick={onCancel}
-          >
-            {t('graph.expandCancel')}
-          </button>
-          <button
-            type="button"
-            data-testid="graph-expand-run"
-            className="primary"
-            disabled={runDisabled}
-            onClick={() => {
-              onRun({
-                direction,
-                labelFilter: labelFilter || undefined,
-                limit: Number.isFinite(parsedLimit) ? parsedLimit : 100,
-              })
+          <WaSelect
+            label={t('graph.expandLabelFilter')}
+            data-testid="graph-expand-label-filter"
+            value={labelFilter}
+            onChange={(e: Event) => {
+              const target = e.target as HTMLSelectElement
+              setLabelFilter(target.value ?? '')
             }}
           >
-            {t('graph.expandRun')}
-          </button>
+            <WaOption value="">{t('graph.expandLabelAny')}</WaOption>
+            {labelOptions.map((l) => (
+              <WaOption key={l} value={l}>
+                {l}
+              </WaOption>
+            ))}
+          </WaSelect>
+          <WaInput
+            type="number"
+            label={t('graph.expandLimit')}
+            data-testid="graph-expand-limit"
+            value={limit}
+            min={1}
+            max={10000}
+            onInput={(e: Event) => {
+              const target = e.target as HTMLInputElement
+              setLimit(target.value)
+            }}
+            onChange={(e: Event) => {
+              const target = e.target as HTMLInputElement
+              setLimit(target.value)
+            }}
+          />
         </div>
-      </Card>
-    </Modal>,
-    document.body
+        <pre data-testid="graph-expand-preview">{preview}</pre>
+      </DialogBody>
+      <wa-button
+        slot="footer"
+        appearance="plain"
+        size="medium"
+        role="button"
+        data-testid="graph-expand-cancel"
+        onClick={onCancel}
+      >
+        {t('graph.expandCancel')}
+      </wa-button>
+      <wa-button
+        slot="footer"
+        appearance="filled"
+        variant="brand"
+        size="medium"
+        role="button"
+        data-testid="graph-expand-run"
+        disabled={runDisabled ? true : undefined}
+        onClick={() => {
+          onRun({
+            direction,
+            labelFilter: labelFilter || undefined,
+            limit: Number.isFinite(parsedLimit) ? parsedLimit : 100,
+          })
+        }}
+      >
+        {t('graph.expandRun')}
+      </wa-button>
+    </Dialog>
   )
 }

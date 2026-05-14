@@ -80,7 +80,7 @@ export const Input = createComponent({
     onWaInvalid: 'wa-invalid',
   },
 }) as unknown as React.ForwardRefExoticComponent<
-  React.HTMLAttributes<HTMLElement> &
+  Omit<React.HTMLAttributes<HTMLElement>, 'onChange' | 'onInput'> &
     InputExtraProps & {
       onChange?: (e: Event) => void
       onInput?: (e: Event) => void
@@ -90,6 +90,27 @@ export const Input = createComponent({
       onWaInvalid?: (e: Event) => void
     } & React.RefAttributes<HTMLElement>
 >
+
+// Extra prop shapes for the WA select element. Same `elementClass: ... as
+// never` rationale as the Input/Tab wrappers above. Hoist the WA-specific
+// props (and the controlled `value`) back in here so call sites can write
+// `<Select value={x} onChange={...} label="…" />`.
+type SelectExtraProps = {
+  value?: string | string[]
+  defaultValue?: string | string[]
+  label?: string
+  placeholder?: string
+  size?: 'small' | 'medium' | 'large'
+  appearance?: 'filled' | 'outlined'
+  disabled?: boolean
+  required?: boolean
+  multiple?: boolean
+  hint?: string
+  pill?: boolean
+  clearable?: boolean
+  name?: string
+  open?: boolean
+}
 
 export const Select = createComponent({
   tagName: 'wa-select',
@@ -107,14 +128,51 @@ export const Select = createComponent({
     onWaAfterHide: 'wa-after-hide',
     onWaInvalid: 'wa-invalid',
   },
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  Omit<React.HTMLAttributes<HTMLElement>, 'onChange' | 'onInput'> &
+    SelectExtraProps & {
+      onChange?: (e: Event) => void
+      onInput?: (e: Event) => void
+      onBlur?: (e: Event) => void
+      onFocus?: (e: Event) => void
+      onWaClear?: (e: Event) => void
+      onWaShow?: (e: Event) => void
+      onWaAfterShow?: (e: Event) => void
+      onWaHide?: (e: Event) => void
+      onWaAfterHide?: (e: Event) => void
+      onWaInvalid?: (e: Event) => void
+    } & React.RefAttributes<HTMLElement>
+>
+
+// <wa-option> only needs `value` for selection bookkeeping. WA reads
+// `disabled` as well; surface it so call sites can disable individual
+// rows without resorting to ambient JSX.
+type OptionExtraProps = {
+  value?: string
+  disabled?: boolean
+}
 
 export const Option = createComponent({
   tagName: 'wa-option',
   elementClass: WaOption as never,
   react: React,
   events: {},
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    OptionExtraProps &
+    React.RefAttributes<HTMLElement>
+>
+
+// <wa-dialog> uses `open` to drive show/hide. `label` populates the
+// header text without requiring a slot. WA also reads `light-dismiss`
+// (kebab-case attribute) to allow click-outside-to-close, but we leave
+// that off by default — consumers can pass `lightDismiss` if they want.
+type DialogExtraProps = {
+  open?: boolean
+  label?: string
+  lightDismiss?: boolean
+  withoutHeader?: boolean
+}
 
 export const Dialog = createComponent({
   tagName: 'wa-dialog',
@@ -126,7 +184,15 @@ export const Dialog = createComponent({
     onWaHide: 'wa-hide',
     onWaAfterHide: 'wa-after-hide',
   },
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    DialogExtraProps & {
+      onWaShow?: (e: Event) => void
+      onWaAfterShow?: (e: Event) => void
+      onWaHide?: (e: Event) => void
+      onWaAfterHide?: (e: Event) => void
+    } & React.RefAttributes<HTMLElement>
+>
 
 // Extra prop shapes for the WA tab elements. We hand-roll these on top
 // of the @lit/react wrappers because we pass `elementClass: ... as never`

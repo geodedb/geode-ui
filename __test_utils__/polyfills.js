@@ -104,3 +104,27 @@ if (
     }
   }
 }
+
+// jsdom ships HTMLDialogElement but stubs `.showModal()` / `.show()` /
+// `.close()` as missing. Web Awesome's <wa-dialog> calls `showModal()`
+// on its internal native <dialog> as soon as `open` flips true, which
+// crashes the constructor in unit tests. Install no-op shims so the
+// component lifecycle completes; tests that need real modal semantics
+// (focus trap, top-layer stacking) belong in Playwright, not jsdom.
+if (
+  typeof globalThis.HTMLDialogElement !== 'undefined' &&
+  typeof globalThis.HTMLDialogElement.prototype.showModal !== 'function'
+) {
+  globalThis.HTMLDialogElement.prototype.showModal = function showModal() {
+    this.setAttribute('open', '')
+    this.open = true
+  }
+  globalThis.HTMLDialogElement.prototype.show = function show() {
+    this.setAttribute('open', '')
+    this.open = true
+  }
+  globalThis.HTMLDialogElement.prototype.close = function close() {
+    this.removeAttribute('open')
+    this.open = false
+  }
+}
