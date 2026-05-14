@@ -5,7 +5,10 @@ import styled from 'styled-components'
 
 import { useAuth } from '../auth/AuthProvider'
 import { Field, Logo } from '../components/ui'
-import { Input as WaInput } from '../services/webawesome/components'
+import {
+  Input as WaInput,
+  Checkbox as WaCheckbox,
+} from '../services/webawesome/components'
 import { fetchPublicProfiles, PublicProfile } from '../api/auth'
 import { getStoredPassword, isElectron } from '../api/electron-bridge'
 
@@ -180,11 +183,15 @@ export const LoginPage: React.FC = () => {
       </Field>
       {isElectron() ? (
         <Field label={t('auth.savePassword')} htmlFor="login-savePw">
-          <input
+          <WaCheckbox
             id="login-savePw"
-            type="checkbox"
+            data-testid="login-save-password"
             checked={savePw}
-            onChange={(e) => setSavePw(e.target.checked)}
+            onChange={(e: Event) => {
+              const target = e.target as HTMLInputElement
+              setSavePw(target.checked)
+            }}
+            size="m"
           />
         </Field>
       ) : null}

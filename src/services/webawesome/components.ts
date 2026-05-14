@@ -24,6 +24,7 @@ import * as React from 'react'
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { createComponent } from '@lit/react'
 
+import WaCheckbox from '@awesome.me/webawesome/dist/components/checkbox/checkbox.js'
 import WaInput from '@awesome.me/webawesome/dist/components/input/input.js'
 import WaSelect from '@awesome.me/webawesome/dist/components/select/select.js'
 import WaOption from '@awesome.me/webawesome/dist/components/option/option.js'
@@ -87,6 +88,48 @@ export const Input = createComponent({
       onBlur?: (e: Event) => void
       onFocus?: (e: Event) => void
       onWaClear?: (e: Event) => void
+      onWaInvalid?: (e: Event) => void
+    } & React.RefAttributes<HTMLElement>
+>
+
+// <wa-checkbox> is form-associated and fires standard `change`/`input`
+// events plus `wa-invalid`. Same `elementClass: ... as never` rationale
+// as the Input wrapper above; hoist the WA-specific props (and the
+// controlled `checked`) back in here so call sites can write
+// `<Checkbox checked={x} onChange={...} size="m" />`.
+type CheckboxExtraProps = {
+  checked?: boolean
+  defaultChecked?: boolean
+  disabled?: boolean
+  indeterminate?: boolean
+  name?: string
+  required?: boolean
+  size?: 'xs' | 's' | 'm' | 'l' | 'xl' | 'small' | 'medium' | 'large'
+  value?: string
+  hint?: string
+}
+
+export const Checkbox = createComponent({
+  tagName: 'wa-checkbox',
+  elementClass: WaCheckbox as never,
+  react: React,
+  events: {
+    onChange: 'change',
+    onInput: 'input',
+    onBlur: 'blur',
+    onFocus: 'focus',
+    onWaInvalid: 'wa-invalid',
+  },
+}) as unknown as React.ForwardRefExoticComponent<
+  Omit<
+    React.HTMLAttributes<HTMLElement>,
+    'onChange' | 'onInput' | 'onInvalid'
+  > &
+    CheckboxExtraProps & {
+      onChange?: (e: Event) => void
+      onInput?: (e: Event) => void
+      onBlur?: (e: Event) => void
+      onFocus?: (e: Event) => void
       onWaInvalid?: (e: Event) => void
     } & React.RefAttributes<HTMLElement>
 >

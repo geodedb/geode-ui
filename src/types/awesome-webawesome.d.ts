@@ -54,6 +54,18 @@ type WaInputProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode
 }
 
+type WaCheckboxProps = HTMLAttributes<HTMLElement> & {
+  checked?: boolean
+  defaultChecked?: boolean
+  disabled?: boolean
+  indeterminate?: boolean
+  name?: string
+  required?: boolean
+  size?: 'xs' | 's' | 'm' | 'l' | 'xl' | 'small' | 'medium' | 'large'
+  value?: string
+  children?: ReactNode
+}
+
 type WaSelectProps = HTMLAttributes<HTMLElement> & {
   value?: string
   defaultValue?: string
@@ -103,6 +115,7 @@ declare global {
   namespace JSX {
     interface IntrinsicElements {
       'wa-button': WaButtonProps
+      'wa-checkbox': WaCheckboxProps
       'wa-input': WaInputProps
       'wa-select': WaSelectProps
       'wa-option': WaOptionProps
