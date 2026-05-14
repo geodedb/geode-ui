@@ -161,10 +161,11 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   return (
     <Toolbar data-testid="graph-toolbar" role="toolbar">
       <div className="group">
-        <button
-          type="button"
+        <wa-button
+          appearance="outlined"
+          size="small"
           data-testid="graph-sidebar-toggle"
-          aria-pressed={sidebarCollapsed}
+          aria-pressed={sidebarCollapsed ? 'true' : 'false'}
           aria-label={
             sidebarCollapsed
               ? t('graph.expandSidebar')
@@ -178,7 +179,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           onClick={onToggleSidebar}
         >
           {sidebarCollapsed ? '⮜' : '⮞'}
-        </button>
+        </wa-button>
       </div>
       <div className="group">
         <span className="label">{t('graph.layoutLabel')}</span>
@@ -289,13 +290,14 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           {t('graph.pathMode')}
         </wa-button>
         {pathActive && (
-          <button
-            type="button"
+          <wa-button
+            appearance="outlined"
+            size="small"
             data-testid="graph-path-clear"
             onClick={onPathClear}
           >
             {t('graph.pathClear')}
-          </button>
+          </wa-button>
         )}
         <wa-button
           appearance={miniMap ? 'filled' : 'outlined'}

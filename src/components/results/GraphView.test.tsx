@@ -1125,7 +1125,7 @@ describe('Phase 1: path mode', () => {
     expect(screen.getByTestId('graph-path-status')).toHaveTextContent(/path/i)
     // Clear path.
     act(() => {
-      fireEvent.click(screen.getByRole('button', { name: /clear path/i }))
+      fireEvent.click(screen.getByTestId('graph-path-clear'))
     })
     expect(pathToggle).toHaveAttribute('aria-pressed', 'false')
   })
