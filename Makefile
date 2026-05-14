@@ -4,7 +4,7 @@ GOTOOLCHAIN ?= go1.26.3
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
-.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
+.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
 
 all: lint test build
 
@@ -47,6 +47,17 @@ bench-baseline:
 	$(GOENV) ./scripts/bench-gate.sh record
 
 bench-record: bench-baseline
+
+# Graph-renderer A/B benchmark (cytoscape vs reagraph) — drives the
+# dev-only /dev/graph-bench route. Requires the geode-ui container up
+# on :8080 (or override UI_URL). The SHA is sourced from git rev-parse
+# inside the recipe (Make's $$(...) defers evaluation to recipe time),
+# so the Playwright spec itself stays shell-out free.
+bench-graph:
+	GIT_COMMIT_SHA=$$(git rev-parse HEAD) npx playwright test \
+	  --config=e2e/playwright.config.ts \
+	  e2e/specs/19-graph-bench.spec.ts \
+	  --workers=1 --project=chromium
 
 # ----- Web build/test (delegates to npm scripts) -----
 web-install:

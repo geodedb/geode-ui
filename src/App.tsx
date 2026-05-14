@@ -27,18 +27,18 @@ import { LocalizationProvider } from './services/i18n'
 import { ThemeProvider } from './theme'
 import { ThemeStyleSheet } from './services/webawesome/ThemeStyleSheet'
 
-// Dev-only renderer benchmark host. Lazy-loaded behind a NODE_ENV check
-// so the prod bundle ships an empty stub instead of the page module —
-// the Playwright harness in e2e/specs/19 drives this route in the test
-// container only.
-const GraphBenchPage = React.lazy(() => {
-  if (process.env.NODE_ENV !== 'production') {
-    return import('./pages/dev/GraphBenchPage').then((m) => ({
-      default: m.GraphBenchPage,
-    }))
-  }
-  return Promise.resolve({ default: () => null })
-})
+// Renderer benchmark host for the cytoscape→reagraph A/B harness.
+// Lazy-loaded so the chunk only ships when the route is hit; the route
+// is intentionally NOT gated on NODE_ENV because the e2e container
+// builds in production mode and the Playwright harness in
+// e2e/specs/19 needs to drive it from there. The path is hidden
+// (/dev/graph-bench) and unauthenticated; the bench page itself is
+// inert when no query params are supplied.
+const GraphBenchPage = React.lazy(() =>
+  import('./pages/dev/GraphBenchPage').then((m) => ({
+    default: m.GraphBenchPage,
+  }))
+)
 
 // Suspense-wrapped element extracted into a named component so the
 // inline Route element prop stays single-line (Prettier wants no
@@ -134,12 +134,7 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
-              {process.env.NODE_ENV !== 'production' && (
-                <Route
-                  path="/dev/graph-bench"
-                  element={<DevGraphBenchRoute />}
-                />
-              )}
+              <Route path="/dev/graph-bench" element={<DevGraphBenchRoute />} />
               <Route element={<ProtectedShell />}>
                 <Route index element={<QueryPage />} />
                 <Route path="dashboard" element={<DashboardPage />} />
