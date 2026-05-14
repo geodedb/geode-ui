@@ -155,6 +155,15 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
           if (ev.target === cy) setSelected(null)
         })
         cyRef.current = cy
+        // Debug-only hook for e2e introspection. Production builds skip this.
+        if (
+          typeof window !== 'undefined' &&
+          process.env.NODE_ENV !== 'production'
+        ) {
+          const win = window as unknown as { __geode_cy?: unknown }
+          // eslint-disable-next-line no-underscore-dangle
+          win.__geode_cy = cy
+        }
         applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
         applySelectionMode(cy, selectionModeRef.current)
         setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
