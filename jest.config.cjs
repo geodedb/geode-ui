@@ -20,6 +20,12 @@ module.exports = {
         },
       },
     ],
+    // ESM-only deps (Web Awesome, Lit, floating-ui) ship raw `import`
+    // syntax in their `dist/` files. Jest can't `require()` those without
+    // first transpiling them to CommonJS. babel-jest + the project's
+    // babel.config.cjs handle that — the negative-lookahead in
+    // `transformIgnorePatterns` below allows these packages through.
+    '^.+\\.m?js$': 'babel-jest',
   },
   setupFilesAfterEnv: ['<rootDir>/__test_utils__/afterEnv.js'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
@@ -40,6 +46,6 @@ module.exports = {
       '<rootDir>/node_modules/cytoscape-lasso/dist/cytoscape-lasso.js',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(@devnw)/)',
+    'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style)/)',
   ],
 }
