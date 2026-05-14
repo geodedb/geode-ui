@@ -27,8 +27,7 @@ import {
 } from './graph/layouts'
 import { respSignature } from './graph/cyHelpers'
 import type { Neighbor, Selected } from './graph/GraphInspector'
-import { NodeContextMenu, NodeContextMenuAction } from './graph/NodeContextMenu'
-import { useNodeContextMenu } from './graph/useNodeContextMenu'
+import { useCxtMenu } from './graph/useCxtMenu'
 import { zoomToNode } from './graph/zoomToNode'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
@@ -299,12 +298,6 @@ export const GraphView: React.FC<Props> = ({
     t,
   })
 
-  // Right-click / long-press context menu on a node. Passing `sig`
-  // forces the hook's subscription effect to re-bind whenever the
-  // orchestrator rebuilds the cy core (cyRef.current changes underneath
-  // the stable ref identity), so the menu always tracks the live core.
-  const menu = useNodeContextMenu({ cyRef, enabled: true, sig })
-
   // Currently-open expand popover target node id (null = closed). The
   // menu's 'expand' action sets this; the popover's onRun reads it +
   // forwards the user's direction / labelFilter / limit choice through
@@ -433,49 +426,60 @@ export const GraphView: React.FC<Props> = ({
   const hiddenIds = Array.from(hidden)
   const collapsedEntries = Array.from(collapsed.entries())
 
-  // Route a NodeContextMenu action to the right orchestrator handler.
-  // Closes the menu first so the dismissal isn't blocked by a slow
-  // network call (e.g. Explore). Stubbed cases ('focus' and 'pin') are
-  // wired in Tasks 13 (pin) and 16 (focus).
-  const onMenuSelect = (action: NodeContextMenuAction): void => {
-    const id = menu.state.nodeId
-    menu.close()
-    if (!id) return
-    switch (action) {
-      case 'zoomTo':
-        if (cyRef.current) zoomToNode(cyRef.current, id)
-        break
-      case 'expand':
-        // Open the configurable popover. The user's chosen
-        // direction / labelFilter / limit is forwarded to
-        // onExploreNeighbours via onExpandRun below.
-        setExpandFor(id)
-        break
-      case 'hide':
-        onHideNode(id)
-        break
-      case 'collapse':
-        onCollapseNode(id)
-        break
-      case 'copyId':
-        if (typeof navigator !== 'undefined' && navigator.clipboard) {
-          navigator.clipboard.writeText(id).catch(() => {})
-        }
-        break
-      case 'pin':
-        pinning.togglePin(id)
-        break
-      case 'focus':
-        focusMode.focus({ id, hops: focusHops })
-        break
-      default: {
-        // Exhaustiveness check — adding a new action without a case
-        // here will fail to compile.
-        const exhaustive: never = action
-        return exhaustive
-      }
+  // Seven node-action handlers consumed by useCxtMenu (radial menu) and
+  // any other entry point that needs to route an action by node id.
+  // Each one closes over the orchestrator's existing state / helpers —
+  // the names match CxtMenuHandlers's fields exactly so the wiring at
+  // the mount site is a no-rename pass-through.
+  const onZoomTo = (id: string): void => {
+    if (cyRef.current) zoomToNode(cyRef.current, id)
+  }
+  const onExpand = (id: string): void => {
+    // Open the configurable popover. The user's chosen
+    // direction / labelFilter / limit is forwarded to
+    // onExploreNeighbours via onExpandRun below.
+    setExpandFor(id)
+  }
+  const onHide = (id: string): void => {
+    onHideNode(id)
+  }
+  const onCollapse = (id: string): void => {
+    onCollapseNode(id)
+  }
+  const onFocus = (id: string): void => {
+    focusMode.focus({ id, hops: focusHops })
+  }
+  const onPin = (id: string): void => {
+    pinning.togglePin(id)
+  }
+  const onCopyId = (id: string): void => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(id).catch(() => {})
     }
   }
+
+  // Right-click / long-press radial context menu on a node. Passing `sig`
+  // forces the hook's subscription effect to re-bind whenever the
+  // orchestrator rebuilds the cy core (cyRef.current changes underneath
+  // the stable ref identity), so the menu always tracks the live core.
+  // Theme is forwarded so the menu can draw its overlay with theme-token
+  // fills / label colors (it renders to a sibling canvas outside the
+  // styled-components context tree).
+  useCxtMenu({
+    cyRef,
+    handlers: {
+      onZoomTo,
+      onExpand,
+      onHide,
+      onCollapse,
+      onFocus,
+      onPin,
+      onCopyId,
+    },
+    t,
+    sig,
+    theme,
+  })
 
   // The popover's Run callback closes the popover and dispatches the
   // explore with the chosen options. The `target` snapshot guards
@@ -615,23 +619,6 @@ export const GraphView: React.FC<Props> = ({
           />
         </GraphSidebar>
       )}
-      <NodeContextMenu
-        open={menu.state.open}
-        x={menu.state.x}
-        y={menu.state.y}
-        items={[
-          'zoomTo',
-          'expand',
-          'hide',
-          'collapse',
-          'focus',
-          'pin',
-          'copyId',
-        ]}
-        onSelect={onMenuSelect}
-        onClose={menu.close}
-        t={t}
-      />
       {/* `key={expandFor}` forces React to unmount/remount the popover
           whenever the open target changes (close→open, open→close, or
           one open node→another), which resets the popover's internal

@@ -299,17 +299,15 @@ function classesOf(id: string): string[] {
   return (lastCy().__classesOf as (i: string) => string[])(id)
 }
 
-// Mock the node-context-menu hook BEFORE importing GraphView so the
-// orchestrator picks up the stub. The default factory returns a closed
-// menu state — that way every pre-existing test (which never opens the
-// menu) continues to render exactly the same DOM as before. Tests in
-// the "context menu wiring" describe block override with mockReturnValueOnce
-// to assert open=true behaviour without leaking that state into other tests.
-jest.mock('./graph/useNodeContextMenu', () => ({
-  useNodeContextMenu: jest.fn(() => ({
-    state: { open: false, x: 0, y: 0, nodeId: null },
-    close: jest.fn(),
-  })),
+// Mock the radial context-menu hook BEFORE importing GraphView so the
+// orchestrator picks up the stub. The cxtmenu extension expects a real
+// Cytoscape Core (which the jsdom mock doesn't model), so the hook is
+// no-op'd here and tests assert the mounting arguments instead of DOM
+// effects. buildCommands is re-exported from the actual module so any
+// upstream consumer that still imports it continues to work.
+jest.mock('./graph/useCxtMenu', () => ({
+  useCxtMenu: jest.fn(),
+  buildCommands: jest.requireActual('./graph/useCxtMenu').buildCommands,
 }))
 
 // Import after the mock is in place.
@@ -318,7 +316,7 @@ import cytoscape from 'cytoscape'
 import type { ElementDefinition } from 'cytoscape'
 import type { QueryRespLike } from '../../lib/graphResult'
 import { useGraphPrefs } from './useGraphPrefs'
-import { useNodeContextMenu } from './graph/useNodeContextMenu'
+import { useCxtMenu } from './graph/useCxtMenu'
 
 import { testTheme as theme } from '../../test-utils/theme'
 
@@ -1421,68 +1419,6 @@ describe('Phase 2: Explore neighbours', () => {
   })
 })
 
-// ------------------------------------------------------------------
-// Task 6 — context-menu wiring. The hook itself is mocked at the top
-// of the file (default state: closed). These tests override the mock
-// per-render to assert that GraphView (a) renders the menu when the
-// hook reports open=true, and (b) routes the menu's actions to the
-// right orchestrator handlers / browser APIs.
-// ------------------------------------------------------------------
-describe('GraphView — context menu wiring', () => {
-  const mockedHook = useNodeContextMenu as jest.Mock
-
-  beforeEach(() => {
-    window.localStorage.clear()
-  })
-
-  afterEach(() => {
-    // Restore the default closed-menu behaviour so subsequent describes
-    // (and other test files via shared module mocks) don't see open=true.
-    mockedHook.mockImplementation(() => ({
-      state: { open: false, x: 0, y: 0, nodeId: null },
-      close: jest.fn(),
-    }))
-  })
-
-  function renderOpenMenu(): ReturnType<typeof render> {
-    // Force the hook to report an OPEN menu for every render in this
-    // describe — using `mockImplementation` (not `mockReturnValueOnce`)
-    // because React invokes the hook on every render pass and a `Once`
-    // would be consumed before the JSX that uses it actually mounts.
-    mockedHook.mockImplementation(() => ({
-      state: { open: true, x: 5, y: 7, nodeId: '1' },
-      close: jest.fn(),
-    }))
-    const view = render(
-      <ThemeProvider theme={theme}>
-        <GraphView resp={twoNodeOneEdgeResp} />
-      </ThemeProvider>
-    )
-    act(() => {
-      jest.advanceTimersByTime(300)
-    })
-    return view
-  }
-
-  it('renders the menu when the hook reports open=true', () => {
-    renderOpenMenu()
-    expect(screen.getByTestId('graph-node-menu')).toBeInTheDocument()
-    // And one menu item is reachable.
-    expect(screen.getByTestId('graph-node-menu-hide')).toBeInTheDocument()
-  })
-
-  it('routes the "copyId" menu action to navigator.clipboard', () => {
-    const writeText = jest.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    })
-    renderOpenMenu()
-    fireEvent.click(screen.getByTestId('graph-node-menu-copyId'))
-    expect(writeText).toHaveBeenCalledWith('1')
-  })
-})
-
 describe('GraphView — inspector neighbors', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -1543,41 +1479,6 @@ describe('GraphView — pin action', () => {
     expect(pin).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(pin)
     expect(pin).toHaveAttribute('aria-pressed', 'false')
-  })
-})
-
-describe('GraphView — zoomTo menu action', () => {
-  const mockedHook = useNodeContextMenu as jest.Mock
-
-  afterEach(() => {
-    mockedHook.mockImplementation(() => ({
-      state: { open: false, x: 0, y: 0, nodeId: null },
-      close: jest.fn(),
-    }))
-  })
-
-  it('routes the menu zoomTo action through zoomToNode (calls cy.animate)', () => {
-    mockedHook.mockImplementation(() => ({
-      state: { open: true, x: 5, y: 7, nodeId: '1' },
-      close: jest.fn(),
-    }))
-    render(
-      <ThemeProvider theme={theme}>
-        <GraphView resp={twoNodeOneEdgeResp} />
-      </ThemeProvider>
-    )
-    act(() => {
-      jest.advanceTimersByTime(300)
-    })
-    // The menu mounts because the mock reports open:true.
-    expect(screen.getByTestId('graph-node-menu')).toBeInTheDocument()
-    // Click the new zoomTo item — the action handler should route the
-    // call through zoomToNode, which animates the cy core's viewport.
-    fireEvent.click(screen.getByTestId('graph-node-menu-zoomTo'))
-    // The fake cy core's `animate` stub records the call.
-    expect(lastCy().animate).toHaveBeenCalled()
-    // Toolbar is still present — no exception thrown by the handler.
-    expect(screen.getByTestId('graph-toolbar')).toBeInTheDocument()
   })
 })
 
@@ -1644,5 +1545,39 @@ describe('GraphView — focus action', () => {
       'data-focus-active',
       'false'
     )
+  })
+})
+
+// ------------------------------------------------------------------
+// Task 3 — radial context menu wiring. The hook itself can't be
+// exercised end-to-end in jsdom (the cxtmenu extension expects a real
+// Cytoscape Core with a canvas), so the test asserts that GraphView
+// mounts useCxtMenu with the right arguments: a cyRef, a CxtMenuHandlers
+// bag whose seven fields are all functions, a Theme, and a rebuild sig.
+// ------------------------------------------------------------------
+describe('GraphView — radial context menu', () => {
+  afterEach(() => jest.clearAllMocks())
+
+  it('mounts useCxtMenu with the orchestrator handlers, theme, and sig', () => {
+    render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={hubGraphResp} query="MATCH (n) RETURN n" />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    expect(useCxtMenu).toHaveBeenCalled()
+    const call = (useCxtMenu as jest.Mock).mock.calls[0][0]
+    expect(call.cyRef).toBeDefined()
+    expect(call.handlers.onZoomTo).toBeInstanceOf(Function)
+    expect(call.handlers.onExpand).toBeInstanceOf(Function)
+    expect(call.handlers.onHide).toBeInstanceOf(Function)
+    expect(call.handlers.onCollapse).toBeInstanceOf(Function)
+    expect(call.handlers.onFocus).toBeInstanceOf(Function)
+    expect(call.handlers.onPin).toBeInstanceOf(Function)
+    expect(call.handlers.onCopyId).toBeInstanceOf(Function)
+    expect(call.theme).toBeDefined()
+    expect(call.sig).toEqual(expect.any(String))
   })
 })
