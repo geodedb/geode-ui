@@ -178,4 +178,84 @@ test.describe('graph power features', () => {
     await page.getByTestId('graph-find-input').press('Enter')
     await expect(page.getByTestId('graph-inspector')).toBeVisible()
   })
+
+  test('zoom-to-node menu action changes the cytoscape zoom level', async ({
+    authedPage: page,
+  }) => {
+    const pos = await firstNodePosition(page)
+    const canvas = page.getByTestId('graph-canvas')
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('canvas not laid out')
+
+    const zoomBefore = await page.evaluate(() => {
+      type CyShape = { zoom: () => number }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      return cy ? cy.zoom() : 0
+    })
+
+    await canvas.click({
+      button: 'right',
+      position: { x: pos.x - box.x, y: pos.y - box.y },
+    })
+    await page.getByTestId('graph-node-menu-zoomTo').click()
+
+    // The helper kicks off an animated zoom to 1.5x by default. Wait
+    // for the animation duration + a small slack and assert the zoom
+    // level changed.
+    await page.waitForTimeout(500)
+    const zoomAfter = await page.evaluate(() => {
+      type CyShape = { zoom: () => number }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      return cy ? cy.zoom() : 0
+    })
+    expect(Math.abs(zoomAfter - zoomBefore)).toBeGreaterThan(0.1)
+  })
+
+  test('focus hides off-set nodes and persists Clear chip until dismissed', async ({
+    authedPage: page,
+  }) => {
+    const pos = await firstNodePosition(page)
+    const canvas = page.getByTestId('graph-canvas')
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('canvas not laid out')
+
+    await canvas.click({
+      button: 'right',
+      position: { x: pos.x - box.x, y: pos.y - box.y },
+    })
+    await page.getByTestId('graph-node-menu-focus').click()
+
+    // The Clear-focus chip is now visible on the canvas overlay.
+    const chip = page.getByTestId('graph-focus-clear-chip')
+    await expect(chip).toBeVisible()
+
+    // At least one node has the focus-hide class on the live cy core.
+    const hiddenCount = await page.evaluate(() => {
+      type CyShape = {
+        nodes: () => { filter: (sel: string) => { length: number } }
+      }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      if (!cy) return 0
+      return cy.nodes().filter('.gv-out-of-focus').length
+    })
+    expect(hiddenCount).toBeGreaterThan(0)
+
+    // Click the chip — focus clears; chip vanishes.
+    await chip.click()
+    await expect(chip).toBeHidden()
+
+    const hiddenAfter = await page.evaluate(() => {
+      type CyShape = {
+        nodes: () => { filter: (sel: string) => { length: number } }
+      }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      if (!cy) return -1
+      return cy.nodes().filter('.gv-out-of-focus').length
+    })
+    expect(hiddenAfter).toBe(0)
+  })
 })
