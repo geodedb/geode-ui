@@ -249,8 +249,8 @@ test.describe('graph power features', () => {
     await expect(button).toBeVisible()
     const box = await button.boundingBox()
     expect(box).not.toBeNull()
-    expect((box?.width ?? 0)).toBeGreaterThan(8)
-    expect((box?.height ?? 0)).toBeGreaterThan(8)
+    expect(box?.width ?? 0).toBeGreaterThan(8)
+    expect(box?.height ?? 0).toBeGreaterThan(8)
   })
 
   test('typing in the editor after run does not reset the graph', async ({
