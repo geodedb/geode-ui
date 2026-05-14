@@ -32,6 +32,8 @@ import WaDialog from '@awesome.me/webawesome/dist/components/dialog/dialog.js'
 import WaTabGroup from '@awesome.me/webawesome/dist/components/tab-group/tab-group.js'
 import WaTab from '@awesome.me/webawesome/dist/components/tab/tab.js'
 import WaTabPanel from '@awesome.me/webawesome/dist/components/tab-panel/tab-panel.js'
+import WaDropdown from '@awesome.me/webawesome/dist/components/dropdown/dropdown.js'
+import WaDropdownItem from '@awesome.me/webawesome/dist/components/dropdown-item/dropdown-item.js'
 
 // Extra prop shapes for the WA input element. Same rationale as the
 // TabGroup/Tab/TabPanel wrappers below: `elementClass: ... as never`
@@ -297,5 +299,78 @@ export const TabPanel = createComponent({
 }) as unknown as React.ForwardRefExoticComponent<
   React.HTMLAttributes<HTMLElement> &
     TabPanelExtraProps &
+    React.RefAttributes<HTMLElement>
+>
+
+// <wa-dropdown> owns the trigger + panel relationship. WA fires
+// `wa-select` (CustomEvent<{ item: HTMLElement }>) when the user
+// picks a `<wa-dropdown-item>`. React 18 won't auto-forward custom
+// events for bare custom elements, so we wrap with @lit/react and
+// expose typed `onWaSelect` / `onWaShow` / `onWaHide` props.
+//
+// Same `elementClass: ... as never` rationale as the Tab/Dialog
+// wrappers — WA's class decorators confuse TS's class-shape
+// inference, so we hand-roll the prop union below.
+type DropdownExtraProps = {
+  open?: boolean
+  placement?:
+    | 'top'
+    | 'top-start'
+    | 'top-end'
+    | 'bottom'
+    | 'bottom-start'
+    | 'bottom-end'
+    | 'right'
+    | 'right-start'
+    | 'right-end'
+    | 'left'
+    | 'left-start'
+    | 'left-end'
+  distance?: number
+  skidding?: number
+  size?: 'xs' | 's' | 'm' | 'l' | 'xl' | 'small' | 'medium' | 'large'
+}
+
+export const Dropdown = createComponent({
+  tagName: 'wa-dropdown',
+  elementClass: WaDropdown as never,
+  react: React,
+  events: {
+    onWaSelect: 'wa-select',
+    onWaShow: 'wa-show',
+    onWaAfterShow: 'wa-after-show',
+    onWaHide: 'wa-hide',
+    onWaAfterHide: 'wa-after-hide',
+  },
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    DropdownExtraProps & {
+      onWaSelect?: (e: Event) => void
+      onWaShow?: (e: Event) => void
+      onWaAfterShow?: (e: Event) => void
+      onWaHide?: (e: Event) => void
+      onWaAfterHide?: (e: Event) => void
+    } & React.RefAttributes<HTMLElement>
+>
+
+// <wa-dropdown-item> participates in the parent dropdown's selection
+// model. The `value` attribute is what gets carried on the
+// CustomEvent fired by the parent's `wa-select`.
+type DropdownItemExtraProps = {
+  value?: string
+  disabled?: boolean
+  type?: 'normal' | 'checkbox'
+  checked?: boolean
+  variant?: 'default' | 'danger'
+}
+
+export const DropdownItem = createComponent({
+  tagName: 'wa-dropdown-item',
+  elementClass: WaDropdownItem as never,
+  react: React,
+  events: {},
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    DropdownItemExtraProps &
     React.RefAttributes<HTMLElement>
 >

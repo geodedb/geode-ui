@@ -46,6 +46,6 @@ module.exports = {
       '<rootDir>/node_modules/cytoscape-lasso/dist/cytoscape-lasso.js',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style)/)',
+    'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style|nanoid)/)',
   ],
 }

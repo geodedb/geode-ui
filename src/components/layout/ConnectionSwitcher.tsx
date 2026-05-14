@@ -1,92 +1,49 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import type { Theme } from '../../theme'
 import { useConnections, useActiveConnection } from '../../api/connections'
 import { useAuth } from '../../auth/AuthProvider'
+import { Dropdown, DropdownItem } from '../../services/webawesome/components'
 
 const SwitcherWrap = styled.div`
   position: relative;
 `
 
-// The switcher trigger sits on the LEFT side of the header (right after
-// the brand logo, before the desktop nav). Anchoring the menu's left
-// edge to the trigger's left edge keeps it on-screen across viewports;
-// the previous right-anchor meant the menu extended leftward off the
-// viewport on every screen size (overflow-left ~17 px desktop, ~33 px
-// mobile). max-height + overflow-y keeps the menu scrollable when the
-// user has many connections instead of stretching past the viewport
-// bottom. max-width caps a pathologically long profile name from
-// pushing the menu past the right edge in narrow viewports.
-const Menu = styled.ul`
-  position: absolute;
-  left: 0;
-  top: 100%;
-  margin: 4px 0 0 0;
-  padding: ${({ theme }) => theme.spacing.xs};
-  background: ${({ theme }) => theme.bg.surface};
-  border: 1px solid ${({ theme }) => theme.border.default};
-  border-radius: ${({ theme }) => theme.radii.md};
-  list-style: none;
-  min-width: 220px;
-  max-width: min(320px, calc(100vw - 16px));
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
-  box-shadow: ${({ theme }) => theme.shadows.md};
-  z-index: 50;
-`
-
-type RowBgProps = { theme: Theme; $active?: boolean }
-function rowBg({ theme, $active }: RowBgProps) {
-  return $active ? theme.bg.subtle : 'transparent'
+// Inline style for the row layout inside each <wa-dropdown-item>.
+// The dropdown-item's slot is its label, so we wrap the profile
+// name + the inline "×" disconnect affordance in a flex span so
+// the × sits to the right of the name.
+const rowInnerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '8px',
+  width: '100%',
 }
 
-const Row = styled.li<{ $active?: boolean }>`
-  display: flex;
-  align-items: center;
-  gap: ${({ theme }) => theme.spacing.xs};
-  padding: 6px 8px;
-  border-radius: ${({ theme }) => theme.radii.sm};
-  cursor: pointer;
-  background: ${rowBg};
-  &:hover {
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-`
-
-const Disconnect = styled.button`
-  margin-left: auto;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font-size: 0.85em;
-  color: ${({ theme }) => theme.text.secondary};
-  &:hover {
-    color: ${({ theme }) => theme.text.danger};
-  }
-`
-
-const AddRow = styled.li`
-  padding: 6px 8px;
-  border-top: 1px solid ${({ theme }) => theme.border.default};
-  margin-top: 4px;
-  cursor: pointer;
-  &:hover {
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-`
+const disconnectStyle: React.CSSProperties = {
+  cursor: 'pointer',
+  padding: '2px 6px',
+  fontSize: '0.85em',
+  userSelect: 'none',
+  lineHeight: 1,
+}
 
 export interface Props {
   onAddRequested: () => void
 }
+
+// Sentinel value used on the "Add another connection" dropdown item.
+// The wa-select handler routes any item with this value to the
+// onAddRequested callback rather than switchActive(connectionId).
+const ADD_ITEM_VALUE = '__add__'
 
 export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   const { t } = useTranslation()
   const { connections, activeId, loading } = useConnections()
   const active = useActiveConnection()
   const { disconnect, switchActive } = useAuth()
-  const [open, setOpen] = useState(false)
 
   // PSR-F16 (#113): the lazy-hydrate path mounts with an empty
   // connection map; show a non-interactive placeholder while the
@@ -129,55 +86,87 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
 
   return (
     <SwitcherWrap>
-      <wa-button
-        appearance="outlined"
-        size="s"
-        role="button"
-        data-testid="connection-trigger"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open ? 'true' : 'false'}
+      <Dropdown
+        onWaSelect={(e: Event) => {
+          // The @lit/react wrapper assigns `value` as a JS property on
+          // the wa-dropdown-item element (since `value` is on the
+          // WaDropdownItem prototype), so `getAttribute('value')`
+          // returns null. Read the property — fall back to the
+          // attribute for safety (e.g. an item authored with a
+          // bare `value="..."` attribute string).
+          const item = (e as CustomEvent<{ item: HTMLElement }>).detail?.item
+          const value =
+            (item as unknown as { value?: string })?.value ??
+            item?.getAttribute('value') ??
+            ''
+          if (value === ADD_ITEM_VALUE) {
+            onAddRequested()
+          } else if (value) {
+            switchActive(value)
+          }
+        }}
       >
-        {active?.profileName ?? t('connection.noActive')}
-      </wa-button>
-      {open && (
-        <Menu role="menu">
-          {[...connections.values()].map((c) => (
-            <Row
-              key={c.connectionId}
-              role="menuitemradio"
-              aria-checked={c.connectionId === activeId}
-              aria-label={c.profileName}
-              $active={c.connectionId === activeId}
-              onClick={() => {
-                switchActive(c.connectionId)
-                setOpen(false)
-              }}
-            >
+        <wa-button
+          slot="trigger"
+          appearance="outlined"
+          size="s"
+          role="button"
+          data-testid="connection-trigger"
+          aria-haspopup="menu"
+        >
+          {active?.profileName ?? t('connection.noActive')}
+        </wa-button>
+        {[...connections.values()].map((c) => (
+          <DropdownItem
+            key={c.connectionId}
+            value={c.connectionId}
+            // Preserve the existing test-id surface so e2e + unit
+            // tests can find rows by connection id. Also expose the
+            // aria-label so getByRole('menuitemradio', {name}) keeps
+            // working — wa-dropdown-item renders as role="menuitem"
+            // by default; tests query by text/testid instead.
+            role="menuitemradio"
+            aria-checked={c.connectionId === activeId}
+            aria-label={c.profileName}
+            data-testid={`connection-row-${c.connectionId}`}
+          >
+            <span style={rowInnerStyle}>
               <span>{c.profileName}</span>
-              <Disconnect
-                type="button"
+              <span
+                role="button"
+                tabIndex={0}
                 aria-label={`${t('connection.disconnect')}: ${c.profileName}`}
+                data-testid={`connection-disconnect-${c.connectionId}`}
                 onClick={(e) => {
+                  // Prevent the dropdown's selection logic from
+                  // firing wa-select (which would race the
+                  // disconnect with a switchActive on the same
+                  // connection id).
                   e.stopPropagation()
                   disconnect(c.connectionId)
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    disconnect(c.connectionId)
+                  }
+                }}
+                style={disconnectStyle}
               >
                 ×
-              </Disconnect>
-            </Row>
-          ))}
-          <AddRow
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              onAddRequested()
-            }}
-          >
-            {`+ ${t('connection.addAnother')}`}
-          </AddRow>
-        </Menu>
-      )}
+              </span>
+            </span>
+          </DropdownItem>
+        ))}
+        <DropdownItem
+          value={ADD_ITEM_VALUE}
+          role="menuitem"
+          data-testid="connection-add"
+        >
+          {`+ ${t('connection.addAnother')}`}
+        </DropdownItem>
+      </Dropdown>
     </SwitcherWrap>
   )
 }

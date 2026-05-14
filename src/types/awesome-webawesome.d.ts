@@ -111,6 +111,36 @@ type WaTabPanelProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode
 }
 
+type WaDropdownProps = HTMLAttributes<HTMLElement> & {
+  open?: boolean
+  placement?:
+    | 'top'
+    | 'top-start'
+    | 'top-end'
+    | 'bottom'
+    | 'bottom-start'
+    | 'bottom-end'
+    | 'right'
+    | 'right-start'
+    | 'right-end'
+    | 'left'
+    | 'left-start'
+    | 'left-end'
+  distance?: number
+  skidding?: number
+  size?: 'xs' | 's' | 'm' | 'l' | 'xl' | 'small' | 'medium' | 'large'
+  children?: ReactNode
+}
+
+type WaDropdownItemProps = HTMLAttributes<HTMLElement> & {
+  value?: string
+  disabled?: boolean
+  type?: 'normal' | 'checkbox'
+  checked?: boolean
+  variant?: 'default' | 'danger'
+  children?: ReactNode
+}
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {
@@ -123,6 +153,8 @@ declare global {
       'wa-tab-group': WaTabGroupProps
       'wa-tab': WaTabProps
       'wa-tab-panel': WaTabPanelProps
+      'wa-dropdown': WaDropdownProps
+      'wa-dropdown-item': WaDropdownItemProps
     }
   }
 }
