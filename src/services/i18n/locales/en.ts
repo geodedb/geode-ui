@@ -195,6 +195,10 @@ export const en = {
     pathClear: 'Clear path',
     miniMap: 'Mini-map',
     miniMapLabel: 'Toggle the canvas overview / mini-map',
+    findPlaceholder: 'Find node…',
+    findAria: 'Find nodes by id, label, or property value',
+    findCount_one: '{{count}} match',
+    findCount_other: '{{count}} matches',
   },
 
   matrix: {

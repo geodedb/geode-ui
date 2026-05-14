@@ -397,6 +397,24 @@ export const GraphView: React.FC<Props> = ({
     cyRef.current?.$id(id).select()
   }
 
+  // Toolbar find-node input — feed it the live set of node-data bags
+  // (memoised on the underlying map so this doesn't churn every render)
+  // and a pick handler that selects + recenters the matched node.
+  const findNodes = useMemo(
+    () => Array.from(nodeDataById.values()),
+    [nodeDataById]
+  )
+  const onFindPick = (id: string): void => {
+    const data = nodeDataById.get(id)
+    if (!data) return
+    setSelected({ kind: 'node', data })
+    const node = cyRef.current?.$id(id)
+    if (node && !node.empty()) {
+      node.select()
+      cyRef.current?.center(node)
+    }
+  }
+
   // Resolve a node id to a short display label for the restore lists.
   const nodeDisplayLabel = (id: string): string => {
     const data = nodeDataById.get(id)
@@ -505,6 +523,8 @@ export const GraphView: React.FC<Props> = ({
           onPathClear={exitPathMode}
           miniMap={miniMap}
           onToggleMiniMap={() => setMiniMap(!miniMap)}
+          findNodes={findNodes}
+          onFindPick={onFindPick}
           counts={counts}
         />
         {pathStatusText && (

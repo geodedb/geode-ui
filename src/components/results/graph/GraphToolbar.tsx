@@ -1,6 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 import type { LayoutName } from '../useGraphPrefs'
+import { FindNodeInput } from './FindNodeInput'
 
 const Toolbar = styled.div`
   display: flex;
@@ -103,6 +104,12 @@ export type GraphToolbarProps = {
   // the GraphMiniMap panel in the canvas wrapper.
   miniMap: boolean
   onToggleMiniMap: () => void
+  // Find-node toolbar input. `findNodes` is the snapshot of node-data
+  // bags to filter against (typically the orchestrator's `nodeDataById`
+  // values spread into an array); `onFindPick` is invoked with the id
+  // of the first match when the user hits Enter.
+  findNodes: Record<string, unknown>[]
+  onFindPick: (id: string) => void
   // Live counts surfaced in the stats span.
   counts: { nodes: number; edges: number }
 }
@@ -134,6 +141,8 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onPathClear,
   miniMap,
   onToggleMiniMap,
+  findNodes,
+  onFindPick,
   counts,
 }) => {
   return (
@@ -278,6 +287,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           {t('graph.miniMap')}
         </button>
       </div>
+      <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
       <span className="stats" aria-live="polite">
         {t('graph.stats', { nodes: counts.nodes, edges: counts.edges })}
       </span>
