@@ -182,9 +182,7 @@ test.describe('graph power features', () => {
       position: { x: pos.x - box.x, y: pos.y - box.y },
     })
     await page.getByTestId('graph-action-pin').click()
-    await expect(
-      page.getByTestId(`graph-badge-pin-${pos.id}`)
-    ).toBeVisible()
+    await expect(page.getByTestId(`graph-badge-pin-${pos.id}`)).toBeVisible()
   })
 
   test('hovering a node shows the tooltip', async ({ authedPage: page }) => {
@@ -205,5 +203,80 @@ test.describe('graph power features', () => {
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('mini-map toggle renders ONE panel inside the canvas wrapper (no body leak)', async ({
+    authedPage: page,
+  }) => {
+    // Default off → toggle on.
+    await page.getByTestId('graph-minimap-toggle').click()
+    await expect(page.getByTestId('graph-minimap-toggle')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    // Exactly one #graph-minimap-panel exists.
+    await expect(page.locator('#graph-minimap-panel')).toHaveCount(1)
+    // It is anchored to the canvas wrapper — i.e. the panel and the
+    // canvas share the same `position: relative` parent. The body-leak
+    // failure mode would have the navigator panel pinned to document.body
+    // via the library's default `position: fixed` fallback.
+    const isAnchoredToCanvasWrapper = await page.evaluate(() => {
+      const panel = document.getElementById('graph-minimap-panel')
+      const canvas = document.querySelector('[data-testid="graph-canvas"]')
+      if (!panel || !canvas) return false
+      const wrap = panel.parentElement
+      if (!wrap || wrap === document.body) return false
+      return wrap.contains(canvas)
+    })
+    expect(isAnchoredToCanvasWrapper).toBe(true)
+    // No stray .cytoscape-navigator pinned to body (the bug).
+    const strayCount = await page.locator('body > .cytoscape-navigator').count()
+    expect(strayCount).toBe(0)
+  })
+
+  test('typing in the editor after run does not reset the graph', async ({
+    authedPage: page,
+  }) => {
+    // beforeEach already ran a query and switched to the Graph tab. The
+    // mini-map toggle is sticky; turn it on so we can observe a stable
+    // DOM marker.
+    const pos = await firstNodePosition(page)
+    // Capture cy.nodes().length BEFORE typing.
+    const beforeCount = await page.evaluate(() => {
+      type CyShape = { nodes: () => { length: number } }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      return cy ? cy.nodes().length : 0
+    })
+    expect(beforeCount).toBeGreaterThan(0)
+
+    // Type a single character into the Monaco editor (it's already
+    // focused after the beforeEach Run, but type anyway to be explicit).
+    await page.locator('.monaco-editor').first().click()
+    await page.keyboard.press('End')
+    await page.keyboard.type(' -- extra text')
+
+    // Wait for any potential debounced rebuild to settle.
+    await page.waitForTimeout(400)
+
+    // cy.nodes() should be UNCHANGED — the graph wasn't torn down.
+    const afterCount = await page.evaluate(() => {
+      type CyShape = { nodes: () => { length: number } }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      return cy ? cy.nodes().length : 0
+    })
+    expect(afterCount).toBe(beforeCount)
+
+    // The originally-found node id is still present in the graph.
+    const stillExists = await page.evaluate((id: string) => {
+      type CyShape = {
+        getElementById: (id: string) => { empty: () => boolean }
+      }
+      // eslint-disable-next-line no-underscore-dangle
+      const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+      return cy ? !cy.getElementById(id).empty() : false
+    }, pos.id)
+    expect(stillExists).toBe(true)
   })
 })
