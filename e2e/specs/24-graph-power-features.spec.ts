@@ -1,3 +1,4 @@
+import { Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
 import { sel } from '../helpers/selectors'
 import { seed } from '../helpers/gqlData'
@@ -9,9 +10,71 @@ import { seed } from '../helpers/gqlData'
 //   • pin/unpin (locked positions survive a layout switch)
 //   • find-node search (Enter picks the first match)
 //
-// All assertions are stable data-testid-based; cytoscape's internal
-// canvas is reached only through the development-only window.__geode_cy
-// hook for the sizing assertion.
+// Tests interact with the live cytoscape Core via window.__geode_cy
+// so click coordinates land on actual nodes regardless of the layout
+// algorithm's random initial seed.
+
+type NodePosition = { x: number; y: number; id: string }
+
+// Wait until cytoscape's debounced build has populated __geode_cy with
+// a graph that has at least one node, then return the first node's
+// page-rendered position. Used so click({position}) lands on a real
+// node every time.
+async function firstNodePosition(page: Page): Promise<NodePosition> {
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          type CyShape = {
+            nodes: () => { length: number }
+          }
+          // eslint-disable-next-line no-underscore-dangle
+          const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+          return cy ? cy.nodes().length : 0
+        }),
+      { timeout: 10000 }
+    )
+    .toBeGreaterThan(0)
+
+  // Stop any in-flight cose animation and center the first node in the
+  // cytoscape viewport. This ensures the node is in the page-visible
+  // canvas region (no scrolling required) and that its rendered position
+  // is stable for the duration of the test.
+  const pos = await page.evaluate(() => {
+    type Node = {
+      id: () => string
+      renderedPosition: () => { x: number; y: number }
+    }
+    type CyShape = {
+      nodes: () => Node[] & { length: number }
+      stop: () => void
+      center: (eles?: unknown) => void
+      zoom: (lvl: number) => void
+    }
+    // eslint-disable-next-line no-underscore-dangle
+    const cy = (window as unknown as { __geode_cy?: CyShape }).__geode_cy
+    if (!cy) return null
+    cy.stop()
+    // Modest zoom so the node is visibly large but not clipped.
+    cy.zoom(1)
+    const n = cy.nodes()[0]
+    if (!n) return null
+    // center(node) pans the viewport so the given node sits at the
+    // centre of the cytoscape canvas.
+    cy.center(n)
+    const p = n.renderedPosition()
+    return { x: p.x, y: p.y, id: n.id() }
+  })
+
+  // The rendered position is canvas-relative; the canvas element's
+  // bounding rect translates to page-relative. Scroll the canvas into
+  // view in case the page is taller than the viewport.
+  await page.getByTestId('graph-canvas').scrollIntoViewIfNeeded()
+  const box = await page.getByTestId('graph-canvas').boundingBox()
+  if (!pos || !box) throw new Error('node position unavailable')
+  return { x: pos.x + box.x, y: pos.y + box.y, id: pos.id }
+}
+
 test.describe('graph power features', () => {
   const GRAPH_QUERY = `USE GRAPH ${seed.graph}; MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p, r, m LIMIT 25`
 
@@ -27,9 +90,8 @@ test.describe('graph power features', () => {
   })
 
   test('node sizing reflects degree', async ({ authedPage: page }) => {
-    // The 'size by edges' toggle defaults on. Read node widths via
-    // the debug hook; at least one node should be larger than the
-    // legacy flat size (38px) when degree > 0.
+    // Wait for the build to settle and at least one node to exist.
+    await firstNodePosition(page)
     const sizes = await page.evaluate(() => {
       type Sized = { width: () => number }
       type CyShape = {
@@ -48,26 +110,53 @@ test.describe('graph power features', () => {
   test('right-click opens context menu, Expand fires popover', async ({
     authedPage: page,
   }) => {
-    // Right-click the canvas at a position likely to land on a node.
-    // The seeded query has 25 rows; positions vary by layout but the
-    // canvas viewport is large enough that the centre is on a node.
-    await page
-      .getByTestId('graph-canvas')
-      .click({ button: 'right', position: { x: 200, y: 200 } })
+    const pos = await firstNodePosition(page)
+    // Wait for the useNodeContextMenu effect to register its cxttap
+    // listener; the hook polls for cy because the rebuild is debounced.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            type Listener = { type: string; qualifier: unknown }
+            type CyShape = {
+              emitter: () => { listeners: Listener[] }
+            }
+            // eslint-disable-next-line no-underscore-dangle
+            const cy = (window as unknown as { __geode_cy?: CyShape })
+              .__geode_cy
+            if (!cy || !cy.emitter) return 0
+            return cy.emitter().listeners.filter((l) => l.type === 'cxttap')
+              .length
+          }),
+        { timeout: 5000 }
+      )
+      .toBeGreaterThan(0)
+    // The Cytoscape canvas needs the right-click to land on the node;
+    // we use the explicit page-coordinates returned by firstNodePosition.
+    const canvas = page.getByTestId('graph-canvas')
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('canvas not laid out')
+    await canvas.click({
+      button: 'right',
+      position: { x: pos.x - box.x, y: pos.y - box.y },
+    })
     await expect(page.getByTestId('graph-node-menu')).toBeVisible()
     await page.getByTestId('graph-node-menu-expand').click()
     await expect(page.getByTestId('graph-expand-popover')).toBeVisible()
-    // Cancel without firing the explore.
     await page.getByTestId('graph-expand-cancel').click()
     await expect(page.getByTestId('graph-expand-popover')).toBeHidden()
   })
 
   test('pin survives a layout switch', async ({ authedPage: page }) => {
-    // Click any node to select it.
-    await page
-      .getByTestId('graph-canvas')
-      .click({ position: { x: 200, y: 200 } })
-    // Click Pin in the inspector actions.
+    const pos = await firstNodePosition(page)
+    const canvas = page.getByTestId('graph-canvas')
+    const box = await canvas.boundingBox()
+    if (!box) throw new Error('canvas not laid out')
+    await canvas.click({
+      position: { x: pos.x - box.x, y: pos.y - box.y },
+    })
+    // Inspector should now show; click Pin.
+    await expect(page.getByTestId('graph-action-pin')).toBeVisible()
     await page.getByTestId('graph-action-pin').click()
     await expect(page.getByTestId('graph-action-pin')).toHaveAttribute(
       'aria-pressed',
@@ -87,7 +176,6 @@ test.describe('graph power features', () => {
     await page.getByTestId('graph-find-input').fill('Movie')
     await expect(page.getByTestId('graph-find-count')).toContainText(/\d/)
     await page.getByTestId('graph-find-input').press('Enter')
-    // The inspector should now show a node header.
     await expect(page.getByTestId('graph-inspector')).toBeVisible()
   })
 })

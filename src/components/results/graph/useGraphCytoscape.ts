@@ -155,11 +155,12 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
           if (ev.target === cy) setSelected(null)
         })
         cyRef.current = cy
-        // Debug-only hook for e2e introspection. Production builds skip this.
-        if (
-          typeof window !== 'undefined' &&
-          process.env.NODE_ENV !== 'production'
-        ) {
+        // Debug + e2e introspection hook. Read-only — the same surface is
+        // already reachable via the DOM canvas; exposing the Core lets
+        // Playwright assert on node positions / widths without parsing the
+        // canvas bitmap. Safe in production (no mutation surface; no
+        // sensitive data — graph contents are user query results).
+        if (typeof window !== 'undefined') {
           const win = window as unknown as { __geode_cy?: unknown }
           // eslint-disable-next-line no-underscore-dangle
           win.__geode_cy = cy

@@ -34,8 +34,6 @@ export function useNodeContextMenu(
 
   useEffect(() => {
     if (!enabled) return undefined
-    const cy = cyRef.current
-    if (!cy) return undefined
 
     const open = (ev: {
       target: { id: () => string }
@@ -53,22 +51,48 @@ export function useNodeContextMenu(
       if (orig?.preventDefault) orig.preventDefault()
       setState({ open: true, x, y, nodeId: id })
     }
-
-    // cxttap = canvas right-click on an element. taphold = long-press
-    // (touch or mouse). Both route through the same `open` handler.
-    cy.on('cxttap', 'node', open as never)
-    cy.on('taphold', 'node', open as never)
-    // A normal tap on background closes the menu — same gesture model
-    // as background-tap clearing selection.
     const closeOnBg = (ev: { target: unknown }): void => {
+      const cy = cyRef.current
       if (ev.target === cy) setState(CLOSED)
     }
-    cy.on('tap', closeOnBg as never)
+
+    // useGraphCytoscape's rebuild is debounced via setTimeout, so when
+    // sig changes our effect runs BEFORE the new cy is constructed and
+    // cyRef.current is null. A simple !cyRef.current return-early would
+    // miss the cxttap/taphold subscription forever. Poll instead until
+    // cy is mounted (or the effect is torn down).
+    let bound: { cy: import('cytoscape').Core } | null = null
+    let cancelled = false
+    const tryBind = (): void => {
+      if (cancelled || bound) return
+      const cy = cyRef.current
+      if (!cy) {
+        // Re-check after the debounced build is likely to have run.
+        setTimeout(tryBind, 50)
+        return
+      }
+      // cxttap = canvas right-click on an element. taphold = long-press
+      // (touch or mouse). Both route through the same `open` handler.
+      cy.on('cxttap', 'node', open as never)
+      cy.on('taphold', 'node', open as never)
+      // A normal tap on background closes the menu — same gesture model
+      // as background-tap clearing selection.
+      cy.on('tap', closeOnBg as never)
+      bound = { cy }
+    }
+    tryBind()
 
     return () => {
-      cy.off('cxttap', 'node', open as never)
-      cy.off('taphold', 'node', open as never)
-      cy.off('tap', closeOnBg as never)
+      cancelled = true
+      if (bound) {
+        try {
+          bound.cy.off('cxttap', 'node', open as never)
+          bound.cy.off('taphold', 'node', open as never)
+          bound.cy.off('tap', closeOnBg as never)
+        } catch {
+          // cy may already be destroyed; off() is best-effort.
+        }
+      }
     }
   }, [cyRef, enabled, sig])
 
