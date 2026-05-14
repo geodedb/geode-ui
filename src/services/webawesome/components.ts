@@ -1,0 +1,108 @@
+// React adapter wrappers for the Web Awesome components that fire
+// CUSTOM EVENTS. React 18 doesn't forward `onWaChange={...}` props
+// for unknown events on bare custom elements, so we use
+// @lit/react's createComponent to map each WA custom event to a
+// matching `onWaXxx` / `onXxx` React prop.
+//
+// Buttons are intentionally NOT wrapped — they fire standard
+// `click`, which React forwards natively via `onClick`. Consumers
+// can use `<wa-button onClick={handler}>` directly.
+//
+// Event names below were verified against the component `.d.ts`
+// files in @awesome.me/webawesome. Input/Select fire STANDARD-
+// named events (`change`, `input`, `focus`, `blur`) plus a few
+// `wa-*` events (`wa-clear`, `wa-invalid`). Dialog/TabGroup/Tab
+// fire only `wa-*` events.
+
+import * as React from 'react'
+// `@lit/react` is intentionally not in package.json — it ships as a
+// direct dep of `@awesome.me/webawesome` (see node_modules/.../package.json)
+// and is the supported integration path WA itself documents. Re-listing
+// it as a top-level dep would risk a version skew with WA's pinned
+// `@lit/react`. The eslint rule below is disabled per the migration
+// plan's "no new dependencies" constraint.
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { createComponent } from '@lit/react'
+
+import WaInput from '@awesome.me/webawesome/dist/components/input/input.js'
+import WaSelect from '@awesome.me/webawesome/dist/components/select/select.js'
+import WaOption from '@awesome.me/webawesome/dist/components/option/option.js'
+import WaDialog from '@awesome.me/webawesome/dist/components/dialog/dialog.js'
+import WaTabGroup from '@awesome.me/webawesome/dist/components/tab-group/tab-group.js'
+import WaTab from '@awesome.me/webawesome/dist/components/tab/tab.js'
+import WaTabPanel from '@awesome.me/webawesome/dist/components/tab-panel/tab-panel.js'
+
+export const Input = createComponent({
+  tagName: 'wa-input',
+  elementClass: WaInput as never,
+  react: React,
+  events: {
+    onChange: 'change',
+    onInput: 'input',
+    onBlur: 'blur',
+    onFocus: 'focus',
+    onWaClear: 'wa-clear',
+    onWaInvalid: 'wa-invalid',
+  },
+})
+
+export const Select = createComponent({
+  tagName: 'wa-select',
+  elementClass: WaSelect as never,
+  react: React,
+  events: {
+    onChange: 'change',
+    onInput: 'input',
+    onBlur: 'blur',
+    onFocus: 'focus',
+    onWaClear: 'wa-clear',
+    onWaShow: 'wa-show',
+    onWaAfterShow: 'wa-after-show',
+    onWaHide: 'wa-hide',
+    onWaAfterHide: 'wa-after-hide',
+    onWaInvalid: 'wa-invalid',
+  },
+})
+
+export const Option = createComponent({
+  tagName: 'wa-option',
+  elementClass: WaOption as never,
+  react: React,
+  events: {},
+})
+
+export const Dialog = createComponent({
+  tagName: 'wa-dialog',
+  elementClass: WaDialog as never,
+  react: React,
+  events: {
+    onWaShow: 'wa-show',
+    onWaAfterShow: 'wa-after-show',
+    onWaHide: 'wa-hide',
+    onWaAfterHide: 'wa-after-hide',
+  },
+})
+
+export const TabGroup = createComponent({
+  tagName: 'wa-tab-group',
+  elementClass: WaTabGroup as never,
+  react: React,
+  events: {
+    onWaTabShow: 'wa-tab-show',
+    onWaTabHide: 'wa-tab-hide',
+  },
+})
+
+export const Tab = createComponent({
+  tagName: 'wa-tab',
+  elementClass: WaTab as never,
+  react: React,
+  events: {},
+})
+
+export const TabPanel = createComponent({
+  tagName: 'wa-tab-panel',
+  elementClass: WaTabPanel as never,
+  react: React,
+  events: {},
+})
