@@ -65,6 +65,9 @@ type GraphPrefsState = {
   // Whether node width/height scales with degree (log-scaled). When off,
   // nodes render at the legacy flat 38px. Sticky.
   degreeSizing: boolean
+  // Number of hops to keep visible from the focal node when focus mode
+  // is on. 0 = just the focal node; 1 = focal + neighbours; up to 3.
+  focusHops: number
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -74,6 +77,7 @@ type GraphPrefsState = {
   setSelectionMode: (m: SelectionMode) => void
   setClusterByLabel: (v: boolean) => void
   setDegreeSizing: (v: boolean) => void
+  setFocusHops: (n: number) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -87,6 +91,7 @@ type PersistedShape = {
   selectionMode: SelectionMode
   clusterByLabel: boolean
   degreeSizing: boolean
+  focusHops: number
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -108,6 +113,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       selectionMode: DEFAULT_SELECTION_MODE,
       clusterByLabel: false,
       degreeSizing: true,
+      focusHops: 1,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -128,6 +134,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setSelectionMode: (m) => set({ selectionMode: m }),
       setClusterByLabel: (v) => set({ clusterByLabel: v }),
       setDegreeSizing: (v) => set({ degreeSizing: v }),
+      setFocusHops: (n) => set({ focusHops: n }),
     }),
     {
       name: STORAGE_KEY,
@@ -141,6 +148,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         selectionMode: s.selectionMode,
         clusterByLabel: s.clusterByLabel,
         degreeSizing: s.degreeSizing,
+        focusHops: s.focusHops,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -161,6 +169,16 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // a stale persisted shape (pre-degree-sizing) lights up sizing
           // on first read; only an explicit `false` opts out.
           degreeSizing: p.degreeSizing !== false,
+          // Clamp focusHops into [0, 3] and default to 1 for any
+          // missing / non-finite persisted value. Trunc so a stray
+          // float (e.g. 1.7) lands on a whole hop count.
+          focusHops: (() => {
+            const v = p.focusHops
+            if (typeof v !== 'number' || !Number.isFinite(v)) return 1
+            if (v < 0) return 0
+            if (v > 3) return 3
+            return Math.trunc(v)
+          })(),
         }
       },
     }

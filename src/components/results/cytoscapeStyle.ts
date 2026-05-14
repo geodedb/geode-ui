@@ -192,6 +192,19 @@ export function createCytoscapeStyle(
         'text-opacity': fadedOpacity,
       },
     },
+    // Focus-mode dim. Applied by useFocusMode to every node outside the
+    // N-hop neighbourhood of the focal node so the focal subgraph reads
+    // unambiguously against the rest. Lower opacity than .gv-faded
+    // (which is the selection neighbourhood dim) so a node that is both
+    // out-of-focus and faded reads as "really out of focus" instead of
+    // accidentally matching the selection-fade level.
+    {
+      selector: '.gv-out-of-focus',
+      style: {
+        opacity: 0.12,
+        'text-opacity': 0.12,
+      },
+    },
     {
       selector: '.gv-hidden',
       style: {
