@@ -1,3 +1,4 @@
+import './services/webawesome' // side-effect: registers <wa-button> etc.
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { createGlobalStyle } from 'styled-components'
