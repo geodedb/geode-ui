@@ -100,6 +100,13 @@ function streamStateToResp(s: StreamState): QueryResp {
 export const QueryPage: React.FC = () => {
   const { t } = useTranslation()
   const [stmt, setStmt] = useState('MATCH (n) RETURN n LIMIT 25')
+  // Bug #6: the SUBMITTED statement, tracked separately from the live
+  // editor buffer (`stmt`). ResultPanel.query — and through it
+  // GraphView's `sig` — must depend on this, NOT on the editor buffer,
+  // or every keystroke triggers a full cytoscape rebuild + cxtmenu
+  // remount + lasso re-apply + tooltip rebind + dom-node remount.
+  // Update from EVERY run path (sync, stream, and any future retry).
+  const [submittedStmt, setSubmittedStmt] = useState('')
   const [resp, setResp] = useState<QueryResp | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -211,6 +218,9 @@ export const QueryPage: React.FC = () => {
     // Capture the statement that this run started with so a later
     // edit to `stmt` can't drift the history entry.
     const ranStmt = stmt
+    // Bug #6: also publish to React state so ResultPanel/GraphView see
+    // the SUBMITTED statement, not the live editor buffer.
+    setSubmittedStmt(ranStmt)
     resetRunState()
     setBusy(true)
     try {
@@ -242,6 +252,9 @@ export const QueryPage: React.FC = () => {
 
   const runStream = (): void => {
     runStmtRef.current = stmt
+    // Bug #6: companion to runStmtRef — the ref is for the async history
+    // record; this React state is what drives ResultPanel/GraphView.
+    setSubmittedStmt(stmt)
     resetRunState()
     dispatch({ type: 'start' })
     setBusy(true)
@@ -307,7 +320,7 @@ export const QueryPage: React.FC = () => {
   const resultPanel = activeResp && (
     <ResultPanel
       resp={activeResp}
-      query={stmt}
+      query={submittedStmt}
       tab={tab}
       onTabChange={setTab}
       expand={expand}
