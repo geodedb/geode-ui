@@ -31,6 +31,8 @@ import { respSignature } from './graph/cyHelpers'
 import type { Neighbor, Selected } from './graph/GraphInspector'
 import { useCxtMenu } from './graph/useCxtMenu'
 import { useLasso } from './graph/useLasso'
+import { useNodeTooltip } from './graph/useNodeTooltip'
+import { GraphTooltip } from './graph/GraphTooltip'
 import { zoomToNode } from './graph/zoomToNode'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
@@ -501,6 +503,12 @@ export const GraphView: React.FC<Props> = ({
     theme,
   })
 
+  // Hover tooltip — subscribes to node-level mouseover/mouseout on the
+  // live cy core and exposes the hovered node's id/label/props. The
+  // GraphTooltip below renders the actual card. `sig` is forwarded so a
+  // sig-keyed rebuild re-binds the listeners against the fresh core.
+  const { targetData: tooltipTarget } = useNodeTooltip({ cyRef, sig })
+
   // Wire cytoscape-lasso's enable-state to the sticky `lasso` pref.
   // `sig` is forwarded so a fresh cy core (post-rebuild) inherits the
   // current toggle.
@@ -594,6 +602,7 @@ export const GraphView: React.FC<Props> = ({
           {error && <ErrorBanner role="alert">{error}</ErrorBanner>}
           {miniMap && <GraphMiniMap cyRef={cyRef} sig={sig} />}
           <GraphBadges badges={badges} />
+          <GraphTooltip targetData={tooltipTarget} t={t} />
           <FocusClearChip
             active={focusMode.state !== null}
             onClear={() => focusMode.clear()}

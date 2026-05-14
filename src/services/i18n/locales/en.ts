@@ -114,6 +114,7 @@ export const en = {
     inspectorViewProps: 'Properties',
     inspectorViewJson: 'Raw JSON',
     inspectorNoProps: 'No properties.',
+    tooltipNoProps: 'No properties.',
     inspectorId: 'id',
     inspectorLabels: 'labels',
     inspectorType: 'type',
