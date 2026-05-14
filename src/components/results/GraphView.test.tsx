@@ -1618,4 +1618,31 @@ describe('GraphView — focus action', () => {
       'false'
     )
   })
+
+  it('Focus action shows the persistent Clear chip; clicking it clears focus', () => {
+    const view = render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={hubGraphResp} query="MATCH (n) RETURN n" />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    // Select node "1" via the existing id picker.
+    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+      target: { value: '1' },
+    })
+    fireEvent.click(view.getByTestId('graph-action-focus'))
+    // The persistent chip is rendered.
+    const chip = view.getByTestId('graph-focus-clear-chip')
+    expect(chip).toBeInTheDocument()
+    // Clicking the chip clears focus — chip vanishes and the canvas
+    // attribute flips back to false.
+    fireEvent.click(chip)
+    expect(view.queryByTestId('graph-focus-clear-chip')).toBeNull()
+    expect(view.getByTestId('graph-canvas')).toHaveAttribute(
+      'data-focus-active',
+      'false'
+    )
+  })
 })
