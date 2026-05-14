@@ -32,6 +32,41 @@ import WaTabGroup from '@awesome.me/webawesome/dist/components/tab-group/tab-gro
 import WaTab from '@awesome.me/webawesome/dist/components/tab/tab.js'
 import WaTabPanel from '@awesome.me/webawesome/dist/components/tab-panel/tab-panel.js'
 
+// Extra prop shapes for the WA input element. Same rationale as the
+// TabGroup/Tab/TabPanel wrappers below: `elementClass: ... as never`
+// erases element-specific props from @lit/react's inferred shape, so
+// the wrapper exposes only base HTMLAttributes. Hoist the WA-specific
+// props (and the controlled-input `value`) back in here so call sites
+// can write `<Input value={x} onInput={...} type="password" required />`.
+type InputExtraProps = {
+  type?:
+    | 'text'
+    | 'password'
+    | 'email'
+    | 'search'
+    | 'number'
+    | 'tel'
+    | 'url'
+    | 'date'
+    | 'datetime-local'
+    | 'time'
+  value?: string
+  defaultValue?: string
+  label?: string
+  placeholder?: string
+  size?: 'small' | 'medium' | 'large'
+  appearance?: 'filled' | 'outlined'
+  disabled?: boolean
+  required?: boolean
+  hint?: string
+  pill?: boolean
+  clearable?: boolean
+  min?: number | string
+  max?: number | string
+  autoComplete?: string
+  name?: string
+}
+
 export const Input = createComponent({
   tagName: 'wa-input',
   elementClass: WaInput as never,
@@ -44,7 +79,17 @@ export const Input = createComponent({
     onWaClear: 'wa-clear',
     onWaInvalid: 'wa-invalid',
   },
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    InputExtraProps & {
+      onChange?: (e: Event) => void
+      onInput?: (e: Event) => void
+      onBlur?: (e: Event) => void
+      onFocus?: (e: Event) => void
+      onWaClear?: (e: Event) => void
+      onWaInvalid?: (e: Event) => void
+    } & React.RefAttributes<HTMLElement>
+>
 
 export const Select = createComponent({
   tagName: 'wa-select',

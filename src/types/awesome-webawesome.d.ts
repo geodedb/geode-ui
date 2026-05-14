@@ -15,6 +15,11 @@ type WaButtonProps = HTMLAttributes<HTMLElement> & {
   appearance?: 'filled' | 'outlined' | 'plain'
   size?: 'small' | 'medium' | 'large'
   variant?: 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'neutral'
+  // WA 3.x is form-associated and reads `type` to decide submit/reset/
+  // button semantics. The browser's HTMLAttributes shape doesn't carry
+  // a `type` prop (that's on HTMLButtonElement, which custom elements
+  // do not extend), so we hoist it here.
+  type?: 'button' | 'submit' | 'reset'
   disabled?: boolean
   loading?: boolean
   pill?: boolean

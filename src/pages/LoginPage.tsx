@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { useAuth } from '../auth/AuthProvider'
-import { Button, Field, Input, Logo } from '../components/ui'
+import { Field, Logo } from '../components/ui'
+import { Input as WaInput } from '../services/webawesome/components'
 import { fetchPublicProfiles, PublicProfile } from '../api/auth'
 import { getStoredPassword, isElectron } from '../api/electron-bridge'
 
@@ -47,36 +48,6 @@ const ProfileList = styled.ul`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.xs};
-`
-
-const profileBorderColor = ({
-  theme,
-  $selected,
-}: {
-  theme: import('../theme/types').Theme
-  $selected?: boolean
-}) => ($selected ? theme.colors.primary : theme.border.default)
-
-const profileBg = ({
-  theme,
-  $selected,
-}: {
-  theme: import('../theme/types').Theme
-  $selected?: boolean
-}) => ($selected ? theme.bg.subtle : theme.bg.surface)
-
-const ProfileButton = styled.button<{ $selected?: boolean }>`
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  border: 1px solid ${profileBorderColor};
-  background: ${profileBg};
-  border-radius: ${({ theme }) => theme.radii.md};
-  cursor: pointer;
-  &:hover {
-    background: ${({ theme }) => theme.bg.subtle};
-  }
 `
 
 const ProfileDescription = styled.div`
@@ -154,46 +125,55 @@ export const LoginPage: React.FC = () => {
         <ProfileList aria-label={t('auth.profileList')}>
           {profiles!.map((p) => (
             <li key={p.name}>
-              <ProfileButton
+              <wa-button
                 type="button"
-                $selected={p.name === profile}
-                onClick={() => setProfile(p.name)}
-                aria-pressed={p.name === profile}
+                appearance={p.name === profile ? 'filled' : 'outlined'}
+                variant={p.name === profile ? 'brand' : 'default'}
+                size="medium"
+                role="button"
+                data-testid={`login-profile-${p.name}`}
+                aria-pressed={p.name === profile ? 'true' : 'false'}
                 aria-label={p.name}
+                onClick={() => setProfile(p.name)}
+                style={{ width: '100%' }}
               >
                 <strong>{p.name}</strong>
                 {p.description ? (
                   <ProfileDescription>{p.description}</ProfileDescription>
                 ) : null}
-              </ProfileButton>
+              </wa-button>
             </li>
           ))}
         </ProfileList>
       ) : (
         <Field label={t('auth.profile')} htmlFor="login-profile">
-          <Input
+          <WaInput
             id="login-profile"
+            data-testid="login-profile-input"
             value={profile}
-            onChange={(e) => setProfile(e.target.value)}
+            onInput={(e) => setProfile((e.target as HTMLInputElement).value)}
           />
         </Field>
       )}
 
       <Field label={t('auth.username')} htmlFor="login-username" required>
-        <Input
+        <WaInput
           id="login-username"
+          type="text"
+          data-testid="login-username"
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onInput={(e) => setUsername((e.target as HTMLInputElement).value)}
           autoComplete="username"
           required
         />
       </Field>
       <Field label={t('auth.password')} htmlFor="login-password" required>
-        <Input
+        <WaInput
           id="login-password"
           type="password"
+          data-testid="login-password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
           autoComplete="current-password"
           required
         />
@@ -208,9 +188,20 @@ export const LoginPage: React.FC = () => {
           />
         </Field>
       ) : null}
-      <Button type="submit" loading={busy} fullWidth>
+      <wa-button
+        type="submit"
+        appearance="filled"
+        variant="brand"
+        size="medium"
+        role="button"
+        data-testid="login-submit-btn"
+        disabled={busy ? true : undefined}
+        loading={busy ? true : undefined}
+        onClick={submit}
+        style={{ width: '100%' }}
+      >
         {t('auth.signInButton')}
-      </Button>
+      </wa-button>
       {err && <ErrText role="alert">{err}</ErrText>}
     </Form>
   )
