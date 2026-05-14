@@ -99,6 +99,10 @@ export type GraphToolbarProps = {
   pathActive: boolean
   onTogglePathMode: () => void
   onPathClear: () => void
+  // Mini-map overview toggle. Off by default; when on, GraphView mounts
+  // the GraphMiniMap panel in the canvas wrapper.
+  miniMap: boolean
+  onToggleMiniMap: () => void
   // Live counts surfaced in the stats span.
   counts: { nodes: number; edges: number }
 }
@@ -128,6 +132,8 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   pathActive,
   onTogglePathMode,
   onPathClear,
+  miniMap,
+  onToggleMiniMap,
   counts,
 }) => {
   return (
@@ -261,6 +267,16 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
             {t('graph.pathClear')}
           </button>
         )}
+        <button
+          type="button"
+          data-testid="graph-minimap-toggle"
+          aria-pressed={miniMap}
+          aria-label={t('graph.miniMapLabel')}
+          title={t('graph.miniMapLabel')}
+          onClick={onToggleMiniMap}
+        >
+          {t('graph.miniMap')}
+        </button>
       </div>
       <span className="stats" aria-live="polite">
         {t('graph.stats', { nodes: counts.nodes, edges: counts.edges })}

@@ -10,6 +10,7 @@ import { QueryRespLike, resolveNodeLabel } from '../../lib/graphResult'
 import { useGraphPathMode } from './graph/useGraphPathMode'
 import { useFillHeight } from './graph/useFillHeight'
 import { GraphToolbar } from './graph/GraphToolbar'
+import { GraphMiniMap } from './graph/GraphMiniMap'
 import { GraphSidebar } from './graph/GraphSidebar'
 import { GraphSidebarContents } from './graph/GraphSidebarContents'
 import { useGraphElements } from './graph/useGraphElements'
@@ -126,6 +127,11 @@ export const GraphView: React.FC<Props> = ({
   // nodes render at the legacy flat 38px. Sticky.
   const degreeSizing = useGraphPrefs((s) => s.degreeSizing)
   const setDegreeSizing = useGraphPrefs((s) => s.setDegreeSizing)
+  // Mini-map overview panel toggle (sticky, default off). When on,
+  // the GraphMiniMap component is mounted inside the canvas wrapper and
+  // attaches a cytoscape-navigator instance to the live cy core.
+  const miniMap = useGraphPrefs((s) => s.miniMap)
+  const setMiniMap = useGraphPrefs((s) => s.setMiniMap)
   // Path-mode state machine + handlers. Result-scoped — `resetPath` is
   // invoked from the sig-keyed reset effect below.
   const {
@@ -497,6 +503,8 @@ export const GraphView: React.FC<Props> = ({
           pathActive={pathState.phase !== 'off'}
           onTogglePathMode={onTogglePathMode}
           onPathClear={exitPathMode}
+          miniMap={miniMap}
+          onToggleMiniMap={() => setMiniMap(!miniMap)}
           counts={counts}
         />
         {pathStatusText && (
@@ -521,6 +529,7 @@ export const GraphView: React.FC<Props> = ({
             </Overlay>
           )}
           {error && <ErrorBanner role="alert">{error}</ErrorBanner>}
+          {miniMap && <GraphMiniMap cyRef={cyRef} sig={sig} />}
         </div>
       </CanvasArea>
       {!sidebarCollapsed && (

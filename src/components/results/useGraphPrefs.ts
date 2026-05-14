@@ -68,6 +68,10 @@ type GraphPrefsState = {
   // Number of hops to keep visible from the focal node when focus mode
   // is on. 0 = just the focal node; 1 = focal + neighbours; up to 3.
   focusHops: number
+  // Whether the canvas overview / mini-map panel is mounted. Off by
+  // default — it adds visual chrome and a second cytoscape attach to
+  // the core, so users opt in via the toolbar toggle.
+  miniMap: boolean
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -78,6 +82,7 @@ type GraphPrefsState = {
   setClusterByLabel: (v: boolean) => void
   setDegreeSizing: (v: boolean) => void
   setFocusHops: (n: number) => void
+  setMiniMap: (v: boolean) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -92,6 +97,7 @@ type PersistedShape = {
   clusterByLabel: boolean
   degreeSizing: boolean
   focusHops: number
+  miniMap: boolean
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -114,6 +120,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       clusterByLabel: false,
       degreeSizing: true,
       focusHops: 1,
+      miniMap: false,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -135,6 +142,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setClusterByLabel: (v) => set({ clusterByLabel: v }),
       setDegreeSizing: (v) => set({ degreeSizing: v }),
       setFocusHops: (n) => set({ focusHops: n }),
+      setMiniMap: (v) => set({ miniMap: v }),
     }),
     {
       name: STORAGE_KEY,
@@ -149,6 +157,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         clusterByLabel: s.clusterByLabel,
         degreeSizing: s.degreeSizing,
         focusHops: s.focusHops,
+        miniMap: s.miniMap,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -179,6 +188,9 @@ export const useGraphPrefs = create<GraphPrefsState>()(
             if (v > 3) return 3
             return Math.trunc(v)
           })(),
+          // Strict-true coercion — a missing/garbage persisted value
+          // leaves the mini-map off (matches the default).
+          miniMap: p.miniMap === true,
         }
       },
     }

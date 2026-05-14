@@ -193,6 +193,8 @@ export const en = {
     pathResult: 'Path: {{from}} → {{to}} · {{hops}} hops',
     pathNone: 'No path between {{from}} and {{to}}',
     pathClear: 'Clear path',
+    miniMap: 'Mini-map',
+    miniMapLabel: 'Toggle the canvas overview / mini-map',
   },
 
   matrix: {
