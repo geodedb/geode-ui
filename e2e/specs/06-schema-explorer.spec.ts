@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
+import { sel } from '../helpers/selectors'
 import { seed } from '../helpers/gqlData'
 
 // selectGraphAndExpectButtons navigates to /schema, clicks the seeded
@@ -110,7 +111,7 @@ test.describe('schema explorer', () => {
     //      the movies seed has more Person nodes than that, so we
     //      assert exactly 25 rows (NOT /\d+ rows?/, which would let a
     //      0-row regression slip through).
-    await page.getByRole('button', { name: /run/i }).click()
+    await sel.queryRunBtn(page).click()
     await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
       0,
       { timeout: 8_000 }
@@ -141,7 +142,7 @@ test.describe('schema explorer', () => {
     // query silently returns 0 rows. The staged template caps at
     // LIMIT 25 and the seed has more ACTED_IN edges than that, so we
     // assert exactly 25 rows.
-    await page.getByRole('button', { name: /run/i }).click()
+    await sel.queryRunBtn(page).click()
     await expect(page.locator('span', { hasText: /query_error/i })).toHaveCount(
       0,
       { timeout: 8_000 }

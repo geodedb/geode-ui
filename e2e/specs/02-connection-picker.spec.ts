@@ -12,8 +12,14 @@ test.describe('connection switcher', () => {
   }) => {
     await page.goto('/')
     // The fixture seeds an active connection on profile 'default', so
-    // the switcher trigger button should display that name.
-    await expect(page.getByRole('button', { name: /default/i })).toBeVisible()
+    // the switcher trigger button should display that name. Trigger is
+    // a <wa-button data-testid="connection-trigger">; both the host and
+    // its shadow-DOM <button> carry role=button, so we use the test-id
+    // to scope to the host.
+    await expect(page.getByTestId('connection-trigger')).toBeVisible()
+    await expect(page.getByTestId('connection-trigger')).toContainText(
+      /default/i
+    )
   })
 
   test('opening the dropdown reveals the connection row + add affordance', async ({

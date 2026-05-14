@@ -7,21 +7,29 @@ import { Page, Locator } from '@playwright/test'
 // the component and switch to that here.
 export const sel = {
   // Login
-  loginUsername: (p: Page): Locator => p.getByLabel('Username'),
-  loginPassword: (p: Page): Locator => p.getByLabel('Password'),
+  // LoginPage username/password are now <wa-input> shadow-DOM elements.
+  // The visible <label> targets the wa-input HOST (htmlFor=wa-input id),
+  // but the inner real <input> lives in the component's shadow tree —
+  // playwright's getByLabel can't bridge that gap. Use the stable
+  // test-ids on the host and chain `.locator('input')` so .fill()/.press()
+  // operate on the actual input element (Playwright pierces shadow roots).
+  loginUsername: (p: Page): Locator =>
+    p.getByTestId('login-username').locator('input'),
+  loginPassword: (p: Page): Locator =>
+    p.getByTestId('login-password').locator('input'),
   // Post-Plan-C the profile field is a clickable list of <button>s
   // populated from /api/v1/profiles/public. The text input variant
   // is the fallback when the public-list fetch fails. Tests that
   // need to "select default" should use the button-by-name selector;
-  // this label-based locator only resolves on the fallback path.
-  loginProfile: (p: Page): Locator => p.getByLabel('Profile'),
-  // Login submit button — text is "Sign in" since the i18n migration.
-  // EXACT match avoids collisions with profile-list buttons whose
-  // descriptions contain the word "login" (post-Plan-C the LoginPage
-  // shows a list of clickable profile buttons, and the e2e seed's
-  // profile description happens to mention "login").
-  loginSubmit: (p: Page): Locator =>
-    p.getByRole('button', { name: 'Sign in', exact: true }),
+  // this fallback-path locator targets the wa-input's shadow <input>.
+  loginProfile: (p: Page): Locator =>
+    p.getByTestId('login-profile-input').locator('input'),
+  // Login submit button — migrated to <wa-button data-testid="login-submit-btn">.
+  // Both the host element and its shadow-DOM <button part="base"> carry
+  // role="button" with the same accessible name, so role+name strict-mode
+  // resolves two elements. Scope to the test-id (the wa-button host) to
+  // pin the outer element.
+  loginSubmit: (p: Page): Locator => p.getByTestId('login-submit-btn'),
 
   // Shell nav
   navQuery: (p: Page): Locator => p.getByRole('link', { name: 'Query' }),
@@ -39,7 +47,12 @@ export const sel = {
     p.getByRole('button', { name: /default/i, exact: false }).first(),
 
   // Query page
-  queryRunBtn: (p: Page): Locator => p.getByRole('button', { name: /run/i }),
+  // Run button migrated to <wa-button data-testid="query-run-btn">; the
+  // wrapper itself AND its shadow-DOM <button part="base"> both expose
+  // role="button" with the same accessible name, so a bare role+name
+  // lookup is now strict-mode-ambiguous. Scope to the test-id (the
+  // wa-button host) to pin the outer element.
+  queryRunBtn: (p: Page): Locator => p.getByTestId('query-run-btn'),
   queryStreamToggle: (p: Page): Locator =>
     p.getByRole('checkbox', { name: 'Stream' }),
   // Result-view tabs are role="tab" (Tabs is role="tablist") since the
@@ -52,8 +65,9 @@ export const sel = {
   queryTabGraph: (p: Page): Locator =>
     p.getByRole('tab', { name: 'graph', exact: true }),
   queryTabMatrix: (p: Page): Locator => p.getByRole('tab', { name: /matrix/i }),
-  cancelStream: (p: Page): Locator =>
-    p.getByRole('button', { name: /cancel/i }),
+  // Cancel button on QueryPage migrated to <wa-button data-testid="query-cancel-btn">.
+  // Same shadow-DOM ambiguity as queryRunBtn — use the test-id.
+  cancelStream: (p: Page): Locator => p.getByTestId('query-cancel-btn'),
   resultsTable: (p: Page): Locator => p.locator('table'),
   graphCanvas: (p: Page): Locator => p.locator('canvas'),
   // Result-panel maximize/fullscreen toggle + the fixed inset:0 overlay

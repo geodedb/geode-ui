@@ -69,9 +69,12 @@ test.describe('login page profile picker', () => {
     await expect(
       page.getByRole('list', { name: /available profiles/i })
     ).toHaveCount(0)
-    // Form remains usable.
-    await expect(page.getByLabel('Username')).toBeVisible()
-    await expect(page.getByLabel('Password')).toBeVisible()
+    // Form remains usable. The Username/Password fields are now
+    // <wa-input>s — their <label for=...> targets the host element, but
+    // getByLabel can't resolve the inner shadow <input>. Assert via the
+    // stable data-testid on the host instead.
+    await expect(page.getByTestId('login-username')).toBeVisible()
+    await expect(page.getByTestId('login-password')).toBeVisible()
   })
 })
 
