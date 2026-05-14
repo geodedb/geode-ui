@@ -39,3 +39,68 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
     disconnect() {}
   }
 }
+
+// Web Awesome's <wa-tab-group> instantiates an IntersectionObserver at
+// module load to detect when the scrolling tab strip's leading/trailing
+// chevrons should appear. jsdom doesn't ship one — install a no-op stub
+// so the component class can construct in unit tests.
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    constructor() {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return []
+    }
+  }
+}
+
+// Web Awesome's form-associated elements (<wa-button>, <wa-input>) call
+// `this.attachInternals()` in their constructor and then read
+// `.validity`, `.willValidate`, `.labels`, `.form` from the returned
+// ElementInternals during Lit's reactive update. jsdom doesn't ship
+// attachInternals (https://github.com/jsdom/jsdom/issues/3463), so WA's
+// constructor swallows the failure but leaves `this.internals` undefined
+// — every subsequent getter then crashes with "Cannot read properties
+// of undefined". Install a no-op stub on HTMLElement.prototype so the
+// element-internals contract is at least syntactically satisfied. Tests
+// that exercise real form validation will need richer stubs.
+if (
+  typeof HTMLElement !== 'undefined' &&
+  typeof HTMLElement.prototype.attachInternals !== 'function'
+) {
+  HTMLElement.prototype.attachInternals = function attachInternals() {
+    return {
+      validity: {
+        valid: true,
+        badInput: false,
+        customError: false,
+        patternMismatch: false,
+        rangeOverflow: false,
+        rangeUnderflow: false,
+        stepMismatch: false,
+        tooLong: false,
+        tooShort: false,
+        typeMismatch: false,
+        valueMissing: false,
+      },
+      validationMessage: '',
+      willValidate: false,
+      labels: [],
+      form: null,
+      states: new Set(),
+      checkValidity() {
+        return true
+      },
+      reportValidity() {
+        return true
+      },
+      setValidity() {},
+      setFormValue() {},
+      ariaLabel: null,
+      ariaPressed: null,
+      role: null,
+    }
+  }
+}

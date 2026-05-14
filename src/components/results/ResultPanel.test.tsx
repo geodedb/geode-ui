@@ -57,9 +57,11 @@ describe('ResultPanel', () => {
 
   it('renders the maximize toggle only when onToggleMaximize is given', () => {
     const { rerender } = renderPanel()
-    expect(
-      screen.queryByRole('button', { name: /maximize|fullscreen/i })
-    ).toBeNull()
+    // The toggle is keyed by data-testid because <wa-button> renders
+    // its `role="button"` inside the shadow root, and jsdom + the
+    // testing-library a11y query can race Lit's first reactive update.
+    // The testid is the stable selector callers in the app rely on.
+    expect(screen.queryByTestId('result-fullscreen-toggle')).toBeNull()
     const onToggle = jest.fn()
     rerender(
       <ThemeProvider theme={theme}>
@@ -72,9 +74,7 @@ describe('ResultPanel', () => {
         />
       </ThemeProvider>
     )
-    fireEvent.click(
-      screen.getByRole('button', { name: /maximize|fullscreen/i })
-    )
+    fireEvent.click(screen.getByTestId('result-fullscreen-toggle'))
     expect(onToggle).toHaveBeenCalled()
   })
 })

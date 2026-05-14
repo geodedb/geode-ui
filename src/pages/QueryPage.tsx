@@ -138,7 +138,16 @@ export const QueryPage: React.FC = () => {
   const prevMaximizedRef = useRef(maximized)
   useEffect(() => {
     if (prevMaximizedRef.current && !maximized) {
-      maximizeBtnRef.current?.focus()
+      // `maximizeBtnRef` is now a <wa-button> host. Its `.focus()` method
+      // delegates to the shadow-DOM <button>, which is only attached
+      // after Lit's first reactive render — in jsdom that may race the
+      // effect tick. Guard so test environments where the shadow root
+      // hasn't materialised don't throw.
+      try {
+        maximizeBtnRef.current?.focus()
+      } catch {
+        /* shadow DOM not ready (test env) — focus restore is best-effort */
+      }
     }
     prevMaximizedRef.current = maximized
   }, [maximized])

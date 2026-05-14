@@ -83,6 +83,33 @@ export const Dialog = createComponent({
   },
 })
 
+// Extra prop shapes for the WA tab elements. We hand-roll these on top
+// of the @lit/react wrappers because we pass `elementClass: ... as never`
+// (the WA classes import Lit decorators that confuse TS's class-shape
+// inference). Without the cast the wrapper carries `Partial<{}>` for
+// the element-specific props — these unions add them back so call sites
+// can write `<TabGroup active="json">`, `<Tab panel="json">`, etc.
+type TabGroupExtraProps = {
+  active?: string
+  placement?: 'top' | 'bottom' | 'start' | 'end'
+  activation?: 'auto' | 'manual'
+  onWaTabShow?: (e: Event) => void
+  onWaTabHide?: (e: Event) => void
+}
+
+type TabExtraProps = {
+  panel?: string
+  active?: boolean
+  closable?: boolean
+  disabled?: boolean
+  slot?: string
+}
+
+type TabPanelExtraProps = {
+  name?: string
+  active?: boolean
+}
+
 export const TabGroup = createComponent({
   tagName: 'wa-tab-group',
   elementClass: WaTabGroup as never,
@@ -91,18 +118,30 @@ export const TabGroup = createComponent({
     onWaTabShow: 'wa-tab-show',
     onWaTabHide: 'wa-tab-hide',
   },
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    TabGroupExtraProps &
+    React.RefAttributes<HTMLElement>
+>
 
 export const Tab = createComponent({
   tagName: 'wa-tab',
   elementClass: WaTab as never,
   react: React,
   events: {},
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    TabExtraProps &
+    React.RefAttributes<HTMLElement>
+>
 
 export const TabPanel = createComponent({
   tagName: 'wa-tab-panel',
   elementClass: WaTabPanel as never,
   react: React,
   events: {},
-})
+}) as unknown as React.ForwardRefExoticComponent<
+  React.HTMLAttributes<HTMLElement> &
+    TabPanelExtraProps &
+    React.RefAttributes<HTMLElement>
+>
