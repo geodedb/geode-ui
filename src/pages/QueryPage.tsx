@@ -362,7 +362,7 @@ export const QueryPage: React.FC = () => {
         <wa-button
           appearance="filled"
           variant="brand"
-          size="medium"
+          size="m"
           role="button"
           data-testid="query-run-btn"
           onClick={run}
@@ -374,7 +374,7 @@ export const QueryPage: React.FC = () => {
         {streamMode && busy && (
           <wa-button
             appearance="outlined"
-            size="medium"
+            size="m"
             role="button"
             data-testid="query-cancel-btn"
             onClick={cancel}

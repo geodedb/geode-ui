@@ -176,7 +176,7 @@ export const ExpandQueryPopover: React.FC<ExpandQueryPopoverProps> = ({
       <wa-button
         slot="footer"
         appearance="plain"
-        size="medium"
+        size="m"
         role="button"
         data-testid="graph-expand-cancel"
         onClick={onCancel}
@@ -187,7 +187,7 @@ export const ExpandQueryPopover: React.FC<ExpandQueryPopoverProps> = ({
         slot="footer"
         appearance="filled"
         variant="brand"
-        size="medium"
+        size="m"
         role="button"
         data-testid="graph-expand-run"
         disabled={runDisabled ? true : undefined}

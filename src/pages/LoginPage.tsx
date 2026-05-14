@@ -129,7 +129,7 @@ export const LoginPage: React.FC = () => {
                 type="button"
                 appearance={p.name === profile ? 'filled' : 'outlined'}
                 variant={p.name === profile ? 'brand' : 'default'}
-                size="medium"
+                size="m"
                 role="button"
                 data-testid={`login-profile-${p.name}`}
                 aria-pressed={p.name === profile ? 'true' : 'false'}
@@ -192,7 +192,7 @@ export const LoginPage: React.FC = () => {
         type="submit"
         appearance="filled"
         variant="brand"
-        size="medium"
+        size="m"
         role="button"
         data-testid="login-submit-btn"
         disabled={busy ? true : undefined}

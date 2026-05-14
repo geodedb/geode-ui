@@ -163,7 +163,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       <div className="group">
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           data-testid="graph-sidebar-toggle"
           aria-pressed={sidebarCollapsed ? 'true' : 'false'}
           aria-label={
@@ -199,7 +199,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       <div className="group">
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           data-testid="graph-zoom-in"
           aria-label={t('graph.zoomIn')}
           title={t('graph.zoomIn')}
@@ -209,7 +209,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           data-testid="graph-zoom-out"
           aria-label={t('graph.zoomOut')}
           title={t('graph.zoomOut')}
@@ -219,7 +219,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           data-testid="graph-fit"
           aria-label={t('graph.fit')}
           title={t('graph.fit')}
@@ -229,7 +229,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           data-testid="graph-reset-view"
           aria-label={t('graph.resetView')}
           title={t('graph.resetView')}
@@ -241,7 +241,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
       <div className="group">
         <wa-button
           appearance={selectionMode === 'box' ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-selection-mode"
           aria-pressed={selectionMode === 'box' ? 'true' : 'false'}
           aria-label={t('graph.selectionModeLabel')}
@@ -258,7 +258,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance={clusterByLabel ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-cluster-toggle"
           aria-pressed={clusterByLabel ? 'true' : 'false'}
           aria-label={t('graph.clusterByLabelLabel')}
@@ -269,7 +269,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance={degreeSizing ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-size-toggle"
           aria-pressed={degreeSizing ? 'true' : 'false'}
           aria-label={t('graph.degreeSizingLabel')}
@@ -280,7 +280,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance={pathActive ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-path-mode"
           aria-pressed={pathActive ? 'true' : 'false'}
           aria-label={t('graph.pathModeLabel')}
@@ -292,7 +292,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         {pathActive && (
           <wa-button
             appearance="outlined"
-            size="small"
+            size="s"
             data-testid="graph-path-clear"
             onClick={onPathClear}
           >
@@ -301,7 +301,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         )}
         <wa-button
           appearance={miniMap ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-minimap-toggle"
           aria-pressed={miniMap ? 'true' : 'false'}
           aria-label={t('graph.miniMapLabel')}
@@ -312,7 +312,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance={lasso ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-lasso-toggle"
           aria-pressed={lasso ? 'true' : 'false'}
           aria-label={t('graph.lassoLabel')}
@@ -323,7 +323,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
         <wa-button
           appearance={domNodes ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           data-testid="graph-dom-nodes-toggle"
           aria-pressed={domNodes ? 'true' : 'false'}
           aria-label={t('graph.domNodesLabel')}

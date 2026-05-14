@@ -264,7 +264,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
       <InspectorToggle role="group" aria-label={t('graph.inspectorViewGroup')}>
         <wa-button
           appearance={view === 'props' ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           role="button"
           data-testid="graph-inspector-view-props"
           aria-pressed={view === 'props' ? 'true' : 'false'}
@@ -274,7 +274,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
         </wa-button>
         <wa-button
           appearance={view === 'json' ? 'filled' : 'outlined'}
-          size="small"
+          size="s"
           role="button"
           data-testid="graph-inspector-view-json"
           aria-pressed={view === 'json' ? 'true' : 'false'}
@@ -291,7 +291,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
           >
             <wa-button
               appearance="outlined"
-              size="small"
+              size="s"
               role="button"
               data-testid="graph-action-hide"
               onClick={() => onHide(id)}
@@ -300,7 +300,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             </wa-button>
             <wa-button
               appearance="outlined"
-              size="small"
+              size="s"
               role="button"
               data-testid="graph-action-collapse"
               onClick={() => onCollapse(id)}
@@ -309,7 +309,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             </wa-button>
             <wa-button
               appearance="outlined"
-              size="small"
+              size="s"
               role="button"
               data-testid="graph-action-explore"
               disabled={exploreDisabled || exploreLoading ? true : undefined}
@@ -326,7 +326,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             </wa-button>
             <wa-button
               appearance={isPinned ? 'filled' : 'outlined'}
-              size="small"
+              size="s"
               role="button"
               data-testid="graph-action-pin"
               aria-pressed={isPinned ? 'true' : 'false'}
@@ -336,7 +336,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             </wa-button>
             <wa-button
               appearance={focusActive ? 'filled' : 'outlined'}
-              size="small"
+              size="s"
               role="button"
               data-testid="graph-action-focus"
               aria-pressed={focusActive ? 'true' : 'false'}
@@ -388,7 +388,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
                 <wa-button
                   key={n.id}
                   appearance="plain"
-                  size="small"
+                  size="s"
                   role="button"
                   data-testid={`graph-neighbor-chip-${n.id}`}
                   onClick={() => onJumpNeighbor(n.id)}

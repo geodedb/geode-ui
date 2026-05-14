@@ -20,7 +20,7 @@ import type {
 type WaButtonProps = HTMLAttributes<HTMLElement> &
   Attributes & {
     appearance?: 'filled' | 'outlined' | 'plain'
-    size?: 'small' | 'medium' | 'large'
+    size?: 'small' | 'medium' | 'large' | 's' | 'm' | 'l'
     variant?: 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'neutral'
     // WA 3.x is form-associated and reads `type` to decide submit/reset/
     // button semantics. The browser's HTMLAttributes shape doesn't carry
@@ -42,7 +42,7 @@ type WaInputProps = HTMLAttributes<HTMLElement> & {
   defaultValue?: string
   label?: string
   placeholder?: string
-  size?: 'small' | 'medium' | 'large'
+  size?: 'small' | 'medium' | 'large' | 's' | 'm' | 'l'
   appearance?: 'filled' | 'outlined'
   disabled?: boolean
   required?: boolean
@@ -59,7 +59,7 @@ type WaSelectProps = HTMLAttributes<HTMLElement> & {
   defaultValue?: string
   label?: string
   placeholder?: string
-  size?: 'small' | 'medium' | 'large'
+  size?: 'small' | 'medium' | 'large' | 's' | 'm' | 'l'
   appearance?: 'filled' | 'outlined'
   disabled?: boolean
   pill?: boolean

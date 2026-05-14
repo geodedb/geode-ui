@@ -167,7 +167,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
         <wa-button
           ref={maximizeBtnRef as React.Ref<HTMLElement>}
           appearance="outlined"
-          size="small"
+          size="s"
           data-testid="result-fullscreen-toggle"
           aria-pressed={maximized ? 'true' : 'false'}
           aria-label={

@@ -97,7 +97,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
       <SwitcherWrap>
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           role="button"
           data-testid="connection-trigger"
           aria-busy="true"
@@ -115,7 +115,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
       <SwitcherWrap>
         <wa-button
           appearance="outlined"
-          size="small"
+          size="s"
           role="button"
           data-testid="connection-trigger"
           onClick={onAddRequested}
@@ -131,7 +131,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
     <SwitcherWrap>
       <wa-button
         appearance="outlined"
-        size="small"
+        size="s"
         role="button"
         data-testid="connection-trigger"
         onClick={() => setOpen((v) => !v)}
