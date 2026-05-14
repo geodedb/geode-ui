@@ -3,11 +3,12 @@ import type { LayoutName } from '../useGraphPrefs'
 
 // Layouts offered in the picker. `cose` is the only force-directed
 // option shipped with cytoscape core; `fcose` (faster force layout,
-// handles compound/clustered graphs) and `dagre` (layered DAG layout
-// for directed / hierarchical shapes) are registered as extensions at
-// module load above. The rest are core layouts useful for known shapes
-// (chains, clusters, time-ordered scans). LayoutName / DEFAULT_LAYOUT
-// live in useGraphPrefs (the sticky-prefs store).
+// handles compound/clustered graphs), `dagre` (layered DAG layout for
+// directed / hierarchical shapes), and `spread` (anti-overlap pass)
+// are registered as extensions at module load in GraphView.tsx. The
+// rest are core layouts useful for known shapes (chains, clusters,
+// time-ordered scans). LayoutName / DEFAULT_LAYOUT live in
+// useGraphPrefs (the sticky-prefs store).
 export const LAYOUTS: readonly LayoutName[] = [
   'cose',
   'fcose',
@@ -16,6 +17,7 @@ export const LAYOUTS: readonly LayoutName[] = [
   'circle',
   'concentric',
   'grid',
+  'spread',
 ]
 
 // Above this node count the cose force-directed layout becomes
@@ -46,6 +48,8 @@ export function layoutLabel(
       return t('graph.layout.concentric')
     case 'grid':
       return t('graph.layout.grid')
+    case 'spread':
+      return t('graph.layout.spread')
     default:
       return name
   }
@@ -78,6 +82,17 @@ export function layoutConfig(name: LayoutName): cytoscape.LayoutOptions {
       } as unknown as cytoscape.LayoutOptions
     case 'cose':
       return { name: 'cose', ...base } as cytoscape.LayoutOptions
+    case 'spread':
+      // cytoscape-spread is an anti-overlap pass — minDist sets the
+      // minimum gap (px) it tries to enforce between any pair of node
+      // bounding boxes; padding is the viewport margin shared with
+      // every other layout.
+      return {
+        name: 'spread',
+        animate: false,
+        minDist: 24,
+        padding: 24,
+      } as unknown as cytoscape.LayoutOptions
     default:
       return { name, ...base } as cytoscape.LayoutOptions
   }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import cytoscape, { Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import dagre from 'cytoscape-dagre'
+import spread from 'cytoscape-spread'
 import { createRoot, type Root } from 'react-dom/client'
 import { ThemeProvider, useTheme } from 'styled-components'
 import { labelToColor } from './cytoscapeStyle'
@@ -54,9 +55,12 @@ import {
 // (clustered) graphs; dagre is a layered DAG layout for directed /
 // hierarchical shapes. Both are surfaced in the layout picker (Task 1.2)
 // and fcose is the auto-pick when group-by-label clustering is on
-// (Task 1.4).
+// (Task 1.4). spread is an anti-overlap pass surfaced as a regular
+// layout option (Task 13); ships no TypeScript types (see
+// src/types/cytoscape-spread.d.ts) so it's cast through unknown.
 cytoscape.use(fcose)
 cytoscape.use(dagre)
+cytoscape.use(spread as unknown as cytoscape.Ext)
 
 // Props.resp is a QueryRespLike from the row stream, which under streaming
 // is a freshly minted object every row. Building a Cytoscape Core +

@@ -16,9 +16,10 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 // lifted here.
 
 // Layouts available in GraphView. `cose` is the only force-directed
-// option shipped with cytoscape core; `fcose` (cytoscape-fcose) and
-// `dagre` (cytoscape-dagre) are registered as extensions at module load
-// in GraphView.tsx. Kept in sync with GraphView's LAYOUTS const.
+// option shipped with cytoscape core; `fcose` (cytoscape-fcose),
+// `dagre` (cytoscape-dagre), and `spread` (cytoscape-spread, an
+// anti-overlap pass) are registered as extensions at module load in
+// GraphView.tsx. Kept in sync with GraphView's LAYOUTS const.
 export type LayoutName =
   | 'cose'
   | 'fcose'
@@ -27,6 +28,7 @@ export type LayoutName =
   | 'circle'
   | 'concentric'
   | 'grid'
+  | 'spread'
 
 export const DEFAULT_LAYOUT: LayoutName = 'cose'
 

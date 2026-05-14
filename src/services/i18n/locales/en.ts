@@ -173,6 +173,7 @@ export const en = {
       circle: 'Circle',
       concentric: 'Concentric',
       grid: 'Grid',
+      spread: 'Spread (anti-overlap)',
     },
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',

@@ -50,6 +50,7 @@
     "cytoscape-lasso": "^1.1.4",
     "cytoscape-navigator": "^2.0.2",
     "cytoscape-popper": "^2.0.0",
+    "cytoscape-spread": "^3.0.0",
     "i18next": "^26.0.10",
     "i18next-browser-languagedetector": "^8.2.1",
     "intl-pluralrules": "^2.0.1",
