@@ -203,21 +203,30 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     cy.style(createCytoscapeStyle(theme)).update()
   }, [cyRef, theme])
 
-  // Re-run the layout when the user picks a different one. We do NOT
-  // tear down the core; .layout().run() re-positions in place.
+  // Re-run the layout when the user picks a different one. We do NOT tear
+  // down the core; .layout().run() re-positions in place. Pins + focus
+  // classes are re-applied AFTER the new positions so locked nodes and
+  // dimmed nodes survive the layout swap.
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
     cy.layout(layoutConfig(layout)).run()
     cy.fit(undefined, 24)
-    // Defensive: re-apply pins after a layout switch. Cytoscape keeps
-    // `locked` across .layout().run() on the same core, so this is
-    // typically a no-op — but it's a cheap idempotent guard and keeps
-    // the .gv-pinned class glued to its node.
     reapplyPins?.()
-    // Same idempotent guard for the focus dim class.
     reapplyFocus?.()
-  }, [cyRef, layout, reapplyPins, reapplyFocus])
+    // reapplyPins / reapplyFocus are intentionally NOT in deps — their
+    // identity churns when focus/pin state changes, and we don't want
+    // every focus toggle to trigger a full layout rerun. The dedicated
+    // reapply-only effect below handles those identity changes.
+  }, [cyRef, layout])
+
+  // Re-apply pin + focus state without running layout. Fires whenever
+  // reapplyPins or reapplyFocus identity changes (e.g. focus state
+  // updates inside useFocusMode trigger a new `reapply` callback).
+  useEffect(() => {
+    reapplyPins?.()
+    reapplyFocus?.()
+  }, [reapplyPins, reapplyFocus])
 
   // Canvas interaction-mode changes — cheap; just flips two cy flags.
   useEffect(() => {
