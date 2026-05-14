@@ -6,9 +6,9 @@ import { useCxtMenu, buildCommands } from './useCxtMenu'
 // minimal stub keeps the suite free of theme-module imports and lets
 // the assertions stay focused on commands + lifecycle.
 const stubTheme = {
-  bg: { overlay: 'STUB_OVERLAY' },
+  bg: { inverse: 'STUB_INVERSE_BG' },
   colors: { primary: 'STUB_PRIMARY' },
-  text: { onPrimary: 'STUB_ON_PRIMARY' },
+  text: { inverse: 'STUB_INVERSE_TEXT' },
 } as unknown as Theme
 
 describe('buildCommands', () => {
@@ -123,5 +123,41 @@ describe('useCxtMenu', () => {
     expect(cy.cxtmenu).toHaveBeenCalledTimes(1)
     rerender({ sig: 's2' })
     expect(cy.cxtmenu).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses inverse-theme tokens for fillColor + itemColor (legibility on light theme)', () => {
+    const cy = makeCxtCy()
+    const cyRef = { current: cy as never }
+    const inverseStubTheme = {
+      bg: { inverse: '#1c0f2e' },
+      text: { inverse: '#f7f2ff' },
+      colors: { primary: '#5b34c7' },
+    }
+    const handlers = {
+      onZoomTo: jest.fn(),
+      onExpand: jest.fn(),
+      onHide: jest.fn(),
+      onCollapse: jest.fn(),
+      onFocus: jest.fn(),
+      onPin: jest.fn(),
+      onCopyId: jest.fn(),
+    }
+    renderHook(() =>
+      useCxtMenu({
+        cyRef: cyRef as never,
+        handlers,
+        t: (k) => k,
+        sig: 's1',
+        theme: inverseStubTheme as never,
+      })
+    )
+    const opts = cy.cxtmenu.mock.calls[0]?.[0] as {
+      fillColor: string
+      itemColor: string
+      activeFillColor: string
+    }
+    expect(opts.fillColor).toBe('#1c0f2e')
+    expect(opts.itemColor).toBe('#f7f2ff')
+    expect(opts.activeFillColor).toBe('#5b34c7')
   })
 })

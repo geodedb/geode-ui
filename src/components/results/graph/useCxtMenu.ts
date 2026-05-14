@@ -109,7 +109,7 @@ export function useCxtMenu(args: UseCxtMenuArgs): void {
         selector: 'node',
         openMenuEvents: 'cxttap taphold',
         commands: buildCommands({ handlers, t }),
-        fillColor: theme.bg.overlay,
+        fillColor: theme.bg.inverse,
         activeFillColor: theme.colors.primary,
         activePadding: 4,
         indicatorSize: 18,
@@ -117,7 +117,7 @@ export function useCxtMenu(args: UseCxtMenuArgs): void {
         spotlightPadding: 4,
         minSpotlightRadius: 18,
         maxSpotlightRadius: 36,
-        itemColor: theme.text.onPrimary,
+        itemColor: theme.text.inverse,
         itemTextShadowColor: 'transparent',
         zIndex: 9999,
       })
