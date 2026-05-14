@@ -238,6 +238,7 @@ const cyFactory = jest.fn((opts: unknown) => {
     $id: (id: string) =>
       makeColl(elementIds.includes(id) ? [id] : [], classes, ctx),
     fit: jest.fn(),
+    animate: jest.fn(),
     zoom: jest.fn(() => 1),
     width: jest.fn(() => 400),
     height: jest.fn(() => 300),
@@ -1532,6 +1533,41 @@ describe('GraphView — pin action', () => {
     expect(pin).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(pin)
     expect(pin).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
+describe('GraphView — zoomTo menu action', () => {
+  const mockedHook = useNodeContextMenu as jest.Mock
+
+  afterEach(() => {
+    mockedHook.mockImplementation(() => ({
+      state: { open: false, x: 0, y: 0, nodeId: null },
+      close: jest.fn(),
+    }))
+  })
+
+  it('routes the menu zoomTo action through zoomToNode (calls cy.animate)', () => {
+    mockedHook.mockImplementation(() => ({
+      state: { open: true, x: 5, y: 7, nodeId: '1' },
+      close: jest.fn(),
+    }))
+    render(
+      <ThemeProvider theme={theme}>
+        <GraphView resp={twoNodeOneEdgeResp} />
+      </ThemeProvider>
+    )
+    act(() => {
+      jest.advanceTimersByTime(300)
+    })
+    // The menu mounts because the mock reports open:true.
+    expect(screen.getByTestId('graph-node-menu')).toBeInTheDocument()
+    // Click the new zoomTo item — the action handler should route the
+    // call through zoomToNode, which animates the cy core's viewport.
+    fireEvent.click(screen.getByTestId('graph-node-menu-zoomTo'))
+    // The fake cy core's `animate` stub records the call.
+    expect(lastCy().animate).toHaveBeenCalled()
+    // Toolbar is still present — no exception thrown by the handler.
+    expect(screen.getByTestId('graph-toolbar')).toBeInTheDocument()
   })
 })
 

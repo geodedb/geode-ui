@@ -122,6 +122,7 @@ export const en = {
     actionHide: 'Hide',
     actionCollapse: 'Collapse',
     actionExploreNeighbours: 'Explore neighbours',
+    menuZoomTo: 'Zoom to node',
     menuExpand: 'Expand neighbours…',
     menuFocus: 'Focus on this node',
     menuPin: 'Pin position',

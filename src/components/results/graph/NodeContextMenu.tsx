@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import styled from 'styled-components'
 
 export type NodeContextMenuAction =
+  | 'zoomTo'
   | 'expand'
   | 'hide'
   | 'collapse'
@@ -60,6 +61,8 @@ export type NodeContextMenuProps = {
 // object; that would hide the keys from the orphan checker.
 function labelFor(action: NodeContextMenuAction, t: TFn): string {
   switch (action) {
+    case 'zoomTo':
+      return t('graph.menuZoomTo')
     case 'expand':
       return t('graph.menuExpand')
     case 'hide':

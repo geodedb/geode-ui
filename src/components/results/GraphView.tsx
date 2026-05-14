@@ -28,6 +28,7 @@ import { respSignature } from './graph/cyHelpers'
 import type { Neighbor, Selected } from './graph/GraphInspector'
 import { NodeContextMenu, NodeContextMenuAction } from './graph/NodeContextMenu'
 import { useNodeContextMenu } from './graph/useNodeContextMenu'
+import { zoomToNode } from './graph/zoomToNode'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
 import {
@@ -440,6 +441,9 @@ export const GraphView: React.FC<Props> = ({
     menu.close()
     if (!id) return
     switch (action) {
+      case 'zoomTo':
+        if (cyRef.current) zoomToNode(cyRef.current, id)
+        break
       case 'expand':
         // Open the configurable popover. The user's chosen
         // direction / labelFilter / limit is forwarded to
@@ -609,7 +613,15 @@ export const GraphView: React.FC<Props> = ({
         open={menu.state.open}
         x={menu.state.x}
         y={menu.state.y}
-        items={['expand', 'hide', 'collapse', 'focus', 'pin', 'copyId']}
+        items={[
+          'zoomTo',
+          'expand',
+          'hide',
+          'collapse',
+          'focus',
+          'pin',
+          'copyId',
+        ]}
         onSelect={onMenuSelect}
         onClose={menu.close}
         t={t}

@@ -16,7 +16,15 @@ const renderMenu = (
         open
         x={20}
         y={30}
-        items={['expand', 'hide', 'collapse', 'focus', 'pin', 'copyId']}
+        items={[
+          'zoomTo',
+          'expand',
+          'hide',
+          'collapse',
+          'focus',
+          'pin',
+          'copyId',
+        ]}
         onSelect={() => {}}
         onClose={() => {}}
         t={t}
@@ -45,6 +53,13 @@ describe('NodeContextMenu', () => {
     renderMenu({ onSelect })
     fireEvent.click(screen.getByTestId('graph-node-menu-expand'))
     expect(onSelect).toHaveBeenCalledWith<[NodeContextMenuAction]>('expand')
+  })
+
+  it('fires onSelect with "zoomTo" when the zoom-to item is clicked', () => {
+    const onSelect = jest.fn()
+    renderMenu({ onSelect })
+    fireEvent.click(screen.getByTestId('graph-node-menu-zoomTo'))
+    expect(onSelect).toHaveBeenCalledWith('zoomTo')
   })
 
   it('fires onClose when Escape is pressed', () => {
