@@ -24,6 +24,14 @@ import 'cytoscape-navigator/cytoscape.js-navigator.css'
 // unknown — matches the project's existing pattern.
 cytoscape.use(navigator as unknown as cytoscape.Ext)
 
+// Stable id used both as the wrapper's DOM id and as the CSS selector
+// passed to cy.navigator(). The library's _initPanel only honors
+// options.container when it's a STRING selector (see
+// node_modules/cytoscape-navigator/cytoscape-navigator.js:376-389) —
+// passing an HTMLElement silently falls through and the library mounts
+// its own panel pinned to document.body via `position: fixed`.
+const PANEL_ID = 'graph-minimap-panel'
+
 const Box = styled.div`
   width: 160px;
   height: 120px;
@@ -35,13 +43,27 @@ const Box = styled.div`
   right: 12px;
   bottom: 12px;
   z-index: 5;
+
+  /* Defense: cytoscape-navigator's stylesheet positions
+     .cytoscape-navigator as fixed bottom-right with hard-coded
+     width/height. Override here so the nested panel stays inside
+     our wrapper. */
+  & .cytoscape-navigator {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    bottom: auto !important;
+    right: auto !important;
+  }
 `
 
 // cytoscape-navigator augments the Core with a .navigator(opts) method at
 // registration time. The typed Core interface doesn't know about it, so we
-// widen locally for the call-site only.
+// widen locally for the call-site only. `container` is typed as a string
+// CSS selector — see PANEL_ID note above for why.
 type CoreWithNavigator = Core & {
-  navigator: (opts: { container: HTMLElement; viewLiveFramerate?: number }) => {
+  navigator: (opts: { container: string; viewLiveFramerate?: number }) => {
     destroy: () => void
   }
 }
@@ -65,8 +87,14 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
   useEffect(() => {
     const cy = cyRef.current as CoreWithNavigator | null
     const el = ref.current
+    // `el` is still required so we don't init before React has mounted
+    // our wrapper into the DOM — cy.navigator() will querySelector the
+    // selector immediately and fail if the node isn't there yet.
     if (!cy || !el || typeof cy.navigator !== 'function') return undefined
-    const inst = cy.navigator({ container: el, viewLiveFramerate: 30 })
+    const inst = cy.navigator({
+      container: `#${PANEL_ID}`,
+      viewLiveFramerate: 30,
+    })
     return () => {
       try {
         inst.destroy()
@@ -79,5 +107,5 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
     }
   }, [cyRef, sig])
 
-  return <Box ref={ref} data-testid="graph-minimap" />
+  return <Box ref={ref} id={PANEL_ID} data-testid="graph-minimap" />
 }

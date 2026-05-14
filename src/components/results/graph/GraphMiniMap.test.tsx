@@ -60,4 +60,29 @@ describe('GraphMiniMap', () => {
     // call was wired (which proves the module file loaded without error).
     expect(navigator).toHaveBeenCalled()
   })
+
+  it('passes a string CSS-selector to cy.navigator (not the raw HTMLElement)', () => {
+    const navigator = jest.fn(() => ({ destroy: jest.fn() }))
+    const cy = { navigator } as unknown as { navigator: jest.Mock }
+    const cyRef = { current: cy as never }
+    render(
+      <ThemeProvider theme={theme}>
+        <GraphMiniMap cyRef={cyRef as never} />
+      </ThemeProvider>
+    )
+    expect(navigator).toHaveBeenCalled()
+    // jest.Mock's default args type is `unknown[]` (default-typed tuple is
+    // empty under strict mode), so cast through unknown to read the first
+    // positional argument.
+    const calls = navigator.mock.calls as unknown as Array<
+      [{ container?: unknown }]
+    >
+    const opts = calls[0]?.[0] ?? { container: undefined }
+    // cytoscape-navigator's _initPanel only honors options.container
+    // when it's a STRING CSS selector. Passing an HTMLElement causes
+    // the library to mount its own panel pinned to document.body via
+    // `position: fixed; bottom: 0; right: 0;` — the "white box" bug.
+    expect(typeof opts.container).toBe('string')
+    expect(opts.container).toMatch(/^#/)
+  })
 })
