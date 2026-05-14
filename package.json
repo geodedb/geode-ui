@@ -45,6 +45,7 @@
     "cytoscape": "^3.33.3",
     "cytoscape-dagre": "^2.5.0",
     "cytoscape-fcose": "^2.2.0",
+    "cytoscape-navigator": "^2.0.2",
     "i18next": "^26.0.10",
     "i18next-browser-languagedetector": "^8.2.1",
     "intl-pluralrules": "^2.0.1",
