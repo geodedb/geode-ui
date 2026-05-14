@@ -74,6 +74,13 @@ const makeColl = (
     // neighborhood() — the adjacency set of the first member.
     neighborhood: () =>
       makeColl(Array.from(ctx?.adj.get(members[0] ?? '') ?? []), classes, ctx),
+    // Cytoscape's Collection.renderedPosition() / .renderedHeight() —
+    // consumed by useGraphBadges (Task 7) to anchor DOM overlays in
+    // canvas pixel space. jsdom has no real layout engine, so the mock
+    // returns deterministic zeros; tests assert state transitions
+    // (badge presence / count), not pixel coordinates.
+    renderedPosition: () => ({ x: 0, y: 0 }),
+    renderedHeight: () => 0,
   }
   const chain = (): Record<string, unknown> => coll
   // addClass / removeClass record the class on each member id so
@@ -231,6 +238,10 @@ const cyFactory = jest.fn((opts: unknown) => {
   })
   const core: Record<string, unknown> & { __lastElements?: unknown } = {
     on: recordOn,
+    // cy.off — consumed by useGraphBadges (Task 7) to unsubscribe its
+    // viewport / pan / zoom / render listeners on unmount. The test
+    // doesn't replay these events, so a no-op is fine.
+    off: jest.fn(),
     destroy: destroyMock,
     add: addImpl,
     remove: jest.fn(),

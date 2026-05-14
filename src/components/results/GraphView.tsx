@@ -19,6 +19,8 @@ import { useGraphActions } from './graph/useGraphActions'
 import { useGraphCytoscape } from './graph/useGraphCytoscape'
 import { usePinnedNodes } from './graph/usePinnedNodes'
 import { useFocusMode } from './graph/useFocusMode'
+import { useGraphBadges } from './graph/useGraphBadges'
+import { GraphBadges } from './graph/GraphBadges'
 import {
   COSE_NODE_LIMIT,
   LAYOUTS,
@@ -228,6 +230,18 @@ export const GraphView: React.FC<Props> = ({
   // stale graph on the canvas. Cluster toggle is folded in so toggling
   // group-by-label re-runs the build.
   const sig = `${respSignature(resp)}|${query ?? ''}|${clusterByLabel ? 'c' : ''}|${degreeSizing ? 'd' : ''}`
+
+  // DOM-positioned badge overlay drawn on top of the cy canvas. The hook
+  // subscribes to viewport / pan / zoom / render events and RAF-throttles
+  // position recalculations so badges track the camera without React
+  // render churn. `sig` is forwarded so a sig-keyed rebuild re-binds the
+  // listeners against the fresh cy core.
+  const badges = useGraphBadges({
+    cyRef,
+    pinned: pinning.pinned,
+    collapsed,
+    sig,
+  })
 
   // Auto-pick grid for large responses (cose would freeze the tab).
   // Only fires once per response — the user's manual layout choice is
@@ -579,6 +593,7 @@ export const GraphView: React.FC<Props> = ({
           )}
           {error && <ErrorBanner role="alert">{error}</ErrorBanner>}
           {miniMap && <GraphMiniMap cyRef={cyRef} sig={sig} />}
+          <GraphBadges badges={badges} />
           <FocusClearChip
             active={focusMode.state !== null}
             onClear={() => focusMode.clear()}
