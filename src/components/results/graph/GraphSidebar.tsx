@@ -1,13 +1,19 @@
 import React from 'react'
 import styled from 'styled-components'
 
-const Side = styled.aside<{ $height: number; $fill: boolean }>`
-  /* In fill mode the sidebar is stacked below the (full-width) canvas,
-     so a fixed canvas-tall height would be wasted space — cap it
-     instead and let it scroll. Otherwise it matches the canvas height
-     for the side-by-side layout. */
+const Side = styled.aside<{ $height?: number; $fill: boolean }>`
+  /* In fill mode the sidebar flexes to fill its grid track (the Wrap's
+     height: 100% cascades down) and scrolls internally; otherwise it
+     matches the caller-provided canvas height for the side-by-side
+     layout. The $height value is ignored in fill mode. */
   ${({ $height, $fill }) => {
-    return $fill ? 'height: auto; max-height: 40vh;' : `height: ${$height}px;`
+    if ($fill) {
+      return `
+        height: 100%;
+        min-height: 0;
+      `
+    }
+    return `height: ${$height ?? 480}px;`
   }}
   overflow: auto;
   border: 1px solid ${({ theme }) => theme.border.subtle};
@@ -32,10 +38,11 @@ const Side = styled.aside<{ $height: number; $fill: boolean }>`
 
 export type GraphSidebarProps = {
   // Pixel height the sidebar tracks in side-by-side mode. In fill mode
-  // this value is ignored (the sidebar uses max-height: 40vh instead).
-  height: number
-  // When true the sidebar is stacked below the canvas (fill / maximized
-  // overlay). Drives the height treatment described above.
+  // this value is ignored — the sidebar flexes to fill the grid track.
+  height?: number
+  // When true the sidebar fills its grid track inside the maximized
+  // overlay (the parent Wrap has `height: 100%`). Drives the height
+  // treatment described above.
   fill: boolean
   // Inspector + controls — rendered inside the scrollable Side.
   children: React.ReactNode

@@ -93,9 +93,11 @@ export const GraphView: React.FC<Props> = ({
   const theme = useTheme()
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
-  // The pixel height the Canvas / Side render at. In fill mode this
-  // tracks the viewport (minus the overlay chrome); otherwise it's the
-  // caller-provided `height`.
+  // The pixel height the Canvas / Side render at. In fill mode this is
+  // `undefined` — the Canvas and Side fall back to the flex chain
+  // (`flex: 1 1 auto` and `height: 100%`) so they grow to the available
+  // viewport, and Cytoscape's ResizeObserver re-fits on container
+  // resize. Otherwise it's the caller-provided `height`.
   const effectiveHeight = useFillHeight({ fillHeight, height })
   const [selected, setSelected] = useState<Selected | null>(null)
   // Whether the inspector/controls sidebar is collapsed. Session-local

@@ -1,21 +1,31 @@
 import styled from 'styled-components'
 
-// Wrap is the grid container for the graph view. In fill mode the
-// sidebar stacks below the canvas (single column) so the canvas claims
-// the full width of the overlay. The side-by-side 1fr/280px layout — and
-// its below-md collapse — is kept for the inline result panel. When the
-// sidebar is collapsed the grid is a single 1fr column regardless of
-// mode (the Side isn't rendered) so the canvas takes the whole width.
+// Wrap is the grid container for the graph view. In fill mode it
+// fills its parent's height (the QueryPage's maximized result overlay)
+// and relies on the flex chain — Wrap → CanvasArea → Canvas — to grow
+// the cytoscape canvas to the available height. The side-by-side
+// 1fr/280px layout — and its below-md collapse — is kept in both modes
+// so the sidebar sits to the right of the canvas in fullscreen, not
+// stacked below it. When the sidebar is collapsed the grid becomes a
+// single 1fr column (the Side isn't rendered) so the canvas takes the
+// whole width.
 export const Wrap = styled.div<{
   $fill: boolean
   $sidebarCollapsed: boolean
 }>`
   display: grid;
-  grid-template-columns: ${({ $fill, $sidebarCollapsed }) => {
-    return $sidebarCollapsed || $fill ? '1fr' : '1fr 280px'
+  grid-template-columns: ${({ $sidebarCollapsed }) => {
+    return $sidebarCollapsed ? '1fr' : '1fr 280px'
   }};
   gap: ${({ theme }) => theme.spacing.sm};
-  ${({ $fill }) => ($fill ? 'height: 100%;' : '')}
+  ${({ $fill }) => {
+    return $fill
+      ? `
+        height: 100%;
+        min-height: 0;
+      `
+      : ''
+  }}
 
   @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
     grid-template-columns: 1fr;
@@ -30,17 +40,33 @@ export const Wrap = styled.div<{
 // without it, after the sidebar is collapsed (canvas sized to the full
 // width) and re-expanded the `1fr 280px` grid can't fit, so the 280px
 // sidebar (the property inspector lives there) is pushed off the right
-// edge.
+// edge. `height: 100%; min-height: 0` lets it flex-shrink inside Wrap
+// in fill mode so the Canvas (`flex: 1 1 auto`) actually claims the
+// remaining vertical space below the toolbar.
 export const CanvasArea = styled.div`
   position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   gap: ${({ theme }) => theme.spacing.xs};
 `
 
-export const Canvas = styled.div<{ $height: number }>`
-  height: ${({ $height }) => $height}px;
+// Canvas renders the Cytoscape <canvas> host. When an explicit `$height`
+// is passed (the inline / non-fill case) it pins a pixel height. When
+// `$height` is omitted (fill mode) it flexes to fill its CanvasArea
+// parent and the cytoscape ResizeObserver re-fits the graph on
+// container resize.
+export const Canvas = styled.div<{ $height?: number }>`
+  ${({ $height }) => {
+    return $height !== undefined
+      ? `height: ${$height}px;`
+      : `
+        flex: 1 1 auto;
+        min-height: 0;
+      `
+  }}
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
   background: ${({ theme }) => theme.bg.graphCanvas};
