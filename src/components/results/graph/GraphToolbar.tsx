@@ -238,10 +238,11 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         </wa-button>
       </div>
       <div className="group">
-        <button
-          type="button"
+        <wa-button
+          appearance={selectionMode === 'box' ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-selection-mode"
-          aria-pressed={selectionMode === 'box'}
+          aria-pressed={selectionMode === 'box' ? 'true' : 'false'}
           aria-label={t('graph.selectionModeLabel')}
           title={
             selectionMode === 'box'
@@ -253,37 +254,40 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           {selectionMode === 'box'
             ? t('graph.selectionModeBox')
             : t('graph.selectionModePan')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance={clusterByLabel ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-cluster-toggle"
-          aria-pressed={clusterByLabel}
+          aria-pressed={clusterByLabel ? 'true' : 'false'}
           aria-label={t('graph.clusterByLabelLabel')}
           title={t('graph.clusterByLabelLabel')}
           onClick={onToggleClusterByLabel}
         >
           {t('graph.clusterByLabel')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance={degreeSizing ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-size-toggle"
-          aria-pressed={degreeSizing}
+          aria-pressed={degreeSizing ? 'true' : 'false'}
           aria-label={t('graph.degreeSizingLabel')}
           title={t('graph.degreeSizingLabel')}
           onClick={onToggleDegreeSizing}
         >
           {t('graph.degreeSizing')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance={pathActive ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-path-mode"
-          aria-pressed={pathActive}
+          aria-pressed={pathActive ? 'true' : 'false'}
           aria-label={t('graph.pathModeLabel')}
           title={t('graph.pathModeLabel')}
           onClick={onTogglePathMode}
         >
           {t('graph.pathMode')}
-        </button>
+        </wa-button>
         {pathActive && (
           <button
             type="button"
@@ -293,36 +297,39 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
             {t('graph.pathClear')}
           </button>
         )}
-        <button
-          type="button"
+        <wa-button
+          appearance={miniMap ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-minimap-toggle"
-          aria-pressed={miniMap}
+          aria-pressed={miniMap ? 'true' : 'false'}
           aria-label={t('graph.miniMapLabel')}
           title={t('graph.miniMapLabel')}
           onClick={onToggleMiniMap}
         >
           {t('graph.miniMap')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance={lasso ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-lasso-toggle"
-          aria-pressed={lasso}
+          aria-pressed={lasso ? 'true' : 'false'}
           aria-label={t('graph.lassoLabel')}
           title={t('graph.lassoLabel')}
           onClick={onToggleLasso}
         >
           {t('graph.lasso')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance={domNodes ? 'filled' : 'outlined'}
+          size="small"
           data-testid="graph-dom-nodes-toggle"
-          aria-pressed={domNodes}
+          aria-pressed={domNodes ? 'true' : 'false'}
           aria-label={t('graph.domNodesLabel')}
           title={t('graph.domNodesLabel')}
           onClick={onToggleDomNodes}
         >
           {t('graph.domNodes')}
-        </button>
+        </wa-button>
       </div>
       <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
       <span className="stats" aria-live="polite">
