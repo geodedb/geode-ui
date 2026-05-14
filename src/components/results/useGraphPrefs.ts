@@ -76,6 +76,11 @@ type GraphPrefsState = {
   // default — when on, drag-from-background draws a freeform polygon
   // and elements within it are selected on release.
   lasso: boolean
+  // Whether nodes render as HTML (cytoscape-dom-node) cards. Off by
+  // default — opt-in via the toolbar toggle. Slower at scale than the
+  // native canvas-painted nodes; surfaces the CustomNodeTemplate React
+  // tree per node which enables richer styling and future interactivity.
+  domNodes: boolean
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -88,6 +93,7 @@ type GraphPrefsState = {
   setFocusHops: (n: number) => void
   setMiniMap: (v: boolean) => void
   setLasso: (v: boolean) => void
+  setDomNodes: (v: boolean) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -104,6 +110,7 @@ type PersistedShape = {
   focusHops: number
   miniMap: boolean
   lasso: boolean
+  domNodes: boolean
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -128,6 +135,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       focusHops: 1,
       miniMap: false,
       lasso: false,
+      domNodes: false,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -151,6 +159,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setFocusHops: (n) => set({ focusHops: n }),
       setMiniMap: (v) => set({ miniMap: v }),
       setLasso: (v) => set({ lasso: v }),
+      setDomNodes: (v) => set({ domNodes: v }),
     }),
     {
       name: STORAGE_KEY,
@@ -167,6 +176,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         focusHops: s.focusHops,
         miniMap: s.miniMap,
         lasso: s.lasso,
+        domNodes: s.domNodes,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -203,6 +213,9 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // Same strict-true coercion for the lasso toggle — opt-in,
           // a missing/garbage persisted value keeps lasso off.
           lasso: p.lasso === true,
+          // Same strict-true coercion for the HTML-nodes toggle — opt-in,
+          // a missing/garbage persisted value keeps DOM-node rendering off.
+          domNodes: p.domNodes === true,
         }
       },
     }

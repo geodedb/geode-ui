@@ -108,6 +108,11 @@ export type GraphToolbarProps = {
   // background draws a freeform polygon and selects elements within it.
   lasso: boolean
   onToggleLasso: () => void
+  // HTML-nodes (cytoscape-dom-node) toggle. Off by default; when on,
+  // each node renders as a React-mounted HTML card layered over the
+  // cytoscape canvas. Slower at scale than the native canvas renderer.
+  domNodes: boolean
+  onToggleDomNodes: () => void
   // Find-node toolbar input. `findNodes` is the snapshot of node-data
   // bags to filter against (typically the orchestrator's `nodeDataById`
   // values spread into an array); `onFindPick` is invoked with the id
@@ -147,6 +152,8 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onToggleMiniMap,
   lasso,
   onToggleLasso,
+  domNodes,
+  onToggleDomNodes,
   findNodes,
   onFindPick,
   counts,
@@ -301,6 +308,16 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           onClick={onToggleLasso}
         >
           {t('graph.lasso')}
+        </button>
+        <button
+          type="button"
+          data-testid="graph-dom-nodes-toggle"
+          aria-pressed={domNodes}
+          aria-label={t('graph.domNodesLabel')}
+          title={t('graph.domNodesLabel')}
+          onClick={onToggleDomNodes}
+        >
+          {t('graph.domNodes')}
         </button>
       </div>
       <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />

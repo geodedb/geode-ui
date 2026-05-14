@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import cytoscape, { Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import dagre from 'cytoscape-dagre'
-import { useTheme } from 'styled-components'
+import { createRoot, type Root } from 'react-dom/client'
+import { ThemeProvider, useTheme } from 'styled-components'
 import { labelToColor } from './cytoscapeStyle'
 import { DEFAULT_LAYOUT, useGraphPrefs } from './useGraphPrefs'
 import { QueryRespLike, resolveNodeLabel } from '../../lib/graphResult'
@@ -31,6 +32,8 @@ import { respSignature } from './graph/cyHelpers'
 import type { Neighbor, Selected } from './graph/GraphInspector'
 import { useCxtMenu } from './graph/useCxtMenu'
 import { useLasso } from './graph/useLasso'
+import { useDomNodes } from './graph/useDomNodes'
+import { CustomNodeTemplate } from './graph/CustomNodeTemplate'
 import { useNodeTooltip } from './graph/useNodeTooltip'
 import { GraphTooltip } from './graph/GraphTooltip'
 import { zoomToNode } from './graph/zoomToNode'
@@ -143,6 +146,12 @@ export const GraphView: React.FC<Props> = ({
   // cy core so drag-from-background draws a freeform polygon.
   const lasso = useGraphPrefs((s) => s.lasso)
   const setLasso = useGraphPrefs((s) => s.setLasso)
+  // HTML-nodes toggle (sticky, default off). When on, useDomNodes
+  // initialises cytoscape-dom-node on the live core and stamps a
+  // React-rendered HTML element on every node's data bag. Slower at
+  // scale than the native canvas painter, so opt-in only.
+  const domNodes = useGraphPrefs((s) => s.domNodes)
+  const setDomNodes = useGraphPrefs((s) => s.setDomNodes)
   // Path-mode state machine + handlers. Result-scoped — `resetPath` is
   // invoked from the sig-keyed reset effect below.
   const {
@@ -514,6 +523,71 @@ export const GraphView: React.FC<Props> = ({
   // current toggle.
   useLasso({ cyRef, enabled: lasso, sig })
 
+  // Track mounted React roots keyed by node id so they can be unmounted
+  // on rebuild / sig change. Without this, every cytoscape rebuild leaks
+  // N mounted createRoot() instances — they outlive the underlying nodes
+  // because nothing else points at them.
+  const domRootsRef = useRef<Map<string, Root>>(new Map())
+
+  // Build a single HTML element + React root per node when DOM-node
+  // rendering is enabled. We never write innerHTML — each container
+  // gets its own createRoot() so the rendered CustomNodeTemplate
+  // is XSS-safe and future interactive children (event handlers,
+  // controlled inputs, etc.) keep working.
+  const renderNode = useCallback(
+    (data: Record<string, unknown>): HTMLElement => {
+      const labelField = data.label
+      let label = ''
+      if (typeof labelField === 'string') {
+        label = labelField
+      } else if (
+        Array.isArray(labelField) &&
+        typeof labelField[0] === 'string'
+      ) {
+        label = labelField[0]
+      }
+      const swatchColor = labelToColor(label, theme.variant)
+      const id = data.id != null ? String(data.id) : ''
+      const pinned = id ? pinning.isPinned(id) : false
+      const container = document.createElement('div')
+      const root = createRoot(container)
+      root.render(
+        <ThemeProvider theme={theme}>
+          <CustomNodeTemplate
+            label={label}
+            swatchColor={swatchColor}
+            pinned={pinned}
+          />
+        </ThemeProvider>
+      )
+      if (id) {
+        const prev = domRootsRef.current.get(id)
+        if (prev) prev.unmount()
+        domRootsRef.current.set(id, root)
+      }
+      return container
+    },
+    [pinning, theme]
+  )
+
+  // Tear down every mounted root on unmount or sig change so a fresh
+  // cytoscape core doesn't leak the previous run's React trees.
+  useEffect(() => {
+    const roots = domRootsRef.current
+    return () => {
+      roots.forEach((root) => {
+        try {
+          root.unmount()
+        } catch {
+          /* already unmounted */
+        }
+      })
+      roots.clear()
+    }
+  }, [sig])
+
+  useDomNodes({ cyRef, enabled: domNodes, renderNode, sig })
+
   // The popover's Run callback closes the popover and dispatches the
   // explore with the chosen options. The `target` snapshot guards
   // against the open id changing between the click and the dispatch.
@@ -574,6 +648,8 @@ export const GraphView: React.FC<Props> = ({
           onToggleMiniMap={() => setMiniMap(!miniMap)}
           lasso={lasso}
           onToggleLasso={() => setLasso(!lasso)}
+          domNodes={domNodes}
+          onToggleDomNodes={() => setDomNodes(!domNodes)}
           findNodes={findNodes}
           onFindPick={onFindPick}
           counts={counts}

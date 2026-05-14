@@ -200,6 +200,8 @@ export const en = {
     miniMapLabel: 'Toggle the canvas overview / mini-map',
     lasso: 'Lasso',
     lassoLabel: 'Drag a freeform shape to select nodes',
+    domNodes: 'HTML nodes',
+    domNodesLabel: 'Render nodes as rich HTML cards (slower at scale)',
     findPlaceholder: 'Find node…',
     findAria: 'Find nodes by id, label, or property value',
     findCount_one: '{{count}} match',
