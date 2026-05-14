@@ -93,6 +93,15 @@ const makeColl = (
     })
     return coll
   })
+  // filter(predicate) — element-by-element filter that yields a new
+  // collection. useFocusMode uses this to narrow elements() down to
+  // the keep-set before fit().
+  coll.filter = jest.fn((predicate: (el: { id: () => string }) => boolean) => {
+    const kept = members.filter((m) =>
+      predicate(makeColl([m], classes, ctx) as { id: () => string })
+    )
+    return makeColl(kept, classes, ctx)
+  })
   coll.difference = jest.fn((other: { __members?: string[] }) => {
     const omit = new Set(other?.__members ?? [])
     return makeColl(
@@ -239,6 +248,7 @@ const cyFactory = jest.fn((opts: unknown) => {
       makeColl(elementIds.includes(id) ? [id] : [], classes, ctx),
     fit: jest.fn(),
     animate: jest.fn(),
+    pan: jest.fn(() => ({ x: 0, y: 0 })),
     zoom: jest.fn(() => 1),
     width: jest.fn(() => 400),
     height: jest.fn(() => 300),
