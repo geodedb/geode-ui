@@ -23,10 +23,79 @@ type WaButtonProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode
 }
 
+type WaInputProps = HTMLAttributes<HTMLElement> & {
+  type?: 'text' | 'password' | 'email' | 'search' | 'number' | 'tel' | 'url'
+  value?: string
+  defaultValue?: string
+  label?: string
+  placeholder?: string
+  size?: 'small' | 'medium' | 'large'
+  appearance?: 'filled' | 'outlined'
+  disabled?: boolean
+  required?: boolean
+  hint?: string
+  pill?: boolean
+  clearable?: boolean
+  min?: number | string
+  max?: number | string
+  children?: ReactNode
+}
+
+type WaSelectProps = HTMLAttributes<HTMLElement> & {
+  value?: string
+  defaultValue?: string
+  label?: string
+  placeholder?: string
+  size?: 'small' | 'medium' | 'large'
+  appearance?: 'filled' | 'outlined'
+  disabled?: boolean
+  pill?: boolean
+  children?: ReactNode
+}
+
+type WaOptionProps = HTMLAttributes<HTMLElement> & {
+  value?: string
+  disabled?: boolean
+  children?: ReactNode
+}
+
+type WaDialogProps = HTMLAttributes<HTMLElement> & {
+  open?: boolean
+  label?: string
+  children?: ReactNode
+}
+
+type WaTabGroupProps = HTMLAttributes<HTMLElement> & {
+  active?: string
+  placement?: 'top' | 'bottom' | 'start' | 'end'
+  children?: ReactNode
+}
+
+type WaTabProps = HTMLAttributes<HTMLElement> & {
+  panel?: string
+  active?: boolean
+  closable?: boolean
+  disabled?: boolean
+  slot?: string
+  children?: ReactNode
+}
+
+type WaTabPanelProps = HTMLAttributes<HTMLElement> & {
+  name?: string
+  children?: ReactNode
+}
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {
       'wa-button': WaButtonProps
+      'wa-input': WaInputProps
+      'wa-select': WaSelectProps
+      'wa-option': WaOptionProps
+      'wa-dialog': WaDialogProps
+      'wa-tab-group': WaTabGroupProps
+      'wa-tab': WaTabProps
+      'wa-tab-panel': WaTabPanelProps
     }
   }
 }
