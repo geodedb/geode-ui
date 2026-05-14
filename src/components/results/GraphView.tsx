@@ -11,6 +11,7 @@ import { useGraphPathMode } from './graph/useGraphPathMode'
 import { useFillHeight } from './graph/useFillHeight'
 import { GraphToolbar } from './graph/GraphToolbar'
 import { GraphMiniMap } from './graph/GraphMiniMap'
+import { FocusClearChip } from './graph/FocusClearChip'
 import { GraphSidebar } from './graph/GraphSidebar'
 import { GraphSidebarContents } from './graph/GraphSidebarContents'
 import { useGraphElements } from './graph/useGraphElements'
@@ -561,6 +562,11 @@ export const GraphView: React.FC<Props> = ({
           )}
           {error && <ErrorBanner role="alert">{error}</ErrorBanner>}
           {miniMap && <GraphMiniMap cyRef={cyRef} sig={sig} />}
+          <FocusClearChip
+            active={focusMode.state !== null}
+            onClear={() => focusMode.clear()}
+            t={t}
+          />
         </div>
       </CanvasArea>
       {!sidebarCollapsed && (

@@ -130,6 +130,7 @@ export const en = {
     menuCopyId: 'Copy id',
     focus: 'Focus',
     focusClear: 'Clear focus',
+    focusClearChip: 'Focused — Clear ×',
     focusHops: 'Hops',
     expandTitle: 'Expand neighbours of node {{id}}',
     expandDirection: 'Direction',
