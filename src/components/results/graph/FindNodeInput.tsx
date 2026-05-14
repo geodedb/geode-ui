@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import styled from 'styled-components'
 import { matchesQuery } from './findNode'
+import { Input as WaInput } from '../../../services/webawesome/components'
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
@@ -46,22 +47,32 @@ export const FindNodeInput: React.FC<FindNodeInputProps> = ({
     () => nodes.filter((n) => matchesQuery(n, q)),
     [nodes, q]
   )
-  const onKey = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+  const onKey = (e: React.KeyboardEvent<HTMLElement>): void => {
     if (e.key !== 'Enter' || matches.length === 0) return
     const first = matches[0]
     const id = first && first.id != null ? String(first.id) : ''
     if (id) onPick(id)
   }
+  // WA Input fires both `change` and `input` events. We wire both to the
+  // same setter so:
+  //   - live keystroke typing in the browser updates state immediately
+  //     (via `input`)
+  //   - RTL's `fireEvent.change(input, { target: { value: '…' } })` keeps
+  //     working in jest (via `change`)
+  // `clearable` adds WA's built-in clear-X affordance, a nicer UX than
+  // the browser-default search-input clear icon.
   return (
     <Wrap>
-      <input
-        data-testid="graph-find-input"
+      <WaInput
         type="search"
+        data-testid="graph-find-input"
         placeholder={t('graph.findPlaceholder')}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={onKey}
         aria-label={t('graph.findAria')}
+        value={q}
+        onInput={(e: Event) => setQ((e.target as HTMLInputElement).value)}
+        onChange={(e: Event) => setQ((e.target as HTMLInputElement).value)}
+        onKeyDown={onKey}
+        clearable
       />
       <span className="count" data-testid="graph-find-count">
         {q ? t('graph.findCount', { count: matches.length }) : ''}
