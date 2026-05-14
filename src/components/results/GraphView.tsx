@@ -28,6 +28,7 @@ import {
 import { respSignature } from './graph/cyHelpers'
 import type { Neighbor, Selected } from './graph/GraphInspector'
 import { useCxtMenu } from './graph/useCxtMenu'
+import { useLasso } from './graph/useLasso'
 import { zoomToNode } from './graph/zoomToNode'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
@@ -133,6 +134,11 @@ export const GraphView: React.FC<Props> = ({
   // attaches a cytoscape-navigator instance to the live cy core.
   const miniMap = useGraphPrefs((s) => s.miniMap)
   const setMiniMap = useGraphPrefs((s) => s.setMiniMap)
+  // Lasso area-selection toggle (sticky, default off). When on,
+  // useLasso flips cytoscape-lasso's lassoSelectionEnabled on the live
+  // cy core so drag-from-background draws a freeform polygon.
+  const lasso = useGraphPrefs((s) => s.lasso)
+  const setLasso = useGraphPrefs((s) => s.setLasso)
   // Path-mode state machine + handlers. Result-scoped — `resetPath` is
   // invoked from the sig-keyed reset effect below.
   const {
@@ -481,6 +487,11 @@ export const GraphView: React.FC<Props> = ({
     theme,
   })
 
+  // Wire cytoscape-lasso's enable-state to the sticky `lasso` pref.
+  // `sig` is forwarded so a fresh cy core (post-rebuild) inherits the
+  // current toggle.
+  useLasso({ cyRef, enabled: lasso, sig })
+
   // The popover's Run callback closes the popover and dispatches the
   // explore with the chosen options. The `target` snapshot guards
   // against the open id changing between the click and the dispatch.
@@ -539,6 +550,8 @@ export const GraphView: React.FC<Props> = ({
           onPathClear={exitPathMode}
           miniMap={miniMap}
           onToggleMiniMap={() => setMiniMap(!miniMap)}
+          lasso={lasso}
+          onToggleLasso={() => setLasso(!lasso)}
           findNodes={findNodes}
           onFindPick={onFindPick}
           counts={counts}

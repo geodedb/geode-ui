@@ -197,6 +197,8 @@ export const en = {
     pathClear: 'Clear path',
     miniMap: 'Mini-map',
     miniMapLabel: 'Toggle the canvas overview / mini-map',
+    lasso: 'Lasso',
+    lassoLabel: 'Drag a freeform shape to select nodes',
     findPlaceholder: 'Find node…',
     findAria: 'Find nodes by id, label, or property value',
     findCount_one: '{{count}} match',

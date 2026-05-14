@@ -72,6 +72,10 @@ type GraphPrefsState = {
   // default — it adds visual chrome and a second cytoscape attach to
   // the core, so users opt in via the toolbar toggle.
   miniMap: boolean
+  // Whether lasso (cytoscape-lasso) area-selection is enabled. Off by
+  // default — when on, drag-from-background draws a freeform polygon
+  // and elements within it are selected on release.
+  lasso: boolean
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -83,6 +87,7 @@ type GraphPrefsState = {
   setDegreeSizing: (v: boolean) => void
   setFocusHops: (n: number) => void
   setMiniMap: (v: boolean) => void
+  setLasso: (v: boolean) => void
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -98,6 +103,7 @@ type PersistedShape = {
   degreeSizing: boolean
   focusHops: number
   miniMap: boolean
+  lasso: boolean
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -121,6 +127,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       degreeSizing: true,
       focusHops: 1,
       miniMap: false,
+      lasso: false,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -143,6 +150,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setDegreeSizing: (v) => set({ degreeSizing: v }),
       setFocusHops: (n) => set({ focusHops: n }),
       setMiniMap: (v) => set({ miniMap: v }),
+      setLasso: (v) => set({ lasso: v }),
     }),
     {
       name: STORAGE_KEY,
@@ -158,6 +166,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         degreeSizing: s.degreeSizing,
         focusHops: s.focusHops,
         miniMap: s.miniMap,
+        lasso: s.lasso,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -191,6 +200,9 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // Strict-true coercion — a missing/garbage persisted value
           // leaves the mini-map off (matches the default).
           miniMap: p.miniMap === true,
+          // Same strict-true coercion for the lasso toggle — opt-in,
+          // a missing/garbage persisted value keeps lasso off.
+          lasso: p.lasso === true,
         }
       },
     }

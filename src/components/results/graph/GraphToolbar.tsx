@@ -104,6 +104,10 @@ export type GraphToolbarProps = {
   // the GraphMiniMap panel in the canvas wrapper.
   miniMap: boolean
   onToggleMiniMap: () => void
+  // Lasso area-selection toggle. Off by default; when on, drag-from-
+  // background draws a freeform polygon and selects elements within it.
+  lasso: boolean
+  onToggleLasso: () => void
   // Find-node toolbar input. `findNodes` is the snapshot of node-data
   // bags to filter against (typically the orchestrator's `nodeDataById`
   // values spread into an array); `onFindPick` is invoked with the id
@@ -141,6 +145,8 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onPathClear,
   miniMap,
   onToggleMiniMap,
+  lasso,
+  onToggleLasso,
   findNodes,
   onFindPick,
   counts,
@@ -285,6 +291,16 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           onClick={onToggleMiniMap}
         >
           {t('graph.miniMap')}
+        </button>
+        <button
+          type="button"
+          data-testid="graph-lasso-toggle"
+          aria-pressed={lasso}
+          aria-label={t('graph.lassoLabel')}
+          title={t('graph.lassoLabel')}
+          onClick={onToggleLasso}
+        >
+          {t('graph.lasso')}
         </button>
       </div>
       <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
