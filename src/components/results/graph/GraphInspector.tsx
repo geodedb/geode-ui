@@ -262,22 +262,26 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
           : t('graph.selectedEdge', { id })}
       </h4>
       <InspectorToggle role="group" aria-label={t('graph.inspectorViewGroup')}>
-        <button
-          type="button"
+        <wa-button
+          appearance={view === 'props' ? 'filled' : 'outlined'}
+          size="small"
+          role="button"
           data-testid="graph-inspector-view-props"
-          aria-pressed={view === 'props'}
+          aria-pressed={view === 'props' ? 'true' : 'false'}
           onClick={() => onSetView('props')}
         >
           {t('graph.inspectorViewProps')}
-        </button>
-        <button
-          type="button"
+        </wa-button>
+        <wa-button
+          appearance={view === 'json' ? 'filled' : 'outlined'}
+          size="small"
+          role="button"
           data-testid="graph-inspector-view-json"
-          aria-pressed={view === 'json'}
+          aria-pressed={view === 'json' ? 'true' : 'false'}
           onClick={() => onSetView('json')}
         >
           {t('graph.inspectorViewJson')}
-        </button>
+        </wa-button>
       </InspectorToggle>
       {kind === 'node' && (
         <>
@@ -285,24 +289,30 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             role="group"
             aria-label={t('graph.inspectorActions')}
           >
-            <button
-              type="button"
+            <wa-button
+              appearance="outlined"
+              size="small"
+              role="button"
               data-testid="graph-action-hide"
               onClick={() => onHide(id)}
             >
               {t('graph.actionHide')}
-            </button>
-            <button
-              type="button"
+            </wa-button>
+            <wa-button
+              appearance="outlined"
+              size="small"
+              role="button"
               data-testid="graph-action-collapse"
               onClick={() => onCollapse(id)}
             >
               {t('graph.actionCollapse')}
-            </button>
-            <button
-              type="button"
+            </wa-button>
+            <wa-button
+              appearance="outlined"
+              size="small"
+              role="button"
               data-testid="graph-action-explore"
-              disabled={exploreDisabled || exploreLoading}
+              disabled={exploreDisabled || exploreLoading ? true : undefined}
               title={
                 exploreDisabled
                   ? t('graph.exploreNeighboursUnavailable')
@@ -313,26 +323,30 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
               {exploreLoading
                 ? t('graph.exploreNeighboursLoading')
                 : t('graph.actionExploreNeighbours')}
-            </button>
-            <button
-              type="button"
+            </wa-button>
+            <wa-button
+              appearance={isPinned ? 'filled' : 'outlined'}
+              size="small"
+              role="button"
               data-testid="graph-action-pin"
-              aria-pressed={isPinned}
+              aria-pressed={isPinned ? 'true' : 'false'}
               onClick={() => onPin(id)}
             >
               {isPinned ? t('graph.menuUnpin') : t('graph.menuPin')}
-            </button>
-            <button
-              type="button"
+            </wa-button>
+            <wa-button
+              appearance={focusActive ? 'filled' : 'outlined'}
+              size="small"
+              role="button"
               data-testid="graph-action-focus"
-              aria-pressed={focusActive}
+              aria-pressed={focusActive ? 'true' : 'false'}
               onClick={() => {
                 if (focusActive) onClearFocus()
                 else onFocus(id, focusHops)
               }}
             >
               {focusActive ? t('graph.focusClear') : t('graph.focus')}
-            </button>
+            </wa-button>
           </InspectorActions>
           {focusActive && (
             <label
@@ -371,14 +385,16 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
                 {t('graph.neighborsHeading', { count: neighbors.length })}
               </span>
               {neighbors.map((n) => (
-                <button
+                <wa-button
                   key={n.id}
-                  type="button"
+                  appearance="plain"
+                  size="small"
+                  role="button"
                   data-testid={`graph-neighbor-chip-${n.id}`}
                   onClick={() => onJumpNeighbor(n.id)}
                 >
                   {n.label} <code>#{n.id}</code>
-                </button>
+                </wa-button>
               ))}
             </NeighborsList>
           )}

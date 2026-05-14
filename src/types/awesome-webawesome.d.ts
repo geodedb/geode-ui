@@ -9,25 +9,32 @@
 // upstream package exports stronger types via @awesome.me/webawesome
 // but they require React 19 wrappers. We're React 18.
 
-import type { HTMLAttributes, MouseEventHandler, ReactNode, Ref } from 'react'
+import type {
+  Attributes,
+  HTMLAttributes,
+  MouseEventHandler,
+  ReactNode,
+  Ref,
+} from 'react'
 
-type WaButtonProps = HTMLAttributes<HTMLElement> & {
-  appearance?: 'filled' | 'outlined' | 'plain'
-  size?: 'small' | 'medium' | 'large'
-  variant?: 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'neutral'
-  // WA 3.x is form-associated and reads `type` to decide submit/reset/
-  // button semantics. The browser's HTMLAttributes shape doesn't carry
-  // a `type` prop (that's on HTMLButtonElement, which custom elements
-  // do not extend), so we hoist it here.
-  type?: 'button' | 'submit' | 'reset'
-  disabled?: boolean
-  loading?: boolean
-  pill?: boolean
-  'aria-pressed'?: boolean | 'true' | 'false'
-  onClick?: MouseEventHandler<HTMLElement>
-  ref?: Ref<HTMLElement>
-  children?: ReactNode
-}
+type WaButtonProps = HTMLAttributes<HTMLElement> &
+  Attributes & {
+    appearance?: 'filled' | 'outlined' | 'plain'
+    size?: 'small' | 'medium' | 'large'
+    variant?: 'default' | 'brand' | 'success' | 'warning' | 'danger' | 'neutral'
+    // WA 3.x is form-associated and reads `type` to decide submit/reset/
+    // button semantics. The browser's HTMLAttributes shape doesn't carry
+    // a `type` prop (that's on HTMLButtonElement, which custom elements
+    // do not extend), so we hoist it here.
+    type?: 'button' | 'submit' | 'reset'
+    disabled?: boolean
+    loading?: boolean
+    pill?: boolean
+    'aria-pressed'?: boolean | 'true' | 'false'
+    onClick?: MouseEventHandler<HTMLElement>
+    ref?: Ref<HTMLElement>
+    children?: ReactNode
+  }
 
 type WaInputProps = HTMLAttributes<HTMLElement> & {
   type?: 'text' | 'password' | 'email' | 'search' | 'number' | 'tel' | 'url'
