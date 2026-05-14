@@ -251,6 +251,13 @@ export const GraphView: React.FC<Props> = ({
     // core, though useGraphCytoscape's teardown will obliterate it
     // moments later.
     focusMode.clear()
+    // Drop the previous selection so the inspector doesn't keep showing
+    // data from a graph that was just torn down. Sits here (synchronous
+    // on sig change) rather than inside useGraphCytoscape's debounced
+    // build callback — moving it eliminated a race where a user/test
+    // pick that landed during the 250 ms debounce was silently wiped by
+    // the late-firing build's clear.
+    setSelected(null)
     if (
       layoutRef.current === DEFAULT_LAYOUT &&
       elementsRef.current.length > COSE_NODE_LIMIT

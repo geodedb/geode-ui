@@ -110,9 +110,11 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
 
     const build = (): void => {
       if (canceled || !containerRef.current) return
-      // GAP-02 / GAP-06: drop the previous selection so the inspector
-      // doesn't keep showing data from a graph that was just torn down.
-      setSelected(null)
+      // Note: `setSelected(null)` happens synchronously in GraphView's
+      // sig-keyed reset effect, NOT here — keeping it here would race the
+      // debounced fire (250 ms) against a user pick that landed during
+      // the debounce window. The background-tap handler below still
+      // clears selection on a user gesture (canvas background tap).
       setError(null)
       // Tear down a previous core if any. We accept this cost because
       // the rebuild is gated by row_count + debounce (PERF-F9), so a
