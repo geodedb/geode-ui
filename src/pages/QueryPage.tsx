@@ -13,7 +13,6 @@ import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
 import { ResultPanel, type ResultTab } from '../components/results/ResultPanel'
-import { Button } from '../components/ui'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryHistory } from '../lib/useQueryHistory'
@@ -351,13 +350,28 @@ export const QueryPage: React.FC = () => {
         <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
       </Suspense>
       <Bar>
-        <Button onClick={run} loading={busy}>
+        <wa-button
+          appearance="filled"
+          variant="brand"
+          size="medium"
+          role="button"
+          data-testid="query-run-btn"
+          onClick={run}
+          disabled={busy ? true : undefined}
+          loading={busy ? true : undefined}
+        >
           {t('query.runHotkey')}
-        </Button>
+        </wa-button>
         {streamMode && busy && (
-          <Button variant="secondary" onClick={cancel}>
+          <wa-button
+            appearance="outlined"
+            size="medium"
+            role="button"
+            data-testid="query-cancel-btn"
+            onClick={cancel}
+          >
             {t('query.cancel')}
-          </Button>
+          </wa-button>
         )}
         <ToggleLabel>
           <input
