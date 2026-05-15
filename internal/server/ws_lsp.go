@@ -92,17 +92,19 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ?access_token= query string fallback.
 	token, _ := extractBearer(r)
 
-	// Use the legacy Upgrade entry point (not UpgradeStrict) — the
-	// bridge is exposed to the same origin as the rest of the API, and
-	// Task 31 will plumb the origin allowlist through configuration.
-	// Until then, accepting any origin matches the existing /ws/query
-	// behaviour under its generated wsOptions.
-	conn, err := wsx.Upgrade(w, r, wsx.Options{
-		MaxFrame:     maxLspMessage,
-		MaxMessage:   maxLspMessage,
-		ReadTimeout:  0,
-		WriteTimeout: 30 * time.Second,
-		PingInterval: 30 * time.Second,
+	// UpgradeStrict is the fail-closed origin-check entry point introduced
+	// after SEC-0008 — `Upgrade` is now deprecated. The bridge is exposed
+	// on the same origin as the rest of the API, so we set
+	// AllowAnyOrigin=true to match the generated /ws/query behaviour;
+	// when an explicit allowlist lands in config we'll plumb it through
+	// here too.
+	conn, err := wsx.UpgradeStrict(w, r, wsx.Options{
+		MaxFrame:       maxLspMessage,
+		MaxMessage:     maxLspMessage,
+		ReadTimeout:    0,
+		WriteTimeout:   30 * time.Second,
+		PingInterval:   30 * time.Second,
+		AllowAnyOrigin: true,
 	})
 	if err != nil {
 		// Upgrade writes its own 4xx response on header validation
