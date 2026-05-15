@@ -85,11 +85,19 @@ export type UseCxtMenuArgs = {
    */
   theme: Theme
   sig?: string
+  /**
+   * When false, the hook is a no-op (no cxtmenu factory call, no
+   * polling, no listener bind). Used by the scaleTier feature-gate
+   * pipeline so the radial menu degrades off at large graph sizes.
+   * Defaults to true to preserve callers that don't gate.
+   */
+  enabled?: boolean
 }
 
 export function useCxtMenu(args: UseCxtMenuArgs): void {
-  const { cyRef, handlers, t, theme, sig } = args
+  const { cyRef, handlers, t, theme, sig, enabled = true } = args
   useEffect(() => {
+    if (!enabled) return undefined
     // useGraphCytoscape's rebuild is debounced via setTimeout, so when
     // sig changes this effect runs BEFORE the new cy is constructed and
     // cyRef.current is null. A simple !cyRef.current return-early would
@@ -138,5 +146,5 @@ export function useCxtMenu(args: UseCxtMenuArgs): void {
     // The handlers captured at sig-time read latest state via zustand/refs.
     // (Project does not enable react-hooks/exhaustive-deps, so no disable
     // directive is needed; the rule is unloaded and would itself error.)
-  }, [cyRef, sig])
+  }, [cyRef, sig, enabled])
 }

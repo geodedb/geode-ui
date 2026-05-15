@@ -30,6 +30,7 @@ import {
   layoutLabel,
 } from './graph/layouts'
 import { respSignature } from './graph/cyHelpers'
+import { allowedFeatures } from './graph/scaleTier'
 import type { Neighbor, Selected } from './graph/GraphInspector'
 import { useCxtMenu } from './graph/useCxtMenu'
 import { useLasso } from './graph/useLasso'
@@ -156,8 +157,22 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // initialises cytoscape-dom-node on the live core and stamps a
   // React-rendered HTML element on every node's data bag. Slower at
   // scale than the native canvas painter, so opt-in only.
-  const domNodes = useGraphPrefs((s) => s.domNodes)
+  // The HTML-nodes feature ANDs the user pref with the runtime scale
+  // tier — large graphs disable DOM-node rendering regardless of the
+  // toggle (see allowedFeatures in ./graph/scaleTier). Subscribing via
+  // a selector that references both `s.domNodes` and `s.tier` makes the
+  // component re-render on either input change.
+  const domNodes = useGraphPrefs(
+    (s) => s.domNodes && allowedFeatures(s.tier).domNodes
+  )
   const setDomNodes = useGraphPrefs((s) => s.setDomNodes)
+  // Tier-only feature gates — these three have no user toggle today and
+  // degrade strictly by scale tier (see allowedFeatures). Each is a
+  // selector function so Zustand tracks `s.tier` as a dep and re-renders
+  // when the rebuild effect bumps the tier.
+  const cxtMenuEnabled = useGraphPrefs((s) => allowedFeatures(s.tier).cxtmenu)
+  const tooltipsEnabled = useGraphPrefs((s) => allowedFeatures(s.tier).tooltips)
+  const badgesEnabled = useGraphPrefs((s) => allowedFeatures(s.tier).badges)
   // Phase-0 / Task 1 of the cytoscape→reagraph migration: sticky pref
   // selecting which graph renderer the dispatcher mounts (cytoscape
   // canvas vs reagraph WebGL). For Task 1 the canvas keeps rendering
@@ -533,6 +548,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     t,
     sig,
     theme,
+    enabled: cxtMenuEnabled,
   })
 
   // Hover tooltip — subscribes to node-level mouseover/mouseout on the
@@ -702,8 +718,8 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
           )}
           {error && <ErrorBanner role="alert">{error}</ErrorBanner>}
           {miniMap && <GraphMiniMap cyRef={cyRef} sig={sig} />}
-          <GraphBadges badges={badges} />
-          <GraphTooltip targetData={tooltipTarget} t={t} />
+          {badgesEnabled && <GraphBadges badges={badges} />}
+          {tooltipsEnabled && <GraphTooltip targetData={tooltipTarget} t={t} />}
           <FocusClearChip
             active={focusMode.state !== null}
             onClear={() => focusMode.clear()}
