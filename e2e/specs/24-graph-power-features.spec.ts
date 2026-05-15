@@ -170,7 +170,7 @@ test.describe('graph power features', () => {
   }) => {
     await page.getByTestId('graph-more-lasso').click()
     await expect(page.getByTestId('graph-more-lasso')).toHaveAttribute(
-      'aria-pressed',
+      'aria-checked',
       'true'
     )
   })
@@ -204,9 +204,9 @@ test.describe('graph power features', () => {
     authedPage: page,
   }) => {
     const toggle = page.getByTestId('graph-more-domnodes')
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
     await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
   })
 
   test('mini-map toggle renders ONE panel inside the canvas wrapper (no body leak)', async ({
@@ -215,7 +215,7 @@ test.describe('graph power features', () => {
     // Default off → toggle on.
     await page.getByTestId('graph-more-minimap').click()
     await expect(page.getByTestId('graph-more-minimap')).toHaveAttribute(
-      'aria-pressed',
+      'aria-checked',
       'true'
     )
     // Exactly one #graph-minimap-panel exists.

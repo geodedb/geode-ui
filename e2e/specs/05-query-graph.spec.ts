@@ -43,12 +43,12 @@ test.describe('query (graph view)', () => {
     // Sidebar is expanded by default — the display-controls block shows.
     await expect(page.getByTestId('graph-display-controls')).toBeVisible()
     const toggle = page.getByTestId('graph-more-sidebar')
-    await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
 
     // Collapse — the sidebar and its control blocks are removed.
     await toggle.click()
     await expect(page.getByTestId('graph-more-sidebar')).toHaveAttribute(
-      'aria-pressed',
+      'aria-checked',
       'true'
     )
     await expect(page.getByTestId('graph-display-controls')).toHaveCount(0)
