@@ -19,11 +19,22 @@ type Sample = { fps: number; mem: number; elapsed: number }
 type BenchRecord = {
   renderer: 'cytoscape' | 'reagraph'
   n: number
+  tier: 'small' | 'mid' | 'large'
   firstPaintMs: number
+  firstInteractiveMs: number
+  layoutMs: number
   samples: Sample[]
   avgFps: number
   p5Fps: number
   peakHeapBytes: number
+  cacheHitRate: number // 0 in P0; meaningful in P1+
+  usedWorker: boolean // false in P0; meaningful in P1+
+}
+
+function tierOf(n: number): 'small' | 'mid' | 'large' {
+  if (n >= 5000) return 'large'
+  if (n >= 2000) return 'mid'
+  return 'small'
 }
 
 const COMBOS: { renderer: 'cytoscape' | 'reagraph'; n: number }[] = [
@@ -80,6 +91,14 @@ async function runOne(
     await page.waitForTimeout(WARMUP_MS)
     const firstPaintMs = Date.now() - navStart
     await page.waitForTimeout(SAMPLE_WINDOW_MS)
+    const layoutMs = await page.evaluate(() => {
+      const m = performance.getEntriesByName('graph:layout', 'measure')[0]
+      return m ? m.duration : 0
+    })
+    const firstInteractiveMs = await page.evaluate(() => {
+      const m = performance.getEntriesByName('graph:firstInteractive', 'mark')[0]
+      return m ? m.startTime : 0
+    })
     const fpsVals = samples.map((s) => s.fps).sort((a, b) => a - b)
     const avgFps =
       fpsVals.reduce((s, v) => s + v, 0) / Math.max(fpsVals.length, 1)
@@ -88,11 +107,16 @@ async function runOne(
     return {
       renderer: combo.renderer,
       n: combo.n,
+      tier: tierOf(combo.n),
       firstPaintMs,
+      firstInteractiveMs,
+      layoutMs,
       samples,
       avgFps: Number(avgFps.toFixed(2)),
       p5Fps: Number(p5Fps.toFixed(2)),
       peakHeapBytes,
+      cacheHitRate: 0,
+      usedWorker: false,
     }
   } finally {
     page.off('console', onConsole)
@@ -114,7 +138,7 @@ test('graph renderer benchmark', async ({ page }) => {
         const rec = await runOne(page, combo)
         // eslint-disable-next-line no-console
         console.log(
-          `[harness] ${combo.renderer} n=${combo.n} firstPaint=${rec.firstPaintMs}ms avgFps=${rec.avgFps} p5Fps=${rec.p5Fps} peakHeap=${rec.peakHeapBytes}`
+          `[harness] ${combo.renderer} n=${combo.n} tier=${tierOf(combo.n)} firstPaint=${rec.firstPaintMs}ms layoutMs=${rec.layoutMs}ms avgFps=${rec.avgFps} p5Fps=${rec.p5Fps}`
         )
         return [...prev, rec]
       }),
