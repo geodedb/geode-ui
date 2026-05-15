@@ -9,6 +9,7 @@ import './assets/fonts/fonts.css'
 import App from './App'
 import type { ConnectionState } from './api/connections'
 import { FatalBootstrapError } from './components/FatalBootstrapError'
+import { installExtensionNoiseFilter } from './lib/extensionNoiseFilter'
 
 // PSR-F16 (#113): the SPA used to await getStoredConnections() before
 // calling createRoot, which serialised safeStorage init + the secure-
@@ -26,6 +27,12 @@ import { FatalBootstrapError } from './components/FatalBootstrapError'
 // react-dom render path. The IIFE below is the production entrypoint;
 // the export itself is harmless to bundle (it is just a symbol).
 export function bootstrap(): void {
+  // Installed FIRST so a browser extension's content script that
+  // fires its orphan-response rejection before our React tree finishes
+  // mounting is still caught. See lib/extensionNoiseFilter.ts for the
+  // specific Chrome message that's filtered and the rationale.
+  installExtensionNoiseFilter()
+
   const container = document.getElementById('root')
   if (!container) throw new Error('Root element not found')
 
