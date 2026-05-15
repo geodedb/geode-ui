@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { allowedFeatures, type Tier } from './graph/scaleTier'
 
 // GraphView's display options (layout algorithm, node-label visibility
 // toggles, per-bucket label-field overrides, per-type edge-field
@@ -96,6 +97,17 @@ type GraphPrefsState = {
   // See Renderer type above. Sticky pref selecting which graph renderer
   // (cytoscape canvas vs reagraph WebGL) the dispatcher mounts.
   renderer: Renderer
+  // Runtime-derived scale tier ('small' | 'mid' | 'large') based on the
+  // current node count. NOT persisted — useGraphCytoscape writes it back
+  // on each rebuild via setTier so feature gates (effective* below) can
+  // gracefully degrade DOM nodes / cxtmenu / tooltips / badges past the
+  // tier thresholds. See ./graph/scaleTier for the boundaries.
+  tier: Tier
+  // Whether layout computation runs off the main thread (Web Worker)
+  // instead of inline on Cytoscape's core. Default on — the worker
+  // entrypoint is delivered in a later task; until then the dispatcher
+  // can still read this pref and decide.
+  useWorkerLayout: boolean
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -110,6 +122,16 @@ type GraphPrefsState = {
   setLasso: (v: boolean) => void
   setDomNodes: (v: boolean) => void
   setRenderer: (r: Renderer) => void
+  setTier: (t: Tier) => void
+  setUseWorkerLayout: (v: boolean) => void
+  // Tier-gated effective views over the user prefs. effectiveDomNodes
+  // returns true only when the user opted in AND the current tier allows
+  // DOM-node rendering. The remaining three are pure tier reads — there
+  // is no per-feature opt-out today, they degrade strictly by tier.
+  effectiveDomNodes: () => boolean
+  effectiveCxtMenu: () => boolean
+  effectiveTooltips: () => boolean
+  effectiveBadges: () => boolean
 }
 
 // Sets do not survive JSON.stringify, so the persisted shape stores
@@ -128,6 +150,7 @@ type PersistedShape = {
   lasso: boolean
   domNodes: boolean
   renderer: Renderer
+  useWorkerLayout: boolean
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -162,6 +185,8 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       lasso: false,
       domNodes: false,
       renderer: DEFAULT_RENDERER,
+      tier: 'small' as Tier,
+      useWorkerLayout: true,
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -187,6 +212,18 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setLasso: (v) => set({ lasso: v }),
       setDomNodes: (v) => set({ domNodes: v }),
       setRenderer: (r) => set({ renderer: r }),
+      setTier: (t) => set({ tier: t }),
+      setUseWorkerLayout: (v) => set({ useWorkerLayout: v }),
+      effectiveDomNodes: () => {
+        const s = useGraphPrefs.getState()
+        return s.domNodes && allowedFeatures(s.tier).domNodes
+      },
+      effectiveCxtMenu: () =>
+        allowedFeatures(useGraphPrefs.getState().tier).cxtmenu,
+      effectiveTooltips: () =>
+        allowedFeatures(useGraphPrefs.getState().tier).tooltips,
+      effectiveBadges: () =>
+        allowedFeatures(useGraphPrefs.getState().tier).badges,
     }),
     {
       name: STORAGE_KEY,
@@ -205,6 +242,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         lasso: s.lasso,
         domNodes: s.domNodes,
         renderer: s.renderer,
+        useWorkerLayout: s.useWorkerLayout,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -250,6 +288,10 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // incumbent 'cytoscape' renderer so a bad persisted value
           // can never trap the user on a partial / broken renderer.
           renderer: coerceRenderer(p.renderer),
+          // useWorkerLayout defaults to true — only an explicit literal
+          // `false` opts out. A missing/garbage persisted value (stale
+          // shape from before this field existed) lights the worker on.
+          useWorkerLayout: p.useWorkerLayout !== false,
         }
       },
     }
