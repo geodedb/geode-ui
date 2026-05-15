@@ -116,4 +116,29 @@ describe('MatrixView', () => {
       screen.getByRole('rowheader', { name: /Person/ })
     ).toBeInTheDocument()
   })
+
+  it('the wrap is a flex column that fills its parent', () => {
+    // Use the seeded `resp` defined at module scope (a Person→Movie
+    // ACTED_IN edge) so the non-empty path renders the Wrap container.
+    const { container } = render(
+      <ThemeProvider theme={theme}>
+        <LocalizationProvider>
+          <div style={{ height: 800 }}>
+            <MatrixView resp={resp} query="" />
+          </div>
+        </LocalizationProvider>
+      </ThemeProvider>
+    )
+    const tableEl = container.querySelector('[role="table"]')
+    // The non-empty branch renders <Wrap><Table /></Wrap>. The Wrap is
+    // the parent of the role=table element.
+    const wrap = tableEl?.parentElement as HTMLElement | null
+    expect(wrap).not.toBeNull()
+    if (wrap) {
+      const cs = getComputedStyle(wrap)
+      expect(cs.display).toBe('flex')
+      expect(cs.flex).toMatch(/1 1 (0|auto)/)
+      expect(cs.minHeight).toMatch(/^0(px)?$/)
+    }
+  })
 })

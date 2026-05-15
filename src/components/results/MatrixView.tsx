@@ -11,6 +11,10 @@ import {
 } from '../../lib/adjacencyMatrix'
 
 const Wrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
   padding: ${({ theme }) => theme.spacing.sm};
 `
