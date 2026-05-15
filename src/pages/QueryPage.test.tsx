@@ -406,3 +406,18 @@ describe('Matrix result tab', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('QueryPage outer layout', () => {
+  it('the page root is a flex column that lets the result region grow', () => {
+    const { container } = renderPage()
+    const root = container.firstChild as HTMLElement
+    const cs = getComputedStyle(root)
+    expect(cs.display).toBe('flex')
+    expect(cs.flexDirection).toBe('column')
+    expect(cs.flex).toMatch(/1 1 (0|auto)/)
+    // jsdom normalises `min-height: 0` to either "0px" or "0" depending
+    // on the version; accept both so the assertion doesn't track the
+    // jsdom implementation detail.
+    expect(cs.minHeight).toMatch(/^0(px)?$/)
+  })
+})

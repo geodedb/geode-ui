@@ -64,6 +64,27 @@ const LazyFallback = styled.div`
   border-radius: ${({ theme }) => theme.radii.md};
 `
 
+// QueryPage outer container — a flex column claiming the height of its
+// parent (Shell's <Body>). Editor + Bar pin to their natural height
+// (flex: 0 0 auto); the result region is `flex: 1 1 0` with
+// `min-height: 0` so it shrinks to fit while still growing to the
+// available height — i.e. the table/graph/json/matrix body fills the
+// viewport WITHOUT requiring the user to click the maximize toggle.
+const PageRoot = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  gap: ${({ theme }) => theme.spacing.sm};
+`
+
+const ResultRegion = styled.div`
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+`
+
 const ToggleLabel = styled.label`
   display: inline-flex;
   align-items: center;
@@ -346,15 +367,18 @@ export const QueryPage: React.FC = () => {
       {resultPanel}
     </ResultOverlay>
   )
-  let resultRegion: React.ReactNode = null
-  if (resultPanel) {
-    resultRegion = maximized
-      ? createPortal(overlayEl, document.body)
-      : resultPanel
-  }
+  // The maximized branch portals into document.body unchanged; the
+  // inline branch wraps in <ResultRegion> so the new flex chain on
+  // <PageRoot> can grow it to fill the viewport.
+  const inlineResultRegion =
+    resultPanel && !maximized ? (
+      <ResultRegion>{resultPanel}</ResultRegion>
+    ) : null
+  const overlayResultRegion =
+    resultPanel && maximized ? createPortal(overlayEl, document.body) : null
 
   return (
-    <div>
+    <PageRoot>
       <Suspense fallback={editorFallback}>
         <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
       </Suspense>
@@ -411,7 +435,8 @@ export const QueryPage: React.FC = () => {
         )}
         {activeErr && <Err>{activeErr}</Err>}
       </Bar>
-      {resultRegion}
-    </div>
+      {inlineResultRegion}
+      {overlayResultRegion}
+    </PageRoot>
   )
 }
