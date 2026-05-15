@@ -28,11 +28,17 @@ type LimitConfig struct {
 }
 
 // ServerConfig defines runtime server bind/tls/timeout/limit settings.
+//
+// EnableCompression turns on transparent gzip of text-ish JSON responses
+// (>=1 KiB, client must send Accept-Encoding: gzip). It is off unless the
+// config opts in so the wire shape stays byte-identical for callers that
+// have not requested it.
 type ServerConfig struct {
-	Bind     string        `json:"bind"`
-	TLS      TLSConfig     `json:"tls"`
-	Timeouts TimeoutConfig `json:"timeouts"`
-	Limits   LimitConfig   `json:"limits"`
+	Bind              string        `json:"bind"`
+	TLS               TLSConfig     `json:"tls"`
+	Timeouts          TimeoutConfig `json:"timeouts"`
+	Limits            LimitConfig   `json:"limits"`
+	EnableCompression bool          `json:"enable_compression,omitempty"`
 }
 
 // AuthConfig defines global auth mechanisms.
@@ -50,9 +56,26 @@ type CORSConfig struct {
 }
 
 // RateLimitConfig defines global rate-limit defaults.
+//
+// GlobalRPS / Burst (-> APIOptions.GlobalRate / GlobalBurst) configure a single
+// server-wide aggregate token bucket shared by every generated route. It is a
+// coarse ceiling: it is checked once per request (after auth/authz, just before
+// the per-route bucket) in addition to -- not instead of -- the per-route
+// rateLimit buckets (which remain the tighter per-endpoint ceiling) and the
+// per-IP limiter. When GlobalRPS is 0 (or Burst is 0) the aggregate limiter is
+// disabled. Note: a route that declares no rateLimit of its own still falls back
+// to GlobalRPS as its *per-route* default rate -- that pre-existing behavior is
+// unchanged and is separate from the aggregate ceiling described here.
+// PerIPRPS / PerIPBurst configure a coarser ceiling applied to every route,
+// partitioned by client IP (the key source is PerIPSource: "remote_addr"
+// (default, safe), "x-forwarded-for", "x-real-ip", or "tls-subject"). A
+// PerIPRPS of zero disables the per-IP layer (opt-in).
 type RateLimitConfig struct {
-	GlobalRPS int `json:"global_rps"`
-	Burst     int `json:"burst"`
+	GlobalRPS   int     `json:"global_rps"`
+	Burst       int     `json:"burst"`
+	PerIPRPS    float64 `json:"per_ip_rps,omitempty"`
+	PerIPBurst  int     `json:"per_ip_burst,omitempty"`
+	PerIPSource string  `json:"per_ip_source,omitempty"`
 }
 
 // SecurityConfig defines top-level security options.

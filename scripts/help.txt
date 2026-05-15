@@ -8,3 +8,9 @@ Targets:
   make ci           Full CI sequence
   make clean        Remove gen/, internal/ui/dist/, bin/, coverage
   make pre-commit   Format, tidy, lint, test (matches the pre-commit hook chain)
+  make bench-gate   Run curated benchmarks; fail on >10% regression vs bench-baseline.txt
+  make bench-baseline  Regenerate bench-baseline.txt from a clean bench run (then commit it)
+  make e2e-up       Bring up the e2e docker stack (geode + ui + mcp + lsp + init)
+  make e2e-down     Tear down the e2e stack and clear named volumes
+  make e2e-test     Run Playwright tests against a running e2e stack
+  make e2e-ci       e2e-up + e2e-test + e2e-down (one-shot CI shape)

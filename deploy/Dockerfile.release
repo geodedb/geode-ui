@@ -1,0 +1,44 @@
+# Multi-arch geode-ui release image (debian-slim base).
+#
+# This Dockerfile is consumed by GoReleaser's `dockers:` section
+# (.goreleaser.yaml). GoReleaser builds the geode-ui binary per
+# architecture first (Zig-free pure-Go cross-compile), then invokes
+# `docker buildx build` with this Dockerfile pointing at the dist/
+# directory containing the binary. The COPY below picks up
+# `geode-ui` for the target arch.
+#
+# DO NOT use this Dockerfile for local dev builds — for that, use
+# deploy/Dockerfile (full source-based multi-stage build).
+
+FROM debian:bookworm-slim
+
+LABEL org.opencontainers.image.title="geode-ui" \
+      org.opencontainers.image.description="Geode UI - admin web UI for the Geode graph database" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://gitlab.com/devnw/codepros/geode/geode-ui"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates tzdata && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system --gid 10001 geode && \
+    useradd  --system --uid 10001 --gid geode --home-dir /var/lib/geode-ui --shell /usr/sbin/nologin geode && \
+    mkdir -p /var/lib/geode-ui/uploads/backups \
+             /var/lib/geode-ui/uploads/migrations \
+             /var/log/geode-ui \
+             /etc/geode-ui && \
+    chown -R geode:geode /var/lib/geode-ui /var/log/geode-ui
+
+# GoReleaser places the geode-ui binary at the build context root
+# (one binary per build context — the per-arch dist/<id>/<binary>).
+COPY geode-ui /usr/local/bin/geode-ui
+
+USER geode
+WORKDIR /var/lib/geode-ui
+# GAP-S5 (#118): GEODE_PROFILESTORE_KEY (base64 of 32 bytes) is required
+# at runtime for at-rest encryption of the SQLite profile store. The
+# release image does NOT bake one in — operators MUST supply it via
+# their orchestrator (k8s Secret, Docker Swarm secret, etc.). Generate
+# with: `openssl rand -base64 32`.
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/geode-ui"]
+CMD ["-listen", ":8080"]

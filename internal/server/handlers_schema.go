@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"encoding/json/jsontext"
 
@@ -32,26 +33,108 @@ import (
 // remap that would silently drop new fields.
 
 // Graphs implements GET /api/v1/graphs.
+//
+// The upstream Geode SHOW GRAPHS verb lists every graph in the engine,
+// including the internal security graph (`__geode_security`) and any
+// future double-underscore-prefixed system graphs. Those are
+// implementation details of the security/audit layer — the dedicated
+// admin endpoints (/api/v1/users, /api/v1/roles, /api/v1/audit) own
+// the user-facing surface for that data. We strip them from the public
+// /api/v1/graphs response so the SchemaExplorer's "first graph" auto-
+// selection lands on a real user-data graph, not the system graph
+// (the alphabetically-first slot would otherwise put `__geode_security`
+// at index 0 and bury actual data behind a misleading default).
 func (s *GraphServer) Graphs(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.GraphList, error) {
 	names, err := s.queryStrings(r.Context(), "", "SHOW GRAPHS")
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
-	return &gentypes.GraphList{Graphs: names}, nil
+	return &gentypes.GraphList{Graphs: filterSystemGraphs(names)}, nil
+}
+
+// filterSystemGraphs drops any graph name that begins with the
+// double-underscore "system" prefix Geode uses for internal graphs
+// (e.g. `__geode_security`). Returns a fresh slice; the input slice is
+// not mutated. Order is preserved.
+func filterSystemGraphs(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if len(n) >= 2 && n[0] == '_' && n[1] == '_' {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // Labels implements GET /api/v1/graphs/{graph}/labels.
+//
+// Geode v0.5.11 quirk: `CALL db.labels()` is GRAPH-AGNOSTIC — it
+// ignores the `USE GRAPH <name>;` prefix and returns labels from the
+// internal `__geode_security` graph regardless of which graph the
+// caller targeted. So calling it for `movies` would surface
+// AuthChainRoot/Role/User instead of Movie/Person — extremely
+// misleading in the SPA's schema explorer.
+//
+// `MATCH (n) RETURN DISTINCT labels(n) AS l` is the only label-
+// discovery form Geode v0.5.11 accepts (UNWIND is a parse error in
+// this dialect; SHOW LABELS is also unsupported). The function
+// `labels(n)` returns a LIST<STRING> per node; we flatten in-process.
+// Empty/null lists are skipped so unlabeled nodes don't pollute the
+// result.
+//
+// Server-side cache (PERF-2026-05-11-01 / F1 / #128): the O(N) full-graph
+// scan is memoised per (profile, graph) for schemaCacheTTL behind a
+// singleflight so a busy dashboard re-querying on every graph switch /
+// tab focus doesn't re-pay it. Profile mutations invalidate the cache.
 func (s *GraphServer) Labels(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.LabelList, error) {
-	rows, err := s.queryStrings(r.Context(), req.Graph, "CALL db.labels()")
+	ctx := r.Context()
+	key := schemaCacheKey{profile: profileFromContextOrDefault(ctx), graph: req.Graph, kind: schemaCacheKindLabels}
+	out, err := s.schemaCacheRef().getOrLoad(key, func() ([]string, error) {
+		rows, lerr := s.queryStringLists(ctx, req.Graph,
+			"MATCH (n) RETURN DISTINCT labels(n) AS l")
+		if lerr != nil {
+			return nil, lerr
+		}
+		seen := make(map[string]struct{}, len(rows))
+		labels := make([]string, 0, len(rows))
+		for _, list := range rows {
+			for _, label := range list {
+				if label == "" {
+					continue
+				}
+				if _, ok := seen[label]; ok {
+					continue
+				}
+				seen[label] = struct{}{}
+				labels = append(labels, label)
+			}
+		}
+		sort.Strings(labels)
+		return labels, nil
+	})
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
-	return &gentypes.LabelList{Labels: rows}, nil
+	return &gentypes.LabelList{Labels: out}, nil
 }
 
 // EdgeTypes implements GET /api/v1/graphs/{graph}/edge-types.
+//
+// Same v0.5.11 quirk as Labels: `CALL db.relationshipTypes()` is
+// graph-agnostic and returns the security graph's HAS_ROLE/UNKNOWN
+// regardless of USE GRAPH. Switched to a MATCH-based discovery
+// query that respects the graph scope.
+//
+// Server-side cache (PERF-2026-05-11-01 / F1 / #128): same TTL +
+// singleflight memoisation as Labels (see that doc comment).
 func (s *GraphServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.EdgeTypeList, error) {
-	rows, err := s.queryStrings(r.Context(), req.Graph, "CALL db.relationshipTypes()")
+	ctx := r.Context()
+	key := schemaCacheKey{profile: profileFromContextOrDefault(ctx), graph: req.Graph, kind: schemaCacheKindEdgeTypes}
+	rows, err := s.schemaCacheRef().getOrLoad(key, func() ([]string, error) {
+		return s.queryStrings(ctx, req.Graph,
+			"MATCH ()-[r]->() RETURN DISTINCT type(r) AS t ORDER BY t")
+	})
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
 	}
@@ -87,6 +170,66 @@ func schemaResponseErr(w http.ResponseWriter, err error) error {
 		return nil
 	}
 	return err
+}
+
+// queryStringLists runs stmt and returns each row's first column as a
+// []string, assuming the column type is LIST<STRING>. The geode
+// database/sql driver delivers list cells either as `[]any` (native
+// scan path) or as a JSON-encoded string (transport-level fallback);
+// we accept both shapes. Used by Labels() to flatten the LIST<STRING>
+// result of `RETURN DISTINCT labels(n)`.
+func (s *GraphServer) queryStringLists(ctx context.Context, graph, stmt string) ([][]string, error) {
+	db, err := s.schemaDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, _, err := runQuery(ctx, db, prefixUseGraph(graph, stmt))
+	if err != nil {
+		return nil, schemaErr(err)
+	}
+	out := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		out = append(out, asStringList(row[0]))
+	}
+	return out, nil
+}
+
+// asStringList coerces a list-shaped cell value into []string. Accepts
+// the driver's native `[]any` form, `[]string` (in case a future
+// driver delivers it pre-typed), and a JSON-encoded string fallback
+// for transports that surface lists as strings.
+func asStringList(v any) []string {
+	switch t := v.(type) {
+	case nil:
+		return nil
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			out = append(out, asString(e))
+		}
+		return out
+	case string:
+		var parsed []string
+		if json.Unmarshal([]byte(t), &parsed) == nil {
+			return parsed
+		}
+		var parsedAny []any
+		if json.Unmarshal([]byte(t), &parsedAny) == nil {
+			out := make([]string, 0, len(parsedAny))
+			for _, e := range parsedAny {
+				out = append(out, asString(e))
+			}
+			return out
+		}
+		return []string{t}
+	default:
+		return []string{asString(v)}
+	}
 }
 
 // queryStrings runs stmt (optionally prefixed with a USE GRAPH clause) and
@@ -152,7 +295,7 @@ func (s *GraphServer) schemaDB(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, &endpointError{
 			status:      http.StatusBadGateway,
-			code:        "profile_unreachable",
+			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		}
 	}
@@ -178,7 +321,7 @@ func schemaErr(err error) error {
 	}
 	return &endpointError{
 		status:      http.StatusUnprocessableEntity,
-		code:        "schema_error",
+		code:        ErrCodeSchemaError,
 		description: err.Error(),
 	}
 }

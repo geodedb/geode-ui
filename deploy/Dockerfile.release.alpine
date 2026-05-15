@@ -1,0 +1,35 @@
+# Alpine variant of the geode-ui release image.
+#
+# Smaller (~15 MiB final layer vs ~80 MiB on debian-slim) and statically
+# linked (CGO_ENABLED=0 in goreleaser builds). Pair with the alpine tag
+# stream from .goreleaser.yaml's docker_manifests.
+
+FROM alpine:3.20
+
+LABEL org.opencontainers.image.title="geode-ui-alpine" \
+      org.opencontainers.image.description="Geode UI (alpine) - admin web UI for the Geode graph database" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.source="https://gitlab.com/devnw/codepros/geode/geode-ui"
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S -g 10001 geode && \
+    adduser  -S -u 10001 -G geode -h /var/lib/geode-ui -s /sbin/nologin geode && \
+    mkdir -p /var/lib/geode-ui/uploads/backups \
+             /var/lib/geode-ui/uploads/migrations \
+             /var/log/geode-ui \
+             /etc/geode-ui && \
+    chown -R geode:geode /var/lib/geode-ui /var/log/geode-ui
+
+# GoReleaser places the geode-ui binary at the build context root
+# for the target arch.
+COPY geode-ui /usr/local/bin/geode-ui
+
+USER geode
+WORKDIR /var/lib/geode-ui
+# GAP-S5 (#118): GEODE_PROFILESTORE_KEY (base64 of 32 bytes) is required
+# at runtime for at-rest encryption of the SQLite profile store. The
+# release image does NOT bake one in — operators MUST supply it via
+# their orchestrator. Generate with: `openssl rand -base64 32`.
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/geode-ui"]
+CMD ["-listen", ":8080"]

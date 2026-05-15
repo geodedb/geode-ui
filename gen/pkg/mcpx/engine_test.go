@@ -15,7 +15,7 @@ import (
 func TestHTTP_JSONRPC_SingleAndBatch(t *testing.T) {
 	installHeaderAuthVerifier(t)
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) {
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) {
 			var in struct {
 				Msg string `json:"msg"`
 			}
@@ -78,7 +78,7 @@ func TestHTTP_JSONRPC_Notification(t *testing.T) {
 func TestHTTP_JSONRPC_RateHeadersAndTimeout(t *testing.T) {
 	installHeaderAuthVerifier(t)
 	tools := map[string]Tool{
-		"slow": func(p jsontext.Value) (jsontext.Value, error) {
+		"slow": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) {
 			time.Sleep(50 * time.Millisecond)
 			return json.Marshal(struct{ Ok bool }{true})
 		},
@@ -103,7 +103,7 @@ func TestHTTP_JSONRPC_RateHeadersAndTimeout(t *testing.T) {
 func TestHTTP_JSONRPC_ErrorPaths_HeadersPresence(t *testing.T) {
 	installHeaderAuthVerifier(t)
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) { return p, nil },
 	}
 	SetToolBuckets(tools, 10, 5)
 	srv := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { HandleHTTP(w, r, tools) })

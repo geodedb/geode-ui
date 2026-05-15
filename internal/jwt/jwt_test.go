@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"strings"
@@ -27,7 +28,7 @@ func TestIssueAndParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, exp, err := iss.Issue("alice", "default", []string{"admin", "reader"})
+	tok, exp, err := iss.Issue("alice", "default", []string{"admin", "reader"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestParse_RejectsTamperedToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, _, err := iss.Issue("alice", "default", []string{"admin"})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,5 +195,136 @@ func TestParse_RejectsGarbage(t *testing.T) {
 	}
 	if _, err := iss.Parse(""); err == nil {
 		t.Fatal("expected error for empty token")
+	}
+}
+
+// TestParse_TolersClockSkew pins the SEC-F3 (#70) leeway: a token whose
+// iat sits a few seconds in the future (e.g. issuing host's clock is
+// ahead of the verifier's) must still parse cleanly. Without leeway,
+// jwt/v5 rejects iat-in-the-future as "token used before issued".
+func TestParse_TolersClockSkew(t *testing.T) {
+	iss, err := NewIssuer(newSecret(t), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mint a token whose iat is 30 s in the future — well inside the
+	// 60 s leeway clockLeeway constant.
+	now := time.Now()
+	future := now.Add(30 * time.Second)
+	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, Claims{
+		Subject: "alice",
+		Profile: "default",
+		Roles:   []string{"reader"},
+		RegisteredClaims: jjwt.RegisteredClaims{
+			IssuedAt:  jjwt.NewNumericDate(future),
+			NotBefore: jjwt.NewNumericDate(future),
+			ExpiresAt: jjwt.NewNumericDate(future.Add(time.Hour)),
+			Subject:   "alice",
+		},
+	})
+	signed, err := tok.SignedString(iss.secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iss.Parse(signed); err != nil {
+		t.Fatalf("expected leeway to tolerate +30s skew, got: %v", err)
+	}
+}
+
+func TestIssueAndParse_ConnectionID(t *testing.T) {
+	secret := bytes.Repeat([]byte("k"), 32)
+	iss, err := NewIssuer(secret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "conn-abc-123")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	claims, err := iss.Parse(tok)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if claims.ConnectionID != "conn-abc-123" {
+		t.Errorf("ConnectionID = %q, want %q", claims.ConnectionID, "conn-abc-123")
+	}
+	if claims.Subject != "alice" || claims.Profile != "default" {
+		t.Errorf("other claims drifted: %+v", claims)
+	}
+}
+
+// TestParse_LegacyNoCidClaim proves that a token minted by the
+// underlying library WITHOUT any `cid` field at all (not just cid: "")
+// parses cleanly with ConnectionID == "". This pins the backwards-compat
+// guarantee for Plan A tokens that predate the cid claim.
+func TestParse_LegacyNoCidClaim(t *testing.T) {
+	secret := bytes.Repeat([]byte("k"), 32)
+	iss, err := NewIssuer(secret, time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+
+	// Mint a token without any cid claim — mirrors Plan A's wire shape.
+	type legacyClaims struct {
+		Subject string   `json:"sub"`
+		Profile string   `json:"profile"`
+		Roles   []string `json:"roles"`
+		jjwt.RegisteredClaims
+	}
+	now := time.Now()
+	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, legacyClaims{
+		Subject: "alice",
+		Profile: "default",
+		Roles:   []string{"admin"},
+		RegisteredClaims: jjwt.RegisteredClaims{
+			IssuedAt:  jjwt.NewNumericDate(now),
+			ExpiresAt: jjwt.NewNumericDate(now.Add(time.Hour)),
+			Subject:   "alice",
+		},
+	})
+	signed, err := tok.SignedString(secret)
+	if err != nil {
+		t.Fatalf("SignedString: %v", err)
+	}
+
+	claims, err := iss.Parse(signed)
+	if err != nil {
+		t.Fatalf("Parse legacy token: %v", err)
+	}
+	if claims.ConnectionID != "" {
+		t.Errorf("ConnectionID = %q, want empty (legacy token has no cid)", claims.ConnectionID)
+	}
+	if claims.Subject != "alice" || claims.Profile != "default" {
+		t.Errorf("other claims drifted: %+v", claims)
+	}
+}
+
+// TestParse_RejectsExpiredBeyondLeeway pins the upper bound: a token
+// whose exp is more than the leeway window in the past must still be
+// rejected. Closes the "leeway accidentally widens replay window"
+// concern.
+func TestParse_RejectsExpiredBeyondLeeway(t *testing.T) {
+	iss, err := NewIssuer(newSecret(t), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	pastIat := now.Add(-2 * time.Hour)
+	pastExp := now.Add(-2 * time.Minute) // far past clockLeeway = 60s
+	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, Claims{
+		Subject: "alice",
+		Profile: "default",
+		RegisteredClaims: jjwt.RegisteredClaims{
+			IssuedAt:  jjwt.NewNumericDate(pastIat),
+			ExpiresAt: jjwt.NewNumericDate(pastExp),
+			Subject:   "alice",
+		},
+	})
+	signed, err := tok.SignedString(iss.secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := iss.Parse(signed); err == nil {
+		t.Fatal("expected expired-beyond-leeway token to be rejected")
 	}
 }

@@ -108,7 +108,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadGateway,
-			code:        "profile_unreachable",
+			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -117,7 +117,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        "tx_begin_failed",
+			code:        ErrCodeTxBeginFailed,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -127,7 +127,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 			_ = tx.Rollback()
 			writeEndpointError(w, &endpointError{
 				status:      http.StatusUnprocessableEntity,
-				code:        "tx_use_graph_failed",
+				code:        ErrCodeTxUseGraphFailed,
 				description: err.Error(),
 			})
 			return nil, nil
@@ -160,7 +160,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusNotFound,
-			code:        "tx_not_found",
+			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -169,7 +169,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "invalid_params",
+			code:        ErrCodeInvalidParams,
 			description: "params field is not a valid JSON object: " + err.Error(),
 		})
 		return nil, nil
@@ -179,7 +179,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        "query_error",
+			code:        ErrCodeQueryError,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -190,7 +190,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 		if rerr := rows.Err(); rerr != nil && errors.Is(err, rerr) {
 			writeEndpointError(w, &endpointError{
 				status:      http.StatusUnprocessableEntity,
-				code:        "query_error",
+				code:        ErrCodeQueryError,
 				description: err.Error(),
 			})
 			return nil, nil
@@ -210,7 +210,7 @@ func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentyp
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusNotFound,
-			code:        "tx_not_found",
+			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -218,7 +218,7 @@ func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentyp
 	if err := tx.Commit(); err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        "tx_commit_failed",
+			code:        ErrCodeTxCommitFailed,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -240,7 +240,7 @@ func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gent
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusNotFound,
-			code:        "tx_not_found",
+			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
 		return nil, nil
@@ -248,7 +248,7 @@ func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gent
 	if err := tx.Rollback(); err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        "tx_rollback_failed",
+			code:        ErrCodeTxRollbackFailed,
 			description: err.Error(),
 		})
 		return nil, nil

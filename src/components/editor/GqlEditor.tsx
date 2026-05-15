@@ -1,8 +1,20 @@
 import React, { useEffect, useRef } from 'react'
+// Side-effect import: wires @monaco-editor/react to the webpack-bundled
+// monaco instance (skips the CDN AMD loader our CSP blocks). This used
+// to live at the top of src/index.tsx, which pulled all of
+// monaco-editor (~several MiB) into the initial bundle. As of F10 (#54)
+// the editor is React.lazy'd at the QueryPage call site, so importing
+// the bootstrap *here* keeps monaco inside the lazy editor chunk
+// instead of the entry chunk.
+import '../../monaco-bootstrap'
 import Editor, { OnMount } from '@monaco-editor/react'
 import { GQL_LANGUAGE_ID, registerGqlLanguage } from './gqlLanguage'
 import type { LspClientHandle } from '../../lib/lsp/client'
 import { useAuth } from '../../auth/AuthProvider'
+// Origin/main moved the access token off `useAuth()` into a module-level
+// latch in api/connections so non-hook call sites can read it. Effect
+// deps on `isAuthed` ensure we still re-run when the user signs in/out.
+import { getLatestToken } from '../../api/connections'
 
 type Props = {
   value: string
@@ -23,7 +35,18 @@ export const GqlEditor: React.FC<Props> = ({
 }) => {
   const lspRef = useRef<LspClientHandle | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
-  const { token } = useAuth()
+  // useAuth() throws when no AuthProvider is mounted (tests that render
+  // GqlEditor in isolation, anonymous SPA boot before sign-in). The
+  // editor must still render in those cases; we fall back to "not
+  // authenticated" and skip LSP wiring. getLatestToken() is the
+  // canonical token source inside useEffect, so the hook only feeds
+  // the re-render trigger.
+  let isAuthed = false
+  try {
+    isAuthed = useAuth().isAuthed
+  } catch {
+    isAuthed = false
+  }
 
   const handleMount: OnMount = (editor, monaco) => {
     registerGqlLanguage(monaco)
@@ -36,7 +59,9 @@ export const GqlEditor: React.FC<Props> = ({
   // monaco-languageclient lifecycle, which doesn't support reusing a
   // started client with a new transport).
   useEffect(() => {
-    if (!token || !monacoRef.current) return undefined
+    if (!isAuthed || !monacoRef.current) return undefined
+    const token = getLatestToken()
+    if (!token) return undefined
     let cancelled = false
     // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
     ;(async () => {
@@ -90,7 +115,7 @@ export const GqlEditor: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [token, graph, tenant])
+  }, [isAuthed, graph, tenant])
 
   useEffect(
     () => () => {

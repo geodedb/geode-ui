@@ -1,6 +1,70 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
+import { useApiResource } from '../../hooks/useApiResource'
+import { useCapabilities } from '../../hooks/useCapabilities'
+import { permissionSuggestions } from '../../lib/rbacVocab'
+import {
+  Button,
+  ConfirmModal,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+} from '../ui'
+
+// Inlined chip/tag input for the role Permissions field — small enough
+// not to warrant a shared primitive. Backed by a native <datalist> so
+// the browser autocompletes from `permissionSuggestions()`; free text is
+// still accepted (Geode persists the string verbatim).
+const ChipList = styled.ul`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px 0;
+  padding: 0;
+  list-style: none;
+`
+
+const Chip = styled.li`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  background: ${({ theme }) => theme.bg.subtle};
+  border: 1px solid ${({ theme }) => theme.border.default};
+  border-radius: ${({ theme }) => theme.radii.md};
+  color: ${({ theme }) => theme.text.primary};
+`
+
+const ChipRemove = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: ${({ theme }) => theme.text.muted};
+  cursor: pointer;
+  border-radius: ${({ theme }) => theme.radii.sm};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  line-height: 1;
+
+  &:hover:not(:disabled) {
+    color: ${({ theme }) => theme.text.danger};
+  }
+`
 
 // RolesPage drives the /admin/roles tab (Geode B5 endpoints):
 //
@@ -18,250 +82,287 @@ type Role = {
   permissions?: string[]
 }
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
     margin: 0;
   }
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const UnsupportedNote = styled.span`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
 `
 
 export const RolesPage: React.FC = () => {
-  const [roles, setRoles] = useState<Role[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const { t } = useTranslation()
+  const { adminWritable, loaded: capsLoaded } = useCapabilities()
+  const gateCreate = capsLoaded && !adminWritable.roles
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
-  const load = (): void => {
-    client
-      .getRoles({})
-      .then((r) => {
-        const list = (r.roles ?? []) as Role[]
-        setRoles(list)
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getRoles({})
+      return ((r.roles ?? []) as Role[]) ?? []
+    },
+    []
+  )
+  const roles = data ?? []
+  const err = actionErr ?? loadErr
 
-  useEffect(() => {
-    load()
-  }, [])
-
-  const onDelete = async (role: string): Promise<void> => {
-    // eslint-disable-next-line no-alert
-    if (!window.confirm('Delete role ' + role + '?')) return
+  const onDelete = async (): Promise<void> => {
+    if (!confirmDelete) return
+    setDeleting(true)
     try {
-      await client.deleteRole({ role })
-      load()
+      await client.deleteRole({ role: confirmDelete })
+      setActionErr(null)
+      setConfirmDelete(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleting(false)
     }
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <ToolBar>
-        <h2>Roles ({roles.length})</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New role</NewBtn>
+        <h2>{t('roles.title', { count: roles.length })}</h2>
+        {gateCreate && (
+          <UnsupportedNote data-testid="admin-roles-unsupported">
+            {t('roles.unsupportedNote')}
+          </UnsupportedNote>
+        )}
+        <Button
+          data-testid="admin-new-role-btn"
+          onClick={() => setShowCreate(true)}
+          disabled={gateCreate}
+          title={gateCreate ? t('roles.unsupportedTooltip') : undefined}
+        >
+          {t('roles.newButton')}
+        </Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Permissions</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {roles.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={4}>No roles.</Empty>
+              <th>{t('roles.columnName')}</th>
+              <th>{t('roles.columnDescription')}</th>
+              <th>{t('roles.columnPermissions')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
-          ) : (
-            roles.map((r) => (
-              <tr key={r.name}>
-                <td>{r.name}</td>
-                <td>{r.description ?? ''}</td>
-                <td>{(r.permissions ?? []).join(', ')}</td>
-                <td>
-                  <RowBtn onClick={() => onDelete(r.name)}>Delete</RowBtn>
-                </td>
+          </thead>
+          <tbody>
+            {roles.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={4}>{t('roles.empty')}</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+            ) : (
+              roles.map((r) => (
+                <tr key={r.name}>
+                  <td>{r.name}</td>
+                  <td>{r.description ?? ''}</td>
+                  <td>{(r.permissions ?? []).join(', ')}</td>
+                  <td>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setConfirmDelete(r.name)}
+                    >
+                      {t('common.delete')}
+                    </Button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
       {showCreate && (
         <CreateRoleModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}
-    </Wrap>
+      <ConfirmModal
+        open={confirmDelete !== null}
+        title={t('roles.deleteTitle', { name: confirmDelete ?? '' })}
+        body={t('common.cannotBeUndone')}
+        destructive
+        loading={deleting}
+        confirmLabel={t('roles.deleteConfirm')}
+        onConfirm={onDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+    </Stack>
   )
 }
 
 const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [permissions, setPermissions] = useState('')
+  const [permissions, setPermissions] = useState<string[]>([])
+  const [permDraft, setPermDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const suggestions = React.useMemo(() => permissionSuggestions(), [])
+
+  const addChip = (raw: string): void => {
+    const v = raw.trim()
+    if (v.length === 0) return
+    setPermissions((prev) => (prev.includes(v) ? prev : [...prev, v]))
+    setPermDraft('')
+  }
+
+  const removeChip = (v: string): void => {
+    setPermissions((prev) => prev.filter((p) => p !== v))
+  }
+
+  const onPermKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      addChip(permDraft)
+    } else if (e.key === 'Backspace' && permDraft.length === 0) {
+      setPermissions((prev) => prev.slice(0, -1))
+    }
+  }
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      // permissions field is a comma-separated string in the form;
-      // split + trim + drop empties before sending.
-      const perms = permissions
-        .split(',')
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0)
+      // Fold any in-progress draft into the chip set before sending so a
+      // value typed but not yet committed isn't silently dropped.
+      const draft = permDraft.trim()
+      const perms =
+        draft.length > 0 && !permissions.includes(draft)
+          ? [...permissions, draft]
+          : permissions
       await client.postApiRoles({ name, description, permissions: perms })
       onClose()
     } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : String(e2))
+      if (isWireFeatureMissingError(e2)) {
+        setErr(
+          wireFeatureMissingDescription(e2) ?? t('roles.wireFeatureMissing')
+        )
+      } else {
+        setErr(e2 instanceof Error ? e2.message : String(e2))
+      }
     } finally {
       setBusy(false)
     }
   }
 
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        {t('common.cancel')}
+      </Button>
+      <Button form="create-role-form" type="submit" loading={busy}>
+        {t('common.create')}
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New role</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-        >
-          <input
-            placeholder="name"
+    <Modal
+      open
+      onClose={onClose}
+      title={t('roles.createTitle')}
+      footer={modalFooter}
+    >
+      <form
+        id="create-role-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field label={t('roles.fieldName')} htmlFor="cr-name" required>
+          <Input
+            id="cr-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+            autoFocus
           />
-          <input
-            placeholder="description"
+        </Field>
+        <Field label={t('roles.fieldDescription')} htmlFor="cr-description">
+          <Input
+            id="cr-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-          <input
-            placeholder="permissions (comma-separated)"
-            value={permissions}
-            onChange={(e) => setPermissions(e.target.value)}
+        </Field>
+        <Field
+          label={t('roles.fieldPermissions')}
+          htmlFor="role-permissions-input"
+          hint={t('roles.permissionsHint')}
+        >
+          {permissions.length > 0 && (
+            <ChipList>
+              {permissions.map((p) => (
+                <Chip key={p}>
+                  <span>{p}</span>
+                  <ChipRemove
+                    type="button"
+                    aria-label={t('roles.removePermission', { permission: p })}
+                    onClick={() => removeChip(p)}
+                  >
+                    ×
+                  </ChipRemove>
+                </Chip>
+              ))}
+            </ChipList>
+          )}
+          <Input
+            id="role-permissions-input"
+            data-testid="role-permissions-input"
+            list="role-permission-suggestions"
+            value={permDraft}
+            placeholder={t('roles.permissionsPlaceholder')}
+            onChange={(e) => setPermDraft(e.target.value)}
+            onKeyDown={onPermKeyDown}
+            onBlur={() => addChip(permDraft)}
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+          <datalist id="role-permission-suggestions">
+            {suggestions.map((s) => (
+              <option key={s} value={s} label={s} />
+            ))}
+          </datalist>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

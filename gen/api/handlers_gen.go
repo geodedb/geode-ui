@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"geodedb.com/geode-ui/gen/pkg/gen"
 	"geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
 	"geodedb.com/geode-ui/gen/pkg/obsx"
@@ -21,14 +22,35 @@ var ErrNotImplemented = errors.New("not implemented")
 
 // ServerInterface defines the business logic contract for generated HTTP endpoints.
 // Embed UnimplementedServer and override only the methods you need.
+//
+// Streaming endpoints (route declared "streaming": true in the genapi config)
+// use a different method contract: func(http.ResponseWriter, *http.Request,
+// *ReqType) error. For those the generated wrapper still performs every
+// pre-handler concern -- auth/role/scope checks, rate limiting, body size
+// limits, request parsing and validation, the standard JSON error envelope
+// for *pre-handler* failures -- and then hands control to the user handler,
+// which owns the entire 200 response: it must write its own status line,
+// Content-Type, and body, flushing as it goes via http.Flusher.
+//
+// Streaming-handler error contract: if the handler returns a non-nil error
+// *before writing any bytes*, the wrapper emits the standard error envelope
+// (500, or 501 for ErrNotImplemented). If the handler has *already written
+// bytes* and then returns an error, the response headers are already on the
+// wire -- the wrapper logs the error (http_handler_err audit event) but
+// cannot change the status; the handler is responsible for signalling the
+// failure in-band (e.g. truncating the stream / writing an error chunk).
+// The cleanest discipline is: a streaming handler never returns an error
+// after it has written anything.
 type ServerInterface interface {
 	Audit(w http.ResponseWriter, r *http.Request, req *types.AuditQuery) (*types.AuditList, error)
 	Login(w http.ResponseWriter, r *http.Request, req *types.LoginReq) (*types.LoginResp, error)
 	GetBackups(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.BackupList, error)
 	PostBackups(w http.ResponseWriter, r *http.Request, req *types.BackupCreateReq) (*types.BackupRef, error)
 	Cleanup(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.BackupCleanupResp, error)
+	BackupUpload(w http.ResponseWriter, r *http.Request, req *types.BackupUploadReq) (*types.UploadResp, error)
 	DeleteFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.Empty, error)
 	GetFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.BackupInfo, error)
+	GetCapabilities(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.Capabilities, error)
 	Grants(w http.ResponseWriter, r *http.Request, req *types.GrantReq) (*types.Empty, error)
 	Revoke(w http.ResponseWriter, r *http.Request, req *types.GrantReq) (*types.Empty, error)
 	Graphs(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.GraphList, error)
@@ -39,13 +61,19 @@ type ServerInterface interface {
 	GetMigrations(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.MigrationStatus, error)
 	PostMigrations(w http.ResponseWriter, r *http.Request, req *types.MigrationCreateReq) (*types.MigrationRef, error)
 	PostMigrationsRun(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.MigrationRunResp, error)
+	MigrationUpload(w http.ResponseWriter, r *http.Request, req *types.MigrationUploadReq) (*types.UploadResp, error)
 	Sign(w http.ResponseWriter, r *http.Request, req *types.MigrationParam) (*types.Empty, error)
 	GetPolicies(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PolicyList, error)
 	PostPolicies(w http.ResponseWriter, r *http.Request, req *types.PolicyCreateReq) (*types.Policy, error)
 	DeleteName(w http.ResponseWriter, r *http.Request, req *types.PolicyParam) (*types.Empty, error)
 	GetName(w http.ResponseWriter, r *http.Request, req *types.PolicyParam) (*types.Policy, error)
-	Profiles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.ProfileList, error)
-	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error)
+	GetProfiles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.ProfileList, error)
+	PostProfiles(w http.ResponseWriter, r *http.Request, req *types.CreateProfileReq) (*types.Profile, error)
+	Public(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PublicProfileList, error)
+	DeleteProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error)
+	GetProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error)
+	PatchProfileid(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error)
+	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) error
 	Restore(w http.ResponseWriter, r *http.Request, req *types.RestoreReq) (*types.Empty, error)
 	GetRoles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.RoleList, error)
 	PostApiRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error)
@@ -92,11 +120,19 @@ func (UnimplementedServer) Cleanup(_ http.ResponseWriter, _ *http.Request, _ *ty
 	return nil, ErrNotImplemented
 }
 
+func (UnimplementedServer) BackupUpload(_ http.ResponseWriter, _ *http.Request, _ *types.BackupUploadReq) (*types.UploadResp, error) {
+	return nil, ErrNotImplemented
+}
+
 func (UnimplementedServer) DeleteFile(_ http.ResponseWriter, _ *http.Request, _ *types.BackupFileParam) (*types.Empty, error) {
 	return nil, ErrNotImplemented
 }
 
 func (UnimplementedServer) GetFile(_ http.ResponseWriter, _ *http.Request, _ *types.BackupFileParam) (*types.BackupInfo, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetCapabilities(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.Capabilities, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -140,6 +176,10 @@ func (UnimplementedServer) PostMigrationsRun(_ http.ResponseWriter, _ *http.Requ
 	return nil, ErrNotImplemented
 }
 
+func (UnimplementedServer) MigrationUpload(_ http.ResponseWriter, _ *http.Request, _ *types.MigrationUploadReq) (*types.UploadResp, error) {
+	return nil, ErrNotImplemented
+}
+
 func (UnimplementedServer) Sign(_ http.ResponseWriter, _ *http.Request, _ *types.MigrationParam) (*types.Empty, error) {
 	return nil, ErrNotImplemented
 }
@@ -160,12 +200,32 @@ func (UnimplementedServer) GetName(_ http.ResponseWriter, _ *http.Request, _ *ty
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) Profiles(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.ProfileList, error) {
+func (UnimplementedServer) GetProfiles(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.ProfileList, error) {
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) Query(_ http.ResponseWriter, _ *http.Request, _ *types.QueryReq) (*types.QueryResp, error) {
+func (UnimplementedServer) PostProfiles(_ http.ResponseWriter, _ *http.Request, _ *types.CreateProfileReq) (*types.Profile, error) {
 	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Public(_ http.ResponseWriter, _ *http.Request, _ *types.Empty) (*types.PublicProfileList, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) DeleteProfileid(_ http.ResponseWriter, _ *http.Request, _ *types.ProfileIDPath) (*types.Empty, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) GetProfileid(_ http.ResponseWriter, _ *http.Request, _ *types.ProfileIDPath) (*types.Profile, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) PatchProfileid(_ http.ResponseWriter, _ *http.Request, _ *types.UpdateProfileReq) (*types.Profile, error) {
+	return nil, ErrNotImplemented
+}
+
+func (UnimplementedServer) Query(_ http.ResponseWriter, _ *http.Request, _ *types.QueryReq) error {
+	return ErrNotImplemented
 }
 
 func (UnimplementedServer) Restore(_ http.ResponseWriter, _ *http.Request, _ *types.RestoreReq) (*types.Empty, error) {
@@ -308,6 +368,25 @@ func callCatchAll[T any](handler CatchAllServerInterface, w http.ResponseWriter,
 	return typed, nil
 }
 
+// callCatchAllStream adapts a catch-all handler to a streaming route. The
+// catch-all handler is expected to write the response body to w directly
+// (and return a nil response, nil error). Any returned error is propagated
+// to the generated wrapper, which only emits an error envelope if nothing
+// has been written yet (see ServerInterface docs).
+func callCatchAllStream(handler CatchAllServerInterface, w http.ResponseWriter, r *http.Request, route RouteInfo, req any) error {
+	if handler == nil {
+		return ErrNilCatchAllHandler
+	}
+	resp, err := handler.HandleRoute(w, r, route, req)
+	if err != nil {
+		return err
+	}
+	if resp != nil {
+		return fmt.Errorf("catch-all handler for streaming route %s %s returned a non-nil response %T; streaming handlers must write to the ResponseWriter", route.Method, route.Path, resp)
+	}
+	return nil
+}
+
 func (s catchAllServer) Audit(w http.ResponseWriter, r *http.Request, req *types.AuditQuery) (*types.AuditList, error) {
 	return callCatchAll[*types.AuditList](s.handler, w, r, RouteInfo{
 		Method:             "GET",
@@ -428,6 +507,30 @@ func (s catchAllServer) Cleanup(w http.ResponseWriter, r *http.Request, req *typ
 	}, req)
 }
 
+func (s catchAllServer) BackupUpload(w http.ResponseWriter, r *http.Request, req *types.BackupUploadReq) (*types.UploadResp, error) {
+	return callCatchAll[*types.UploadResp](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/backups/upload",
+		MuxPattern:         "POST /api/v1/backups/upload",
+		MethodName:         "BackupUpload",
+		BodyMode:           "multipart",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.BackupUploadReq",
+		ResponseType:       "*types.UploadResp",
+		RequestSchema:      "BackupUploadReq",
+		ResponseSchema:     "UploadResp",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
 func (s catchAllServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *types.BackupFileParam) (*types.Empty, error) {
 	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
 		Method:             "DELETE",
@@ -471,6 +574,30 @@ func (s catchAllServer) GetFile(w http.ResponseWriter, r *http.Request, req *typ
 		HasTypedResponse:   true,
 		PathParams:         []string{"file"},
 		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetCapabilities(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.Capabilities, error) {
+	return callCatchAll[*types.Capabilities](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/capabilities",
+		MuxPattern:         "GET /api/v1/capabilities",
+		MethodName:         "GetCapabilities",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.Capabilities",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "Capabilities",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
 	}, req)
@@ -716,6 +843,30 @@ func (s catchAllServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request
 	}, req)
 }
 
+func (s catchAllServer) MigrationUpload(w http.ResponseWriter, r *http.Request, req *types.MigrationUploadReq) (*types.UploadResp, error) {
+	return callCatchAll[*types.UploadResp](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/migrations/upload",
+		MuxPattern:         "POST /api/v1/migrations/upload",
+		MethodName:         "MigrationUpload",
+		BodyMode:           "multipart",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.MigrationUploadReq",
+		ResponseType:       "*types.UploadResp",
+		RequestSchema:      "MigrationUploadReq",
+		ResponseSchema:     "UploadResp",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string{"admin"},
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
 func (s catchAllServer) Sign(w http.ResponseWriter, r *http.Request, req *types.MigrationParam) (*types.Empty, error) {
 	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
 		Method:             "POST",
@@ -836,12 +987,12 @@ func (s catchAllServer) GetName(w http.ResponseWriter, r *http.Request, req *typ
 	}, req)
 }
 
-func (s catchAllServer) Profiles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.ProfileList, error) {
+func (s catchAllServer) GetProfiles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.ProfileList, error) {
 	return callCatchAll[*types.ProfileList](s.handler, w, r, RouteInfo{
 		Method:             "GET",
 		Path:               "/api/v1/profiles",
 		MuxPattern:         "GET /api/v1/profiles",
-		MethodName:         "Profiles",
+		MethodName:         "GetProfiles",
 		BodyMode:           "query",
 		Auth:               "jwt",
 		Surface:            "public",
@@ -860,8 +1011,128 @@ func (s catchAllServer) Profiles(w http.ResponseWriter, r *http.Request, req *ty
 	}, req)
 }
 
-func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) (*types.QueryResp, error) {
-	return callCatchAll[*types.QueryResp](s.handler, w, r, RouteInfo{
+func (s catchAllServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *types.CreateProfileReq) (*types.Profile, error) {
+	return callCatchAll[*types.Profile](s.handler, w, r, RouteInfo{
+		Method:             "POST",
+		Path:               "/api/v1/profiles",
+		MuxPattern:         "POST /api/v1/profiles",
+		MethodName:         "PostProfiles",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.CreateProfileReq",
+		ResponseType:       "*types.Profile",
+		RequestSchema:      "CreateProfileReq",
+		ResponseSchema:     "Profile",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Public(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.PublicProfileList, error) {
+	return callCatchAll[*types.PublicProfileList](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/profiles/public",
+		MuxPattern:         "GET /api/v1/profiles/public",
+		MethodName:         "Public",
+		BodyMode:           "query",
+		Auth:               "",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.Empty",
+		ResponseType:       "*types.PublicProfileList",
+		RequestSchema:      "Empty",
+		ResponseSchema:     "PublicProfileList",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string(nil),
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Empty, error) {
+	return callCatchAll[*types.Empty](s.handler, w, r, RouteInfo{
+		Method:             "DELETE",
+		Path:               "/api/v1/profiles/{profileId}",
+		MuxPattern:         "DELETE /api/v1/profiles/{profileId}",
+		MethodName:         "DeleteProfileid",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.ProfileIDPath",
+		ResponseType:       "*types.Empty",
+		RequestSchema:      "ProfileIDPath",
+		ResponseSchema:     "Empty",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"profileId"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *types.ProfileIDPath) (*types.Profile, error) {
+	return callCatchAll[*types.Profile](s.handler, w, r, RouteInfo{
+		Method:             "GET",
+		Path:               "/api/v1/profiles/{profileId}",
+		MuxPattern:         "GET /api/v1/profiles/{profileId}",
+		MethodName:         "GetProfileid",
+		BodyMode:           "query",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.ProfileIDPath",
+		ResponseType:       "*types.Profile",
+		RequestSchema:      "ProfileIDPath",
+		ResponseSchema:     "Profile",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"profileId"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req *types.UpdateProfileReq) (*types.Profile, error) {
+	return callCatchAll[*types.Profile](s.handler, w, r, RouteInfo{
+		Method:             "PATCH",
+		Path:               "/api/v1/profiles/{profileId}",
+		MuxPattern:         "PATCH /api/v1/profiles/{profileId}",
+		MethodName:         "PatchProfileid",
+		BodyMode:           "json",
+		Auth:               "jwt",
+		Surface:            "public",
+		Sensitivity:        "normal",
+		Profile:            "",
+		RequestType:        "*types.UpdateProfileReq",
+		ResponseType:       "*types.Profile",
+		RequestSchema:      "UpdateProfileReq",
+		ResponseSchema:     "Profile",
+		HasTypedRequest:    true,
+		HasTypedResponse:   true,
+		PathParams:         []string{"profileId"},
+		RequiredRoles:      []string(nil),
+		RequiredScopes:     []string(nil),
+		RequiredAttributes: map[string]string(nil),
+	}, req)
+}
+
+func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) error {
+	return callCatchAllStream(s.handler, w, r, RouteInfo{
 		Method:             "POST",
 		Path:               "/api/v1/query",
 		MuxPattern:         "POST /api/v1/query",
@@ -1380,6 +1651,13 @@ type APIOptions struct {
 
 // RegisterGeneratedAPI registers generated HTTP routes with validation and middleware.
 func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptions) {
+	// globalRateBkt is a single server-wide aggregate token bucket shared by
+	// every generated route. It is a coarse ceiling enforced per request (after
+	// auth/authz, just before the per-route bucket); it does not replace the
+	// per-route rateLimit buckets or the per-IP limiter. Disabled when
+	// opts.GlobalRate or opts.GlobalBurst is 0.
+	var globalRateBkt *securex.Bucket
+	if opts.GlobalRate > 0 && opts.GlobalBurst > 0 { globalRateBkt = securex.NewBucket(opts.GlobalRate, opts.GlobalBurst) }
 	var bkt_get_Audit *securex.Bucket
 	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Audit = securex.NewBucket(50, opts.GlobalBurst) }
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
@@ -1447,6 +1725,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Audit != nil { lim, rem, reset := bkt_get_Audit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Audit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.AuditQuery
 		req.Event = r.URL.Query().Get("event")
@@ -1480,6 +1762,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		r = r.WithContext(_ctx)
 			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
 			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Login != nil { lim, rem, reset := bkt_post_Login.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Login.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseForm(); err != nil { writeJSONError(w, "bad request", 400); return }
 		var req types.LoginReq
@@ -1569,6 +1855,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetBackups != nil { lim, rem, reset := bkt_get_GetBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -1654,6 +1944,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostBackups != nil { lim, rem, reset := bkt_post_PostBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -1740,11 +2034,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Cleanup != nil { lim, rem, reset := bkt_post_Cleanup.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Cleanup.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Cleanup(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_BackupUpload *securex.Bucket
+	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_BackupUpload = securex.NewBucket(10, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/backups/upload", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "BackupUpload",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/backups/upload"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 67108864 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 67108864)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_BackupUpload != nil { lim, rem, reset := bkt_post_BackupUpload.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_BackupUpload.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		defer func() {
+			if r.MultipartForm != nil { _ = r.MultipartForm.RemoveAll() }
+		}()
+		var req types.BackupUploadReq
+		{
+			_f, _fh, _ferr := r.FormFile("file")
+			if _ferr == nil {
+				if _fh.Size > 67108864 { writeJSONError(w, fmt.Sprintf("file 'file' exceeds maximum size of 67108864 bytes"), 400); return }
+				req.File = &gen.FileUpload{Filename: _fh.Filename, Size: _fh.Size, ContentType: _fh.Header.Get("Content-Type"), Reader: _f}
+			} else {
+				writeJSONError(w, "missing required file 'file'", 400); return
+			}
+		}
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.BackupUpload(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -1826,6 +2226,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_delete_DeleteFile != nil { lim, rem, reset := bkt_delete_DeleteFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupFileParam
 		req.File = r.URL.Query().Get("file")
@@ -1913,12 +2317,60 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetFile != nil { lim, rem, reset := bkt_get_GetFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupFileParam
 		req.File = r.URL.Query().Get("file")
 		req.File = r.PathValue("file")
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetFile(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetCapabilities *securex.Bucket
+	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetCapabilities = securex.NewBucket(100, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetCapabilities",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/capabilities"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetCapabilities != nil { lim, rem, reset := bkt_get_GetCapabilities.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetCapabilities.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetCapabilities(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -2000,6 +2452,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Grants != nil { lim, rem, reset := bkt_post_Grants.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Grants.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GrantReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2086,6 +2542,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Revoke != nil { lim, rem, reset := bkt_post_Revoke.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Revoke.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GrantReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2127,6 +2587,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Graphs != nil { lim, rem, reset := bkt_get_Graphs.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Graphs.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2167,6 +2631,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Constraints != nil { lim, rem, reset := bkt_get_Constraints.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Constraints.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2209,6 +2677,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_EdgeTypes != nil { lim, rem, reset := bkt_get_EdgeTypes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_EdgeTypes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2251,6 +2723,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Indexes != nil { lim, rem, reset := bkt_get_Indexes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Indexes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2293,6 +2769,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Labels != nil { lim, rem, reset := bkt_get_Labels.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Labels.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
@@ -2380,6 +2860,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetMigrations != nil { lim, rem, reset := bkt_get_GetMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2465,6 +2949,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostMigrations != nil { lim, rem, reset := bkt_post_PostMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.MigrationCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2551,11 +3039,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostMigrationsRun != nil { lim, rem, reset := bkt_post_PostMigrationsRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrationsRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.PostMigrationsRun(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_MigrationUpload *securex.Bucket
+	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_MigrationUpload = securex.NewBucket(10, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/migrations/upload", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "MigrationUpload",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/migrations/upload"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 67108864 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 67108864)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+		authParts := strings.Fields(authHeader)
+		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		claims, err := securex.ParseClaims(authParts[1])
+		if err != nil {
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		requiredRoles := []string{"admin"}
+		if len(requiredRoles) > 0 {
+			userRole := claims.HighestRole()
+			allowed := false
+			for _, roleName := range requiredRoles {
+				requiredRole, convErr := securex.RoleFromString(roleName)
+				if convErr != nil {
+					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					return
+				}
+				if userRole.HasRole(requiredRole) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredScopes := []string(nil)
+		for _, scope := range requiredScopes {
+			if !claims.HasScope(scope) {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		requiredAttrs := map[string]string(nil)
+		for key, val := range requiredAttrs {
+			if claims.Attributes == nil || claims.Attributes[key] != val {
+				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				return
+			}
+		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_MigrationUpload != nil { lim, rem, reset := bkt_post_MigrationUpload.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_MigrationUpload.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		defer func() {
+			if r.MultipartForm != nil { _ = r.MultipartForm.RemoveAll() }
+		}()
+		var req types.MigrationUploadReq
+		{
+			_f, _fh, _ferr := r.FormFile("file")
+			if _ferr == nil {
+				if _fh.Size > 67108864 { writeJSONError(w, fmt.Sprintf("file 'file' exceeds maximum size of 67108864 bytes"), 400); return }
+				req.File = &gen.FileUpload{Filename: _fh.Filename, Size: _fh.Size, ContentType: _fh.Header.Get("Content-Type"), Reader: _f}
+			} else {
+				writeJSONError(w, "missing required file 'file'", 400); return
+			}
+		}
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.MigrationUpload(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -2637,6 +3231,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Sign != nil { lim, rem, reset := bkt_post_Sign.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Sign.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.MigrationParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2724,6 +3322,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetPolicies != nil { lim, rem, reset := bkt_get_GetPolicies.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetPolicies.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2809,6 +3411,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostPolicies != nil { lim, rem, reset := bkt_post_PostPolicies.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostPolicies.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2895,6 +3501,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_delete_DeleteName != nil { lim, rem, reset := bkt_delete_DeleteName.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteName.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyParam
 		req.Name = r.URL.Query().Get("name")
@@ -2982,6 +3592,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetName != nil { lim, rem, reset := bkt_get_GetName.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetName.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyParam
 		req.Name = r.URL.Query().Get("name")
@@ -3002,10 +3616,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			_ = json.MarshalWrite(w, resp)
 		}
 	})
-	var bkt_get_Profiles *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Profiles = securex.NewBucket(50, opts.GlobalBurst) }
+	var bkt_get_GetProfiles *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetProfiles = securex.NewBucket(50, opts.GlobalBurst) }
 	mux.HandleFunc("GET /api/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
-		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Profiles",
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetProfiles",
 			trace.WithAttributes(
 				attribute.String("http.route", "/api/v1/profiles"),
 				attribute.String("http.method", "GET"),
@@ -3024,10 +3638,231 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if bkt_get_Profiles != nil { lim, rem, reset := bkt_get_Profiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Profiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetProfiles != nil { lim, rem, reset := bkt_get_GetProfiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.Profiles(w, r, &req)
+		resp, err := srv.GetProfiles(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_post_PostProfiles *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_PostProfiles = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("POST /api/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostProfiles",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/profiles"),
+				attribute.String("http.method", "POST"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostProfiles != nil { lim, rem, reset := bkt_post_PostProfiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostProfiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.CreateProfileReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PostProfiles(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_Public *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Public = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/profiles/public", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Public",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/profiles/public"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Public != nil { lim, rem, reset := bkt_get_Public.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Public.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.Empty
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.Public(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_delete_DeleteProfileid *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteProfileid = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("DELETE /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteProfileid",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/profiles/{profileId}"),
+				attribute.String("http.method", "DELETE"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteProfileid != nil { lim, rem, reset := bkt_delete_DeleteProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.ProfileIDPath
+		req.ProfileID = r.URL.Query().Get("profile_id")
+		req.ProfileID = r.PathValue("profileId")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.DeleteProfileid(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_get_GetProfileid *securex.Bucket
+	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetProfileid = securex.NewBucket(50, opts.GlobalBurst) }
+	mux.HandleFunc("GET /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetProfileid",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/profiles/{profileId}"),
+				attribute.String("http.method", "GET"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetProfileid != nil { lim, rem, reset := bkt_get_GetProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.ProfileIDPath
+		req.ProfileID = r.URL.Query().Get("profile_id")
+		req.ProfileID = r.PathValue("profileId")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.GetProfileid(w, r, &req)
+		if err != nil {
+			_span.RecordError(err)
+			_span.SetStatus(codes.Error, "handler error")
+			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+			writeJSONError(w, "internal server error", 500); return
+		}
+		_span.SetStatus(codes.Ok, "")
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		if resp != nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.MarshalWrite(w, resp)
+		}
+	})
+	var bkt_patch_PatchProfileid *securex.Bucket
+	if (20) > 0 && opts.GlobalBurst > 0 { bkt_patch_PatchProfileid = securex.NewBucket(20, opts.GlobalBurst) }
+	mux.HandleFunc("PATCH /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PatchProfileid",
+			trace.WithAttributes(
+				attribute.String("http.route", "/api/v1/profiles/{profileId}"),
+				attribute.String("http.method", "PATCH"),
+			))
+		defer _span.End()
+		r = r.WithContext(_ctx)
+			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
+			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		if opts.AuthJWT == nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+			return
+		}
+		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_patch_PatchProfileid != nil { lim, rem, reset := bkt_patch_PatchProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		var req types.UpdateProfileReq
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		req.ProfileID = r.PathValue("profileId")
+		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		resp, err := srv.PatchProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
@@ -3043,7 +3878,7 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 	})
 	var bkt_post_Query *securex.Bucket
-	if (200) > 0 && opts.GlobalBurst > 0 { bkt_post_Query = securex.NewBucket(200, opts.GlobalBurst) }
+	if (2000) > 0 && opts.GlobalBurst > 0 { bkt_post_Query = securex.NewBucket(2000, opts.GlobalBurst) }
 	mux.HandleFunc("POST /api/v1/query", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Query",
 			trace.WithAttributes(
@@ -3064,24 +3899,31 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Query != nil { lim, rem, reset := bkt_post_Query.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Query.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.QueryReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.Query(w, r, &req)
+		err := srv.Query(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
+			// Streaming route: the handler owns the response body. If it
+			// returns an error after writing bytes the headers are already
+			// on the wire and writeJSONError's WriteHeader is a no-op; we
+			// still emit the envelope so a pre-write failure is reported.
 			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
 			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 			writeJSONError(w, "internal server error", 500); return
 		}
 		_span.SetStatus(codes.Ok, "")
 		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		if resp != nil {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
-		}
+		// Streaming route: response body was written by the handler. Flush
+		// any buffered bytes so the client sees end-of-stream promptly.
+		if f, ok := w.(http.Flusher); ok { f.Flush() }
 	})
 	var bkt_post_Restore *securex.Bucket
 	if (5) > 0 && opts.GlobalBurst > 0 { bkt_post_Restore = securex.NewBucket(5, opts.GlobalBurst) }
@@ -3150,6 +3992,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Restore != nil { lim, rem, reset := bkt_post_Restore.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Restore.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RestoreReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3236,6 +4082,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetRoles != nil { lim, rem, reset := bkt_get_GetRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3321,6 +4171,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostApiRoles != nil { lim, rem, reset := bkt_post_PostApiRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostApiRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3407,6 +4261,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_delete_DeleteRole != nil { lim, rem, reset := bkt_delete_DeleteRole.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteRole.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleParam
 		req.Role = r.URL.Query().Get("role")
@@ -3494,6 +4352,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetRole != nil { lim, rem, reset := bkt_get_GetRole.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetRole.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleParam
 		req.Role = r.URL.Query().Get("role")
@@ -3536,6 +4398,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Tx != nil { lim, rem, reset := bkt_post_Tx.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Tx.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxBeginReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3577,6 +4443,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Commit != nil { lim, rem, reset := bkt_post_Commit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Commit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxIDParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3619,6 +4489,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Rollback != nil { lim, rem, reset := bkt_post_Rollback.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Rollback.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxIDParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3661,6 +4535,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostTxidRun != nil { lim, rem, reset := bkt_post_PostTxidRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostTxidRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxRunReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3748,6 +4626,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetUsers != nil { lim, rem, reset := bkt_get_GetUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3833,6 +4715,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostUsers != nil { lim, rem, reset := bkt_post_PostUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UserCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3919,6 +4805,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_delete_DeleteUsername != nil { lim, rem, reset := bkt_delete_DeleteUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
@@ -4006,6 +4896,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_GetUsername != nil { lim, rem, reset := bkt_get_GetUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
@@ -4093,6 +4987,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_patch_PatchUsername != nil { lim, rem, reset := bkt_patch_PatchUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UserUpdateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4180,6 +5078,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Disable != nil { lim, rem, reset := bkt_post_Disable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Disable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4267,6 +5169,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Enable != nil { lim, rem, reset := bkt_post_Enable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Enable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4309,6 +5215,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_Password != nil { lim, rem, reset := bkt_post_Password.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Password.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PasswordChangeReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4396,6 +5306,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Permissions != nil { lim, rem, reset := bkt_get_Permissions.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Permissions.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
@@ -4483,6 +5397,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				return
 			}
 		}
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_post_PostUsernameRoles != nil { lim, rem, reset := bkt_post_PostUsernameRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsernameRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.AssignRoleReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4515,6 +5433,10 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		r = r.WithContext(_ctx)
 			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
 			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
+		// per-route bucket (the tighter ceiling), the block below overwrites them on
+		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
+		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if bkt_get_Healthz != nil { lim, rem, reset := bkt_get_Healthz.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Healthz.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4539,4 +5461,18 @@ func writeJSONError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.MarshalWrite(w, map[string]string{"error": msg})
+}
+
+func isAllowedType(ct string, allowed []string) bool {
+	for _, a := range allowed {
+		if strings.EqualFold(ct, a) {
+			return true
+		}
+		if idx := strings.IndexByte(ct, ';'); idx >= 0 {
+			if strings.EqualFold(strings.TrimSpace(ct[:idx]), a) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -73,7 +73,7 @@ func TestBackups_Create(t *testing.T) {
 		{
 			name: "graph_only",
 			in:   gentypes.BackupCreateReq{Graph: "main"},
-			want: "BACKUP CREATE GRAPH `main`",
+			want: "BACKUP CREATE GRAPH main",
 		},
 		{
 			name: "output_only",
@@ -83,7 +83,7 @@ func TestBackups_Create(t *testing.T) {
 		{
 			name: "graph_and_output",
 			in:   gentypes.BackupCreateReq{Graph: "main", Output: "/var/snap.gql"},
-			want: "BACKUP CREATE GRAPH `main` OUTPUT '/var/snap.gql'",
+			want: "BACKUP CREATE GRAPH main OUTPUT '/var/snap.gql'",
 		},
 	}
 	for _, tc := range cases {
@@ -134,7 +134,7 @@ func TestBackups_Get(t *testing.T) {
 		t.Fatalf("resp=%+v missing fields", resp)
 	}
 	stmts := d.seen()
-	want := "SHOW BACKUP `snap-001.gql`"
+	want := "SHOW BACKUP 'snap-001.gql'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -171,7 +171,7 @@ func TestBackups_Delete(t *testing.T) {
 		t.Fatalf("DeleteFile: %v", err)
 	}
 	stmts := d.seen()
-	want := "DROP BACKUP `snap-001.gql`"
+	want := "DROP BACKUP 'snap-001.gql'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}
@@ -213,12 +213,12 @@ func TestRestore(t *testing.T) {
 		{
 			name: "no_target_time",
 			in:   gentypes.RestoreReq{File: "snap-001.gql"},
-			want: "RESTORE `snap-001.gql`",
+			want: "RESTORE 'snap-001.gql'",
 		},
 		{
 			name: "with_target_time",
 			in:   gentypes.RestoreReq{File: "snap-001.gql", TargetTime: "2026-05-06T10:00:00Z"},
-			want: "RESTORE `snap-001.gql` AT '2026-05-06T10:00:00Z'",
+			want: "RESTORE 'snap-001.gql' AT '2026-05-06T10:00:00Z'",
 		},
 	}
 	for _, tc := range cases {
@@ -415,12 +415,12 @@ func TestMigrations_Create(t *testing.T) {
 		{
 			name: "no_description",
 			in:   gentypes.MigrationCreateReq{Name: "005_add_index"},
-			want: "CREATE MIGRATION `005_add_index`",
+			want: "CREATE MIGRATION 005_add_index",
 		},
 		{
 			name: "with_description",
 			in:   gentypes.MigrationCreateReq{Name: "005_add_index", Description: "add user idx"},
-			want: "CREATE MIGRATION `005_add_index` DESCRIPTION 'add user idx'",
+			want: "CREATE MIGRATION 005_add_index DESCRIPTION 'add user idx'",
 		},
 	}
 	for _, tc := range cases {
@@ -456,7 +456,7 @@ func TestMigrations_Sign(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 	stmts := d.seen()
-	want := "MIGRATE SIGN `005_add_index`"
+	want := "MIGRATE SIGN 005_add_index"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
 	}

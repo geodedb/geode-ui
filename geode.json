@@ -11,12 +11,19 @@
     "limits": {
       "max_header_bytes": 16384,
       "max_body_bytes": 1048576
-    }
+    },
+    "enable_compression": true
   },
   "security": {
     "auth": { "api_key": false, "jwt": true },
     "cors": { "enabled": true, "origins": ["http://localhost:3000"] },
-    "rate_limit": { "global_rps": 2000, "burst": 400 }
+    "rate_limit": {
+      "global_rps": 2000,
+      "burst": 400,
+      "per_ip_rps": 50,
+      "per_ip_burst": 100,
+      "per_ip_source": "remote_addr"
+    }
   },
   "api": [
     {
@@ -43,8 +50,9 @@
       "requestSchema": "QueryReq",
       "responseSchema": "QueryResp",
       "auth": "jwt",
-      "rateLimit": 200,
-      "maxBodyBytes": 524288
+      "rateLimit": 2000,
+      "maxBodyBytes": 524288,
+      "streaming": true
     },
     {
       "method": "GET",
@@ -83,6 +91,15 @@
       "path": "/api/v1/graphs/{graph}/constraints",
       "requestSchema": "GraphParam",
       "responseSchema": "ConstraintList",
+      "auth": "jwt",
+      "rateLimit": 100
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/capabilities",
+      "name": "GetCapabilities",
+      "requestSchema": "Empty",
+      "responseSchema": "Capabilities",
       "auth": "jwt",
       "rateLimit": 100
     },
@@ -347,6 +364,17 @@
     },
     {
       "method": "POST",
+      "path": "/api/v1/backups/upload",
+      "name": "BackupUpload",
+      "requestSchema": "BackupUploadReq",
+      "responseSchema": "UploadResp",
+      "auth": "jwt",
+      "rateLimit": 10,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 67108864
+    },
+    {
+      "method": "POST",
       "path": "/api/v1/restore",
       "requestSchema": "RestoreReq",
       "responseSchema": "Empty",
@@ -393,6 +421,17 @@
       "required_roles": ["admin"]
     },
     {
+      "method": "POST",
+      "path": "/api/v1/migrations/upload",
+      "name": "MigrationUpload",
+      "requestSchema": "MigrationUploadReq",
+      "responseSchema": "UploadResp",
+      "auth": "jwt",
+      "rateLimit": 10,
+      "required_roles": ["admin"],
+      "maxBodyBytes": 67108864
+    },
+    {
       "method": "GET",
       "path": "/api/v1/audit",
       "requestSchema": "AuditQuery",
@@ -403,11 +442,51 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/profiles/public",
+      "requestSchema": "Empty",
+      "responseSchema": "PublicProfileList",
+      "auth": "",
+      "rateLimit": 50
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/profiles",
       "requestSchema": "Empty",
       "responseSchema": "ProfileList",
       "auth": "jwt",
       "rateLimit": 50
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/profiles",
+      "requestSchema": "CreateProfileReq",
+      "responseSchema": "Profile",
+      "auth": "jwt",
+      "rateLimit": 20
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/profiles/{profileId}",
+      "requestSchema": "ProfileIDPath",
+      "responseSchema": "Profile",
+      "auth": "jwt",
+      "rateLimit": 50
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/profiles/{profileId}",
+      "requestSchema": "UpdateProfileReq",
+      "responseSchema": "Profile",
+      "auth": "jwt",
+      "rateLimit": 20
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/profiles/{profileId}",
+      "requestSchema": "ProfileIDPath",
+      "responseSchema": "Empty",
+      "auth": "jwt",
+      "rateLimit": 20
     }
   ],
   "websocket": [
@@ -418,7 +497,8 @@
       "auth": "jwt",
       "ping_interval_ms": 30000,
       "max_frame_bytes": 65536,
-      "max_message_bytes": 1048576
+      "max_message_bytes": 1048576,
+      "allow_any_origin": true
     },
     {
       "path": "/ws/query",
@@ -427,7 +507,8 @@
       "auth": "jwt",
       "ping_interval_ms": 15000,
       "max_frame_bytes": 1048576,
-      "max_message_bytes": 16777216
+      "max_message_bytes": 16777216,
+      "allow_any_origin": true
     }
   ],
   "mcp": {
@@ -457,11 +538,12 @@
     },
     "LoginResp": {
       "type": "object",
-      "required": ["access_token", "token_type", "expires_in"],
+      "required": ["access_token", "token_type", "expires_in", "connection_id"],
       "properties": {
-        "access_token": { "type": "string", "minLength": 1, "maxLength": 8192 },
-        "token_type":   { "type": "string", "enum": ["Bearer"] },
-        "expires_in":   { "type": "integer", "minimum": 1, "maximum": 86400 }
+        "access_token":  { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "token_type":    { "type": "string", "enum": ["Bearer"] },
+        "expires_in":    { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "connection_id": { "type": "string", "minLength": 1, "maxLength": 64 }
       }
     },
     "QueryReq": {
@@ -564,6 +646,22 @@
         }
       }
     },
+    "Capabilities": {
+      "type": "object",
+      "required": ["geode_version", "admin_writable"],
+      "properties": {
+        "geode_version":  { "type": "string", "maxLength": 256 },
+        "admin_writable": {
+          "type": "object",
+          "properties": {
+            "users":    { "type": "boolean" },
+            "roles":    { "type": "boolean" },
+            "policies": { "type": "boolean" },
+            "grants":   { "type": "boolean" }
+          }
+        }
+      }
+    },
     "TxBeginReq": {
       "type": "object",
       "properties": {
@@ -625,7 +723,7 @@
       "type": "object",
       "required": ["users"],
       "properties": {
-        "users": { "type": "array", "items": { } }
+        "users": { "type": "array", "items": { "$ref": "User" } }
       }
     },
     "UserCreateReq": {
@@ -672,20 +770,19 @@
         "role":     { "type": "string" }
       }
     },
+    "Permission": {
+      "type": "object",
+      "properties": {
+        "permission": { "type": "string" },
+        "resource":   { "type": "string" },
+        "scope":      { "type": "string" }
+      }
+    },
     "PermissionList": {
       "type": "object",
       "required": ["permissions"],
       "properties": {
-        "permissions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "permission": { "type": "string" },
-              "resource":   { "type": "string" }
-            }
-          }
-        }
+        "permissions": { "type": "array", "items": { "$ref": "Permission" } }
       }
     },
     "Role": {
@@ -814,6 +911,30 @@
         "freed_bytes": { "type": "integer", "minimum": 0 }
       }
     },
+    "BackupUploadReq": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "file", "maxSize": 67108864 }
+      }
+    },
+    "MigrationUploadReq": {
+      "type": "object",
+      "required": ["file"],
+      "properties": {
+        "file": { "type": "file", "maxSize": 67108864 }
+      }
+    },
+    "UploadResp": {
+      "type": "object",
+      "required": ["file", "size_bytes", "path", "uploaded_at"],
+      "properties": {
+        "file":        { "type": "string", "minLength": 1, "maxLength": 256 },
+        "size_bytes":  { "type": "integer", "minimum": 0 },
+        "path":        { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "uploaded_at": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
     "RestoreReq": {
       "type": "object",
       "required": ["file"],
@@ -876,20 +997,100 @@
         "entries": { "type": "array", "items": { } }
       }
     },
+    "PoolOverrides": {
+      "type": "object",
+      "properties": {
+        "max_open_conns":       { "type": "integer", "minimum": 0 },
+        "max_idle_conns":       { "type": "integer", "minimum": 0 },
+        "conn_max_lifetime_ms": { "type": "integer", "minimum": 0 },
+        "conn_max_idle_ms":     { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "TLSMaterial": {
+      "type": "object",
+      "properties": {
+        "ca_pem":          { "type": "string" },
+        "client_cert_pem": { "type": "string" },
+        "client_key_pem":  { "type": "string" }
+      }
+    },
+
+    "PublicProfile": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name":        { "type": "string", "minLength": 1, "maxLength": 64 },
+        "description": { "type": "string", "maxLength": 256 }
+      }
+    },
+
+    "PublicProfileList": {
+      "type": "object",
+      "required": ["profiles"],
+      "properties": {
+        "profiles": { "type": "array", "items": { "$ref": "PublicProfile" } }
+      }
+    },
+
+    "Profile": {
+      "type": "object",
+      "required": ["id", "scope", "name", "dsn"],
+      "properties": {
+        "id":             { "type": "string", "minLength": 1, "maxLength": 64 },
+        "scope":          { "type": "string" },
+        "owner_user_id":  { "type": "string" },
+        "name":           { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "maxLength": 256 },
+        "saved_username": { "type": "string", "maxLength": 128 },
+        "is_default":     { "type": "boolean" },
+        "tls":            { "type": "object" },
+        "pool_overrides": { "type": "object" }
+      }
+    },
+
     "ProfileList": {
       "type": "object",
       "required": ["profiles"],
       "properties": {
-        "profiles": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name":        { "type": "string" },
-              "description": { "type": "string" }
-            }
-          }
-        }
+        "profiles": { "type": "array", "items": { "$ref": "Profile" } }
+      }
+    },
+
+    "ProfileIDPath": {
+      "type": "object",
+      "required": ["profile_id"],
+      "properties": { "profile_id": { "type": "string", "minLength": 1, "maxLength": 64 } }
+    },
+
+    "CreateProfileReq": {
+      "type": "object",
+      "required": ["scope", "name", "dsn"],
+      "properties": {
+        "scope":          { "type": "string" },
+        "name":           { "type": "string", "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "maxLength": 256 },
+        "saved_username": { "type": "string", "maxLength": 128 },
+        "is_default":     { "type": "boolean" },
+        "tls":            { "type": "object" },
+        "pool_overrides": { "type": "object" }
+      }
+    },
+
+    "UpdateProfileReq": {
+      "type": "object",
+      "required": ["profile_id"],
+      "properties": {
+        "profile_id":     { "type": "string", "minLength": 1, "maxLength": 64 },
+        "name":           { "type": "string", "nullable": true, "minLength": 1, "maxLength": 64 },
+        "dsn":            { "type": "string", "nullable": true, "minLength": 1, "maxLength": 1024 },
+        "description":    { "type": "string", "nullable": true, "maxLength": 256 },
+        "saved_username": { "type": "string", "nullable": true, "maxLength": 128 },
+        "is_default":     { "type": "boolean", "nullable": true },
+        "tls":            { "type": "object" },
+        "pool_overrides": { "type": "object" }
       }
     }
   }

@@ -104,7 +104,7 @@ func TestServeWS_E2E(t *testing.T) {
 	configureMCPWSAllowlist(t, []string{"https://app.example"})
 
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) { return p, nil },
 	}
 
 	// net.Pipe gives us a synchronous, in-process pair of net.Conn.
@@ -177,7 +177,7 @@ func TestServeWS_E2E_ToolCall(t *testing.T) {
 	configureMCPWSAllowlist(t, []string{"https://app.example"})
 
 	tools := map[string]Tool{
-		"greet": func(p jsontext.Value) (jsontext.Value, error) {
+		"greet": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) {
 			return json.Marshal(map[string]string{"hello": "world"})
 		},
 	}

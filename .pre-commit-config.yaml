@@ -94,6 +94,27 @@ repos:
 - repo: local
   hooks:
       # ── pre-commit (fast: formatters + per-file linters) ───────────────
+      # Supply-chain pin guard (Q32 / #127, SEC F-SUP-3 / #153): fails if
+      # any `go install ...@latest` line or ci-catalog `component:` ref in
+      # .gitlab-ci.yml is unpinned. Cheap; runs only when the CI file moves.
+  - id: check-ci-pins
+    name: check-ci-pins
+    entry: scripts/check-ci-pins.sh
+    language: system
+    pass_filenames: false
+    files: ^\.gitlab-ci\.yml$
+
+      # Error-code seam guard: every server error code the SPA branches on
+      # (exported from src/api/serverErrorCodes.ts) must still exist as an
+      # ErrCode* constant in internal/server/errorcodes.go. Catches silent
+      # drift between the two sides. Cheap; runs only when either file moves.
+  - id: check-error-codes
+    name: error-code seam vs errorcodes.go
+    entry: node scripts/check-error-codes.mjs
+    language: system
+    pass_filenames: false
+    files: ^(internal/server/errorcodes\.go|src/api/serverErrorCodes\.ts)$
+
   - id: gofmt-check
     name: gofmt
     entry: scripts/check-gofmt.sh
@@ -115,7 +136,7 @@ repos:
     entry: npx --no-install eslint --max-warnings=0
     language: system
     files: \.(ts|tsx)$
-    exclude: ^(node_modules/|gen/)
+    exclude: ^(node_modules/|gen/|electron/|internal/ui/electron-dist/)
 
   - id: prettier-check
     name: prettier:check
@@ -123,7 +144,61 @@ repos:
     language: system
     pass_filenames: false
     files: \.(ts|tsx|json|css)$
-    exclude: ^(node_modules/|gen/|package-lock\.json)
+    exclude: ^(node_modules/|gen/|electron/|package-lock\.json)
+
+  # Theme enforcement — lightweight scans that fail loudly if a hex
+  # literal or rgb()/hsl() call shows up outside src/theme/, or if any
+  # text/bg pair in the theme drops below WCAG AA contrast.
+  - id: lint-hardcoded-styles
+    name: lint:hardcoded-styles
+    entry: node scripts/check-hardcoded-styles.mjs
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx|css)$
+    exclude: ^(node_modules/|gen/)
+
+  - id: lint-contrast
+    name: lint:contrast
+    entry: node scripts/check-contrast.mjs
+    language: system
+    pass_filenames: false
+    files: ^(src/theme/|scripts/check-contrast\.mjs)
+
+  # i18n enforcement.
+  #   verify-translations: every `t('foo')` referenced in source must
+  #     resolve in every required locale (default: en). Orphan keys
+  #     in the locale are tolerated up to --max-warnings-total to ease
+  #     adoption.
+  #   detect-hardcoded-strings: surfaces JSX label / placeholder /
+  #     aria-label literals that should funnel through `t()`. Runs in
+  #     warn mode (exit 0) until the codebase is fully migrated; flip
+  #     to --strict in a follow-up commit.
+  - id: verify-translations
+    name: verify:translations
+    entry: npm run verify:translations --silent
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx)$
+    exclude: ^(node_modules/|gen/|electron/)
+
+  - id: detect-hardcoded-strings
+    name: detect:hardcoded-strings
+    entry: node scripts/detect-hardcoded-strings.mjs --strict
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx)$
+    exclude: ^(node_modules/|gen/|electron/)
+
+  # Q-NEW-2 / S-NEW-3: ban JSX HTML renderers so the i18n module's
+  # escapeValue: false setting can't become an XSS vector. See
+  # docs/I18N.md for the full rationale.
+  - id: check-html-renderers
+    name: check:html-renderers
+    entry: node scripts/check-html-renderers.mjs
+    language: system
+    pass_filenames: false
+    files: \.(ts|tsx)$
+    exclude: ^(node_modules/|gen/|electron/)
 
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint
@@ -192,6 +267,11 @@ ci:
   - go-vet
   - eslint
   - prettier-check
+  - lint-hardcoded-styles
+  - lint-contrast
+  - verify-translations
+  - detect-hardcoded-strings
+  - check-html-renderers
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck

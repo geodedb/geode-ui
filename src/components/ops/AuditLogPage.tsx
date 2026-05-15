@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
+import { DataTable, EmptyCell, Field, Input, Stack, TableScroll } from '../ui'
 
 // AuditLogPage drives the /ops/audit tab. The Geode B11 endpoint backs
 // the table:
@@ -28,77 +32,35 @@ type Filters = {
   user: string
 }
 
-const Wrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const FilterBar = styled.div`
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  flex-wrap: wrap;
-`
-
-const Field = styled.label`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 0.85rem;
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-    min-width: 180px;
-  }
-`
-
 const Heading = styled.h2`
-  font-size: 1.1rem;
-  color: ${({ theme }) => theme.colors.text};
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-size: ${({ theme }) => theme.font.sizes.xl};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  color: ${({ theme }) => theme.text.primary};
+  margin: 0;
 `
 
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    vertical-align: top;
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
+const FilterBar = styled.form`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: ${({ theme }) => theme.spacing.md};
+  align-items: end;
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
-`
-
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 const Snippet = styled.code`
   display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8rem;
-  color: ${({ theme }) => theme.colors.textSecondary};
+  font-family: ${({ theme }) => theme.font.family.mono};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  color: ${({ theme }) => theme.text.muted};
   white-space: pre-wrap;
   word-break: break-all;
   max-width: 480px;
@@ -140,43 +102,68 @@ const fieldsSnippet = (e: AuditEntry): string => {
 }
 
 export const AuditLogPage: React.FC = () => {
-  const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const { t } = useTranslation()
   const [filters, setFilters] = useState<Filters>({
     since: '',
     event: '',
     user: '',
   })
 
-  // useEffect polls /api/v1/audit every 5 seconds while the page is
-  // mounted. The cancelled flag prevents stale resolves from clobbering
-  // state after unmount or a filter change.
+  // useApiResource fetches once on mount and on every filter change,
+  // owning the AbortController + stale-resolve guard. We layer a
+  // setInterval on top to drive 5-second polling via refetch(), and
+  // gate it on document.visibilityState so background tabs don't keep
+  // hammering the server (perf finding F15, bundled here as a 1-line
+  // tweak per the gap plan).
+  const {
+    data,
+    error: err,
+    refetch,
+  } = useApiResource<AuditEntry[]>(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = (await client.audit({
+        since: filters.since,
+        event: filters.event,
+        user: filters.user,
+      })) as { entries?: unknown[] }
+      return (r.entries ?? []) as AuditEntry[]
+    },
+    [filters.since, filters.event, filters.user]
+  )
+  const entries = data ?? []
+
   useEffect(() => {
-    let cancelled = false
-    const poll = (): void => {
-      client
-        .audit({
-          since: filters.since,
-          event: filters.event,
-          user: filters.user,
-        })
-        .then((r: { entries?: unknown[] }) => {
-          if (cancelled) return
-          setEntries((r.entries ?? []) as AuditEntry[])
-          setErr(null)
-        })
-        .catch((e: unknown) => {
-          if (cancelled) return
-          setErr(e instanceof Error ? e.message : String(e))
-        })
+    const tick = (): void => {
+      // Skip refetches while the tab is hidden; the next visibility
+      // change will trigger a poll on the visibility listener path.
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'hidden'
+      ) {
+        return
+      }
+      refetch()
     }
-    poll()
-    const id = window.setInterval(poll, 5000)
+    const onVisibility = (): void => {
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState === 'visible'
+      ) {
+        refetch()
+      }
+    }
+    const id = window.setInterval(tick, 5000)
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility)
+    }
     return () => {
-      cancelled = true
       window.clearInterval(id)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility)
+      }
     }
-  }, [filters.since, filters.event, filters.user])
+  }, [refetch])
 
   const rows = useMemo(
     () =>
@@ -201,63 +188,65 @@ export const AuditLogPage: React.FC = () => {
   }
 
   return (
-    <Wrap>
-      <Heading>Audit log ({entries.length})</Heading>
+    <Stack $gap="md">
+      <Heading>{t('audit.title', { count: entries.length })}</Heading>
       <FilterBar>
-        <Field>
-          Since
-          <input
-            placeholder="2025-01-01T00:00:00Z"
+        <Field label={t('audit.fieldSince')} htmlFor="al-since">
+          <Input
+            id="al-since"
+            placeholder={t('audit.sincePlaceholder')}
             value={filters.since}
             onChange={onSinceChange}
           />
         </Field>
-        <Field>
-          Event
-          <input
-            placeholder="event name"
+        <Field label={t('audit.fieldEvent')} htmlFor="al-event">
+          <Input
+            id="al-event"
+            placeholder={t('audit.eventPlaceholder')}
             value={filters.event}
             onChange={onEventChange}
           />
         </Field>
-        <Field>
-          User
-          <input
-            placeholder="username"
+        <Field label={t('audit.fieldUser')} htmlFor="al-user">
+          <Input
+            id="al-user"
+            placeholder={t('audit.userPlaceholder')}
             value={filters.user}
             onChange={onUserChange}
           />
         </Field>
       </FilterBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>User</th>
-            <th>Event</th>
-            <th>Fields</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={4}>No audit entries.</Empty>
+              <th>{t('audit.columnTimestamp')}</th>
+              <th>{t('audit.columnUser')}</th>
+              <th>{t('audit.columnEvent')}</th>
+              <th>{t('audit.columnFields')}</th>
             </tr>
-          ) : (
-            rows.map((r) => (
-              <tr key={r.key}>
-                <td>{r.ts}</td>
-                <td>{r.user}</td>
-                <td>{r.event}</td>
-                <td>
-                  <Snippet>{r.snippet}</Snippet>
-                </td>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={4}>{t('audit.empty')}</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
-    </Wrap>
+            ) : (
+              rows.map((r) => (
+                <tr key={r.key}>
+                  <td>{r.ts}</td>
+                  <td>{r.user}</td>
+                  <td>{r.event}</td>
+                  <td>
+                    <Snippet>{r.snippet}</Snippet>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
+    </Stack>
   )
 }

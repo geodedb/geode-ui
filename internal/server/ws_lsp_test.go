@@ -153,7 +153,7 @@ func newTestLspServer(t *testing.T, upstreamAddr string) (*httptest.Server, *Gra
 // to srv. Returns the encoded token.
 func mintTestToken(t *testing.T, srv *GraphServer, sub string) string {
 	t.Helper()
-	tok, _, err := srv.cfg.JWT.Issue(sub, "default", nil)
+	tok, _, err := srv.cfg.JWT.Issue(sub, "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}

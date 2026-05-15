@@ -1,0 +1,447 @@
+# GoReleaser config for the geode-ui Go server binary + container images.
+#
+# Layout mirrors ../geode/.goreleaser.yaml so operators get the same release
+# muscle memory across the two repos:
+#
+#   - Cross-compile a single static Go binary per linux/{amd64,arm64} +
+#     darwin/{amd64,arm64} target.
+#   - Bundle the SPA assets into the binary via //go:embed before the Go
+#     compile step (the npm build runs in `before:hooks`).
+#   - Build 4 docker images: debian + alpine, each in amd64 + arm64; push to
+#     both GitLab Container Registry (CI_REGISTRY_IMAGE) and Docker Hub
+#     (geodedb/geode-ui), with multi-arch manifest tags.
+#   - Produce nfpm packages (.deb, .rpm, .apk) so operators can `apt install
+#     geode-ui` from a downloaded deb.
+#   - GitLab Release publishing is owned by .gitlab-ci.yml's release-semantic
+#     component (release: section here is `disable: true`).
+#
+# Electron desktop installers are NOT built by goreleaser — they live in
+# parallel CI jobs (electron-mac/linux/windows) that invoke
+# electron-builder. The release-publish job in .gitlab-ci.yml collects
+# both sets of artifacts onto the same GitLab Release page.
+version: 2
+
+project_name: geode-ui
+
+before:
+  hooks:
+    # Build the SPA so internal/ui/dist/* is populated before `go build`
+    # runs the //go:embed pass. CI seeds node_modules via the install
+    # job; locally, the engineer should `npm ci` first.
+  - npm run build
+
+builds:
+- id: geode-ui
+  main: ./cmd/server
+  binary: geode-ui
+  env:
+  - CGO_ENABLED=0
+  - GOEXPERIMENT=jsonv2
+  - GOTOOLCHAIN=go1.26.2
+  goos:
+  - linux
+  - darwin
+  goarch:
+  - amd64
+  - arm64
+  flags:
+  - -trimpath
+  ldflags:
+  - -s -w
+  - -X main.version={{ .Version }}
+  - -X main.commit={{ .FullCommit }}
+  - -X main.date={{ .Date }}
+
+# =============================================================================
+# Archives - per-platform binary distribution
+# =============================================================================
+
+archives:
+- id: geode-ui-archives
+  ids:
+  - geode-ui
+  name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  format_overrides:
+  - goos: windows
+    formats: [zip]
+  files:
+  - README.md
+  - LICENSE
+  - docs/I18N.md
+  - docs/ELECTRON.md
+  - deploy/profiles.json
+
+# =============================================================================
+# Checksums + snapshots
+# =============================================================================
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}'
+
+changelog:
+  sort: asc
+  use: git
+  groups:
+  - title: Breaking Changes
+    regexp: ^.*!:.*$
+    order: 0
+  - title: Features
+    regexp: ^.*feat(\(.+\))?:.*$
+    order: 1
+  - title: Bug Fixes
+    regexp: ^.*fix(\(.+\))?:.*$
+    order: 2
+  - title: Security
+    regexp: ^.*sec(\(.+\))?:.*$
+    order: 3
+  - title: Performance
+    regexp: ^.*perf(\(.+\))?:.*$
+    order: 4
+  - title: Documentation
+    regexp: ^.*docs(\(.+\))?:.*$
+    order: 5
+  - title: Other
+    order: 999
+  filters:
+    exclude:
+    - '^chore:'
+    - '^style:'
+    - '^test\(e2e\):'
+    - Merge pull request
+    - Merge branch
+
+# =============================================================================
+# Docker Images - 4 variants × 2 registries
+# =============================================================================
+# CI requirements:
+#   • GitLab: $CI_REGISTRY_IMAGE is auto-populated; CI_JOB_TOKEN authenticates.
+#   • Docker Hub: DOCKERHUB_USERNAME + DOCKERHUB_TOKEN CI variables.
+#     SKIP_DOCKERHUB=true (set in CI when login fails) bypasses the push.
+#
+# Each image is single-arch; the docker_manifests section below stitches them
+# into multi-arch tags.
+
+dockers:
+  # --- Debian images: GitLab Registry ---
+- id: geode-ui-debian-amd64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: amd64
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-amd64'
+  dockerfile: deploy/Dockerfile.release
+  use: buildx
+  build_flag_templates:
+  - --pull
+  - --platform=linux/amd64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.source={{.GitURL}}
+  - --label=org.opencontainers.image.description=Geode UI - admin web UI for the Geode graph database
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+- id: geode-ui-debian-arm64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: arm64
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-arm64'
+  dockerfile: deploy/Dockerfile.release
+  use: buildx
+  build_flag_templates:
+  - --pull
+  - --platform=linux/arm64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.source={{.GitURL}}
+  - --label=org.opencontainers.image.description=Geode UI - admin web UI for the Geode graph database
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+  # --- Alpine images: GitLab Registry ---
+- id: geode-ui-alpine-amd64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: amd64
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine-amd64'
+  dockerfile: deploy/Dockerfile.release.alpine
+  use: buildx
+  build_flag_templates:
+  - --pull
+  - --platform=linux/amd64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}-alpine
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+- id: geode-ui-alpine-arm64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: arm64
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine-arm64'
+  dockerfile: deploy/Dockerfile.release.alpine
+  use: buildx
+  build_flag_templates:
+  - --pull
+  - --platform=linux/arm64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}-alpine
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+  # --- Debian images: Docker Hub (skipped on snapshot or when SKIP_DOCKERHUB=true) ---
+- id: geode-ui-dockerhub-debian-amd64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: amd64
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-amd64
+  dockerfile: deploy/Dockerfile.release
+  use: buildx
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+  build_flag_templates:
+  - --pull
+  - --platform=linux/amd64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.source=https://gitlab.com/devnw/codepros/geode/geode-ui
+  - --label=org.opencontainers.image.description=Geode UI - admin web UI for the Geode graph database
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+- id: geode-ui-dockerhub-debian-arm64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: arm64
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-arm64
+  dockerfile: deploy/Dockerfile.release
+  use: buildx
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+  build_flag_templates:
+  - --pull
+  - --platform=linux/arm64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.source=https://gitlab.com/devnw/codepros/geode/geode-ui
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+  # --- Alpine images: Docker Hub ---
+- id: geode-ui-dockerhub-alpine-amd64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: amd64
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-alpine-amd64
+  dockerfile: deploy/Dockerfile.release.alpine
+  use: buildx
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+  build_flag_templates:
+  - --pull
+  - --platform=linux/amd64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}-alpine
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+- id: geode-ui-dockerhub-alpine-arm64
+  ids:
+  - geode-ui
+  goos: linux
+  goarch: arm64
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-alpine-arm64
+  dockerfile: deploy/Dockerfile.release.alpine
+  use: buildx
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+  build_flag_templates:
+  - --pull
+  - --platform=linux/arm64
+  - --label=org.opencontainers.image.created={{.Date}}
+  - --label=org.opencontainers.image.title={{.ProjectName}}-alpine
+  - --label=org.opencontainers.image.revision={{.FullCommit}}
+  - --label=org.opencontainers.image.version={{.Version}}
+  - --label=org.opencontainers.image.licenses=Apache-2.0
+
+# =============================================================================
+# Multi-arch manifest lists - same shape as ../geode
+# =============================================================================
+
+docker_manifests:
+  # GitLab Registry: debian
+- name_template: '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}'
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-amd64'
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-arm64'
+
+- name_template: '{{ .Env.CI_REGISTRY_IMAGE }}:latest'
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-amd64'
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-arm64'
+
+- name_template: '{{ .Env.CI_REGISTRY_IMAGE }}:v{{ .Major }}.{{ .Minor }}'
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-amd64'
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-arm64'
+
+- name_template: '{{ .Env.CI_REGISTRY_IMAGE }}:v{{ .Major }}'
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-amd64'
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-arm64'
+
+  # GitLab Registry: alpine
+- name_template: '{{ .Env.CI_REGISTRY_IMAGE }}:alpine'
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine-amd64'
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine-arm64'
+
+- name_template: '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine'
+  image_templates:
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine-amd64'
+  - '{{ .Env.CI_REGISTRY_IMAGE }}:{{ .Version }}-alpine-arm64'
+
+  # Docker Hub: debian
+- name_template: docker.io/geodedb/geode-ui:{{ .Version }}
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-amd64
+  - docker.io/geodedb/geode-ui:{{ .Version }}-arm64
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+
+- name_template: docker.io/geodedb/geode-ui:latest
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-amd64
+  - docker.io/geodedb/geode-ui:{{ .Version }}-arm64
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+
+- name_template: docker.io/geodedb/geode-ui:v{{ .Major }}.{{ .Minor }}
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-amd64
+  - docker.io/geodedb/geode-ui:{{ .Version }}-arm64
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+
+- name_template: docker.io/geodedb/geode-ui:v{{ .Major }}
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-amd64
+  - docker.io/geodedb/geode-ui:{{ .Version }}-arm64
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+
+  # Docker Hub: alpine
+- name_template: docker.io/geodedb/geode-ui:alpine
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-alpine-amd64
+  - docker.io/geodedb/geode-ui:{{ .Version }}-alpine-arm64
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+
+- name_template: docker.io/geodedb/geode-ui:{{ .Version }}-alpine
+  image_templates:
+  - docker.io/geodedb/geode-ui:{{ .Version }}-alpine-amd64
+  - docker.io/geodedb/geode-ui:{{ .Version }}-alpine-arm64
+  skip_push: '{{ if or .IsSnapshot (eq .Env.SKIP_DOCKERHUB "true") }}true{{ end }}'
+
+# =============================================================================
+# System packages (deb/rpm/apk) via nFPM
+# =============================================================================
+
+nfpms:
+- id: geode-ui-packages
+  package_name: geode-ui
+  ids:
+  - geode-ui
+  vendor: CodePros
+  homepage: https://gitlab.com/devnw/codepros/geode/geode-ui
+  maintainer: Geode Team <geode@codepros.dev>
+  description: |-
+    Geode UI - admin web interface for the Geode graph database.
+
+    Self-hosted Go binary serving a React SPA + JSON+WS API. Pairs with
+    the Geode graph database (geodedb.com).
+  license: Apache-2.0
+  formats:
+  - deb
+  - rpm
+  - apk
+  bindir: /usr/bin
+  section: database
+  priority: optional
+  provides:
+  - geode-ui
+  dependencies:
+  - ca-certificates
+  file_name_template: >-
+    {{ .ProjectName }}_{{ .Version }}_
+    {{- if eq .Os "linux" }}Linux{{- else }}{{ title .Os }}{{ end }}_
+    {{- if eq .Arch "amd64" }}x86_64
+    {{- else if eq .Arch "arm64" }}arm64
+    {{- else }}{{ .Arch }}{{ end }}
+  contents:
+  - src: README.md
+    dst: /usr/share/doc/geode-ui/README.md
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/doc/geode-ui/LICENSE
+    file_info:
+      mode: 0644
+  - src: deploy/profiles.json
+    dst: /etc/geode-ui/profiles.json
+    type: config|noreplace
+    file_info:
+      mode: 0640
+
+      # Upload + log directories
+  - dst: /var/lib/geode-ui/uploads
+    type: dir
+    file_info:
+      mode: 0750
+  - dst: /var/log/geode-ui
+    type: dir
+    file_info:
+      mode: 0750
+  - dst: /etc/geode-ui
+    type: dir
+    file_info:
+      mode: 0755
+
+  deb:
+    compression: xz
+  rpm:
+    compression: xz
+
+# =============================================================================
+# Release publishing - delegated to .gitlab-ci.yml's release-semantic component
+# =============================================================================
+
+release:
+  disable: true
+
+# =============================================================================
+# Metadata
+# =============================================================================
+
+metadata:
+  mod_timestamp: '{{ .CommitTimestamp }}'
+
+announce:
+  skip: true

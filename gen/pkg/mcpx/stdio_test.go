@@ -3,6 +3,7 @@ package mcpx
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
@@ -14,7 +15,7 @@ import (
 func TestSTDIO_BackpressureAndBatch(t *testing.T) {
 	// Tools registry with echo
 	tools := map[string]Tool{
-		"echo": func(p jsontext.Value) (jsontext.Value, error) { return p, nil },
+		"echo": func(_ context.Context, p jsontext.Value) (jsontext.Value, error) { return p, nil },
 	}
 
 	inR, inW := io.Pipe()

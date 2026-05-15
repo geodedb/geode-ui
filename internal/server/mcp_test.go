@@ -72,7 +72,7 @@ func TestMCPServer_QueryDelegatesToHandleQuery(t *testing.T) {
 	srv := New(Config{Version: "test", Pool: &stubPool{db: db}})
 	mcp := NewMCPServer(srv)
 
-	if _, err := mcp.Query(&gentypes.QueryReq{Statement: "RETURN 1"}); err != nil {
+	if _, err := mcp.Query(context.Background(), &gentypes.QueryReq{Statement: "RETURN 1"}); err != nil {
 		t.Fatalf("MCP Query: %v", err)
 	}
 	sharedCapture.mu.Lock()
@@ -90,7 +90,7 @@ func TestMCPServer_QueryUsesGraphParam(t *testing.T) {
 	srv := New(Config{Version: "test", Pool: &stubPool{db: db}})
 	mcp := NewMCPServer(srv)
 
-	if _, err := mcp.Query(&gentypes.QueryReq{Statement: "MATCH (n) RETURN n", Graph: "social"}); err != nil {
+	if _, err := mcp.Query(context.Background(), &gentypes.QueryReq{Statement: "MATCH (n) RETURN n", Graph: "social"}); err != nil {
 		t.Fatalf("MCP Query: %v", err)
 	}
 	sharedCapture.mu.Lock()
@@ -110,7 +110,7 @@ func TestMCPServer_QueryUsesGraphParam(t *testing.T) {
 func TestMCPServer_QueryReturnsHandleQueryError(t *testing.T) {
 	srv := New(Config{Version: "test", Pool: &errPool{err: errors.New("upstream down")}})
 	mcp := NewMCPServer(srv)
-	_, err := mcp.Query(&gentypes.QueryReq{Statement: "RETURN 1"})
+	_, err := mcp.Query(context.Background(), &gentypes.QueryReq{Statement: "RETURN 1"})
 	if err == nil {
 		t.Fatal("expected error from underlying pool")
 	}

@@ -1,10 +1,34 @@
 package conn
 
 import (
+	"database/sql"
+	"database/sql/driver"
+	"io"
 	"reflect"
 	"testing"
 	"time"
 )
+
+// stubDriver is a no-op database/sql driver used by pool tests that need to
+// call Pool.DB() without a live Geode server. It accepts any DSN.
+type stubDriver struct{}
+type stubConn struct{}
+
+func (d *stubDriver) Open(_ string) (driver.Conn, error) { return &stubConn{}, nil }
+func (c *stubConn) Prepare(string) (driver.Stmt, error)  { return nil, io.ErrUnexpectedEOF }
+func (c *stubConn) Close() error                         { return nil }
+func (c *stubConn) Begin() (driver.Tx, error)            { return nil, io.ErrUnexpectedEOF }
+
+func init() {
+	sql.Register("stub", &stubDriver{})
+}
+
+// stubOpener is an sql.Open-compatible function that always uses the "stub"
+// driver, regardless of the driver name passed. Assign to p.dbOpener in tests
+// that need to call Pool.DB() without a live Geode server.
+func stubOpener(_, dsn string) (*sql.DB, error) {
+	return sql.Open("stub", dsn)
+}
 
 func TestPool_Lookup(t *testing.T) {
 	p, err := NewPool([]Profile{
@@ -73,18 +97,43 @@ func TestPool_Names(t *testing.T) {
 }
 
 func TestPool_DefaultConfigSensibleValues(t *testing.T) {
+	// Pool sizing must match the documented operational target of
+	// 2000 rps sustained / 400 rps burst (PERF-F11 / issue #55).
 	cfg := DefaultPoolConfig()
-	if cfg.MaxOpenConns != 16 {
-		t.Errorf("MaxOpenConns: got %d, want 16", cfg.MaxOpenConns)
+	if cfg.MaxOpenConns != 64 {
+		t.Errorf("MaxOpenConns: got %d, want 64", cfg.MaxOpenConns)
 	}
-	if cfg.MaxIdleConns != 4 {
-		t.Errorf("MaxIdleConns: got %d, want 4", cfg.MaxIdleConns)
+	if cfg.MaxIdleConns != 16 {
+		t.Errorf("MaxIdleConns: got %d, want 16", cfg.MaxIdleConns)
 	}
 	if cfg.ConnMaxLifetime != 5*time.Minute {
 		t.Errorf("ConnMaxLifetime: got %v, want 5m", cfg.ConnMaxLifetime)
 	}
 	if cfg.ConnMaxIdleTime != 25*time.Second {
 		t.Errorf("ConnMaxIdleTime: got %v, want 25s", cfg.ConnMaxIdleTime)
+	}
+}
+
+// TestPool_DB_AppliesDefaultLimits verifies the bumped defaults flow
+// through to the underlying *sql.DB via SetMaxOpenConns. Stats()
+// exposes MaxOpenConnections, which we read back to confirm the value
+// the database/sql layer is actually enforcing.
+func TestPool_DB_AppliesDefaultLimits(t *testing.T) {
+	p, err := NewPool([]Profile{
+		{Name: "local", DSN: "quic://127.0.0.1:3141"},
+	})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	p.dbOpener = stubOpener
+
+	db, err := p.DB("local")
+	if err != nil {
+		t.Fatalf("DB(local): %v", err)
+	}
+	if got := db.Stats().MaxOpenConnections; got != 64 {
+		t.Errorf("Stats().MaxOpenConnections: got %d, want 64", got)
 	}
 }
 
@@ -123,6 +172,7 @@ func TestPool_DB_LazyAndCached(t *testing.T) {
 		t.Fatalf("NewPool: %v", err)
 	}
 	t.Cleanup(func() { _ = p.Close() })
+	p.dbOpener = stubOpener
 
 	db1, err := p.DB("local")
 	if err != nil {
@@ -152,6 +202,7 @@ func TestPool_Close_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPool: %v", err)
 	}
+	p.dbOpener = stubOpener
 
 	// Force a *sql.DB to exist so Close has something to do.
 	if _, err := p.DB("local"); err != nil {
@@ -167,5 +218,51 @@ func TestPool_Close_Idempotent(t *testing.T) {
 
 	if _, err := p.DB("local"); err == nil {
 		t.Fatalf("DB after Close: want error, got nil")
+	}
+}
+
+func TestPoolReloadKeepsExistingDBs(t *testing.T) {
+	p, err := NewPool([]Profile{
+		{Name: "a", DSN: "stub://a"},
+		{Name: "b", DSN: "stub://b"},
+	})
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer func() { _ = p.Close() }()
+	p.dbOpener = stubOpener
+
+	dbA, err := p.DB("a")
+	if err != nil {
+		t.Fatalf("DB(a): %v", err)
+	}
+
+	if err := p.Reload([]Profile{
+		{Name: "a", DSN: "stub://a"},
+		{Name: "c", DSN: "stub://c"},
+	}); err != nil {
+		t.Fatalf("Reload: %v", err)
+	}
+
+	dbA2, err := p.DB("a")
+	if err != nil {
+		t.Fatalf("DB(a) after reload: %v", err)
+	}
+	if dbA != dbA2 {
+		t.Errorf("Reload re-opened existing 'a' handle")
+	}
+	if _, err := p.DB("b"); err == nil {
+		t.Errorf("DB(b) after reload: expected unknown-profile error, got nil")
+	}
+	if _, err := p.DB("c"); err != nil {
+		t.Errorf("DB(c) after reload: %v", err)
+	}
+}
+
+func TestPoolReloadRejectsEmpty(t *testing.T) {
+	p, _ := NewPool([]Profile{{Name: "a", DSN: "stub://a"}})
+	defer func() { _ = p.Close() }()
+	if err := p.Reload(nil); err == nil {
+		t.Errorf("Reload(nil): expected error, got nil")
 	}
 }

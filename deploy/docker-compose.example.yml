@@ -39,9 +39,22 @@ services:
     environment:
       # Generate with: openssl rand -hex 32
       JWT_SECRET_HEX: REPLACE_WITH_OPENSSL_RAND_HEX_32
-    command: [-listen, :8080, -jwt-secret-hex, '${JWT_SECRET_HEX}', -profiles, /etc/geode-ui/profiles.json]
+      # GAP-S5 (#118): required for at-rest encryption of DSN and TLS
+      # PEM material in the SQLite profile store. Generate with:
+      #   openssl rand -base64 32
+      # Loss of this key permanently locks any rows it encrypted out of
+      # decryption — store it in a secret manager (k8s Secret, Docker
+      # secret, etc.), not in version control.
+      GEODE_PROFILESTORE_KEY: REPLACE_WITH_OPENSSL_RAND_BASE64_32
+    # `-secure-cookies` defaults to true so the auth cookie carries the
+    # Secure flag (HTTPS-only). Set it to false in environments that serve
+    # geode-ui over plain HTTP, otherwise the browser will refuse to
+    # attach the cookie on subsequent requests.
+    command: [-listen, :8080, -jwt-secret-hex, '${JWT_SECRET_HEX}', -profiles, /etc/geode-ui/profiles.json, -upload-dir, /var/lib/geode-ui/uploads]
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
+    - geode-ui-uploads:/var/lib/geode-ui/uploads
 
 volumes:
   geode-data:
+  geode-ui-uploads:

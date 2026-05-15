@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +54,7 @@ func TestAuthJWT_MissingHeader(t *testing.T) {
 // can't set Authorization on the WebSocket upgrade request.
 func TestAuthJWT_QueryParamFallback(t *testing.T) {
 	iss := newTestIssuer(t)
-	tok, _, err := iss.Issue("alice", "default", []string{"admin"})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestAuthJWT_MalformedHeader(t *testing.T) {
 func TestAuthJWT_BadToken(t *testing.T) {
 	srv := New(Config{JWT: newTestIssuer(t)})
 	otherIssuer := newTestIssuer(t)
-	tok, _, err := otherIssuer.Issue("alice", "default", []string{"admin"})
+	tok, _, err := otherIssuer.Issue("alice", "default", []string{"admin"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestAuthJWT_BadToken(t *testing.T) {
 func TestAuthJWT_ValidToken(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	tok, _, err := iss.Issue("alice", "prod", []string{"admin", "dba"})
+	tok, _, err := iss.Issue("alice", "prod", []string{"admin", "dba"}, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestAuthJWT_ValidToken(t *testing.T) {
 func TestAuthJWT_LowercaseBearer(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	tok, _, err := iss.Issue("alice", "default", nil)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -166,11 +167,11 @@ func TestAuthJWT_LowercaseBearer(t *testing.T) {
 func TestAuthJWT_HeaderTakesPrecedenceOverQuery(t *testing.T) {
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
-	headerTok, _, err := iss.Issue("alice", "default", nil)
+	headerTok, _, err := iss.Issue("alice", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	queryTok, _, err := iss.Issue("mallory", "default", nil)
+	queryTok, _, err := iss.Issue("mallory", "default", nil, "")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -211,5 +212,111 @@ func TestAuthJWT_EmptyToken(t *testing.T) {
 	}
 	if !strings.Contains(authErr.Error(), "auth:") {
 		t.Fatalf("unexpected error: %v", authErr)
+	}
+}
+
+// TestAuthJWT_CookieFallback (SEC-F7 / #62 S3a) confirms a request with
+// no Authorization header but a `geode-ui-auth` cookie carrying a valid
+// JWT is authenticated. This is the new transport for SPA traffic so
+// the access token never sits in localStorage where DOM-XSS could
+// exfiltrate it.
+func TestAuthJWT_CookieFallback(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{JWT: iss})
+	tok, _, err := iss.Issue("alice", "default", []string{"admin"}, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: tok})
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	if got := userFromContext(r.Context()); got != "alice" {
+		t.Fatalf("user=%q want alice", got)
+	}
+}
+
+// TestAuthJWT_HeaderTakesPrecedenceOverCookie (SEC-F7 / #62 S3a) — when
+// both an Authorization header and a `geode-ui-auth` cookie carry tokens
+// for different subjects, the Authorization header wins. Mirrors the
+// pre-existing precedence over `?access_token=`.
+func TestAuthJWT_HeaderTakesPrecedenceOverCookie(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{JWT: iss})
+	headerTok, _, err := iss.Issue("alice", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	cookieTok, _, err := iss.Issue("mallory", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	r.Header.Set("Authorization", "Bearer "+headerTok)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: cookieTok})
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	if got := userFromContext(r.Context()); got != "alice" {
+		t.Fatalf("user=%q want alice (header wins over cookie)", got)
+	}
+}
+
+// TestAuthJWT_CookieTakesPrecedenceOverQuery (SEC-F7 / #62 S3a) — when
+// the Authorization header is absent but both a cookie and the
+// `?access_token=` querystring fallback are present, the cookie wins.
+// The querystring fallback exists for WS-only scenarios where browsers
+// can't attach cookies; if a cookie is present it's the more trusted
+// source.
+func TestAuthJWT_CookieTakesPrecedenceOverQuery(t *testing.T) {
+	iss := newTestIssuer(t)
+	srv := New(Config{JWT: iss})
+	cookieTok, _, err := iss.Issue("alice", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	queryTok, _, err := iss.Issue("mallory", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/ws/query?access_token="+queryTok, nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: cookieTok})
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	if got := userFromContext(r.Context()); got != "alice" {
+		t.Fatalf("user=%q want alice (cookie wins over query)", got)
+	}
+}
+
+// TestAuthJWT_EmptyCookieFallsThrough confirms an empty-string
+// `geode-ui-auth` cookie does not short-circuit other auth sources or
+// produce a parse-error 401; the request behaves as if no cookie were
+// present at all.
+func TestAuthJWT_EmptyCookieFallsThrough(t *testing.T) {
+	srv := New(Config{JWT: newTestIssuer(t)})
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: ""})
+	if err := srv.AuthJWT(r); err == nil {
+		t.Fatal("expected error for empty cookie + no other auth")
+	}
+}
+
+func TestAuthJWT_PopulatesConnectionID(t *testing.T) {
+	secret := bytes.Repeat([]byte("k"), 32)
+	iss, _ := jwt.NewIssuer(secret, time.Hour)
+	srv := New(Config{JWT: iss})
+
+	tok, _, _ := iss.Issue("alice", "default", []string{"admin"}, "conn-xyz-789")
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("AuthJWT: %v", err)
+	}
+	got := connectionIDFromContext(r.Context())
+	if got != "conn-xyz-789" {
+		t.Errorf("connectionIDFromContext = %q, want %q", got, "conn-xyz-789")
 	}
 }

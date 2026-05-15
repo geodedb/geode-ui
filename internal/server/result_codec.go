@@ -1,16 +1,59 @@
 package server
 
 import (
+	"bufio"
 	"database/sql"
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"io"
+	"log/slog"
 	"math"
+	"net/http"
+	"strconv"
 	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
+
+// errWriter is a first-error-latching wrapper around a *bufio.Writer used
+// by streamQueryResult. Once any write fails, every subsequent call is a
+// no-op and err holds the first failure — so the streaming body becomes a
+// linear sequence of `ew.str(...)` / `ew.marshal(...)` / `ew.byte(...)`
+// calls with a single error check at the end instead of a dozen inline
+// `if _, err := ...; err != nil { return ... }` blocks (Q9 / #125).
+type errWriter struct {
+	w   *bufio.Writer
+	err error
+}
+
+func (e *errWriter) str(s string) {
+	if e.err == nil {
+		_, e.err = io.WriteString(e.w, s)
+	}
+}
+
+func (e *errWriter) byte(b byte) {
+	if e.err == nil {
+		e.err = e.w.WriteByte(b)
+	}
+}
+
+func (e *errWriter) raw(p []byte) {
+	if e.err == nil {
+		_, e.err = e.w.Write(p)
+	}
+}
+
+// marshal streams v as JSON directly into the buffered writer via the
+// encoding/json/v2 streaming encoder — no per-call []byte allocation,
+// unlike json.Marshal(v) + w.Write(raw) (PERF-2026-05-11-07 / #145).
+func (e *errWriter) marshal(v any) {
+	if e.err == nil {
+		e.err = json.MarshalWrite(e.w, v)
+	}
+}
 
 // queryRowScanner is the read-only subset of *sql.Rows that scanQueryResult
 // needs. *sql.Tx.QueryContext and *sql.DB.QueryContext both return
@@ -24,19 +67,20 @@ type queryRowScanner interface {
 	Err() error
 }
 
-// scanQueryResult drains rows into a *gentypes.QueryResp using the same
-// shape Query exposes: per-column descriptors, per-row JSON arrays, a
-// graph summary, and elapsed_ms measured from start. Both the synchronous
-// query handler and the transactional Run handler call this so the shape
-// stays consistent across endpoints.
-func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp, error) {
+// queryColumnDescs builds the per-column {name,type} JSON descriptors for a
+// result set. Pulled out of scanQueryResult so the streaming HTTP handler
+// (PERF-F3) can inspect columns *before* it commits to a 200 — a failure
+// here still surfaces as a clean 500 because nothing has been written yet.
+// Returns the marshalled descriptors and the raw column-name slice (the
+// caller needs len(cols) to size its scan buffers).
+func queryColumnDescs(rows queryRowScanner) ([]jsontext.Value, []string, error) {
 	cols, err := rows.Columns()
 	if err != nil {
-		return nil, fmt.Errorf("columns: %w", err)
+		return nil, nil, fmt.Errorf("columns: %w", err)
 	}
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
-		return nil, fmt.Errorf("column types: %w", err)
+		return nil, nil, fmt.Errorf("column types: %w", err)
 	}
 	colDescs := make([]jsontext.Value, len(cols))
 	for i, name := range cols {
@@ -45,35 +89,192 @@ func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp
 			Type string `json:"type"`
 		}{Name: name, Type: colTypes[i].DatabaseTypeName()})
 		if mErr != nil {
-			return nil, fmt.Errorf("marshal column desc: %w", mErr)
+			return nil, nil, fmt.Errorf("marshal column desc: %w", mErr)
 		}
 		colDescs[i] = jsontext.Value(raw)
 	}
+	return colDescs, cols, nil
+}
 
-	var allRows [][]any
-	var rowJSON []jsontext.Value
+// streamFlushEvery is the row interval at which streamQueryResult flushes
+// the buffered writer + http.Flusher so a slow consumer sees rows arrive
+// incrementally rather than in one big chunk at end-of-stream. Small enough
+// that latency stays low on a trickle of rows, large enough that a tight
+// row loop isn't dominated by flush syscalls.
+const streamFlushEvery = 64
+
+// streamQueryResult writes a *gentypes.QueryResp-shaped JSON document to w
+// incrementally: the {"columns":[...],"rows":[ head (then an immediate
+// flush so TTFB == first-rows-arrive, not all-rows-collected), each row as
+// a JSON array element (flushing every streamFlushEvery rows), then the
+// "row_count" / "elapsed_ms" / "graph_summary" trailer that closes the
+// object. The graph summary is folded inline as rows are scanned, exactly
+// like scanQueryResult — no second pass, no [][]any buffer.
+//
+// Contract: caller must NOT have written anything to w yet (this function
+// owns the status line / Content-Type / body). On a mid-stream driver error
+// (rows.Scan or rows.Err) the head is already on the wire, so we return the
+// error with the JSON document left intentionally truncated (unclosed); the
+// caller's generated wrapper logs it but cannot change the 200 status. Such
+// a mid-stream abort is additionally surfaced server-side via slog.Warn
+// (Q39 / #134) because the truncated body is the only client-visible
+// signal otherwise. On success returns the row count and a nil error.
+func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []string, colDescs []jsontext.Value, start time.Time) (int64, error) {
+	bw := bufio.NewWriter(w)
+	flusher, _ := w.(http.Flusher)
+	flush := func() {
+		_ = bw.Flush()
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	// midStreamAbort logs the abort and wraps err for the caller. Called
+	// only after the document head is on the wire, so the on-the-wire
+	// behavior (truncated body, 200 already committed) is unchanged — this
+	// just makes the failure visible in the server logs (Q39 / #134).
+	midStreamAbort := func(stage string, rowCount int64, err error) (int64, error) {
+		slog.Warn("streamQueryResult: mid-stream abort",
+			"stage", stage,
+			"rows_sent", rowCount,
+			"elapsed_ms", time.Since(start).Milliseconds(),
+			"err", err)
+		return rowCount, fmt.Errorf("%s: %w", stage, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	// 200 is implied on the first Write; set it explicitly so the
+	// status is unambiguous even for an empty result set.
+	w.WriteHeader(http.StatusOK)
+
+	ew := &errWriter{w: bw}
+	ew.str(`{"columns":[`)
+	for i, cd := range colDescs {
+		if i > 0 {
+			ew.byte(',')
+		}
+		ew.raw(cd)
+	}
+	ew.str(`],"rows":[`)
+	if ew.err != nil {
+		// Head failed before any flush: nothing meaningful is on the wire,
+		// but the status is already committed — treat as a head error.
+		return 0, fmt.Errorf("write head: %w", ew.err)
+	}
+	flush() // TTFB: client sees the document open before any rows are fetched.
+
+	summary := newGraphSummaryAccum()
+	row := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range row {
+		ptrs[i] = &row[i]
+	}
+	rowCount := int64(0)
 	for rows.Next() {
-		row := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
+		// Reset before each Scan — driver may leave previous values in
+		// place for null/skipped columns otherwise.
 		for i := range row {
-			ptrs[i] = &row[i]
+			row[i] = nil
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			// Head already on the wire — abort with a truncated body.
+			return midStreamAbort("scan", rowCount, err)
+		}
+		summary.visitRow(row)
+		if rowCount > 0 {
+			ew.byte(',')
+		}
+		// Stream the row directly into the buffered writer — no per-row
+		// []byte allocation (PERF-2026-05-11-07 / #145). The v2 encoder
+		// completes synchronously before the next loop iteration overwrites
+		// the shared `row` backing array.
+		ew.marshal(row)
+		if ew.err != nil {
+			return midStreamAbort("write row", rowCount, ew.err)
+		}
+		rowCount++
+		if rowCount%streamFlushEvery == 0 {
+			flush()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return midStreamAbort("rows", rowCount, err)
+	}
+
+	writeTrailer(ew, rowCount, start, summary.finish())
+	if ew.err != nil {
+		return midStreamAbort("write trailer", rowCount, ew.err)
+	}
+	flush()
+	return rowCount, nil
+}
+
+// writeTrailer appends the `],"row_count":N,"elapsed_ms":M,"graph_summary":{...}}`
+// tail that closes the streamed QueryResp document. Pulled out of
+// streamQueryResult so the row loop reads as a flat sequence of writes
+// (Q9 / #125). Errors latch on ew; the caller checks ew.err once.
+func writeTrailer(ew *errWriter, rowCount int64, start time.Time, summary GraphSummary) {
+	ew.str(`],"row_count":`)
+	ew.str(strconv.FormatInt(rowCount, 10))
+	ew.str(`,"elapsed_ms":`)
+	ew.str(strconv.FormatInt(time.Since(start).Milliseconds(), 10))
+	ew.str(`,"graph_summary":`)
+	ew.marshal(summary)
+	ew.byte('}')
+}
+
+// scanQueryResult drains rows into a *gentypes.QueryResp using the same
+// shape Query exposes: per-column descriptors, per-row JSON arrays, a
+// graph summary, and elapsed_ms measured from start. Both the synchronous
+// query handler and the transactional Run handler call this so the shape
+// stays consistent across endpoints.
+//
+// PERF-F1 / issue #18: this is a single-pass scan. Each row is scanned
+// once, fed through the inline graph-summary accumulator (visitRow), then
+// JSON-marshalled. The previous implementation buffered every row into a
+// [][]any slice and walked it again in extractGraphSummary -- two full
+// passes plus an extra row-sized allocation per result.
+func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp, error) {
+	colDescs, cols, err := queryColumnDescs(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Single-pass row drain: scan -> fold into summary -> marshal -> append.
+	// We reuse one row backing array per iteration; the JSON marshaller
+	// snapshots its inputs so the next iteration can safely overwrite the
+	// slice contents.
+	rowJSON := make([]jsontext.Value, 0)
+	summary := newGraphSummaryAccum()
+	row := make([]any, len(cols))
+	ptrs := make([]any, len(cols))
+	for i := range row {
+		ptrs[i] = &row[i]
+	}
+	rowCount := int64(0)
+	for rows.Next() {
+		// Reset before each Scan -- driver may leave previous values in
+		// place for null/skipped columns otherwise.
+		for i := range row {
+			row[i] = nil
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
-		allRows = append(allRows, row)
+		summary.visitRow(row)
 		raw, mErr := json.Marshal(row)
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal row: %w", mErr)
 		}
 		rowJSON = append(rowJSON, jsontext.Value(raw))
+		rowCount++
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	summary := extractGraphSummary(allRows)
-	summaryJSON, err := json.Marshal(summary)
+	graphSummary := summary.finish()
+	summaryJSON, err := json.Marshal(graphSummary)
 	if err != nil {
 		return nil, fmt.Errorf("marshal graph summary: %w", err)
 	}
@@ -81,18 +282,11 @@ func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp
 	return &gentypes.QueryResp{
 		Columns:      colDescs,
 		Rows:         rowJSON,
-		RowCount:     int64(len(allRows)),
+		RowCount:     rowCount,
 		ElapsedMs:    time.Since(start).Milliseconds(),
 		GraphSummary: jsontext.Value(summaryJSON),
 	}, nil
 }
-
-// extractGraphSummary walks the rows of a query result and pulls out any
-// nodes/edges/paths so the UI can render a graph view alongside the table.
-//
-// Geode returns nodes as map[string]any with keys {id, labels, properties},
-// edges as {id, start_node, end_node, type, properties}, paths as
-// {nodes: []map, edges: []map}. See geode-client-go/rows.go:118-138.
 
 // GraphNode is the JSON-friendly representation of a Geode node row cell.
 type GraphNode struct {
@@ -117,48 +311,89 @@ type GraphSummary struct {
 	Edges []GraphEdge `json:"edges"`
 }
 
+// graphSummaryAccum is the streaming state used by scanQueryResult to
+// extract the graph summary inline as rows are scanned. visitRow is
+// called once per row with the raw cell slice; finish returns the
+// finalised GraphSummary at end-of-stream.
+//
+// The accumulator is a thin wrapper around two dedup maps -- it deliberately
+// has no buffering of its own beyond the GraphSummary slices it builds.
+type graphSummaryAccum struct {
+	seenNode map[int64]struct{}
+	seenEdge map[int64]struct{}
+	out      GraphSummary
+}
+
+func newGraphSummaryAccum() *graphSummaryAccum {
+	return &graphSummaryAccum{
+		seenNode: map[int64]struct{}{},
+		seenEdge: map[int64]struct{}{},
+	}
+}
+
+// visit drains a single decoded JSON value (cell, list element, or nested
+// path member) into the accumulator. The recursion mirrors the previous
+// extractGraphSummary closure: nodes have {id, labels}, edges have
+// {id, start_node, end_node}, and paths have {nodes:[], edges:[]}.
+func (a *graphSummaryAccum) visit(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		if id, ok := nodeID(t); ok {
+			if _, dup := a.seenNode[id]; !dup {
+				a.out.Nodes = append(a.out.Nodes, asNode(t))
+				a.seenNode[id] = struct{}{}
+			}
+		}
+		if id, ok := edgeID(t); ok {
+			if _, dup := a.seenEdge[id]; !dup {
+				a.out.Edges = append(a.out.Edges, asEdge(t))
+				a.seenEdge[id] = struct{}{}
+			}
+		}
+		if nodes, ok := t["nodes"].([]any); ok {
+			for _, n := range nodes {
+				a.visit(n)
+			}
+		}
+		if edges, ok := t["edges"].([]any); ok {
+			for _, e := range edges {
+				a.visit(e)
+			}
+		}
+	case []any:
+		for _, item := range t {
+			a.visit(item)
+		}
+	}
+}
+
+// visitRow folds one row's worth of cells into the accumulator.
+func (a *graphSummaryAccum) visitRow(row []any) {
+	for _, cell := range row {
+		a.visit(cell)
+	}
+}
+
+// finish returns the GraphSummary built up so far. The accumulator is
+// not safe to reuse afterwards.
+func (a *graphSummaryAccum) finish() GraphSummary {
+	return a.out
+}
+
+// extractGraphSummary walks rows and returns a GraphSummary. Retained
+// for the test surface and any future caller that already has the rows
+// buffered; the production hot path now folds the work inline via
+// graphSummaryAccum during the single-pass scanQueryResult drain.
+//
+// Geode returns nodes as map[string]any with keys {id, labels, properties},
+// edges as {id, start_node, end_node, type, properties}, paths as
+// {nodes: []map, edges: []map}. See geode-client-go/rows.go:118-138.
 func extractGraphSummary(rows [][]any) GraphSummary {
-	seenNode := map[int64]struct{}{}
-	seenEdge := map[int64]struct{}{}
-	var summary GraphSummary
-	var visit func(v any)
-	visit = func(v any) {
-		switch t := v.(type) {
-		case map[string]any:
-			if id, ok := nodeID(t); ok {
-				if _, dup := seenNode[id]; !dup {
-					summary.Nodes = append(summary.Nodes, asNode(t))
-					seenNode[id] = struct{}{}
-				}
-			}
-			if id, ok := edgeID(t); ok {
-				if _, dup := seenEdge[id]; !dup {
-					summary.Edges = append(summary.Edges, asEdge(t))
-					seenEdge[id] = struct{}{}
-				}
-			}
-			if nodes, ok := t["nodes"].([]any); ok {
-				for _, n := range nodes {
-					visit(n)
-				}
-			}
-			if edges, ok := t["edges"].([]any); ok {
-				for _, e := range edges {
-					visit(e)
-				}
-			}
-		case []any:
-			for _, item := range t {
-				visit(item)
-			}
-		}
-	}
+	a := newGraphSummaryAccum()
 	for _, row := range rows {
-		for _, cell := range row {
-			visit(cell)
-		}
+		a.visitRow(row)
 	}
-	return summary
+	return a.finish()
 }
 
 // toInt64 best-effort coerces a decoded JSON value into an int64. JSON

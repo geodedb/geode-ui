@@ -1,108 +1,217 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
-import { login } from '../api/auth'
+
 import { useAuth } from '../auth/AuthProvider'
+import { Button, Field, Input, Logo } from '../components/ui'
+import { fetchPublicProfiles, PublicProfile } from '../api/auth'
+import { getStoredPassword, isElectron } from '../api/electron-bridge'
 
 const Form = styled.form`
-  max-width: 320px;
+  max-width: 380px;
   margin: 60px auto;
-  padding: 24px;
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 8px;
+  padding: ${({ theme }) => theme.spacing.lg};
+  background: ${({ theme }) => theme.bg.surface};
+  border: 1px solid ${({ theme }) => theme.border.default};
+  border-radius: ${({ theme }) => theme.radii.xl};
+  box-shadow: ${({ theme }) => theme.shadows.md};
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
 `
 
 const Title = styled.h1`
-  color: ${({ theme }) => theme.colors.text};
+  font-family: ${({ theme }) => theme.font.family.display};
+  font-size: ${({ theme }) => theme.font.sizes.xxl};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  color: ${({ theme }) => theme.text.primary};
+  margin: 0 0 ${({ theme }) => theme.spacing.sm};
 `
 
-const Field = styled.label`
+const LogoSlot = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  & input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: ${({ theme }) => theme.colors.text};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-  }
-`
-
-const Button = styled.button`
-  padding: 8px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
+  justify-content: center;
+  margin-bottom: ${({ theme }) => theme.spacing.md};
 `
 
 const ErrText = styled.p`
-  color: #ef4444;
+  color: ${({ theme }) => theme.text.danger};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+`
+
+const ProfileList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.xs};
+`
+
+const profileBorderColor = ({
+  theme,
+  $selected,
+}: {
+  theme: import('../theme/types').Theme
+  $selected?: boolean
+}) => ($selected ? theme.colors.primary : theme.border.default)
+
+const profileBg = ({
+  theme,
+  $selected,
+}: {
+  theme: import('../theme/types').Theme
+  $selected?: boolean
+}) => ($selected ? theme.bg.subtle : theme.bg.surface)
+
+const ProfileButton = styled.button<{ $selected?: boolean }>`
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  border: 1px solid ${profileBorderColor};
+  background: ${profileBg};
+  border-radius: ${({ theme }) => theme.radii.md};
+  cursor: pointer;
+  &:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+`
+
+const ProfileDescription = styled.div`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
 `
 
 export const LoginPage: React.FC = () => {
-  const { setToken } = useAuth()
+  const { signIn } = useAuth()
+  const { t } = useTranslation()
   const nav = useNavigate()
+
+  const [profiles, setProfiles] = useState<PublicProfile[] | null>(null)
+  const [loadErr, setLoadErr] = useState<boolean>(false)
+  const [profile, setProfile] = useState<string>('default')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [profile, setProfile] = useState('default')
+  const [savePw, setSavePw] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchPublicProfiles()
+      .then((list) => {
+        if (cancelled) return
+        setProfiles(list)
+        if (list.length > 0 && list[0]) setProfile(list[0].name)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setLoadErr(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!username || !profile) return undefined
+    let cancelled = false
+    getStoredPassword(profile, username).then((pw) => {
+      if (cancelled) return
+      if (pw) setPassword(pw)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [profile, username])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      const r = await login(username, password, profile)
-      setToken(r.access_token)
+      await signIn(username, password, profile, savePw)
       nav('/', { replace: true })
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'login failed')
+    } catch (e2: unknown) {
+      setErr(e2 instanceof Error ? e2.message : t('auth.loginFailed'))
     } finally {
       setBusy(false)
     }
   }
 
+  const showList = profiles && profiles.length > 0 && !loadErr
+
   return (
     <Form onSubmit={submit}>
-      <Title>Sign in</Title>
-      <Field>
-        Profile
-        <input value={profile} onChange={(e) => setProfile(e.target.value)} />
-      </Field>
-      <Field>
-        Username
-        <input
+      <LogoSlot>
+        <Logo height={36} variant="on-light" />
+      </LogoSlot>
+      <Title>{t('auth.signIn')}</Title>
+
+      {showList ? (
+        <ProfileList aria-label={t('auth.profileList')}>
+          {profiles!.map((p) => (
+            <li key={p.name}>
+              <ProfileButton
+                type="button"
+                $selected={p.name === profile}
+                onClick={() => setProfile(p.name)}
+                aria-pressed={p.name === profile}
+                aria-label={p.name}
+              >
+                <strong>{p.name}</strong>
+                {p.description ? (
+                  <ProfileDescription>{p.description}</ProfileDescription>
+                ) : null}
+              </ProfileButton>
+            </li>
+          ))}
+        </ProfileList>
+      ) : (
+        <Field label={t('auth.profile')} htmlFor="login-profile">
+          <Input
+            id="login-profile"
+            value={profile}
+            onChange={(e) => setProfile(e.target.value)}
+          />
+        </Field>
+      )}
+
+      <Field label={t('auth.username')} htmlFor="login-username" required>
+        <Input
+          id="login-username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
           required
         />
       </Field>
-      <Field>
-        Password
-        <input
+      <Field label={t('auth.password')} htmlFor="login-password" required>
+        <Input
+          id="login-password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
           required
         />
       </Field>
-      <Button disabled={busy} type="submit">
-        {busy ? '...' : 'Login'}
+      {isElectron() ? (
+        <Field label={t('auth.savePassword')} htmlFor="login-savePw">
+          <input
+            id="login-savePw"
+            type="checkbox"
+            checked={savePw}
+            onChange={(e) => setSavePw(e.target.checked)}
+          />
+        </Field>
+      ) : null}
+      <Button type="submit" loading={busy} fullWidth>
+        {t('auth.signInButton')}
       </Button>
-      {err && <ErrText>{err}</ErrText>}
+      {err && <ErrText role="alert">{err}</ErrText>}
     </Form>
   )
 }

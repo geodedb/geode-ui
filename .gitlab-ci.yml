@@ -16,12 +16,43 @@ include:
   # Release
   - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.7.1
 
+  # Code signing — Windows Authenticode via ssl.com eSigner.
+  # Pulls credentials from group-level CI variables ESIGNER_*; see
+  # deploy/RELEASE.md for the one-time ssl.com setup.
+  #
+  # TODO(#127): pin to an immutable tag. As of 2026-05, the
+  # `codesign-windows-ssl` component exists only on ci-catalog's
+  # `main` branch (commit db708c0, "feat(catalog): add
+  # codesign-windows-ssl component") — it has NOT shipped in any
+  # tagged release yet (latest catalog tag is v1.25.1, which predates
+  # it; the `~latest` *release* alias resolves to v1.19.2). Every
+  # other catalog component below is pinned to @v1.7.1. The moment a
+  # ci-catalog tag includes templates/codesign-windows-ssl/, bump
+  # this to that tag. `scripts/check-ci-pins.sh` allowlists THIS one
+  # `@~latest` by line content so the guard still catches any *new*
+  # `@latest`/`@~latest` regression.
+  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@~latest # ci-pins-allow: no tagged catalog release ships this component yet (see TODO #127)
+    inputs:
+      input_glob: 'release/win/*.exe'
+      needs: 'electron:win'
+      tag_only: true
+      job_name: 'codesign:electron-win'
+      stage: release
+      allow_failure: true
+
 variables:
   NODE_VERSION: '22.14.0'
+  GO_VERSION: '1.26-alpine'
+  GORELEASER_VERSION: 'v2.13.3'
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
   FF_USE_FASTZIP: 'true'
   ARTIFACT_COMPRESSION_LEVEL: 'fast'
   CACHE_COMPRESSION_LEVEL: 'fast'
+  # Docker Hub credentials (set as protected CI variables in GitLab):
+  #   DOCKERHUB_USERNAME — Docker Hub login (e.g., "geodedb")
+  #   DOCKERHUB_TOKEN    — Docker Hub access token (NOT a password)
+  # When unset, goreleaser exports SKIP_DOCKERHUB=true and the dockerhub
+  # image variants are built locally but not pushed.
 
 default:
   image: node:${NODE_VERSION}
@@ -49,6 +80,7 @@ stages:
   - security
   - sbom
   - release
+  - publish
 
 # ============================================================================
 # INSTALL STAGE
@@ -103,6 +135,76 @@ prettier:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Closes GAP-008: the four ratchet gates land in CI alongside the
+# existing pre-commit hooks. Local pre-commit + remote CI agree on
+# the same enforcement contract, so a contributor who skips the
+# pre-commit hook still blocks at MR time.
+audit-ratchets:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run lint:hardcoded-styles
+    - npm run lint:contrast
+    - npm run verify:translations
+    - npm run detect:hardcoded-strings
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Closes GAP-009 / Q25 (#170): type-check the Electron main + preload
+# independently from the SPA tsc pass. The renderer tsconfig
+# (tsconfig.json) does not include electron/ — without this job, a
+# regression in electron/main.ts or electron/preload.ts would land
+# silently and only surface during a release-engineer's
+# `pnpm electron:package` run. `electron` and `@types/node` are now in
+# devDependencies (so `npm run electron:tsc` resolves the `electron`
+# module + `node` lib types), the electron sources type-check cleanly,
+# and the job is a real gate — no longer allow_failure.
+electron-typecheck:
+  stage: lint
+  needs: ['install']
+  script:
+    - npm run electron:tsc
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - electron/**/*
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Supply-chain pin guard (Q32 / #127, SEC F-SUP-3 / #153). The
+# pre-commit hook of the same name runs locally; this job mirrors it at
+# MR time so a contributor who skipped pre-commit still blocks here.
+ci-pins-check:
+  stage: lint
+  needs: []
+  image: alpine:3
+  before_script: []
+  cache: []
+  script:
+    - apk add --no-cache bash grep
+    - bash scripts/check-ci-pins.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Error-code seam guard. The pre-commit hook of the same name runs
+# locally; this job mirrors it at MR time so a contributor who skipped
+# pre-commit still blocks here if src/api/serverErrorCodes.ts names a
+# code that internal/server/errorcodes.go no longer declares.
+error-codes-check:
+  stage: lint
+  needs: []
+  image: alpine:3
+  before_script: []
+  cache: []
+  script:
+    - apk add --no-cache nodejs
+    - node --test scripts/check-error-codes.test.mjs
+    - node scripts/check-error-codes.mjs
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # ============================================================================
 # TEST STAGE
 # ============================================================================
@@ -136,6 +238,9 @@ build:
   needs:
     - job: install
     - job: eslint
+    - job: typecheck
+    - job: unit-tests
+    - job: audit-ratchets
   script:
     - npm run build
   artifacts:
@@ -178,7 +283,7 @@ pages:
   image: golang:1.26-alpine
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.26.2
+    GOTOOLCHAIN: go1.26.3
     CGO_ENABLED: "0"
   before_script: []
   cache: []
@@ -188,7 +293,9 @@ go:lint:
   stage: lint
   script:
     - apk add --no-cache git make
-    - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+    # Pinned to an immutable tag (Q32 / #127). Bump deliberately; keep in
+    # sync with the version local devs run (see CLAUDE.md / scripts).
+    - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
     - golangci-lint run
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -200,7 +307,14 @@ go:generate-verify:
   script:
     - apk add --no-cache make git nodejs npm
     - npm ci
-    - go install devnw.dev/genapi/cmd/genapi@latest
+    # Pinned to an immutable tag (Q32 / #127). Bump in lockstep with the
+    # genapi version the gen/ tree was generated against. NOTE: this pin
+    # does not change the fetch auth path — CI's Go jobs run with
+    # `before_script: []` and no visible GOPRIVATE/.netrc, so genapi must
+    # already be go-gettable by the runner (it was being fetched at
+    # @latest before); runner-side module-proxy/auth for devnw.dev/genapi
+    # is a separate, pre-existing concern.
+    - go install devnw.dev/genapi/cmd/genapi@v0.3.1
     - make generate
     - git diff --exit-code -- gen/ || (echo "make generate produced changes — commit them"; exit 1)
   rules:
@@ -215,6 +329,38 @@ go:test:
     - npm ci
     - npm run build
     - go test -race -cover -failfast ./...
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Performance regression gate (PERF-2026-05-11-11 / #156).
+#
+# Runs `make bench-gate`, which executes the curated benchmark set
+# (scripts/bench-gate.sh — internal/conn, internal/server, internal/jwt,
+# gen/pkg/{wsx,oidcx,securex,gen}) with `-count=6` and a bounded `-benchtime`,
+# then diffs the result against the committed `bench-baseline.txt` via
+# `benchstat`. The job fails if any benchmark regressed > 10% in ns/op, B/op,
+# or allocs/op with a statistically significant delta.
+#
+# `allow_failure: true` on purpose: shared CI runners are noisy. The high
+# -count + benchstat's significance test suppress most false positives, but
+# not all — treat a red gate as "go investigate", not "you broke prod". After
+# a deliberate, accepted perf change, regenerate the baseline with
+# `make bench-baseline` and commit `bench-baseline.txt`. See docs/ARCHITECTURE.md
+# ("Performance SLOs"). Promote to `allow_failure: false` once runner noise is
+# characterised on real telemetry.
+bench-gate:
+  <<: *go_defaults
+  stage: test
+  needs: ['go:test']
+  script:
+    - apk add --no-cache git make bash
+    # Pinned to an immutable pseudo-version (Q32 / #127); x/perf has no
+    # semver tags, so this is the latest tagged commit of cmd/benchstat.
+    - go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260409210113-8e83ce0f7b1c
+    - export PATH="$(go env GOPATH)/bin:$PATH"
+    - make bench-gate
+  allow_failure: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -242,3 +388,371 @@ docker:build:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
+
+# ============================================================================
+# E2E STAGE - Playwright suite against the full docker-compose stack
+# ============================================================================
+#
+# Runs the e2e Playwright suite against the docker-compose.test.yml stack.
+# The stack expects a pre-built geode binary at ../geode/zig-out/bin/geode
+# (see deploy/geode/Dockerfile.geode). In CI we clone the geode repo at the
+# pinned tag and run `zig build` before invoking `make e2e-up`. This requires
+# Zig 0.16.0+ on the runner (installed inline below). If the geode repo
+# becomes inaccessible from CI, switch this job to `when: manual` and rely
+# on local `make e2e-ci` runs until the geode runtime ships as a binary
+# release artifact.
+e2e:playwright:
+  stage: test
+  image: docker:25
+  services:
+    - docker:25-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
+    JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
+    ZIG_VERSION: "0.16.0"
+  script:
+    - apk add --no-cache make git bash curl xz tar
+    # Install Zig so the geode binary can be built on the host.
+    - curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
+    - mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+    - export PATH="/opt/zig:$PATH"
+    - zig version
+    # Fetch the geode runtime sources at the pinned tag and build the binary.
+    - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git ../geode || git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/geode/geode.git ../geode
+    - (cd ../geode && zig build -Doptimize=ReleaseSafe)
+    # Build the e2e stack and bring services up.
+    - make e2e-up
+    # Wait for geode-ui to be ready.
+    - |
+      for i in $(seq 1 90); do
+        if wget -qO- http://docker:8080/healthz 2>/dev/null | grep -q ok; then
+          echo "geode-ui is healthy"
+          break
+        fi
+        sleep 2
+      done
+    # Build the playwright runner and run the suite. Mount the report dir.
+    - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
+    - mkdir -p e2e/playwright-report
+    - >
+      docker run --rm --network=host
+      -e UI_URL=http://docker:8080
+      -e MCP_HOST=docker
+      -e MCP_PORT=8090
+      -e ADMIN_USER=geode
+      -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
+      -e ADMIN_PROFILE=default
+      -v "$PWD/e2e/playwright-report:/work/e2e/playwright-report"
+      pw:local
+  after_script:
+    - make e2e-down || true
+  artifacts:
+    when: always
+    paths:
+      - e2e/playwright-report/
+    expire_in: 7 days
+  # Only run on main and on merge requests touching e2e or backend.
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ============================================================================
+# RELEASE STAGE - GoReleaser (Go binary + container images + nfpm packages)
+# ============================================================================
+#
+# Two release entry points mirroring the ../geode pipeline:
+#
+#   • goreleaser:snapshot — runs on every main-branch commit. Builds the
+#     binaries + images locally and pushes the GitLab Container Registry
+#     tags only. Never touches Docker Hub or the GitLab Release page.
+#     allow_failure: true so a flaky goreleaser run doesn't block main.
+#
+#   • goreleaser:release — runs only on git tags matching v*. Pushes to
+#     Docker Hub when DOCKERHUB_USERNAME + DOCKERHUB_TOKEN are set.
+#     Hard-blocks on failure.
+#
+# Both jobs install pinned goreleaser via tarball download (no
+# pipe-to-shell), authenticate to registries, then invoke goreleaser.
+
+.goreleaser-base:
+  image: docker:25
+  services:
+    - docker:25-dind
+  tags:
+    - company
+  variables:
+    DOCKER_TLS_CERTDIR: ''
+    DOCKER_BUILDKIT: '1'
+    GIT_DEPTH: '0'
+  before_script:
+    # Tools: alpine package set + node (for the npm-build before-hook).
+    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm
+    # Goreleaser binary (pinned, integrity-verifiable via SHA next time).
+    - |
+      curl -fsSL "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" -o /tmp/gr.tgz
+      tar -xzf /tmp/gr.tgz -C /tmp goreleaser
+      install -m 0755 /tmp/goreleaser /usr/local/bin/goreleaser
+      goreleaser --version
+    # Wait for docker daemon
+    - |
+      for i in $(seq 1 60); do
+        if docker info >/dev/null 2>&1; then break; fi
+        sleep 1
+      done
+      docker info
+    # GitLab Container Registry login (always available).
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    # Optional Docker Hub login. SKIP_DOCKERHUB="true" silences the
+    # dockerhub image variants when credentials aren't present.
+    - |
+      export SKIP_DOCKERHUB=true
+      if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+        if echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin; then
+          export SKIP_DOCKERHUB=false
+          echo "✓ Docker Hub login successful (will push to docker.io/geodedb/geode-ui)"
+        else
+          echo "⚠ Docker Hub login failed — keeping SKIP_DOCKERHUB=true"
+        fi
+      fi
+      echo "SKIP_DOCKERHUB=$SKIP_DOCKERHUB" > /tmp/dockerhub.env
+    # Buildx for multi-arch image assembly.
+    - docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null
+    - docker buildx inspect --bootstrap
+    # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
+    - npm ci
+
+goreleaser:snapshot:
+  extends: .goreleaser-base
+  stage: release
+  interruptible: false
+  needs:
+    - job: unit-tests
+      artifacts: false
+    - job: build
+      artifacts: false
+    - job: go:test
+      artifacts: false
+  timeout: 1h
+  script:
+    - . /tmp/dockerhub.env
+    - echo "SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
+    # `--snapshot` skips git-tag validation, marks the build as a snapshot,
+    # and short-circuits any release-publish step. Container images are
+    # still pushed (snapshot tags carry the `-snapshot-<sha>` suffix).
+    - goreleaser release --snapshot --clean --timeout 60m
+    - ls -la dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 3 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG == null'
+  allow_failure: true
+
+goreleaser:release:
+  extends: .goreleaser-base
+  stage: release
+  interruptible: false
+  needs:
+    - job: unit-tests
+      artifacts: false
+    - job: build
+      artifacts: false
+    - job: go:test
+      artifacts: false
+  timeout: 2h
+  script:
+    - . /tmp/dockerhub.env
+    - echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"
+    - goreleaser release --clean --timeout 120m
+    - ls -la dist/
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+# ============================================================================
+# RELEASE STAGE - Electron desktop installers (mac, linux, windows)
+# ============================================================================
+#
+# Three parallel jobs, each producing the platform-specific installer(s)
+# defined in electron-builder.yml. All artifacts surface as job artifacts
+# and the `release:publish` job below stitches them onto the GitLab
+# Release page.
+#
+# Runner availability (typical company-runner taxonomy):
+#   • electron:linux  → linux runner (always available)
+#   • electron:mac    → tag `macos`. allow_failure: true so missing
+#                       runner doesn't block release; use `when: manual`
+#                       fallback if no mac runner is registered.
+#   • electron:win    → tag `windows`. Same fallback rule as mac.
+#
+# Code signing:
+#   • mac:  CSC_LINK + CSC_KEY_PASSWORD CI vars (.p12 base64-encoded
+#           Developer ID cert). Without these the dmg is unsigned.
+#   • win:  WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD for Authenticode.
+#   • linux: AppImage + .deb don't require signing for distribution
+#           (.deb gpg signing is out of scope; sign the GitLab release
+#           tag itself for provenance).
+
+.electron-base:
+  stage: release
+  interruptible: false
+  needs:
+    - job: unit-tests
+      artifacts: false
+    - job: build
+      artifacts: false
+  timeout: 1h
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+electron:linux:
+  extends: .electron-base
+  image: node:${NODE_VERSION}
+  script:
+    - npm ci
+    # electron-builder needs a few system libs to package linux artifacts.
+    - apt-get update && apt-get install -y --no-install-recommends rpm fakeroot dpkg
+    - npm run electron:build
+    # Build BOTH AppImage + deb for x64 + arm64 (per electron-builder.yml).
+    - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml
+    - ls -la release/linux/ || true
+  artifacts:
+    paths:
+      - release/linux/
+    expire_in: 30 days
+
+electron:mac:
+  extends: .electron-base
+  tags:
+    - macos
+  script:
+    - npm ci
+    - npm run electron:build
+    # mac universal dmg. Code signing kicks in if CSC_LINK is set.
+    - npx electron-builder --mac --universal --config electron-builder.yml
+    - ls -la release/mac/ || true
+  artifacts:
+    paths:
+      - release/mac/
+    expire_in: 30 days
+  # No mac runner registered yet → skip without failing the pipeline.
+  # Switch to `allow_failure: false` once a macos runner is available.
+  allow_failure: true
+
+electron:win:
+  extends: .electron-base
+  tags:
+    - windows
+  script:
+    - npm ci
+    - npm run electron:build
+    - npx electron-builder --win --x64 --config electron-builder.yml
+    - dir release\win || echo "no win artifacts"
+  artifacts:
+    paths:
+      - release/win/
+    expire_in: 30 days
+  # Same windows-runner caveat as the mac job.
+  allow_failure: true
+
+# ============================================================================
+# PUBLISH STAGE - Attach goreleaser + electron artifacts to GitLab Release
+# ============================================================================
+#
+# After goreleaser:release + electron:* finish on a tag, this job:
+#   1. Uploads each binary / package / installer to the GitLab Generic
+#      Package Registry (permanent URL keyed by version + filename).
+#   2. Creates a GitLab Release pointing at those uploads as assets.
+#
+# We use the GitLab Release API directly instead of `release-cli` so the
+# job has full control over asset link names + descriptions.
+
+release:publish:
+  stage: publish
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: goreleaser:release
+      artifacts: true
+    - job: electron:linux
+      artifacts: true
+      optional: true
+    - job: electron:mac
+      artifacts: true
+      optional: true
+    - job: electron:win
+      artifacts: true
+      optional: true
+    # The codesign job re-uploads release/win/*.exe with Authenticode
+    # signatures applied in-place. Marked optional so a missing
+    # ssl.com cert (or a tag from a fork) still ships unsigned bits.
+    - job: codesign:electron-win
+      artifacts: true
+      optional: true
+  before_script:
+    - apk add --no-cache curl jq bash coreutils
+  script:
+    - |
+      set -euo pipefail
+      VERSION="${CI_COMMIT_TAG#v}"
+      PKG_API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/geode-ui/${VERSION}"
+      ASSETS_JSON="/tmp/assets.json"
+      echo '{"links": []}' > "${ASSETS_JSON}"
+
+      upload() {
+        local file="$1"
+        local name; name="$(basename "$file")"
+        echo "→ uploading ${name}"
+        curl --silent --show-error --fail \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --upload-file "${file}" \
+          "${PKG_API}/${name}"
+        local url="${PKG_API}/${name}"
+        jq --arg n "$name" --arg u "$url" \
+           '.links += [{"name":$n, "url":$u, "link_type":"package"}]' \
+           "${ASSETS_JSON}" > "${ASSETS_JSON}.tmp" && mv "${ASSETS_JSON}.tmp" "${ASSETS_JSON}"
+      }
+
+      # GoReleaser outputs (binaries, archives, packages, checksums)
+      for f in dist/*.tar.gz dist/*.zip dist/*.deb dist/*.rpm dist/*.apk dist/checksums.txt; do
+        [ -f "$f" ] && upload "$f"
+      done
+
+      # Electron installers (each per-OS job published to release/<os>/)
+      for f in release/linux/*.AppImage release/linux/*.deb release/mac/*.dmg release/win/*.exe; do
+        [ -f "$f" ] && upload "$f"
+      done
+
+      cat "${ASSETS_JSON}"
+      echo "Asset upload complete."
+  release:
+    name: Geode UI ${CI_COMMIT_TAG}
+    tag_name: ${CI_COMMIT_TAG}
+    description: |
+      Automated release for ${CI_COMMIT_TAG}.
+
+      ### Container images
+
+      ```
+      docker pull ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG#v}
+      docker pull docker.io/geodedb/geode-ui:${CI_COMMIT_TAG#v}
+      ```
+
+      ### Linux package
+
+      Download the `.deb` / `.rpm` / `.apk` for your platform from the assets below,
+      then `dpkg -i geode-ui_${CI_COMMIT_TAG#v}_Linux_x86_64.deb` (or rpm/apk equivalent).
+
+      ### Desktop app
+
+      The `.dmg` (macOS), `.AppImage` + `.deb` (Linux), and `.exe` (Windows) installers
+      bundle the Electron desktop client.
+
+      Full release notes generated by GoReleaser are in `dist/CHANGELOG.md`
+      attached as a job artifact.
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'

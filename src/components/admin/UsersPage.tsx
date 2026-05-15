@@ -1,6 +1,26 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
+
+import type { User } from '@api'
 import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
+import { useApiResource } from '../../hooks/useApiResource'
+import { useCapabilities } from '../../hooks/useCapabilities'
+import {
+  Button,
+  ConfirmModal,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+} from '../ui'
 
 // UsersPage drives the /admin/users tab. The Geode B4 endpoints back
 // every action:
@@ -11,238 +31,220 @@ import { client } from '../../api/client'
 //   disable POST   /api/v1/users/{name}/disable -> client.disable
 //   enable  POST   /api/v1/users/{name}/enable  -> client.enable
 //
-// `UserList.users` is `Array<unknown>` in the genapi-emitted spec
-// (the server returns an array of arbitrary records); UsersPage casts
-// each entry to a structural User shape because the runtime payload is
-// stable and the rendering code only touches well-known fields.
-type User = {
-  username: string
-  email: string
-  roles?: string[]
-  disabled?: boolean
-  mfa_enrolled?: boolean
-}
+// GAP-Q8 (#38): `UserList.users` is now the typed `User[]` in the
+// genapi-emitted spec (the server projects the runtime-discovered
+// `SHOW USERS` columns onto the typed struct), so this page imports
+// `User` from `@api` instead of re-declaring a structural shadow and
+// casting `Array<unknown>`.
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
     margin: 0;
   }
-
-  input {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
+const RowActions = styled.div`
+  display: inline-flex;
+  gap: ${({ theme }) => theme.spacing.xs};
+`
+
+const UnsupportedNote = styled.span`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
 `
 
 export const UsersPage: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const { t } = useTranslation()
+  const { adminWritable, loaded: capsLoaded } = useCapabilities()
+  // Render the CTA enabled until the /capabilities probe confirms the
+  // connected Geode build lacks the wire DDL — only then disable it and
+  // surface the inline note, so the button never flashes disabled-then-
+  // enabled on a build that does support it.
+  const gateCreate = capsLoaded && !adminWritable.users
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
-  // Centralized refresh: the create modal calls load() on close, and
-  // every row action (delete/disable/enable) calls it on success so the
-  // UI reflects the new state without needing optimistic updates.
-  const load = (): void => {
-    client
-      .getUsers({})
-      .then((r) => {
-        const list = (r.users ?? []) as User[]
-        setUsers(list)
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
+  // useApiResource owns the AbortController + mounted/aborted guards.
+  // The fetcher receives a signal which is forwarded to the typed
+  // client; the genapi-emitted client doesn't yet expose a per-call
+  // signal, so the hook still gates state updates correctly even if
+  // the underlying fetch isn't aborted. The signal is passed for when
+  // genapi grows passthrough in a future MR (see #29 commit body).
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal): Promise<User[]> => {
+      const r = await client.getUsers({})
+      return r.users ?? []
+    },
+    []
+  )
+  const users = data ?? []
+  const err = actionErr ?? loadErr
 
-  useEffect(() => {
-    load()
-  }, [])
-
-  const onDelete = async (username: string): Promise<void> => {
-    // window.confirm is intentional -- this is an admin destructive
-    // action and a confirmation prompt is the lowest-friction guard.
-    // eslint-disable-next-line no-alert
-    if (!window.confirm('Delete user ' + username + '?')) return
+  const onDelete = async (): Promise<void> => {
+    if (!confirmDelete) return
+    setDeleting(true)
     try {
-      await client.deleteUsername({ username })
-      load()
+      await client.deleteUsername({ username: confirmDelete })
+      setActionErr(null)
+      setConfirmDelete(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDeleting(false)
     }
   }
 
   const onDisable = async (username: string): Promise<void> => {
     try {
       await client.disable({ username })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
   const onEnable = async (username: string): Promise<void> => {
     try {
       await client.enable({ username })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
   return (
-    <Wrap>
+    <Stack $gap="md">
       <ToolBar>
-        <h2>Users ({users.length})</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New user</NewBtn>
+        <h2>{t('users.title', { count: users.length })}</h2>
+        {gateCreate && (
+          <UnsupportedNote data-testid="admin-users-unsupported">
+            {t('users.unsupportedNote')}
+          </UnsupportedNote>
+        )}
+        <Button
+          data-testid="admin-new-user-btn"
+          onClick={() => setShowCreate(true)}
+          disabled={gateCreate}
+          title={gateCreate ? t('users.unsupportedTooltip') : undefined}
+        >
+          {t('users.newButton')}
+        </Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      <Table>
-        <thead>
-          <tr>
-            <th>Username</th>
-            <th>Email</th>
-            <th>Roles</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.length === 0 ? (
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      <TableScroll>
+        <DataTable>
+          <thead>
             <tr>
-              <Empty colSpan={5}>No users.</Empty>
+              <th>{t('users.columnUsername')}</th>
+              <th>{t('users.columnEmail')}</th>
+              <th>{t('users.columnRoles')}</th>
+              <th>{t('users.columnStatus')}</th>
+              <th>{t('common.actions')}</th>
             </tr>
-          ) : (
-            users.map((u) => (
-              <tr key={u.username}>
-                <td>{u.username}</td>
-                <td>{u.email}</td>
-                <td>{(u.roles ?? []).join(', ')}</td>
-                <td>{u.disabled ? 'disabled' : 'active'}</td>
-                <td>
-                  {u.disabled ? (
-                    <RowBtn onClick={() => onEnable(u.username)}>Enable</RowBtn>
-                  ) : (
-                    <RowBtn onClick={() => onDisable(u.username)}>
-                      Disable
-                    </RowBtn>
-                  )}
-                  <RowBtn onClick={() => onDelete(u.username)}>Delete</RowBtn>
-                </td>
+          </thead>
+          <tbody>
+            {users.length === 0 ? (
+              <tr>
+                <EmptyCell colSpan={5}>{t('users.empty')}</EmptyCell>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+            ) : (
+              users.map((u) => (
+                <tr key={u.username}>
+                  <td>{u.username}</td>
+                  <td>{u.email}</td>
+                  <td>{(u.roles ?? []).join(', ')}</td>
+                  <td>
+                    {u.disabled
+                      ? t('users.statusDisabled')
+                      : t('users.statusActive')}
+                  </td>
+                  <td>
+                    <RowActions>
+                      {u.disabled ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEnable(u.username)}
+                        >
+                          {t('common.enable')}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onDisable(u.username)}
+                        >
+                          {t('common.disable')}
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setConfirmDelete(u.username)}
+                      >
+                        {t('common.delete')}
+                      </Button>
+                    </RowActions>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </DataTable>
+      </TableScroll>
       {showCreate && (
         <CreateUserModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}
-    </Wrap>
+      <ConfirmModal
+        open={confirmDelete !== null}
+        title={t('users.deleteTitle', { name: confirmDelete ?? '' })}
+        body={t('common.cannotBeUndone')}
+        destructive
+        loading={deleting}
+        confirmLabel={t('users.deleteConfirm')}
+        onConfirm={onDelete}
+        onClose={() => setConfirmDelete(null)}
+      />
+    </Stack>
   )
 }
 
 const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -257,44 +259,74 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       await client.postUsers({ username, email, password })
       onClose()
     } catch (e2: unknown) {
-      setErr(e2 instanceof Error ? e2.message : String(e2))
+      if (isWireFeatureMissingError(e2)) {
+        setErr(
+          wireFeatureMissingDescription(e2) ?? t('users.wireFeatureMissing')
+        )
+      } else {
+        setErr(e2 instanceof Error ? e2.message : String(e2))
+      }
     } finally {
       setBusy(false)
     }
   }
 
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        {t('common.cancel')}
+      </Button>
+      <Button form="create-user-form" type="submit" loading={busy}>
+        {t('common.create')}
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New user</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-        >
-          <input
-            placeholder="username"
+    <Modal
+      open
+      onClose={onClose}
+      title={t('users.createTitle')}
+      footer={modalFooter}
+    >
+      <form
+        id="create-user-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field label={t('users.fieldUsername')} htmlFor="cu-username" required>
+          <Input
+            id="cu-username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
+            autoFocus
           />
-          <input
-            placeholder="email"
+        </Field>
+        <Field label={t('users.fieldEmail')} htmlFor="cu-email" required>
+          <Input
+            id="cu-email"
+            type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
           />
-          <input
-            placeholder="password"
+        </Field>
+        <Field
+          label={t('users.fieldPassword')}
+          htmlFor="cu-password"
+          hint={t('users.passwordHint')}
+        >
+          <Input
+            id="cu-password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

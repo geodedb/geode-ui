@@ -1,65 +1,119 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { useNavigate } from 'react-router-dom'
 import { client } from '../../api/client'
 import { useQueryStore } from '../../lib/queryStore'
+import { defaultSchemaCache, type SchemaCacheLike } from './schemaCache'
 
 // EdgeTypeList mirrors LabelList for relationship types. Clicking a
-// type stages a `MATCH ()-[r:`Type`]->() RETURN r LIMIT 25` statement
+// type stages a `MATCH ()-[r:Type]->() RETURN r LIMIT 25` statement
 // and navigates to '/'. The LIMIT 25 keeps the preview cheap on large
-// graphs; the user can edit before running.
+// graphs; the user can edit before running. Identifiers are emitted
+// bare — Geode v0.5.11 rejects backtick-quoted form (42000).
+//
+// PERF-2026-05-11-10 (#154): the per-graph edge-type set is served from
+// the shared session cache (./schemaCache) — re-selecting a graph the
+// operator already visited is instant, zero wire round-trips. On a cold
+// miss a fresh AbortController arms cancellation so toggling graphs
+// faster than the network responds aborts the stale request before it
+// lands a setState. The Geode-side read is a full-graph
+// `MATCH ()-[r]->()` scan; #128 (internal/server/schema_cache.go, 120s
+// TTL) is the cold-miss backstop on the server.
 const List = styled.ul`
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: 0;
+  margin: 0;
 `
 
 const Btn = styled.button`
   text-align: left;
-  padding: 6px 10px;
-  background: ${({ theme }) => theme.colors.surface};
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
+  padding: 8px 12px;
+  min-height: 36px;
+  background: ${({ theme }) => theme.bg.surface};
+  color: ${({ theme }) => theme.text.primary};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
   cursor: pointer;
+  font-family: inherit;
+  font-size: ${({ theme }) => theme.font.sizes.md};
+
   &:hover {
-    background: ${({ theme }) => theme.colors.background};
+    background: ${({ theme }) => theme.bg.subtle};
+    border-color: ${({ theme }) => theme.border.default};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
   }
 `
 
 const Empty = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
+  color: ${({ theme }) => theme.text.muted};
   font-style: italic;
 `
 
-export const EdgeTypeList: React.FC<{ graph: string }> = ({ graph }) => {
+export const EdgeTypeList: React.FC<{
+  graph: string
+  cache?: SchemaCacheLike
+}> = ({ graph, cache }) => {
+  const { t } = useTranslation()
   const [types, setTypes] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
   const setStaged = useQueryStore((s) => s.setStaged)
   const nav = useNavigate()
 
+  // Keep the AbortController across renders so a pending edge-types
+  // fetch from the prior `graph` can be aborted on a fast graph switch.
+  // The generated client does not accept a signal; we still gate every
+  // setState on `signal.aborted` and the controller doubles as the
+  // signal the regression tests assert on.
+  const inflightAbort = useRef<AbortController | null>(null)
+  const effectiveCache = cache ?? defaultSchemaCache
+
   useEffect(() => {
     if (!graph) return undefined
-    let cancelled = false
+
+    // Cache hit: hydrate synchronously, no wire I/O.
+    const hit = effectiveCache.getEdgeTypes(graph)
+    if (hit) {
+      setTypes(hit)
+      setLoaded(true)
+      return undefined
+    }
+
+    // Cache miss: cancel any prior in-flight request, then fetch.
+    if (inflightAbort.current) inflightAbort.current.abort()
+    const controller = new AbortController()
+    inflightAbort.current = controller
+    const { signal } = controller
+
     setLoaded(false)
     client
       .edgeTypes({ graph })
       .then((r) => {
-        if (cancelled) return
-        setTypes(r.types ?? [])
+        if (signal.aborted) return
+        const next = r.types ?? []
+        setTypes(next)
         setLoaded(true)
+        effectiveCache.putEdgeTypes(graph, next)
       })
       .catch(() => {
-        if (!cancelled) setLoaded(true)
+        // We do not cache a failure — the next selection retries.
+        if (signal.aborted) return
+        setLoaded(true)
       })
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [graph])
+  }, [graph, effectiveCache])
 
   if (loaded && types.length === 0) {
-    return <Empty>No edge types.</Empty>
+    return <Empty>{t('schema.noEdgeTypes')}</Empty>
   }
 
   return (
@@ -68,7 +122,17 @@ export const EdgeTypeList: React.FC<{ graph: string }> = ({ graph }) => {
         <li key={t}>
           <Btn
             onClick={() => {
-              setStaged('MATCH ()-[r:`' + t + '`]->() RETURN r LIMIT 25')
+              // Prepend `USE GRAPH <graph>;` so the staged query runs
+              // against the active graph when the operator clicks Run.
+              // Without it Geode executes against no graph context
+              // and silently returns 0 rows.
+              setStaged(
+                'USE GRAPH ' +
+                  graph +
+                  '; MATCH ()-[r:' +
+                  t +
+                  ']->() RETURN r LIMIT 25'
+              )
               nav('/')
             }}
           >

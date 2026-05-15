@@ -50,18 +50,24 @@ import (
 // either case, but lets the operator distinguish state once Geode
 // emits the column).
 func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.MigrationStatus, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW MIGRATIONS")
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		// Geode v0.5.11 doesn't expose SHOW MIGRATIONS on the wire yet
+		// (status_class=42000). Degrade to an empty status so the Ops
+		// page renders cleanly instead of an error banner.
+		if isWireFeatureMissing(err) {
+			return &gentypes.MigrationStatus{Pending: []string{}, Applied: []jsontext.Value{}}, nil
+		}
+		return nil, respondErr(w, wireErr(err))
 	}
 	pending := make([]string, 0)
 	applied := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
-		obj := userRowToMap(cols, row)
+		obj := rowToMap(cols, row)
 		isPending := false
 		if v, ok := obj["status"]; ok {
 			if asStr(v) == "pending" {
@@ -91,17 +97,17 @@ func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *g
 // response surfaces a string slice of those names in the order Geode
 // applied them.
 func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.MigrationRunResp, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	rows, cols, err := runQuery(r.Context(), db, "MIGRATE RUN")
 	if err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	applied := make([]string, 0, len(rows))
 	for _, row := range rows {
-		obj := userRowToMap(cols, row)
+		obj := rowToMap(cols, row)
 		if v, ok := obj["name"]; ok {
 			applied = append(applied, asStr(v))
 			continue
@@ -120,27 +126,27 @@ func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, 
 
 // PostMigrations implements POST /api/v1/migrations (create migration).
 func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationCreateReq) (*gentypes.MigrationRef, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.Name); err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
 	mname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
 	stmt := "CREATE MIGRATION " + mname
 	if req.Description != "" {
 		desc, qErr := quoteString(req.Description)
 		if qErr != nil {
-			return nil, userResponseErr(w, badRequest("invalid_description", qErr.Error()))
+			return nil, respondErr(w, badRequest(ErrCodeInvalidDescription, qErr.Error()))
 		}
 		stmt += " DESCRIPTION " + desc
 	}
 	if _, err := runStatement(r.Context(), db, stmt); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventMigrationCreated,
 		"user", userFromContext(r.Context()),
@@ -151,19 +157,19 @@ func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req
 
 // Sign implements POST /api/v1/migrations/{name}/sign.
 func (s *GraphServer) Sign(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationParam) (*gentypes.Empty, error) {
-	db, err := s.userDB(r.Context())
+	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, userResponseErr(w, err)
+		return nil, respondErr(w, err)
 	}
 	if err := sanitizeBackupFile(req.Name); err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
 	mname, err := quoteIdent(req.Name)
 	if err != nil {
-		return nil, userResponseErr(w, badRequest("invalid_name", err.Error()))
+		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
 	if _, err := runStatement(r.Context(), db, "MIGRATE SIGN "+mname); err != nil {
-		return nil, userResponseErr(w, userErr(err))
+		return nil, respondErr(w, wireErr(err))
 	}
 	emitAudit(auditEventMigrationSigned,
 		"user", userFromContext(r.Context()),

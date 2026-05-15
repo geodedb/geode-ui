@@ -1,8 +1,72 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
+import type { Theme } from '../../theme'
+import { below } from '../../theme'
 import { LabelList } from './LabelList'
 import { EdgeTypeList } from './EdgeTypeList'
+import {
+  createSchemaCache,
+  defaultSchemaCache,
+  type SchemaCacheLike,
+  type SchemaIndexConstraintEntry,
+} from './schemaCache'
+
+// PERF-F8 (#52) / PERF-2026-05-11-10 (#154): per-graph cache for the
+// index+constraint pair so re-selecting a graph the operator has
+// already viewed this session is instant — no second wire round-trip.
+// The cache implementation now lives in ./schemaCache and is shared
+// with LabelList / EdgeTypeList (one bounded LRU across all four schema
+// reads). The server-side cache (#128, internal/server/schema_cache.go,
+// 120s TTL) backs the cold-miss case.
+type SchemaCacheEntry = SchemaIndexConstraintEntry
+
+// SchemaExplorerCacheLike keeps the historical pair-accessor surface
+// (`get`/`put` on the indexes+constraints pair) on top of the shared
+// SchemaCacheLike, so existing call sites and tests (which import from
+// './SchemaExplorer' and call `cache.put(graph, { indexes, constraints
+// })`) keep working unchanged.
+export type SchemaExplorerCacheLike = SchemaCacheLike & {
+  get(graph: string): SchemaCacheEntry | undefined
+  put(graph: string, entry: SchemaCacheEntry): void
+}
+
+// createSchemaExplorerCache wraps a fresh shared cache and adds the
+// pair-accessor shim. Production callers omit the `cache` prop and
+// inherit the module-level defaultSchemaCache; tests inject a fresh
+// instance per run.
+export function createSchemaExplorerCache(
+  maxEntries?: number
+): SchemaExplorerCacheLike {
+  const shared =
+    maxEntries === undefined
+      ? createSchemaCache()
+      : createSchemaCache(maxEntries)
+  return {
+    ...shared,
+    get(graph) {
+      return shared.getIndexConstraints(graph)
+    },
+    put(graph, entry) {
+      shared.putIndexConstraints(graph, entry)
+    },
+  }
+}
+
+interface ActiveProps {
+  theme: Theme
+  $active: boolean
+}
+
+function graphBtnBg({ $active, theme }: ActiveProps): string {
+  return $active ? theme.bg.subtle : 'transparent'
+}
+
+function graphBtnBorder({ $active, theme }: ActiveProps): string {
+  return $active ? theme.border.default : theme.border.subtle
+}
 
 // SchemaExplorer is the three-column panel:
 //
@@ -18,29 +82,40 @@ import { EdgeTypeList } from './EdgeTypeList'
 // strong typing for at the UI layer.
 const Layout = styled.div`
   display: grid;
-  grid-template-columns: 200px 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: 220px 1fr 1fr;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: start;
+
+  ${below('lg')`
+    grid-template-columns: 1fr 1fr;
+  `}
+
+  ${below('md')`
+    grid-template-columns: 1fr;
+  `}
 `
 
-const Pane = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 6px;
-  padding: 12px;
-  color: ${({ theme }) => theme.colors.text};
+const Pane = styled.section`
+  background: ${({ theme }) => theme.bg.surface};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.lg};
+  padding: ${({ theme }) => theme.spacing.md};
+  color: ${({ theme }) => theme.text.primary};
 
   h3 {
-    margin-bottom: 8px;
-    font-size: 1rem;
+    margin: 0 0 ${({ theme }) => theme.spacing.sm};
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.lg};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
   }
 
   h4 {
-    margin: 12px 0 6px;
-    font-size: 0.85rem;
+    margin: ${({ theme }) => theme.spacing.md} 0
+      ${({ theme }) => theme.spacing.xs};
+    font-size: ${({ theme }) => theme.font.sizes.sm};
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: ${({ theme }) => theme.colors.textSecondary};
+    letter-spacing: 0.04em;
+    color: ${({ theme }) => theme.text.secondary};
   }
 `
 
@@ -48,48 +123,66 @@ const GraphList = styled.ul`
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: 0;
+  margin: 0;
 `
-
-function graphBtnBg(props: {
-  $active: boolean
-  theme: { colors: { background: string } }
-}): string {
-  return props.$active ? props.theme.colors.background : 'transparent'
-}
 
 const GraphBtn = styled.button<{ $active: boolean }>`
   text-align: left;
-  padding: 6px 10px;
+  padding: 8px 12px;
   width: 100%;
+  min-height: 36px;
   background: ${graphBtnBg};
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
+  color: ${({ theme }) => theme.text.primary};
+  border: 1px solid ${graphBtnBorder};
+  border-radius: ${({ theme }) => theme.radii.md};
   cursor: pointer;
+  font-family: inherit;
+  font-size: ${({ theme }) => theme.font.sizes.md};
+
+  &:hover {
+    background: ${({ theme }) => theme.bg.subtle};
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: ${({ theme }) => theme.shadows.focus};
+  }
 `
 
 const Pre = styled.pre`
-  background: ${({ theme }) => theme.colors.background};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  padding: 8px;
-  font-size: 0.8rem;
+  background: ${({ theme }) => theme.bg.canvas};
+  border: 1px solid ${({ theme }) => theme.border.subtle};
+  border-radius: ${({ theme }) => theme.radii.md};
+  padding: ${({ theme }) => theme.spacing.sm};
+  font-family: ${({ theme }) => theme.font.family.mono};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
   overflow: auto;
   max-height: 200px;
-  color: ${({ theme }) => theme.colors.text};
+  color: ${({ theme }) => theme.text.primary};
 `
 
 const Empty = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
+  color: ${({ theme }) => theme.text.muted};
   font-style: italic;
 `
 
 const ErrText = styled.p`
-  color: #ef4444;
+  color: ${({ theme }) => theme.text.danger};
 `
 
-export const SchemaExplorer: React.FC = () => {
+// SchemaExplorerProps lets tests inject a fresh cache instance per
+// run; production callers omit the prop and inherit the module-level
+// defaultSchemaCache. The prop accepts any SchemaCacheLike — the
+// pair-accessor superset returned by createSchemaExplorerCache is
+// assignable.
+export type SchemaExplorerProps = {
+  cache?: SchemaCacheLike
+}
+
+export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
+  const { t } = useTranslation()
   const [graphs, setGraphs] = useState<string[]>([])
   const [active, setActive] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
@@ -97,6 +190,14 @@ export const SchemaExplorer: React.FC = () => {
   const [constraints, setConstraints] = useState<
     Array<Record<string, unknown>>
   >([])
+
+  // PERF-F8 (#52): keep the AbortController across renders so a
+  // pending fetch from the prior `active` graph can be aborted when
+  // the user switches graphs faster than the network responds.
+  // useRef so we don't trigger an extra render on each .current
+  // mutation.
+  const inflightAbort = useRef<AbortController | null>(null)
+  const effectiveCache = cache ?? defaultSchemaCache
 
   // Initial graph fetch. Empty deps -- runs once on mount. The first
   // returned graph becomes active so the right-hand panes have data.
@@ -120,38 +221,85 @@ export const SchemaExplorer: React.FC = () => {
   }, [])
 
   // Re-fetch indexes & constraints whenever the active graph changes.
-  // The genapi client returns ConstraintList / IndexList where each
-  // entry is `Record<string, unknown>`, which we render as JSON.
+  // PERF-F8: cache check first (instant on re-select), then a single
+  // AbortController arms cancellation on the next switch. The generated
+  // client does not currently accept a signal so we still gate the
+  // setState calls on `signal.aborted` for cancellation correctness;
+  // the AbortController also serves as the unambiguous signal that
+  // tests assert on (abort() called when graph changes).
   useEffect(() => {
     if (!active) return undefined
-    let cancelled = false
+
+    // Cache hit: return instantly with no wire I/O.
+    const hit = effectiveCache.getIndexConstraints(active)
+    if (hit) {
+      setIndexes(hit.indexes)
+      setConstraints(hit.constraints)
+      return undefined
+    }
+
+    // Cache miss: cancel any prior in-flight request, then issue
+    // fresh fetches.
+    if (inflightAbort.current) {
+      inflightAbort.current.abort()
+    }
+    const controller = new AbortController()
+    inflightAbort.current = controller
+    const { signal } = controller
+
+    let nextIndexes: Array<Record<string, unknown>> | null = null
+    let nextConstraints: Array<Record<string, unknown>> | null = null
+    const cachePut = (): void => {
+      // Only cache once BOTH requests have settled with a value —
+      // a partial result would surface a "ghost half" on the next
+      // re-selection.
+      if (nextIndexes !== null && nextConstraints !== null && !signal.aborted) {
+        effectiveCache.putIndexConstraints(active, {
+          indexes: nextIndexes,
+          constraints: nextConstraints,
+        })
+      }
+    }
+
     client
       .indexes({ graph: active })
       .then((r) => {
-        if (!cancelled) setIndexes(r.indexes ?? [])
+        if (signal.aborted) return
+        nextIndexes = r.indexes ?? []
+        setIndexes(nextIndexes)
+        cachePut()
       })
       .catch(() => {
-        if (!cancelled) setIndexes([])
+        if (signal.aborted) return
+        nextIndexes = []
+        setIndexes(nextIndexes)
+        cachePut()
       })
     client
       .constraints({ graph: active })
       .then((r) => {
-        if (!cancelled) setConstraints(r.constraints ?? [])
+        if (signal.aborted) return
+        nextConstraints = r.constraints ?? []
+        setConstraints(nextConstraints)
+        cachePut()
       })
       .catch(() => {
-        if (!cancelled) setConstraints([])
+        if (signal.aborted) return
+        nextConstraints = []
+        setConstraints(nextConstraints)
+        cachePut()
       })
     return () => {
-      cancelled = true
+      controller.abort()
     }
-  }, [active])
+  }, [active, effectiveCache])
 
   return (
     <Layout>
       <Pane>
-        <h3>Graphs</h3>
+        <h3>{t('schema.graphsTitle')}</h3>
         {err && <ErrText>{err}</ErrText>}
-        {graphs.length === 0 && !err && <Empty>No graphs.</Empty>}
+        {graphs.length === 0 && !err && <Empty>{t('schema.noGraphs')}</Empty>}
         <GraphList>
           {graphs.map((g) => (
             <li key={g}>
@@ -163,29 +311,41 @@ export const SchemaExplorer: React.FC = () => {
         </GraphList>
       </Pane>
       <Pane>
-        <h3>{active ? 'Labels (' + active + ')' : 'Labels'}</h3>
-        {active ? <LabelList graph={active} /> : <Empty>Select a graph.</Empty>}
+        <h3>
+          {active
+            ? t('schema.labelsTitleScoped', { graph: active })
+            : t('schema.labelsTitle')}
+        </h3>
+        {active ? (
+          <LabelList graph={active} />
+        ) : (
+          <Empty>{t('schema.selectGraph')}</Empty>
+        )}
       </Pane>
       <Pane>
-        <h3>{active ? 'Edge types (' + active + ')' : 'Edge types'}</h3>
+        <h3>
+          {active
+            ? t('schema.edgeTypesTitleScoped', { graph: active })
+            : t('schema.edgeTypesTitle')}
+        </h3>
         {active ? (
           <EdgeTypeList graph={active} />
         ) : (
-          <Empty>Select a graph.</Empty>
+          <Empty>{t('schema.selectGraph')}</Empty>
         )}
         {active && (
           <>
-            <h4>Indexes</h4>
+            <h4>{t('schema.indexes')}</h4>
             {indexes.length > 0 ? (
               <Pre>{JSON.stringify(indexes, null, 2)}</Pre>
             ) : (
-              <Empty>No indexes.</Empty>
+              <Empty>{t('schema.noIndexes')}</Empty>
             )}
-            <h4>Constraints</h4>
+            <h4>{t('schema.constraints')}</h4>
             {constraints.length > 0 ? (
               <Pre>{JSON.stringify(constraints, null, 2)}</Pre>
             ) : (
-              <Empty>No constraints.</Empty>
+              <Empty>{t('schema.noConstraints')}</Empty>
             )}
           </>
         )}

@@ -7,9 +7,12 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"mime/multipart"
+	"net/textproto"
 	"net/http"
 	"net/url"
 	"strings"
+	"geodedb.com/geode-ui/gen/pkg/gen"
 	"geodedb.com/geode-ui/gen/types"
 )
 
@@ -33,7 +36,13 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("http status %d: %s", e.StatusCode, body)
 }
 
-func expandRoute(rawURL string, pathParams []string, req any) (*url.URL, map[string]any, error) {
+// expandRoute substitutes path parameters into rawURL. genapi#216: each
+// pathParams entry is {urlToken, schemaKey} -- the URL pattern uses
+// "{urlToken}" while the request payload map (built from the request
+// struct's JSON/genapi tags) keys the value under schemaKey, which differs
+// from urlToken whenever the tag is snake_case but the route token is
+// camelCase (e.g. {profileId} <-> "profile_id").
+func expandRoute(rawURL string, pathParams [][2]string, req any) (*url.URL, map[string]any, error) {
 	values, err := payloadMap(req)
 	if err != nil {
 		return nil, nil, err
@@ -42,13 +51,14 @@ func expandRoute(rawURL string, pathParams []string, req any) (*url.URL, map[str
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, param := range pathParams {
-		value, ok := values[param]
+	for _, pp := range pathParams {
+		urlToken, schemaKey := pp[0], pp[1]
+		value, ok := values[schemaKey]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing path parameter %q", param)
+			return nil, nil, fmt.Errorf("missing path parameter %q", schemaKey)
 		}
-		u.Path = strings.ReplaceAll(u.Path, "{"+param+"}", url.PathEscape(fmt.Sprint(value)))
-		delete(values, param)
+		u.Path = strings.ReplaceAll(u.Path, "{"+urlToken+"}", url.PathEscape(fmt.Sprint(value)))
+		delete(values, schemaKey)
 	}
 	return u, values, nil
 }
@@ -90,6 +100,54 @@ func buildRESTBody(mode string, payload map[string]any) (httpBody, error) {
 			Reader:      strings.NewReader(encoded),
 			ContentType: "application/x-www-form-urlencoded",
 		}, nil
+	case "multipart":
+		var buf bytes.Buffer
+		writer := multipart.NewWriter(&buf)
+		for key, value := range payload {
+			switch v := value.(type) {
+			case nil:
+				continue
+			case *gen.FileUpload:
+				if v == nil {
+					continue
+				}
+				if err := writeUploadPart(writer, key, v); err != nil {
+					return httpBody{}, err
+				}
+			case []*gen.FileUpload:
+				for _, item := range v {
+					if item == nil {
+						continue
+					}
+					if err := writeUploadPart(writer, key, item); err != nil {
+						return httpBody{}, err
+					}
+				}
+			default:
+				switch vv := value.(type) {
+				case []string:
+					for _, item := range vv {
+						if err := writer.WriteField(key, item); err != nil {
+							return httpBody{}, err
+						}
+					}
+				case []any:
+					for _, item := range vv {
+						if err := writer.WriteField(key, fmt.Sprint(item)); err != nil {
+							return httpBody{}, err
+						}
+					}
+				default:
+					if err := writer.WriteField(key, fmt.Sprint(value)); err != nil {
+						return httpBody{}, err
+					}
+				}
+			}
+		}
+		if err := writer.Close(); err != nil {
+			return httpBody{}, err
+		}
+		return httpBody{Reader: bytes.NewReader(buf.Bytes()), ContentType: writer.FormDataContentType()}, nil
 	case "json":
 		if len(payload) == 0 {
 			return httpBody{
@@ -120,13 +178,59 @@ func decodeHTTPError(resp *http.Response) error {
 	_, _ = io.Copy(&buf, limited)
 	return &HTTPError{StatusCode: resp.StatusCode, Body: buf.Bytes()}
 }
+func writeUploadPart(writer *multipart.Writer, field string, upload *gen.FileUpload) error {
+	if upload == nil || upload.Reader == nil {
+		return fmt.Errorf("upload %q is missing a reader", field)
+	}
+	safeField := sanitizeMultipartDispositionValue(field)
+	if safeField == "" {
+		return fmt.Errorf("upload field name is required")
+	}
+	contentType := sanitizeMultipartHeaderValue(upload.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	filename := sanitizeMultipartDispositionValue(upload.Filename)
+	if filename == "" {
+		filename = safeField
+	}
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, safeField, filename))
+	header.Set("Content-Type", contentType)
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, upload.Reader)
+	return err
+}
+
+func sanitizeMultipartDispositionValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.NewReplacer(
+		"\r", "_",
+		"\n", "_",
+		"\\", "\\\\",
+		`"`, `\"`,
+	).Replace(value)
+	return value
+}
+
+func sanitizeMultipartHeaderValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.NewReplacer(
+		"\r", " ",
+		"\n", " ",
+	).Replace(value)
+	return strings.TrimSpace(value)
+}
 // Audit performs GET /api/v1/audit.
 func (c *Client) Audit(ctx context.Context, req *types.AuditQuery) (*types.AuditList, error) {
 	target, err := c.buildURL("/api/v1/audit")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +268,7 @@ func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginRe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +308,7 @@ func (c *Client) GetBackups(ctx context.Context, req *types.Empty) (*types.Backu
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +346,7 @@ func (c *Client) PostBackups(ctx context.Context, req *types.BackupCreateReq) (*
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +386,7 @@ func (c *Client) Cleanup(ctx context.Context, req *types.Empty) (*types.BackupCl
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -316,13 +420,53 @@ func (c *Client) Cleanup(ctx context.Context, req *types.Empty) (*types.BackupCl
 	}
 	return &out, nil
 }
+// BackupUpload performs POST /api/v1/backups/upload.
+func (c *Client) BackupUpload(ctx context.Context, req *types.BackupUploadReq) (*types.UploadResp, error) {
+	target, err := c.buildURL("/api/v1/backups/upload")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("multipart", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.UploadResp
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // DeleteFile performs DELETE /api/v1/backups/{file}.
 func (c *Client) DeleteFile(ctx context.Context, req *types.BackupFileParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/backups/{file}")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"file"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"file", "file"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +504,7 @@ func (c *Client) GetFile(ctx context.Context, req *types.BackupFileParam) (*type
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"file"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"file", "file"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -392,13 +536,51 @@ func (c *Client) GetFile(ctx context.Context, req *types.BackupFileParam) (*type
 	}
 	return &out, nil
 }
+// GetCapabilities performs GET /api/v1/capabilities.
+func (c *Client) GetCapabilities(ctx context.Context, req *types.Empty) (*types.Capabilities, error) {
+	target, err := c.buildURL("/api/v1/capabilities")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Capabilities
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Grants performs POST /api/v1/grants.
 func (c *Client) Grants(ctx context.Context, req *types.GrantReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/grants")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +620,7 @@ func (c *Client) Revoke(ctx context.Context, req *types.GrantReq) (*types.Empty,
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +660,7 @@ func (c *Client) Graphs(ctx context.Context, req *types.Empty) (*types.GraphList
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +698,7 @@ func (c *Client) Constraints(ctx context.Context, req *types.GraphParam) (*types
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -554,7 +736,7 @@ func (c *Client) EdgeTypes(ctx context.Context, req *types.GraphParam) (*types.E
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -592,7 +774,7 @@ func (c *Client) Indexes(ctx context.Context, req *types.GraphParam) (*types.Ind
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -630,7 +812,7 @@ func (c *Client) Labels(ctx context.Context, req *types.GraphParam) (*types.Labe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"graph"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"graph", "graph"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -668,7 +850,7 @@ func (c *Client) GetMigrations(ctx context.Context, req *types.Empty) (*types.Mi
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -706,7 +888,7 @@ func (c *Client) PostMigrations(ctx context.Context, req *types.MigrationCreateR
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -746,7 +928,7 @@ func (c *Client) PostMigrationsRun(ctx context.Context, req *types.Empty) (*type
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -780,13 +962,53 @@ func (c *Client) PostMigrationsRun(ctx context.Context, req *types.Empty) (*type
 	}
 	return &out, nil
 }
+// MigrationUpload performs POST /api/v1/migrations/upload.
+func (c *Client) MigrationUpload(ctx context.Context, req *types.MigrationUploadReq) (*types.UploadResp, error) {
+	target, err := c.buildURL("/api/v1/migrations/upload")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("multipart", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.UploadResp
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Sign performs POST /api/v1/migrations/{name}/sign.
 func (c *Client) Sign(ctx context.Context, req *types.MigrationParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/migrations/{name}/sign")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"name"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"name", "name"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -826,7 +1048,7 @@ func (c *Client) GetPolicies(ctx context.Context, req *types.Empty) (*types.Poli
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -864,7 +1086,7 @@ func (c *Client) PostPolicies(ctx context.Context, req *types.PolicyCreateReq) (
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -904,7 +1126,7 @@ func (c *Client) DeleteName(ctx context.Context, req *types.PolicyParam) (*types
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"name"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"name", "name"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -942,7 +1164,7 @@ func (c *Client) GetName(ctx context.Context, req *types.PolicyParam) (*types.Po
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"name"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"name", "name"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -974,13 +1196,13 @@ func (c *Client) GetName(ctx context.Context, req *types.PolicyParam) (*types.Po
 	}
 	return &out, nil
 }
-// Profiles performs GET /api/v1/profiles.
-func (c *Client) Profiles(ctx context.Context, req *types.Empty) (*types.ProfileList, error) {
+// GetProfiles performs GET /api/v1/profiles.
+func (c *Client) GetProfiles(ctx context.Context, req *types.Empty) (*types.ProfileList, error) {
 	target, err := c.buildURL("/api/v1/profiles")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1012,13 +1234,207 @@ func (c *Client) Profiles(ctx context.Context, req *types.Empty) (*types.Profile
 	}
 	return &out, nil
 }
+// PostProfiles performs POST /api/v1/profiles.
+func (c *Client) PostProfiles(ctx context.Context, req *types.CreateProfileReq) (*types.Profile, error) {
+	target, err := c.buildURL("/api/v1/profiles")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("json", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Profile
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// Public performs GET /api/v1/profiles/public.
+func (c *Client) Public(ctx context.Context, req *types.Empty) (*types.PublicProfileList, error) {
+	target, err := c.buildURL("/api/v1/profiles/public")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.PublicProfileList
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// DeleteProfileid performs DELETE /api/v1/profiles/{profileId}.
+func (c *Client) DeleteProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Empty, error) {
+	target, err := c.buildURL("/api/v1/profiles/{profileId}")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string{{"profileId", "profile_id"}}, req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Empty
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// GetProfileid performs GET /api/v1/profiles/{profileId}.
+func (c *Client) GetProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Profile, error) {
+	target, err := c.buildURL("/api/v1/profiles/{profileId}")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string{{"profileId", "profile_id"}}, req)
+	if err != nil {
+		return nil, err
+	}
+	query := expanded.Query()
+	for key, value := range payload {
+		appendValue(query, key, value)
+	}
+	expanded.RawQuery = query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", expanded.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Profile
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+// PatchProfileid performs PATCH /api/v1/profiles/{profileId}.
+func (c *Client) PatchProfileid(ctx context.Context, req *types.UpdateProfileReq) (*types.Profile, error) {
+	target, err := c.buildURL("/api/v1/profiles/{profileId}")
+	if err != nil {
+		return nil, err
+	}
+	expanded, payload, err := expandRoute(target, [][2]string{{"profileId", "profile_id"}}, req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := buildRESTBody("json", payload)
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", expanded.String(), body.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if body.ContentType != "" {
+		httpReq.Header.Set("Content-Type", body.ContentType)
+	}
+	resp, err := c.do(httpReq, "jwt")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, decodeHTTPError(resp)
+	}
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var out types.Profile
+	// PERF-0015: cap response body before streaming decode so a rogue
+	// server cannot exhaust client memory via oversized payloads.
+	if err := json.UnmarshalRead(io.LimitReader(resp.Body, maxRESTResponseBytes), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
 // Query performs POST /api/v1/query.
 func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryResp, error) {
 	target, err := c.buildURL("/api/v1/query")
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1058,7 +1474,7 @@ func (c *Client) Restore(ctx context.Context, req *types.RestoreReq) (*types.Emp
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1098,7 +1514,7 @@ func (c *Client) GetRoles(ctx context.Context, req *types.Empty) (*types.RoleLis
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1136,7 +1552,7 @@ func (c *Client) PostApiRoles(ctx context.Context, req *types.RoleCreateReq) (*t
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1176,7 +1592,7 @@ func (c *Client) DeleteRole(ctx context.Context, req *types.RoleParam) (*types.E
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"role"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"role", "role"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1214,7 +1630,7 @@ func (c *Client) GetRole(ctx context.Context, req *types.RoleParam) (*types.Role
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"role"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"role", "role"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1252,7 +1668,7 @@ func (c *Client) Tx(ctx context.Context, req *types.TxBeginReq) (*types.TxBeginR
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1292,7 +1708,7 @@ func (c *Client) Commit(ctx context.Context, req *types.TxIDParam) (*types.Empty
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"txid", "txid"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1332,7 +1748,7 @@ func (c *Client) Rollback(ctx context.Context, req *types.TxIDParam) (*types.Emp
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"txid", "txid"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1372,7 +1788,7 @@ func (c *Client) PostTxidRun(ctx context.Context, req *types.TxRunReq) (*types.Q
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"txid"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"txid", "txid"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1412,7 +1828,7 @@ func (c *Client) GetUsers(ctx context.Context, req *types.Empty) (*types.UserLis
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1450,7 +1866,7 @@ func (c *Client) PostUsers(ctx context.Context, req *types.UserCreateReq) (*type
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -1490,7 +1906,7 @@ func (c *Client) DeleteUsername(ctx context.Context, req *types.UsernameParam) (
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1528,7 +1944,7 @@ func (c *Client) GetUsername(ctx context.Context, req *types.UsernameParam) (*ty
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1566,7 +1982,7 @@ func (c *Client) PatchUsername(ctx context.Context, req *types.UserUpdateReq) (*
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1606,7 +2022,7 @@ func (c *Client) Disable(ctx context.Context, req *types.UsernameParam) (*types.
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1646,7 +2062,7 @@ func (c *Client) Enable(ctx context.Context, req *types.UsernameParam) (*types.E
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1686,7 +2102,7 @@ func (c *Client) Password(ctx context.Context, req *types.PasswordChangeReq) (*t
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1726,7 +2142,7 @@ func (c *Client) Permissions(ctx context.Context, req *types.UsernameParam) (*ty
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1764,7 +2180,7 @@ func (c *Client) PostUsernameRoles(ctx context.Context, req *types.AssignRoleReq
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string{"username"}, req)
+	expanded, payload, err := expandRoute(target, [][2]string{{"username", "username"}}, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1804,7 +2220,7 @@ func (c *Client) Healthz(ctx context.Context, req *types.Empty) (*types.HealthRe
 	if err != nil {
 		return nil, err
 	}
-	expanded, payload, err := expandRoute(target, []string(nil), req)
+	expanded, payload, err := expandRoute(target, [][2]string(nil), req)
 	if err != nil {
 		return nil, err
 	}

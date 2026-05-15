@@ -28,7 +28,7 @@ func (s *GraphServer) Audit(_ http.ResponseWriter, _ *http.Request, req *gentype
 	if err != nil {
 		return nil, &endpointError{
 			status:      http.StatusBadRequest,
-			code:        "invalid_since",
+			code:        ErrCodeInvalidSince,
 			description: err.Error(),
 		}
 	}

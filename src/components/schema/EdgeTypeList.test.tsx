@@ -1,0 +1,158 @@
+/// <reference types="@testing-library/jest-dom" />
+import React from 'react'
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { ThemeProvider } from 'styled-components'
+import { MemoryRouter } from 'react-router-dom'
+
+const setStaged = jest.fn()
+
+type Resolver<T> = (v: T) => void
+const edgeTypesCall = jest.fn<unknown, [unknown]>()
+const edgeTypeResolvers: Array<Resolver<{ types: string[] }>> = []
+let edgeTypesAutoResolve: string[] | null = ['ACTED_IN', 'DIRECTED']
+
+jest.mock('../../api/client', () => ({
+  client: {
+    edgeTypes: (req: unknown): Promise<{ types: string[] }> => {
+      edgeTypesCall(req)
+      if (edgeTypesAutoResolve !== null) {
+        return Promise.resolve({ types: edgeTypesAutoResolve })
+      }
+      return new Promise<{ types: string[] }>((resolve) => {
+        edgeTypeResolvers.push(resolve)
+      })
+    },
+  },
+}))
+
+jest.mock('../../lib/queryStore', () => ({
+  useQueryStore: (selector: (s: unknown) => unknown) =>
+    selector({ stagedStatement: null, setStaged }),
+}))
+
+import { EdgeTypeList } from './EdgeTypeList'
+import { createSchemaCache } from './schemaCache'
+
+import { testTheme as theme } from '../../test-utils/theme'
+
+beforeEach(() => {
+  setStaged.mockClear()
+  edgeTypesCall.mockClear()
+  edgeTypeResolvers.length = 0
+  edgeTypesAutoResolve = ['ACTED_IN', 'DIRECTED']
+})
+
+function renderEdge(props: {
+  graph: string
+  cache?: ReturnType<typeof createSchemaCache>
+}): { rerender: (graph: string) => void } {
+  const cache = props.cache
+  const { rerender } = render(
+    <ThemeProvider theme={theme}>
+      <MemoryRouter>
+        <EdgeTypeList graph={props.graph} cache={cache} />
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+  return {
+    rerender: (graph: string) =>
+      rerender(
+        <ThemeProvider theme={theme}>
+          <MemoryRouter>
+            <EdgeTypeList graph={graph} cache={cache} />
+          </MemoryRouter>
+        </ThemeProvider>
+      ),
+  }
+}
+
+test('clicking an edge type stages a MATCH with USE GRAPH prefix', async () => {
+  renderEdge({ graph: 'movies', cache: createSchemaCache() })
+
+  await waitFor(() => {
+    expect(screen.getByText('ACTED_IN')).toBeInTheDocument()
+    expect(screen.getByText('DIRECTED')).toBeInTheDocument()
+  })
+
+  fireEvent.click(screen.getByText('ACTED_IN'))
+  // Regression: must include `USE GRAPH <graph>;` prefix so Geode runs
+  // the MATCH against the active graph. Without the prefix the query
+  // executes against no graph and silently returns 0 rows.
+  expect(setStaged).toHaveBeenCalledWith(
+    'USE GRAPH movies; MATCH ()-[r:ACTED_IN]->() RETURN r LIMIT 25'
+  )
+})
+
+test('PERF-#154: re-selecting the same graph serves edge types from cache (zero extra wire calls)', async () => {
+  const cache = createSchemaCache()
+  const h = renderEdge({ graph: 'alpha', cache })
+  await waitFor(() => {
+    expect(screen.getByText('ACTED_IN')).toBeInTheDocument()
+  })
+  expect(edgeTypesCall).toHaveBeenCalledTimes(1)
+
+  h.rerender('beta')
+  await waitFor(() => {
+    expect(edgeTypesCall).toHaveBeenCalledTimes(2)
+  })
+  await act(async () => {
+    await Promise.resolve()
+  })
+
+  // Re-select alpha -> from cache, no new call.
+  h.rerender('alpha')
+  await waitFor(() => {
+    expect(screen.getByText('ACTED_IN')).toBeInTheDocument()
+  })
+  expect(edgeTypesCall).toHaveBeenCalledTimes(2)
+
+  h.rerender('beta')
+  await waitFor(() => {
+    expect(screen.getByText('ACTED_IN')).toBeInTheDocument()
+  })
+  expect(edgeTypesCall).toHaveBeenCalledTimes(2)
+})
+
+test('PERF-#154: switching graph mid-flight aborts the prior fetch; a late resolve does not stomp state', async () => {
+  edgeTypesAutoResolve = null
+  const cache = createSchemaCache()
+  const h = renderEdge({ graph: 'alpha', cache })
+  await waitFor(() => {
+    expect(edgeTypesCall).toHaveBeenCalledTimes(1)
+  })
+  expect(edgeTypeResolvers.length).toBe(1)
+
+  h.rerender('beta')
+  await waitFor(() => {
+    expect(edgeTypesCall).toHaveBeenCalledTimes(2)
+  })
+  expect(edgeTypeResolvers.length).toBe(2)
+
+  await act(async () => {
+    edgeTypeResolvers[0]?.({ types: ['ALPHA_LATE'] })
+    await Promise.resolve()
+  })
+  expect(document.body.textContent).not.toContain('ALPHA_LATE')
+  expect(cache.getEdgeTypes('alpha')).toBeUndefined()
+
+  await act(async () => {
+    edgeTypeResolvers[1]?.({ types: ['BETA_OK'] })
+    await Promise.resolve()
+  })
+  await waitFor(() => {
+    expect(screen.getByText('BETA_OK')).toBeInTheDocument()
+  })
+})
+
+test('PERF-#154: cache LRU eviction respects maxEntries (shared across kinds)', () => {
+  const cache = createSchemaCache(2)
+  cache.putEdgeTypes('a', ['A'])
+  cache.putLabels('a', ['LA']) // distinct (kind, graph) -> distinct entry
+  expect(cache.size()).toBe(2)
+  // Inserting a third entry evicts the oldest (edgeTypes:a).
+  cache.putEdgeTypes('b', ['B'])
+  expect(cache.size()).toBe(2)
+  expect(cache.getEdgeTypes('a')).toBeUndefined()
+  expect(cache.getLabels('a')).toEqual(['LA'])
+  expect(cache.getEdgeTypes('b')).toEqual(['B'])
+})

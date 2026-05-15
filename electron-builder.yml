@@ -1,0 +1,77 @@
+# electron-builder config — drives `pnpm electron:package`.
+#
+# The packaged app bundles the compiled main process (electron-dist/main.js
+# + preload.js) plus the SPA build (internal/ui/dist) under app:// custom
+# protocol. CI invokes this config from per-OS jobs (electron-mac,
+# electron-linux, electron-windows) in .gitlab-ci.yml; each job uploads
+# the resulting installers as job artifacts, and the publish-release
+# job stitches them onto the GitLab Release page.
+#
+# Code signing:
+#   • mac:  set CSC_LINK + CSC_KEY_PASSWORD CI vars (Apple Developer ID
+#           cert in .p12). Without them the build still produces an
+#           unsigned .dmg suitable for internal testing.
+#   • win:  set WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD for Authenticode.
+#   • linux: AppImage + deb need no signing (.deb is signed via gpg
+#           separately if desired — out of scope here).
+
+appId: com.geodedb.ui
+productName: Geode
+copyright: Copyright (c) Geode Database. All rights reserved.
+
+directories:
+  output: release/${platform}
+  buildResources: build
+
+files:
+- internal/ui/electron-dist/**/*
+- internal/ui/dist/**/*
+- package.json
+
+# Asar packs everything into a single archive. Off by default so debugging
+# packaged builds is easier; turn on once main + preload are stable.
+# asar: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+  - target: dmg
+    arch: [universal]
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # Provide an icon at build/icon.icns before publishing — placeholder
+  # falls back to electron's default during local builds.
+  # icon: build/icon.icns
+
+linux:
+  target:
+  - target: AppImage
+    arch: [x64, arm64]
+  - target: deb
+    arch: [x64, arm64]
+  category: Development
+  # icon: build/icon.png
+
+win:
+  target:
+  - target: nsis
+    arch: [x64]
+  # icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+# Publishing config. CI does NOT use electron-builder's --publish flag;
+# instead, the per-OS jobs upload `release/**/*.{dmg,AppImage,deb,exe}`
+# as GitLab job artifacts, and the publish-release job in
+# .gitlab-ci.yml uploads them to the GitLab Generic Package Registry
+# and links them on the GitLab Release page.
+#
+# Setting `provider: generic` here documents the contract for future
+# third-party auto-update deployments (where the app would fetch
+# update manifests from a hosted feed). Until that lands the field is
+# inert — `electron-builder build` (no --publish) does not contact it.
+publish:
+  provider: generic
+  url: https://gitlab.com/devnw/codepros/geode/geode-ui/-/releases/${version}/downloads

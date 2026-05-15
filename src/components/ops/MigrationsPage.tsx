@@ -1,6 +1,20 @@
-import React, { useEffect, useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
+
 import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
+import {
+  Button,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  Stack,
+  TableScroll,
+  Textarea,
+} from '../ui'
 
 // MigrationsPage drives the /ops/migrations tab. Geode B8 endpoints:
 //
@@ -18,167 +32,97 @@ type Migration = {
   description?: string
 }
 
-const Wrap = styled.div`
+const ToolBar = styled.header`
   display: flex;
-  flex-direction: column;
-  gap: 24px;
-`
-
-const ToolBar = styled.div`
-  display: flex;
-  gap: 12px;
+  gap: ${({ theme }) => theme.spacing.md};
   align-items: center;
+  flex-wrap: wrap;
 
   h2 {
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme.colors.text};
+    flex: 1 1 auto;
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.xl};
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.primary};
+    margin: 0;
   }
 `
 
 const Section = styled.section`
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: ${({ theme }) => theme.spacing.sm};
 
   h3 {
-    font-size: 0.95rem;
-    color: ${({ theme }) => theme.colors.textSecondary};
-  }
-`
-
-const NewBtn = styled.button`
-  padding: 6px 12px;
-  background: ${({ theme }) => theme.colors.primary};
-  color: #fff;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-
-  &:disabled {
-    opacity: 0.6;
-    cursor: wait;
-  }
-`
-
-const Table = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  color: ${({ theme }) => theme.colors.text};
-
-  th,
-  td {
-    padding: 8px;
-    text-align: left;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-  }
-
-  th {
-    background: ${({ theme }) => theme.colors.surface};
-    font-weight: 600;
-  }
-`
-
-const RowBtn = styled.button`
-  padding: 4px 8px;
-  margin-right: 4px;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.85em;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.surface};
-  }
-`
-
-const Modal = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-`
-
-const ModalCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  padding: 24px;
-  border-radius: 8px;
-  min-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  color: ${({ theme }) => theme.colors.text};
-
-  h3 {
+    font-family: ${({ theme }) => theme.font.family.display};
+    font-size: ${({ theme }) => theme.font.sizes.md};
+    color: ${({ theme }) => theme.text.secondary};
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     margin: 0;
   }
-
-  input,
-  textarea {
-    padding: 6px 8px;
-    background: ${({ theme }) => theme.colors.background};
-    color: inherit;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 4px;
-    font-family: inherit;
-  }
 `
 
-const Err = styled.p`
-  color: #ef4444;
-  margin-top: 8px;
+const ErrorBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.danger};
+  color: ${({ theme }) => theme.text.danger};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const OkBanner = styled.p`
-  color: #10b981;
-  margin-top: 8px;
+const OkBanner = styled.div`
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.success};
+  color: ${({ theme }) => theme.text.success};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const Empty = styled.td`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-style: italic;
-  text-align: center;
-`
+type MigrationsView = {
+  applied: Migration[]
+  pending: string[]
+}
 
 export const MigrationsPage: React.FC = () => {
-  const [applied, setApplied] = useState<Migration[]>([])
-  const [pending, setPending] = useState<string[]>([])
-  const [err, setErr] = useState<string | null>(null)
+  const { t } = useTranslation()
+  const [actionErr, setActionErr] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const load = (): void => {
-    client
-      .getMigrations({})
-      .then((r) => {
-        setApplied(((r.applied ?? []) as Migration[]) ?? [])
-        setPending(((r.pending ?? []) as string[]) ?? [])
-      })
-      .catch((e: unknown) => {
-        setErr(e instanceof Error ? e.message : String(e))
-      })
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
+  const {
+    data,
+    error: loadErr,
+    refetch,
+  } = useApiResource<MigrationsView>(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = await client.getMigrations({})
+      return {
+        applied: ((r.applied ?? []) as Migration[]) ?? [],
+        pending: ((r.pending ?? []) as string[]) ?? [],
+      }
+    },
+    []
+  )
+  const applied = data?.applied ?? []
+  const pending = data?.pending ?? []
+  const err = actionErr ?? loadErr
 
   const onRunPending = async (): Promise<void> => {
     setBusy(true)
-    setErr(null)
+    setActionErr(null)
     setOkMsg(null)
     try {
       const r = await client.postMigrationsRun({})
       const n = (r.applied ?? []).length
-      setOkMsg('Applied ' + n + ' migration(s).')
-      load()
+      setOkMsg(t('migrations.appliedToast', { count: n }))
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }
@@ -187,100 +131,166 @@ export const MigrationsPage: React.FC = () => {
   const onSign = async (name: string): Promise<void> => {
     try {
       await client.sign({ name })
-      load()
+      setActionErr(null)
+      refetch()
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e))
+      setActionErr(e instanceof Error ? e.message : String(e))
     }
   }
 
   return (
-    <Wrap>
+    <Stack $gap="lg">
       <ToolBar>
-        <h2>Migrations</h2>
-        <NewBtn onClick={() => setShowCreate(true)}>+ New migration</NewBtn>
-        <NewBtn onClick={onRunPending} disabled={busy || pending.length === 0}>
-          {busy ? '...' : 'Run pending (' + pending.length + ')'}
-        </NewBtn>
+        <h2>{t('migrations.title')}</h2>
+        <Button onClick={() => setShowCreate(true)}>
+          {t('migrations.newButton')}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={onRunPending}
+          loading={busy}
+          disabled={pending.length === 0}
+        >
+          {t('migrations.runPending', { count: pending.length })}
+        </Button>
       </ToolBar>
-      {err && <Err>{err}</Err>}
-      {okMsg && <OkBanner>{okMsg}</OkBanner>}
+      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      {okMsg && <OkBanner role="status">{okMsg}</OkBanner>}
       <Section>
-        <h3>Pending ({pending.length})</h3>
-        <Table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pending.length === 0 ? (
+        <h3>{t('migrations.pendingHeading', { count: pending.length })}</h3>
+        <TableScroll>
+          <DataTable>
+            <thead>
               <tr>
-                <Empty colSpan={2}>No pending migrations.</Empty>
+                <th>{t('migrations.columnName')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
-            ) : (
-              pending.map((name) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>
-                    <RowBtn onClick={() => onSign(name)}>Sign</RowBtn>
-                  </td>
+            </thead>
+            <tbody>
+              {pending.length === 0 ? (
+                <tr>
+                  <EmptyCell colSpan={2}>
+                    {t('migrations.emptyPending')}
+                  </EmptyCell>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </Table>
+              ) : (
+                pending.map((name) => (
+                  <tr key={name}>
+                    <td>{name}</td>
+                    <td>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onSign(name)}
+                      >
+                        {t('common.sign')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </DataTable>
+        </TableScroll>
       </Section>
       <Section>
-        <h3>Applied ({applied.length})</h3>
-        <Table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Applied at</th>
-              <th>Signed by</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {applied.length === 0 ? (
+        <h3>{t('migrations.appliedHeading', { count: applied.length })}</h3>
+        <TableScroll>
+          <DataTable>
+            <thead>
               <tr>
-                <Empty colSpan={4}>No applied migrations.</Empty>
+                <th>{t('migrations.columnName')}</th>
+                <th>{t('migrations.columnAppliedAt')}</th>
+                <th>{t('migrations.columnSignedBy')}</th>
+                <th>{t('common.actions')}</th>
               </tr>
-            ) : (
-              applied.map((m) => (
-                <tr key={m.name}>
-                  <td>{m.name}</td>
-                  <td>{m.applied_at ?? ''}</td>
-                  <td>{m.signed_by ?? ''}</td>
-                  <td>
-                    <RowBtn onClick={() => onSign(m.name)}>Sign</RowBtn>
-                  </td>
+            </thead>
+            <tbody>
+              {applied.length === 0 ? (
+                <tr>
+                  <EmptyCell colSpan={4}>
+                    {t('migrations.emptyApplied')}
+                  </EmptyCell>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </Table>
+              ) : (
+                applied.map((m) => (
+                  <tr key={m.name}>
+                    <td>{m.name}</td>
+                    <td>{m.applied_at ?? ''}</td>
+                    <td>{m.signed_by ?? ''}</td>
+                    <td>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onSign(m.name)}
+                      >
+                        {t('common.sign')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </DataTable>
+        </TableScroll>
       </Section>
       {showCreate && (
         <CreateMigrationModal
           onClose={() => {
             setShowCreate(false)
-            load()
+            refetch()
           }}
         />
       )}
-    </Wrap>
+    </Stack>
   )
 }
 
 const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
   onClose,
 }) => {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Stage the migration content via the typed multipart endpoint
+  // (GAP-Q5 #34: `client.migrationUpload` is generated from the
+  // `"type": "file"` request schema in geode.json — it builds the
+  // FormData and POSTs `multipart/form-data`; the shared fetch wrapper
+  // in api/client.ts attaches the cookie/CSRF/bearer auth). Server
+  // returns the canonical filename; we record it locally so the
+  // subsequent postMigrations call can reference it once Geode's wire
+  // dialect grows a "CREATE MIGRATION FROM FILE" form. Today the file
+  // is simply staged on disk for an operator to pick up.
+  const onUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ): Promise<void> => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setUploading(true)
+    setErr(null)
+    try {
+      const resp = await client.migrationUpload({
+        file: { blob: f, filename: f.name, contentType: f.type || undefined },
+      })
+      setUploadedFile(resp.file)
+      // Default the migration name to the upload filename if the
+      // operator hasn't typed one yet.
+      if (!name) {
+        setName(resp.file.replace(/\.[^.]+$/, ''))
+      }
+    } catch (e2: unknown) {
+      setErr(e2 instanceof Error ? e2.message : String(e2))
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
@@ -296,32 +306,75 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
     }
   }
 
+  let createLabel = t('common.create')
+  if (uploading) createLabel = t('common.uploading')
+
+  const modalFooter = (
+    <>
+      <Button variant="ghost" onClick={onClose} disabled={busy}>
+        Cancel
+      </Button>
+      <Button
+        form="create-migration-form"
+        type="submit"
+        loading={busy}
+        disabled={uploading}
+      >
+        {createLabel}
+      </Button>
+    </>
+  )
+
   return (
-    <Modal onClick={onClose}>
-      <ModalCard onClick={(e) => e.stopPropagation()}>
-        <h3>New migration</h3>
-        <form
-          onSubmit={submit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+    <Modal
+      open
+      onClose={onClose}
+      title={t('migrations.createTitle')}
+      footer={modalFooter}
+    >
+      <form
+        id="create-migration-form"
+        onSubmit={submit}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        <Field
+          label={t('migrations.uploadLabel')}
+          htmlFor="migration-upload-input"
         >
           <input
-            placeholder="name"
+            id="migration-upload-input"
+            ref={fileInputRef}
+            type="file"
+            onChange={onUpload}
+            disabled={uploading || busy}
+          />
+        </Field>
+        {uploadedFile && (
+          <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
+            {t('migrations.staged', { name: uploadedFile })}
+          </span>
+        )}
+        <Field label={t('migrations.fieldName')} htmlFor="cm-name" required>
+          <Input
+            id="cm-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
-          <textarea
-            placeholder="description"
+        </Field>
+        <Field
+          label={t('migrations.fieldDescription')}
+          htmlFor="cm-description"
+        >
+          <Textarea
+            id="cm-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
           />
-          <NewBtn type="submit" disabled={busy}>
-            {busy ? '...' : 'Create'}
-          </NewBtn>
-          {err && <Err>{err}</Err>}
-        </form>
-      </ModalCard>
+        </Field>
+        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      </form>
     </Modal>
   )
 }

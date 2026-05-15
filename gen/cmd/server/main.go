@@ -122,12 +122,20 @@ func main() {
 	defer cancel()
 
 	if err := Serve(ctx); err != nil {
+		// Serve defers obsx.FlushLogs(), but log.Fatal calls os.Exit which
+		// bypasses defers in this frame; flush explicitly before exiting so
+		// a fatal log line buffered by the obsx logger is not lost.
+		obsx.FlushLogs()
 		log.Fatal(err)
 	}
 }
 
 // Serve starts the generated API server with functional options.
 func Serve(ctx context.Context, opts ...ServerOption) error {
+	// obsx buffers JSON log records; flush on the way out so a graceful
+	// shutdown does not drop in-flight log lines. (A hard crash still loses
+	// records buffered within the obsx flush interval -- see obsx.FlushLogs.)
+	defer obsx.FlushLogs()
 	var sopts ServerOptions
 	for _, o := range opts {
 		o(&sopts)
@@ -269,15 +277,19 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 	}
 
 	hcfg := httpx.Config{
-		Bind:           rc.Server.Bind,
-		ReadHeader:     time.Duration(rc.Server.Timeouts.ReadHeaderMS) * time.Millisecond,
-		ReadTimeout:    time.Duration(rc.Server.Timeouts.ReadMS) * time.Millisecond,
-		WriteTimeout:   time.Duration(rc.Server.Timeouts.WriteMS) * time.Millisecond,
-		IdleTimeout:    time.Duration(rc.Server.Timeouts.IdleMS) * time.Millisecond,
-		MaxHeaderBytes: rc.Server.Limits.MaxHeaderBytes,
-		MaxBodyBytes:   rc.Server.Limits.MaxBodyBytes,
-		CORSEnabled:    rc.Security.CORS.Enabled,
-		CORSOrigins:    rc.Security.CORS.Origins,
+		Bind:              rc.Server.Bind,
+		ReadHeader:        time.Duration(rc.Server.Timeouts.ReadHeaderMS) * time.Millisecond,
+		ReadTimeout:       time.Duration(rc.Server.Timeouts.ReadMS) * time.Millisecond,
+		WriteTimeout:      time.Duration(rc.Server.Timeouts.WriteMS) * time.Millisecond,
+		IdleTimeout:       time.Duration(rc.Server.Timeouts.IdleMS) * time.Millisecond,
+		MaxHeaderBytes:    rc.Server.Limits.MaxHeaderBytes,
+		MaxBodyBytes:      rc.Server.Limits.MaxBodyBytes,
+		CORSEnabled:       rc.Security.CORS.Enabled,
+		CORSOrigins:       rc.Security.CORS.Origins,
+		EnableCompression: rc.Server.EnableCompression,
+		PerIPRPS:          rc.Security.RateLimit.PerIPRPS,
+		PerIPBurst:        float64(rc.Security.RateLimit.PerIPBurst),
+		PerIPSource:       httpx.ParseIPSource(rc.Security.RateLimit.PerIPSource),
 	}
 	h := httpx.WrapHandler(hcfg, mux)
 	h = obsx.Middleware(h)
