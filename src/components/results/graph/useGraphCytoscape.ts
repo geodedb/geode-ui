@@ -9,9 +9,10 @@ import {
   applyVisibility,
 } from './cyHelpers'
 import { layoutConfig } from './layouts'
-import type { LayoutName } from '../useGraphPrefs'
+import { useGraphPrefs, type LayoutName } from '../useGraphPrefs'
 import type { Selected } from './GraphInspector'
 import { perfMarks } from '../../../lib/perfMarks'
+import { scaleTier } from './scaleTier'
 
 const REBUILD_DEBOUNCE_MS = 250
 
@@ -183,6 +184,19 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
           applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
           applySelectionMode(cy, selectionModeRef.current)
           setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
+          // PERF: writeback the scale tier derived from the live node
+          // count so feature gates (effectiveDomNodes / cxtmenu / tooltips
+          // / badges in useGraphPrefs) can degrade gracefully past the
+          // 2k/5k thresholds. scaleTier applies hysteresis so a graph
+          // hovering near a boundary doesn't thrash. Skips the setter +
+          // perf mark when the tier is unchanged.
+          const nodeCount = cy.nodes().length
+          const prevTier = useGraphPrefs.getState().tier
+          const nextTier = scaleTier(nodeCount, prevTier)
+          if (nextTier !== prevTier) {
+            useGraphPrefs.getState().setTier(nextTier)
+            perfMarks.tier(nextTier)
+          }
           // Re-apply pinned-node bookkeeping against the fresh core —
           // Cytoscape doesn't carry `locked` state across teardown/rebuild.
           reapplyPins?.()
@@ -335,5 +349,19 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
 export function __buildForTest(): void {
   perfMarks.start('graph:rebuild')
   perfMarks.end('graph:rebuild')
+}
+
+// Test seam: exposes the tier-writeback contract without spinning up a
+// full Cytoscape Core. Mirrors the in-build branch (read prev, compute
+// next via scaleTier, write + emit perf mark only on change) so the
+// tier-writeback contract test asserts the same shape the rebuild
+// happy-path runs against.
+export function __writeTierForTest(n: number): void {
+  const prev = useGraphPrefs.getState().tier
+  const next = scaleTier(n, prev)
+  if (next !== prev) {
+    useGraphPrefs.getState().setTier(next)
+    perfMarks.tier(next)
+  }
 }
 /* eslint-enable no-underscore-dangle */
