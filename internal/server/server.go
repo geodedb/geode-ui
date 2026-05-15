@@ -63,3 +63,23 @@ func New(cfg Config) *GraphServer {
 func (s *GraphServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *gentypes.Empty) (*gentypes.HealthResp, error) {
 	return &gentypes.HealthResp{Status: "ok", Version: s.cfg.Version}, nil
 }
+
+// RegisterLspWS registers the /ws/lsp WebSocket-to-TCP bridge route on
+// mux. The bridge proxies browser WebSocket frames to the upstream
+// LSP TCP listener (geode serve --lsp-port=N — see geode worktree
+// Task 28); see ws_lsp.go for the wire-format details.
+//
+// auth is invoked before the WebSocket upgrade. A nil callback or a
+// non-nil error from the callback short-circuits to 401, so the
+// upstream TCP listener is never dialed for an anonymous request. The
+// same callback shape (*GraphServer).AuthJWT satisfies — wire it in
+// cmd/server/main.go alongside the generated /ws/query registration:
+//
+//	server.RegisterLspWS(mux, graphSrv.AuthJWT, "127.0.0.1:3142")
+//
+// upstreamAddr is currently a hardcoded host:port; Task 31 plumbs it
+// through Config so deployments can colocate or fan out the LSP
+// listener independently.
+func RegisterLspWS(mux *http.ServeMux, auth func(*http.Request) error, upstreamAddr string) {
+	mux.Handle("/ws/lsp", newWsLspHandler(upstreamAddr, auth))
+}
