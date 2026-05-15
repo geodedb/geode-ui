@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
@@ -39,11 +39,63 @@ export interface Props {
 // onAddRequested callback rather than switchActive(connectionId).
 const ADD_ITEM_VALUE = '__add__'
 
+// React-synthetic-event `stopPropagation` only stops React's
+// synthetic delegation chain — the native click event continues to
+// bubble to <wa-dropdown>'s shadow-DOM @click handler, which then
+// fires wa-select for whichever wa-dropdown-item is the ancestor.
+// The wa-select dispatch in turn closes the dropdown and races with
+// our disconnect against the same connection id, so the menu shuts
+// before the e2e suite can observe the post-disconnect row count.
+//
+// Returning a callback ref handler that attaches a CAPTURE-phase
+// native click listener fixes both problems: it runs BEFORE
+// wa-dropdown's bubble-phase handler and can call
+// stopImmediatePropagation to prevent wa-select entirely.
+function bindCaptureClick(
+  handler: (e: Event) => void
+): (node: HTMLElement | null) => void {
+  return (node) => {
+    if (!node) return
+    node.addEventListener(
+      'click',
+      (e) => {
+        e.stopImmediatePropagation()
+        handler(e)
+      },
+      true
+    )
+  }
+}
+
 export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   const { t } = useTranslation()
   const { connections, activeId, loading } = useConnections()
   const active = useActiveConnection()
   const { disconnect, switchActive } = useAuth()
+
+  // <wa-dropdown-item>'s Lit `updated()` lifecycle forcibly sets
+  // role="menuitem" + clears aria-checked on first commit (it only
+  // honours role="menuitemradio" for type="checkbox"). The seed item
+  // survives because subsequent React renders reconcile the role
+  // attribute back; a newly-mounted item commits exactly once and
+  // loses to WA's microtask, so it stays role="menuitem" with no
+  // aria-checked. That broke 17-add-connection.spec ("two rows for
+  // default") and 18-connection-switcher.spec ("disconnect removes
+  // the row"). React's `useEffect` runs in a macrotask AFTER both
+  // React's commit and WA's update microtask, so re-asserting the
+  // role attribute here wins deterministically.
+  const rowsContainerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const root = rowsContainerRef.current
+    if (!root) return
+    root
+      .querySelectorAll<HTMLElement>('wa-dropdown-item[data-connection-row]')
+      .forEach((el) => {
+        el.setAttribute('role', 'menuitemradio')
+        const isActive = el.dataset.connectionRowActive === 'true'
+        el.setAttribute('aria-checked', isActive ? 'true' : 'false')
+      })
+  }, [connections, activeId])
 
   // PSR-F16 (#113): the lazy-hydrate path mounts with an empty
   // connection map; show a non-interactive placeholder while the
@@ -85,7 +137,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   }
 
   return (
-    <SwitcherWrap>
+    <SwitcherWrap ref={rowsContainerRef}>
       <Dropdown
         onWaSelect={(e: Event) => {
           // The @lit/react wrapper assigns `value` as a JS property on
@@ -121,14 +173,23 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
             key={c.connectionId}
             value={c.connectionId}
             // Preserve the existing test-id surface so e2e + unit
-            // tests can find rows by connection id. Also expose the
-            // aria-label so getByRole('menuitemradio', {name}) keeps
-            // working — wa-dropdown-item renders as role="menuitem"
-            // by default; tests query by text/testid instead.
+            // tests can find rows by connection id. Role + aria-checked
+            // are also set here for React's initial commit (which
+            // wins for the seed item that re-reconciles), but the
+            // useEffect above is the authoritative writer: WA's
+            // <wa-dropdown-item> lifecycle overwrites both attributes
+            // on first commit, so a freshly-mounted row would
+            // otherwise render as role="menuitem" without
+            // aria-checked. The data-connection-row + data-* attrs
+            // give the effect a stable target.
             role="menuitemradio"
             aria-checked={c.connectionId === activeId}
             aria-label={c.profileName}
             data-testid={`connection-row-${c.connectionId}`}
+            data-connection-row=""
+            data-connection-row-active={
+              c.connectionId === activeId ? 'true' : 'false'
+            }
           >
             <span style={rowInnerStyle}>
               <span>{c.profileName}</span>
@@ -137,14 +198,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
                 tabIndex={0}
                 aria-label={`${t('connection.disconnect')}: ${c.profileName}`}
                 data-testid={`connection-disconnect-${c.connectionId}`}
-                onClick={(e) => {
-                  // Prevent the dropdown's selection logic from
-                  // firing wa-select (which would race the
-                  // disconnect with a switchActive on the same
-                  // connection id).
-                  e.stopPropagation()
-                  disconnect(c.connectionId)
-                }}
+                ref={bindCaptureClick(() => disconnect(c.connectionId))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.stopPropagation()

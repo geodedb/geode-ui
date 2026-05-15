@@ -110,7 +110,25 @@ export const GraphBenchPage: React.FC = () => {
   }, [renderer, n])
 
   return (
-    <div style={{ height: '100vh' }} data-testid="graph-bench-page">
+    // GraphView's fill mode relies on its <Wrap> grid + <CanvasArea> +
+    // <Canvas> chain resolving `height: 100%` against a definite parent
+    // height. A plain block parent at `height: 100vh` works as long as
+    // the GraphView wrapper itself is also told to take 100% — the
+    // toolbar label is position:absolute and out of flow. Without
+    // `display: flex` on the parent + a `flex: 1` GraphView wrapper,
+    // the Wrap grid's row height resolves to `auto` (= content height)
+    // and the cytoscape canvases render at height=0. Caught by
+    // e2e/specs/20 — pre-fix the bench canvas was 990x0 which prevented
+    // the right-click that drives the scale-degradation assertions.
+    <div
+      style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+      }}
+      data-testid="graph-bench-page"
+    >
       <label
         htmlFor="bench-use-worker-layout"
         style={{
@@ -131,7 +149,9 @@ export const GraphBenchPage: React.FC = () => {
         />{' '}
         worker layout
       </label>
-      <GraphView resp={resp} fillHeight />
+      <div style={{ flex: '1 1 auto', minHeight: 0 }}>
+        <GraphView resp={resp} fillHeight />
+      </div>
     </div>
   )
 }

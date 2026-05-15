@@ -700,7 +700,28 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             {pathStatusText}
           </PathStatus>
         )}
-        <div style={{ position: 'relative' }}>
+        {/*
+          Position-relative wrapper for the canvas + absolute overlays
+          (Overlay empty-state, ErrorBanner, GraphMiniMap, GraphBadges,
+          GraphTooltip, FocusClearChip). In fill mode the Canvas child
+          uses `flex: 1 1 auto` to grow inside its parent — which means
+          THIS wrapper must itself be a flex item that grows, otherwise
+          Canvas's `flex: 1` resolves against a 0-height auto-sized
+          parent and the cytoscape canvases render at height=0. Caught
+          by e2e/specs/20 — pre-fix the bench canvas was 990x0 because
+          this div was auto-height. Also keep `display: flex` so the
+          Canvas's flex grow rule actually applies, and `min-height: 0`
+          to allow flex shrinking below content size.
+        */}
+        <div
+          style={{
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            flex: fillHeight ? '1 1 auto' : '0 0 auto',
+            minHeight: 0,
+          }}
+        >
           <Canvas
             ref={ref}
             $height={effectiveHeight}
