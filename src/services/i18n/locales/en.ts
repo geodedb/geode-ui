@@ -201,6 +201,11 @@ export const en = {
     sectionVisibility: 'Visibility',
     sectionDisplay: 'Display fields',
     sectionInspector: 'Inspector',
+    filterChipHidden: 'Hidden: {{label}}',
+    filterChipFocused: 'Focused (id {{id}}, {{hops}} hops)',
+    filterChipCluster: 'Grouped by label',
+    filterChipPath: 'Path mode',
+    filterChipClear: 'Clear filter',
   },
 
   matrix: {
