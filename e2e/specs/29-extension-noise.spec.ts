@@ -83,9 +83,11 @@ test.describe('extension-noise filter', () => {
     // test) AND leave anything else alone (proved here).
     const prevented = await page.evaluate(() => {
       const reason = new Error('genuine-test-rejection-not-extension')
-      const ev = new (window as unknown as {
-        PromiseRejectionEvent: typeof PromiseRejectionEvent
-      }).PromiseRejectionEvent('unhandledrejection', {
+      const ev = new (
+        window as unknown as {
+          PromiseRejectionEvent: typeof PromiseRejectionEvent
+        }
+      ).PromiseRejectionEvent('unhandledrejection', {
         promise: Promise.reject(reason),
         reason,
         cancelable: true,
