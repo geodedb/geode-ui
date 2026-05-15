@@ -107,3 +107,17 @@ test('logout button calls signOut', () => {
   fireEvent.click(buttons[0]!)
   expect(signOut).toHaveBeenCalled()
 })
+
+describe('Shell <Body> flex chain', () => {
+  it('the body region is a flex column that grows to fill the viewport', () => {
+    const { container } = renderShell()
+    const main = container.querySelector('main#main-content') as HTMLElement
+    expect(main).not.toBeNull()
+    const cs = getComputedStyle(main)
+    // jsdom doesn't compute layout, but the styled-rule strings ARE
+    // serialised — assert the declarations exist.
+    expect(cs.display).toBe('flex')
+    expect(cs.flexDirection).toBe('column')
+    expect(cs.minHeight).toMatch(/100dvh|100vh/)
+  })
+})

@@ -78,11 +78,25 @@ const BrandLink = styled(Link)`
   }
 `
 
+// Body is a flex column rooted at the dynamic viewport height (dvh
+// excludes mobile browser chrome that vh includes). The Top nav stays
+// above it as a separate flex item of the document; subtract its
+// rendered height through `flex: 1 1 0` + `min-height: 0` so children
+// (QueryPage, etc.) can grow into the remaining space without ever
+// scrolling the page itself — only their internal panes scroll.
 const Body = styled.main`
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 57px);
   padding: ${({ theme }) => theme.spacing.lg};
+  /* The viewport-height calc above subtracts an approximation of the
+     Top nav row (sm vertical padding × 2 + 28 px logo + 1 px border ≈
+     57 px). The flex chain below this point uses min-height: 0 so a
+     long child doesn't push the page off-screen. */
 
   ${below('sm')`
     padding: ${({ theme }: { theme: DefaultTheme }) => theme.spacing.md};
+    min-height: calc(100dvh - 49px);
   `}
 `
 
