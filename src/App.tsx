@@ -7,6 +7,7 @@ import { ConnectionsProvider } from './api/connections'
 import type { ConnectionState } from './api/connections'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { Shell } from './components/layout/Shell'
+import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoginPage } from './pages/LoginPage'
 import { QueryPage } from './pages/QueryPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -126,40 +127,56 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
     <ThemeProvider>
       <GlobalStyle />
       <ThemeStyleSheet />
-      <ConnectionsProvider
-        initialConnections={initialConnections}
-        lazyHydrate={lazyHydrate}
-      >
-        <AuthProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/dev/graph-bench" element={<DevGraphBenchRoute />} />
-              <Route element={<ProtectedShell />}>
-                <Route index element={<QueryPage />} />
-                <Route path="dashboard" element={<DashboardPage />} />
-                <Route path="workspace" element={<WorkspacePage />} />
-                <Route path="schema" element={<SchemaPage />} />
-                <Route path="admin" element={<AdminPage />}>
-                  <Route index element={<Navigate to="users" replace />} />
-                  <Route path="users" element={<UsersPage />} />
-                  <Route path="roles" element={<RolesPage />} />
-                  <Route path="policies" element={<PoliciesPage />} />
-                  <Route path="grants" element={<GrantsPanel />} />
+      {/*
+        ErrorBoundary wraps everything below the theme so a render-time
+        throw (a hook that violated rules-of-hooks, a malformed API
+        payload that surfaces through a render, etc.) lands on a
+        recoverable error UI instead of unmounting #root entirely.
+        See ErrorBoundary.tsx for the carveout: chunk-eval throws
+        (webpack module factories) land on window.onerror, not on a
+        React render frame, and CAN'T be caught here. Those must be
+        prevented at the source — see GraphView.tsx for the
+        reagraph/React-18 example.
+      */}
+      <ErrorBoundary>
+        <ConnectionsProvider
+          initialConnections={initialConnections}
+          lazyHydrate={lazyHydrate}
+        >
+          <AuthProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route
+                  path="/dev/graph-bench"
+                  element={<DevGraphBenchRoute />}
+                />
+                <Route element={<ProtectedShell />}>
+                  <Route index element={<QueryPage />} />
+                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="workspace" element={<WorkspacePage />} />
+                  <Route path="schema" element={<SchemaPage />} />
+                  <Route path="admin" element={<AdminPage />}>
+                    <Route index element={<Navigate to="users" replace />} />
+                    <Route path="users" element={<UsersPage />} />
+                    <Route path="roles" element={<RolesPage />} />
+                    <Route path="policies" element={<PoliciesPage />} />
+                    <Route path="grants" element={<GrantsPanel />} />
+                  </Route>
+                  <Route path="ops" element={<OpsPage />}>
+                    <Route index element={<Navigate to="backups" replace />} />
+                    <Route path="backups" element={<BackupPage />} />
+                    <Route path="restore" element={<RestorePage />} />
+                    <Route path="migrations" element={<MigrationsPage />} />
+                    <Route path="audit" element={<AuditLogPage />} />
+                  </Route>
+                  <Route path="profiles" element={<ProfilesPage />} />
                 </Route>
-                <Route path="ops" element={<OpsPage />}>
-                  <Route index element={<Navigate to="backups" replace />} />
-                  <Route path="backups" element={<BackupPage />} />
-                  <Route path="restore" element={<RestorePage />} />
-                  <Route path="migrations" element={<MigrationsPage />} />
-                  <Route path="audit" element={<AuditLogPage />} />
-                </Route>
-                <Route path="profiles" element={<ProfilesPage />} />
-              </Route>
-            </Routes>
-          </BrowserRouter>
-        </AuthProvider>
-      </ConnectionsProvider>
+              </Routes>
+            </BrowserRouter>
+          </AuthProvider>
+        </ConnectionsProvider>
+      </ErrorBoundary>
     </ThemeProvider>
   </LocalizationProvider>
 )

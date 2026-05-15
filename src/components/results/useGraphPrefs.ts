@@ -161,12 +161,19 @@ function coerceSelectionMode(v: unknown): SelectionMode {
   return v === 'box' ? 'box' : DEFAULT_SELECTION_MODE
 }
 
-// Anything other than the literal string 'reagraph' coerces back to
-// the default ('cytoscape') — guards against a stale persisted shape
-// from an older build, a hand-edited localStorage value, or a typo
-// from another branch.
-function coerceRenderer(v: unknown): Renderer {
-  return v === 'reagraph' ? 'reagraph' : DEFAULT_RENDERER
+// Coerces the persisted renderer back to 'cytoscape'.
+//
+// The reagraph branch is currently disabled at the GraphView
+// dispatcher level (see GraphView.tsx for the React-18 vs
+// react-three-fiber@9 compatibility note). A user who flipped the
+// renderer to 'reagraph' on an older build has 'reagraph' persisted
+// in localStorage; reading that back would keep them stuck on the
+// disabled branch — except that the dispatcher ignores the pref now,
+// so the effective renderer is always cytoscape. We additionally
+// coerce 'reagraph' → 'cytoscape' on read so the rest of the store
+// (and any future re-enabled dispatcher) sees a coherent value.
+function coerceRenderer(): Renderer {
+  return DEFAULT_RENDERER
 }
 
 export const useGraphPrefs = create<GraphPrefsState>()(
@@ -284,7 +291,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // stale shape, a typo, a missing field) falls back to the
           // incumbent 'cytoscape' renderer so a bad persisted value
           // can never trap the user on a partial / broken renderer.
-          renderer: coerceRenderer(p.renderer),
+          renderer: coerceRenderer(),
           // useWorkerLayout defaults to true — only an explicit literal
           // `false` opts out. A missing/garbage persisted value (stale
           // shape from before this field existed) lights the worker on.

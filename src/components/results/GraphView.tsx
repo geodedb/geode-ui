@@ -1,34 +1,29 @@
-import React, { lazy, Suspense } from 'react'
-import { useGraphPrefs } from './useGraphPrefs'
+import React from 'react'
 import {
   GraphViewCytoscape,
   type GraphViewCytoscapeProps,
 } from './GraphViewCytoscape'
 
-// Reagraph pulls in three.js (~600 KB minified) — lazy-load it so the
-// cytoscape default path doesn't pay the bundle cost. The chunk is
-// fetched the first time the user flips the renderer toggle. Suspense
-// fallback is a single-frame placeholder; in practice the chunk is in
-// cache after the first toggle.
-const GraphViewReagraph = lazy(() =>
-  import('./GraphViewReagraph').then((m) => ({ default: m.GraphViewReagraph }))
-)
-
 export type GraphViewProps = GraphViewCytoscapeProps
 
-// Thin dispatcher that picks the active graph renderer from the sticky
-// pref in useGraphPrefs. Both branches receive identical props — the
-// renderer choice is intentionally invisible to the caller (QueryPage,
-// the maximised overlay, etc.) so a future feature-flag flip or rollback
-// is a one-line change here.
-export const GraphView: React.FC<GraphViewProps> = (props) => {
-  const renderer = useGraphPrefs((s) => s.renderer)
-  if (renderer === 'reagraph') {
-    return (
-      <Suspense fallback={<div data-testid="graph-renderer-loading" />}>
-        <GraphViewReagraph {...props} />
-      </Suspense>
-    )
-  }
-  return <GraphViewCytoscape {...props} />
-}
+// Thin dispatcher that historically picked between the cytoscape canvas
+// renderer (production) and the reagraph WebGL spike (Phase 0).
+//
+// The reagraph branch is currently DISABLED at the dispatcher level
+// because reagraph@4.30.8 transitively requires @react-three/fiber@9.6.1
+// which peer-depends on React >=19. The project pins react@18.2 and
+// react-three-fiber's module body reads ReactSharedInternals.S (a React
+// 19 internal). Lazy-loading the reagraph chunk therefore throws
+// synchronously during module evaluation — outside any Suspense or
+// ErrorBoundary scope — and the protected shell whitescreens.
+//
+// Caught by e2e/specs/28-no-whitescreen.spec.ts. The spike sources
+// (GraphViewReagraph.tsx + reagraphElements.ts) are intentionally left
+// on disk so the spike branch is recoverable when either reagraph
+// publishes a React-18-compatible release or the project upgrades to
+// React 19; flipping this dispatcher back to a lazy-loaded reagraph
+// branch is then a one-line change. Until then there is exactly one
+// renderer: cytoscape.
+export const GraphView: React.FC<GraphViewProps> = (props) => (
+  <GraphViewCytoscape {...props} />
+)
