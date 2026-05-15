@@ -171,7 +171,7 @@ function coerceRenderer(v: unknown): Renderer {
 
 export const useGraphPrefs = create<GraphPrefsState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       layout: DEFAULT_LAYOUT,
       hiddenLabels: new Set<string>(),
       nodeLabelPrefs: {},
@@ -214,16 +214,13 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setRenderer: (r) => set({ renderer: r }),
       setTier: (t) => set({ tier: t }),
       setUseWorkerLayout: (v) => set({ useWorkerLayout: v }),
-      effectiveDomNodes: () => {
-        const s = useGraphPrefs.getState()
+      effectiveDomNodes: (): boolean => {
+        const s = get()
         return s.domNodes && allowedFeatures(s.tier).domNodes
       },
-      effectiveCxtMenu: () =>
-        allowedFeatures(useGraphPrefs.getState().tier).cxtmenu,
-      effectiveTooltips: () =>
-        allowedFeatures(useGraphPrefs.getState().tier).tooltips,
-      effectiveBadges: () =>
-        allowedFeatures(useGraphPrefs.getState().tier).badges,
+      effectiveCxtMenu: (): boolean => allowedFeatures(get().tier).cxtmenu,
+      effectiveTooltips: (): boolean => allowedFeatures(get().tier).tooltips,
+      effectiveBadges: (): boolean => allowedFeatures(get().tier).badges,
     }),
     {
       name: STORAGE_KEY,
