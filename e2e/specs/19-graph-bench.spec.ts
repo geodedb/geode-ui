@@ -96,7 +96,10 @@ async function runOne(
       return m ? m.duration : 0
     })
     const firstInteractiveMs = await page.evaluate(() => {
-      const m = performance.getEntriesByName('graph:firstInteractive', 'mark')[0]
+      const m = performance.getEntriesByName(
+        'graph:firstInteractive',
+        'mark'
+      )[0]
       return m ? m.startTime : 0
     })
     const fpsVals = samples.map((s) => s.fps).sort((a, b) => a - b)

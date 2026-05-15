@@ -2,7 +2,9 @@ import { test, expect } from '@playwright/test'
 
 test.describe.configure({ mode: 'serial', retries: 0 })
 
-test('scale degradation: large tier disables cxtmenu / tooltip / badges / domNodes', async ({ page }) => {
+test('scale degradation: large tier disables cxtmenu / tooltip / badges / domNodes', async ({
+  page,
+}) => {
   test.setTimeout(60_000)
   await page.goto('/dev/graph-bench?n=6000&renderer=cytoscape')
   // Warmup for layout to complete + tier write to land.
@@ -18,7 +20,10 @@ test('scale degradation: large tier disables cxtmenu / tooltip / badges / domNod
   // cxtmenu trigger: a right-click on a node in "large" tier should NOT
   // open the context menu (its consumer is mounted but tier-gated off).
   // Probe via the DOM: cxtmenu root element should not exist.
-  await page.locator('[data-testid="graph-bench-page"] canvas').first().click({ button: 'right' })
+  await page
+    .locator('[data-testid="graph-bench-page"] canvas')
+    .first()
+    .click({ button: 'right' })
   const cxtmenu = page.locator('.cy-cxtmenu')
   await expect(cxtmenu).toHaveCount(0)
 
