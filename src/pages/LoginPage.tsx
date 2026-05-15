@@ -51,11 +51,26 @@ const ProfileList = styled.ul`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.xs};
+
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
 `
 
 const ProfileDescription = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.sm};
   color: ${({ theme }) => theme.text.secondary};
+  padding: 0 ${({ theme }) => theme.spacing.sm};
+  /*
+    Word-wrap is the load-bearing rule here: the description can be a
+    multi-sentence paragraph and the form is only 380px wide. Keep it
+    in normal flow — block-level <div> already wraps, but be explicit
+    so a future ProfileList rule that switches direction can't break
+    it back into a single inline run.
+  */
+  overflow-wrap: anywhere;
 `
 
 export const LoginPage: React.FC = () => {
@@ -128,6 +143,14 @@ export const LoginPage: React.FC = () => {
         <ProfileList aria-label={t('auth.profileList')}>
           {profiles!.map((p) => (
             <li key={p.name}>
+              {/*
+                Profile description must sit OUTSIDE the <wa-button>: the
+                button's shadow-DOM label slot lays out children inline
+                without word-wrap, so a multi-paragraph <div> slotted as
+                a button child overflows the form card horizontally
+                (~1051px wide inside a 380px form, regression caught by
+                25-ui-health.spec.ts).
+              */}
               <wa-button
                 type="button"
                 appearance={p.name === profile ? 'filled' : 'outlined'}
@@ -137,14 +160,19 @@ export const LoginPage: React.FC = () => {
                 data-testid={`login-profile-${p.name}`}
                 aria-pressed={p.name === profile ? 'true' : 'false'}
                 aria-label={p.name}
+                aria-describedby={
+                  p.description ? `login-profile-${p.name}-desc` : undefined
+                }
                 onClick={() => setProfile(p.name)}
                 style={{ width: '100%' }}
               >
                 <strong>{p.name}</strong>
-                {p.description ? (
-                  <ProfileDescription>{p.description}</ProfileDescription>
-                ) : null}
               </wa-button>
+              {p.description ? (
+                <ProfileDescription id={`login-profile-${p.name}-desc`}>
+                  {p.description}
+                </ProfileDescription>
+              ) : null}
             </li>
           ))}
         </ProfileList>

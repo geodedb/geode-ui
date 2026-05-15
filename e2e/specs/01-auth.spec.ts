@@ -22,7 +22,16 @@ test.describe('auth', () => {
     // (Plan C). The first profile auto-selects on mount and the seed has
     // 'default' as the only system profile, so we just confirm the
     // picker is showing and proceed.
-    await expect(page.getByRole('button', { name: /^default$/i })).toBeVisible()
+    //
+    // The profile button is a <wa-button> whose shadow root contains a
+    // nested <button part="base"> with the same accessible name. After
+    // moving ProfileDescription OUT of the wa-button (so the form card
+    // no longer overflows — see 25-ui-health.spec.ts), both elements
+    // resolve to `getByRole('button', { name: /^default$/i })` in
+    // strict mode. Scope to the wa-button host via test-id to pin the
+    // outer element. Same pattern used elsewhere in the suite for
+    // wa-button locators (see helpers/selectors.ts loginSubmit).
+    await expect(page.getByTestId('login-profile-default')).toBeVisible()
     await sel.loginUsername(page).fill(USER)
     await sel.loginPassword(page).fill(PASS)
     await sel.loginSubmit(page).click()

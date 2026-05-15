@@ -33,7 +33,7 @@ import { useTranslation } from 'react-i18next'
 import styled, { DefaultTheme } from 'styled-components'
 
 import { listProfiles, updateProfile, ProfileView } from '../api/profiles'
-import { Button } from '../components/ui'
+import { Button, TableScroll } from '../components/ui'
 import { ProfileEditorModal } from '../components/profiles/ProfileEditorModal'
 import { DeleteProfileModal } from '../components/profiles/DeleteProfileModal'
 import { useAuth } from '../auth/AuthProvider'
@@ -236,82 +236,91 @@ export const ProfilesPage: React.FC = () => {
     if (profiles.length === 0) {
       return <Status>{t('profiles.empty')}</Status>
     }
+    // TableScroll wrapper keeps the table on its own horizontal scroll
+    // axis at narrow viewports — without it the page itself horizontally
+    // scrolls (caught by 25-ui-health.spec.ts: /profiles mobile leaked
+    // ~43px past the viewport pre-fix because the table's natural width
+    // exceeded 390px).
     return (
-      <Table>
-        <thead>
-          <tr>
-            <th>{t('profiles.column.name')}</th>
-            <th>{t('profiles.column.scope')}</th>
-            <th>{t('profiles.column.description')}</th>
-            <th>{t('profiles.column.owner')}</th>
-            <th>{t('common.actions')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {profiles.map((p) => (
-            <tr key={p.id}>
-              <td>
-                <strong>{p.name}</strong>
-                {p.isDefault ? (
-                  <>
-                    {' '}
-                    <Badge $kind="default">{t('profiles.flag.default')}</Badge>
-                  </>
-                ) : null}
-              </td>
-              <td>
-                <Badge $kind={p.scope}>{scopeLabel(p.scope, t)}</Badge>
-              </td>
-              <td>{p.description ?? ''}</td>
-              <td>{p.ownerUserId ?? ''}</td>
-              <td>
-                {/*
-                  PSR-G09 (#86): per-row CRUD visibility now combines two
-                  signals correctly. (1) isAdmin from JWT roles — an
-                  admin can edit/delete any profile, including system
-                  profiles whose DSN the server scrubbed for redaction
-                  reasons (admins still authoritatively see them via the
-                  edit modal which re-fetches); (2) `!!p.dsn` — for
-                  non-admins this is the server's "you own this" signal
-                  (the server emits the DSN only when the viewer is the
-                  profile owner). Pre-fix the gate was `!!p.dsn` alone
-                  which meant an admin viewing a redacted system row
-                  would see no buttons.
-                */}
-                {(isAdmin || !!p.dsn) && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => openEdit(p)}
-                    >
-                      {t('profiles.actions.edit')}
-                    </Button>{' '}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setDeleteTarget(p)}
-                    >
-                      {t('profiles.actions.delete')}
-                    </Button>{' '}
-                    {!p.isDefault && (
+      <TableScroll>
+        <Table>
+          <thead>
+            <tr>
+              <th>{t('profiles.column.name')}</th>
+              <th>{t('profiles.column.scope')}</th>
+              <th>{t('profiles.column.description')}</th>
+              <th>{t('profiles.column.owner')}</th>
+              <th>{t('common.actions')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {profiles.map((p) => (
+              <tr key={p.id}>
+                <td>
+                  <strong>{p.name}</strong>
+                  {p.isDefault ? (
+                    <>
+                      {' '}
+                      <Badge $kind="default">
+                        {t('profiles.flag.default')}
+                      </Badge>
+                    </>
+                  ) : null}
+                </td>
+                <td>
+                  <Badge $kind={p.scope}>{scopeLabel(p.scope, t)}</Badge>
+                </td>
+                <td>{p.description ?? ''}</td>
+                <td>{p.ownerUserId ?? ''}</td>
+                <td>
+                  {/*
+                    PSR-G09 (#86): per-row CRUD visibility now combines two
+                    signals correctly. (1) isAdmin from JWT roles — an
+                    admin can edit/delete any profile, including system
+                    profiles whose DSN the server scrubbed for redaction
+                    reasons (admins still authoritatively see them via the
+                    edit modal which re-fetches); (2) `!!p.dsn` — for
+                    non-admins this is the server's "you own this" signal
+                    (the server emits the DSN only when the viewer is the
+                    profile owner). Pre-fix the gate was `!!p.dsn` alone
+                    which meant an admin viewing a redacted system row
+                    would see no buttons.
+                  */}
+                  {(isAdmin || !!p.dsn) && (
+                    <>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => {
-                          setAsDefault(p).catch(() => undefined)
-                        }}
+                        onClick={() => openEdit(p)}
                       >
-                        {t('profiles.actions.setDefault')}
-                      </Button>
-                    )}
-                  </>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
+                        {t('profiles.actions.edit')}
+                      </Button>{' '}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setDeleteTarget(p)}
+                      >
+                        {t('profiles.actions.delete')}
+                      </Button>{' '}
+                      {!p.isDefault && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setAsDefault(p).catch(() => undefined)
+                          }}
+                        >
+                          {t('profiles.actions.setDefault')}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </TableScroll>
     )
   }
 
