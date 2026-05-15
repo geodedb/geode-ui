@@ -105,6 +105,38 @@ if (
   }
 }
 
+// jsdom's Performance implementation (as of jest-environment-jsdom v29 /
+// jsdom v20) ships `performance.now()` and the navigation-timing fields,
+// but omits the W3C UserTiming entries (`mark`, `measure`, `clearMarks`,
+// `clearMeasures`, `getEntriesByName`, `getEntriesByType`). The runtime
+// browser ships them, so production code can rely on them; tests need a
+// shim. Delegate to Node's `perf_hooks.performance`, which implements the
+// full UserTiming Level 3 surface. Pin via `Object.defineProperty` so
+// individual tests can still reassign (e.g. to simulate `mark` throwing).
+if (
+  typeof globalThis.performance !== 'undefined' &&
+  typeof globalThis.performance.mark !== 'function'
+) {
+  const nodePerf = require('perf_hooks').performance
+  for (const fn of [
+    'mark',
+    'measure',
+    'clearMarks',
+    'clearMeasures',
+    'getEntriesByName',
+    'getEntriesByType',
+    'getEntries',
+  ]) {
+    if (typeof nodePerf[fn] === 'function') {
+      Object.defineProperty(globalThis.performance, fn, {
+        value: nodePerf[fn].bind(nodePerf),
+        writable: true,
+        configurable: true,
+      })
+    }
+  }
+}
+
 // jsdom ships HTMLDialogElement but stubs `.showModal()` / `.show()` /
 // `.close()` as missing. Web Awesome's <wa-dialog> calls `showModal()`
 // on its internal native <dialog> as soon as `open` flips true, which
