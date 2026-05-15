@@ -168,8 +168,8 @@ test.describe('graph power features', () => {
   test('lasso toggle enables lasso selection mode', async ({
     authedPage: page,
   }) => {
-    await page.getByTestId('graph-lasso-toggle').click()
-    await expect(page.getByTestId('graph-lasso-toggle')).toHaveAttribute(
+    await page.getByTestId('graph-more-lasso').click()
+    await expect(page.getByTestId('graph-more-lasso')).toHaveAttribute(
       'aria-pressed',
       'true'
     )
@@ -203,7 +203,7 @@ test.describe('graph power features', () => {
   test('HTML-node toggle flips the sticky pref', async ({
     authedPage: page,
   }) => {
-    const toggle = page.getByTestId('graph-dom-nodes-toggle')
+    const toggle = page.getByTestId('graph-more-domnodes')
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-pressed', 'true')
@@ -213,8 +213,8 @@ test.describe('graph power features', () => {
     authedPage: page,
   }) => {
     // Default off → toggle on.
-    await page.getByTestId('graph-minimap-toggle').click()
-    await expect(page.getByTestId('graph-minimap-toggle')).toHaveAttribute(
+    await page.getByTestId('graph-more-minimap').click()
+    await expect(page.getByTestId('graph-more-minimap')).toHaveAttribute(
       'aria-pressed',
       'true'
     )

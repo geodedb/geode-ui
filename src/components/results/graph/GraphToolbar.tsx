@@ -2,31 +2,21 @@ import React from 'react'
 import styled from 'styled-components'
 import type { LayoutName } from '../useGraphPrefs'
 import { FindNodeInput } from './FindNodeInput'
+import { GraphToolbarMore } from './GraphToolbarMore'
 
 const Toolbar = styled.div`
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   align-items: center;
-  gap: ${({ theme }) => theme.spacing.xs};
+  gap: ${({ theme }) => theme.spacing.sm};
   padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
   background: ${({ theme }) => theme.bg.surface};
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.secondary};
-
-  .group {
-    display: flex;
-    align-items: center;
-    gap: ${({ theme }) => theme.spacing.xxs};
-  }
-
-  .label {
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-    color: ${({ theme }) => theme.text.muted};
-  }
+  scrollbar-gutter: stable;
 
   select,
   button {
@@ -41,101 +31,79 @@ const Toolbar = styled.div`
     cursor: pointer;
   }
 
-  button {
-    min-width: 28px;
-  }
-
-  button:hover:not(:disabled) {
-    border-color: ${({ theme }) => theme.border.strong};
-    background: ${({ theme }) => theme.bg.subtle};
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  select:focus-visible,
-  button:focus-visible {
-    outline: none;
-    box-shadow: ${({ theme }) => theme.shadows.focus};
-  }
-
   .stats {
     margin-left: auto;
     font-variant-numeric: tabular-nums;
     color: ${({ theme }) => theme.text.muted};
+    white-space: nowrap;
+  }
+`
+
+// Group is a labelled cluster of related controls. The `data-testid` is
+// derived from the group key so the E2E suite can assert each cluster
+// exists.
+const Group = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.xxs};
+  padding: 0 ${({ theme }) => theme.spacing.xs};
+  border-right: 1px solid ${({ theme }) => theme.border.subtle};
+
+  &:last-of-type {
+    border-right: none;
+  }
+
+  .group-label {
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.muted};
+    margin-right: ${({ theme }) => theme.spacing.xxs};
+    font-size: ${({ theme }) => theme.font.sizes.xxs};
   }
 `
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
 export type GraphToolbarProps = {
-  // i18n function. Passed in so the toolbar doesn't re-acquire it via
-  // useTranslation (the orchestrator already calls it once).
   t: TFn
-  // Sidebar collapse toggle.
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
-  // Layout picker.
   layout: LayoutName
   onChangeLayout: (next: LayoutName) => void
   layouts: readonly LayoutName[]
   layoutLabel: (name: LayoutName, t: TFn) => string
-  // Zoom / fit / reset buttons.
   onZoomIn: () => void
   onZoomOut: () => void
   onFit: () => void
   onResetView: () => void
-  // Toggles.
   selectionMode: 'pan' | 'box'
   onToggleSelectionMode: () => void
   clusterByLabel: boolean
   onToggleClusterByLabel: () => void
-  // Whether node width/height scales with degree (log-scaled).
   degreeSizing: boolean
   onToggleDegreeSizing: () => void
-  // Path-mode controls. `pathActive` is true when path mode is in any
-  // state other than 'off'. The clear button only renders when active.
   pathActive: boolean
   onTogglePathMode: () => void
   onPathClear: () => void
-  // Mini-map overview toggle. Off by default; when on, GraphView mounts
-  // the GraphMiniMap panel in the canvas wrapper.
   miniMap: boolean
   onToggleMiniMap: () => void
-  // Lasso area-selection toggle. Off by default; when on, drag-from-
-  // background draws a freeform polygon and selects elements within it.
   lasso: boolean
   onToggleLasso: () => void
-  // HTML-nodes (cytoscape-dom-node) toggle. Off by default; when on,
-  // each node renders as a React-mounted HTML card layered over the
-  // cytoscape canvas. Slower at scale than the native canvas renderer.
   domNodes: boolean
   onToggleDomNodes: () => void
-  // Find-node toolbar input. `findNodes` is the snapshot of node-data
-  // bags to filter against (typically the orchestrator's `nodeDataById`
-  // values spread into an array); `onFindPick` is invoked with the id
-  // of the first match when the user hits Enter.
   findNodes: Record<string, unknown>[]
   onFindPick: (id: string) => void
-  // Live counts surfaced in the stats span.
   counts: { nodes: number; edges: number }
-  // Phase-0 / Task 1 of the cytoscape→reagraph migration: which graph
-  // renderer is currently mounted by GraphView. `cytoscape` is the
-  // incumbent canvas renderer; `reagraph` is the WebGL challenger.
-  // The toolbar only surfaces the toggle — the dispatch (which
-  // component actually renders) lives in GraphView. Sticky via
-  // useGraphPrefs so the choice survives a re-run remount and a page
-  // reload.
+  // renderer / onToggleRenderer are kept on the props bag for source-
+  // level compat with callers but no longer surfaced as inline buttons —
+  // the reagraph dispatcher branch is disabled in this build. When the
+  // dispatcher is re-enabled the toggle can be re-added (likely as a
+  // fifth item inside the More dropdown).
   renderer: 'cytoscape' | 'reagraph'
   onToggleRenderer: () => void
 }
 
-// GraphToolbar is the top action bar of the graph view. It owns the
-// sidebar-collapse toggle, the layout picker, the viewport actions
-// (zoom in/out, fit, reset), the selection-mode / cluster / path-mode
-// toggles, and the live node/edge count.
 export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   t,
   sidebarCollapsed,
@@ -166,34 +134,23 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   findNodes,
   onFindPick,
   counts,
-  renderer,
-  onToggleRenderer,
+  // renderer / onToggleRenderer are intentionally kept in the props bag
+  // for source-level compat with the GraphView orchestrator. They are not
+  // rendered as inline buttons — the reagraph dispatcher branch is
+  // disabled in this build. Destructured to satisfy react/no-unused-prop-types.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  renderer: _renderer,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onToggleRenderer: _onToggleRenderer,
 }) => {
   return (
     <Toolbar data-testid="graph-toolbar" role="toolbar">
-      <div className="group">
-        <wa-button
-          appearance="outlined"
-          size="s"
-          data-testid="graph-sidebar-toggle"
-          aria-pressed={sidebarCollapsed ? 'true' : 'false'}
-          aria-label={
-            sidebarCollapsed
-              ? t('graph.expandSidebar')
-              : t('graph.collapseSidebar')
-          }
-          title={
-            sidebarCollapsed
-              ? t('graph.expandSidebar')
-              : t('graph.collapseSidebar')
-          }
-          onClick={onToggleSidebar}
-        >
-          {sidebarCollapsed ? '⮜' : '⮞'}
-        </wa-button>
-      </div>
-      <div className="group">
-        <span className="label">{t('graph.layoutLabel')}</span>
+      <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
+      <Group
+        data-testid="graph-toolbar-group-view"
+        aria-label={t('graph.viewGroupLabel')}
+      >
+        <span className="group-label">{t('graph.viewGroupLabel')}</span>
         <select
           data-testid="graph-layout-picker"
           aria-label={t('graph.layoutLabel')}
@@ -206,8 +163,6 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
             </option>
           ))}
         </select>
-      </div>
-      <div className="group">
         <wa-button
           appearance="outlined"
           size="s"
@@ -236,7 +191,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={t('graph.fit')}
           onClick={onFit}
         >
-          {t('graph.fit')}
+          ⤢
         </wa-button>
         <wa-button
           appearance="outlined"
@@ -246,10 +201,14 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={t('graph.resetView')}
           onClick={onResetView}
         >
-          {t('graph.resetView')}
+          ⟲
         </wa-button>
-      </div>
-      <div className="group">
+      </Group>
+      <Group
+        data-testid="graph-toolbar-group-filters"
+        aria-label={t('graph.filtersGroupLabel')}
+      >
+        <span className="group-label">{t('graph.filtersGroupLabel')}</span>
         <wa-button
           appearance={selectionMode === 'box' ? 'filled' : 'outlined'}
           size="s"
@@ -289,6 +248,12 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         >
           {t('graph.degreeSizing')}
         </wa-button>
+      </Group>
+      <Group
+        data-testid="graph-toolbar-group-analysis"
+        aria-label={t('graph.analysisGroupLabel')}
+      >
+        <span className="group-label">{t('graph.analysisGroupLabel')}</span>
         <wa-button
           appearance={pathActive ? 'filled' : 'outlined'}
           size="s"
@@ -310,69 +275,18 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
             {t('graph.pathClear')}
           </wa-button>
         )}
-        <wa-button
-          appearance={miniMap ? 'filled' : 'outlined'}
-          size="s"
-          data-testid="graph-minimap-toggle"
-          aria-pressed={miniMap ? 'true' : 'false'}
-          aria-label={t('graph.miniMapLabel')}
-          title={t('graph.miniMapLabel')}
-          onClick={onToggleMiniMap}
-        >
-          {t('graph.miniMap')}
-        </wa-button>
-        <wa-button
-          appearance={lasso ? 'filled' : 'outlined'}
-          size="s"
-          data-testid="graph-lasso-toggle"
-          aria-pressed={lasso ? 'true' : 'false'}
-          aria-label={t('graph.lassoLabel')}
-          title={t('graph.lassoLabel')}
-          onClick={onToggleLasso}
-        >
-          {t('graph.lasso')}
-        </wa-button>
-        <wa-button
-          appearance={domNodes ? 'filled' : 'outlined'}
-          size="s"
-          data-testid="graph-dom-nodes-toggle"
-          aria-pressed={domNodes ? 'true' : 'false'}
-          aria-label={t('graph.domNodesLabel')}
-          title={t('graph.domNodesLabel')}
-          onClick={onToggleDomNodes}
-        >
-          {t('graph.domNodes')}
-        </wa-button>
-        {/*
-          Phase-0 / Task 1 of the cytoscape→reagraph migration: surfaces
-          a sticky toggle between the canvas (cytoscape) and WebGL
-          (reagraph) renderers. Clicking it flips the persisted
-          useGraphPrefs.renderer value; the dispatch lives in GraphView,
-          so this button only changes localStorage state here (the
-          renderer swap is wired in a later task). aria-pressed is the
-          canonical signal that this is a toggle, and aria-label spells
-          out the *current* renderer for assistive tech because the
-          visible label ('Canvas' / 'WebGL') is intentionally terse.
-        */}
-        <wa-button
-          appearance={renderer === 'reagraph' ? 'filled' : 'outlined'}
-          size="s"
-          data-testid="graph-renderer-toggle"
-          aria-pressed={renderer === 'reagraph' ? 'true' : 'false'}
-          aria-label={
-            renderer === 'reagraph'
-              ? t('graph.rendererLabelReagraph')
-              : t('graph.rendererLabelCytoscape')
-          }
-          title={t('graph.rendererTitle')}
-          onClick={onToggleRenderer}
-        >
-          {renderer === 'reagraph'
-            ? t('graph.rendererWebGL')
-            : t('graph.rendererCanvas')}
-        </wa-button>
-      </div>
-      <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
+      </Group>
+      <GraphToolbarMore
+        t={t}
+        miniMap={miniMap}
+        onToggleMiniMap={onToggleMiniMap}
+        lasso={lasso}
+        onToggleLasso={onToggleLasso}
+        domNodes={domNodes}
+        onToggleDomNodes={onToggleDomNodes}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={onToggleSidebar}
+      />
       <span className="stats" aria-live="polite">
         {t('graph.stats', { nodes: counts.nodes, edges: counts.edges })}
       </span>

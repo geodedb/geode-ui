@@ -103,10 +103,17 @@ export const sel = {
   // controls + the property inspector), its collapse/expand toggle in
   // the canvas toolbar, and the display-controls block inside it.
   graphSidebar: (p: Page): Locator => p.getByTestId('graph-sidebar'),
-  graphSidebarToggle: (p: Page): Locator =>
-    p.getByTestId('graph-sidebar-toggle'),
+  // Sidebar toggle migrated from an inline toolbar button to a checkbox
+  // item inside GraphToolbarMore. The new testid is graph-more-sidebar.
+  graphSidebarToggle: (p: Page): Locator => p.getByTestId('graph-more-sidebar'),
   graphDisplayControls: (p: Page): Locator =>
     p.getByTestId('graph-display-controls'),
+  // GraphToolbarMore overflow dropdown selectors.
+  graphToolbarMore: (p: Page): Locator => p.getByTestId('graph-toolbar-more'),
+  graphMoreMiniMap: (p: Page): Locator => p.getByTestId('graph-more-minimap'),
+  graphMoreLasso: (p: Page): Locator => p.getByTestId('graph-more-lasso'),
+  graphMoreDomNodes: (p: Page): Locator => p.getByTestId('graph-more-domnodes'),
+  graphMoreSidebar: (p: Page): Locator => p.getByTestId('graph-more-sidebar'),
 
   // Workspace (21-workspace.spec.ts) — multi-pane query surface mounted
   // at /workspace. The "+ Add pane" button is disabled at MAX_PANES (4);

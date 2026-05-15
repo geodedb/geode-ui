@@ -572,15 +572,17 @@ test('GraphView sidebar-collapse toggle hides and restores the sidebar', () => {
   })
 
   // Sidebar is expanded by default — the control blocks are present.
-  const toggle = view.getByTestId('graph-sidebar-toggle')
-  expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  // graph-more-sidebar is a DropdownItem type="checkbox" so it carries
+  // aria-checked (not aria-pressed). sidebarCollapsed=false → checked=false.
+  const toggle = view.getByTestId('graph-more-sidebar')
+  expect(toggle).toHaveAttribute('aria-checked', 'false')
   expect(view.queryByTestId('graph-visibility-controls')).not.toBeNull()
   expect(view.queryByTestId('graph-display-controls')).not.toBeNull()
 
   // Collapse — the whole sidebar (and its control blocks) is gone.
   fireEvent.click(toggle)
-  expect(view.getByTestId('graph-sidebar-toggle')).toHaveAttribute(
-    'aria-pressed',
+  expect(view.getByTestId('graph-more-sidebar')).toHaveAttribute(
+    'aria-checked',
     'true'
   )
   expect(view.queryByTestId('graph-visibility-controls')).toBeNull()
@@ -589,9 +591,9 @@ test('GraphView sidebar-collapse toggle hides and restores the sidebar', () => {
   expect(view.queryByTestId('graph-toolbar')).not.toBeNull()
 
   // Expand again — the sidebar and its blocks come back.
-  fireEvent.click(view.getByTestId('graph-sidebar-toggle'))
-  expect(view.getByTestId('graph-sidebar-toggle')).toHaveAttribute(
-    'aria-pressed',
+  fireEvent.click(view.getByTestId('graph-more-sidebar'))
+  expect(view.getByTestId('graph-more-sidebar')).toHaveAttribute(
+    'aria-checked',
     'false'
   )
   expect(view.queryByTestId('graph-visibility-controls')).not.toBeNull()

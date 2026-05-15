@@ -1,18 +1,12 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 import { testTheme as theme } from '../../../test-utils/theme'
 import { GraphToolbar, type GraphToolbarProps } from './GraphToolbar'
 
-// Minimal i18n stub — the toolbar passes the key through unchanged so
-// assertions can match on raw keys without pulling i18next into the
-// unit test surface.
 const t: GraphToolbarProps['t'] = (k: string) => k
 
-// Build a fully-populated GraphToolbarProps with the renderer toggle
-// pre-wired. Tests pass `overrides` for the field(s) under exercise so
-// the rest of the toolbar's contract is held constant.
 const toolbarProps = (
   overrides: Partial<GraphToolbarProps> = {}
 ): GraphToolbarProps => ({
@@ -50,39 +44,56 @@ const toolbarProps = (
   ...overrides,
 })
 
-describe('GraphToolbar renderer toggle', () => {
-  it('renders a toggle showing the current renderer (cytoscape)', () => {
+describe('GraphToolbar grouped layout', () => {
+  it('renders three labelled groups: View, Filters, Analysis', () => {
     render(
       <ThemeProvider theme={theme}>
         <GraphToolbar {...toolbarProps()} />
       </ThemeProvider>
     )
-    const btn = screen.getByTestId('graph-renderer-toggle')
-    // aria-pressed is the canonical signal that this is a toggle; it
-    // must reflect the *current* renderer, not the post-click one.
-    expect(btn).toHaveAttribute('aria-pressed', 'false')
-    expect(btn).toHaveAccessibleName(/renderer.*cytoscape/i)
+    expect(screen.getByTestId('graph-toolbar-group-view')).toBeInTheDocument()
+    expect(
+      screen.getByTestId('graph-toolbar-group-filters')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByTestId('graph-toolbar-group-analysis')
+    ).toBeInTheDocument()
   })
 
-  it('reflects pressed state when renderer is reagraph', () => {
+  it('hides rarely-used toggles from the main strip (they live in the More dropdown)', () => {
     render(
       <ThemeProvider theme={theme}>
-        <GraphToolbar {...toolbarProps({ renderer: 'reagraph' })} />
+        <GraphToolbar {...toolbarProps()} />
       </ThemeProvider>
     )
-    const btn = screen.getByTestId('graph-renderer-toggle')
-    expect(btn).toHaveAttribute('aria-pressed', 'true')
-    expect(btn).toHaveAccessibleName(/renderer.*reagraph/i)
+    // No inline buttons for these — they live in GraphToolbarMore.
+    expect(screen.queryByTestId('graph-minimap-toggle')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('graph-lasso-toggle')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('graph-dom-nodes-toggle')
+    ).not.toBeInTheDocument()
+    // The renderer toggle is removed entirely (reagraph dispatch disabled).
+    expect(
+      screen.queryByTestId('graph-renderer-toggle')
+    ).not.toBeInTheDocument()
+    // The four overflow items DO exist via the More dropdown.
+    expect(screen.getByTestId('graph-more-minimap')).toBeInTheDocument()
+    expect(screen.getByTestId('graph-more-lasso')).toBeInTheDocument()
+    expect(screen.getByTestId('graph-more-domnodes')).toBeInTheDocument()
+    expect(screen.getByTestId('graph-more-sidebar')).toBeInTheDocument()
   })
 
-  it('fires onToggleRenderer when clicked', () => {
-    const onToggleRenderer = jest.fn()
+  it('keeps the high-frequency view controls (zoom, fit, reset) as icon buttons', () => {
     render(
       <ThemeProvider theme={theme}>
-        <GraphToolbar {...toolbarProps({ onToggleRenderer })} />
+        <GraphToolbar {...toolbarProps()} />
       </ThemeProvider>
     )
-    fireEvent.click(screen.getByTestId('graph-renderer-toggle'))
-    expect(onToggleRenderer).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('graph-zoom-in')).toBeInTheDocument()
+    expect(screen.getByTestId('graph-zoom-out')).toBeInTheDocument()
+    expect(screen.getByTestId('graph-fit')).toBeInTheDocument()
+    expect(screen.getByTestId('graph-reset-view')).toBeInTheDocument()
+    // The layout picker is still visible.
+    expect(screen.getByTestId('graph-layout-picker')).toBeInTheDocument()
   })
 })
