@@ -275,3 +275,49 @@ describe('useGraphPrefs renderer pref', () => {
     expect(useGraphPrefs.getState().renderer).toBe('cytoscape')
   })
 })
+
+describe('useGraphPrefs.sectionsOpen', () => {
+  beforeEach(() => {
+    // Reset the persisted state and the in-memory store so each test
+    // starts from defaults. Clearing the localStorage key first so the
+    // persist middleware doesn't rehydrate a previous test's state.
+    window.localStorage.removeItem('geode-ui.graph-prefs')
+    useGraphPrefs.setState({
+      sectionsOpen: {
+        visibility: true,
+        display: true,
+        hidden: true,
+        collapsed: true,
+        inspector: true,
+      },
+    })
+  })
+
+  it('defaults to all five sections expanded', () => {
+    const s = useGraphPrefs.getState()
+    expect(s.sectionsOpen).toEqual({
+      visibility: true,
+      display: true,
+      hidden: true,
+      collapsed: true,
+      inspector: true,
+    })
+  })
+
+  it('toggleSection flips the open flag for one section', () => {
+    useGraphPrefs.getState().toggleSection('display')
+    expect(useGraphPrefs.getState().sectionsOpen.display).toBe(false)
+    useGraphPrefs.getState().toggleSection('display')
+    expect(useGraphPrefs.getState().sectionsOpen.display).toBe(true)
+  })
+
+  it('toggleSection does not affect other sections', () => {
+    useGraphPrefs.getState().toggleSection('hidden')
+    const s = useGraphPrefs.getState().sectionsOpen
+    expect(s.hidden).toBe(false)
+    expect(s.visibility).toBe(true)
+    expect(s.display).toBe(true)
+    expect(s.collapsed).toBe(true)
+    expect(s.inspector).toBe(true)
+  })
+})

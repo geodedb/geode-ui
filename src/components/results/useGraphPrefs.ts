@@ -58,6 +58,25 @@ export type Renderer = 'cytoscape' | 'reagraph'
 
 export const DEFAULT_RENDERER: Renderer = 'cytoscape'
 
+// The graph sidebar renders five collapsible sections — Visibility,
+// Display, Hidden, Collapsed, Inspector — and each remembers its
+// open/closed state via this map. Sticky so the user's chosen layout
+// survives a query re-run and a full page reload.
+export type GraphSectionId =
+  | 'visibility'
+  | 'display'
+  | 'hidden'
+  | 'collapsed'
+  | 'inspector'
+
+export const DEFAULT_SECTIONS_OPEN: Record<GraphSectionId, boolean> = {
+  visibility: true,
+  display: true,
+  hidden: true,
+  collapsed: true,
+  inspector: true,
+}
+
 const STORAGE_KEY = 'geode-ui.graph-prefs'
 
 type GraphPrefsState = {
@@ -108,6 +127,9 @@ type GraphPrefsState = {
   // entrypoint is delivered in a later task; until then the dispatcher
   // can still read this pref and decide.
   useWorkerLayout: boolean
+  // Per-section open/closed state for the sidebar — see GraphSectionId.
+  // Sticky.
+  sectionsOpen: Record<GraphSectionId, boolean>
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -124,6 +146,7 @@ type GraphPrefsState = {
   setRenderer: (r: Renderer) => void
   setTier: (t: Tier) => void
   setUseWorkerLayout: (v: boolean) => void
+  toggleSection: (id: GraphSectionId) => void
   // Tier-gated effective views over the user prefs. effectiveDomNodes
   // returns true only when the user opted in AND the current tier allows
   // DOM-node rendering. The remaining three are pure tier reads — there
@@ -151,6 +174,7 @@ type PersistedShape = {
   domNodes: boolean
   renderer: Renderer
   useWorkerLayout: boolean
+  sectionsOpen: Record<GraphSectionId, boolean>
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -194,6 +218,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       renderer: DEFAULT_RENDERER,
       tier: 'small' as Tier,
       useWorkerLayout: true,
+      sectionsOpen: { ...DEFAULT_SECTIONS_OPEN },
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -221,6 +246,10 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       setRenderer: (r) => set({ renderer: r }),
       setTier: (t) => set({ tier: t }),
       setUseWorkerLayout: (v) => set({ useWorkerLayout: v }),
+      toggleSection: (id) =>
+        set((s) => ({
+          sectionsOpen: { ...s.sectionsOpen, [id]: !s.sectionsOpen[id] },
+        })),
       effectiveDomNodes: (): boolean => {
         const s = get()
         return s.domNodes && allowedFeatures(s.tier).domNodes
@@ -247,6 +276,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         domNodes: s.domNodes,
         renderer: s.renderer,
         useWorkerLayout: s.useWorkerLayout,
+        sectionsOpen: s.sectionsOpen,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -296,6 +326,23 @@ export const useGraphPrefs = create<GraphPrefsState>()(
           // `false` opts out. A missing/garbage persisted value (stale
           // shape from before this field existed) lights the worker on.
           useWorkerLayout: p.useWorkerLayout !== false,
+          // sectionsOpen: each section defaults to expanded (true). Only
+          // an explicit boolean `false` keeps a section collapsed. A
+          // missing key from an old persisted shape (pre-sectionsOpen)
+          // rehydrates to the default-expanded state so no section is
+          // accidentally hidden on first load after an upgrade.
+          sectionsOpen: (() => {
+            const p2 = (p.sectionsOpen ?? {}) as Partial<
+              Record<GraphSectionId, unknown>
+            >
+            return {
+              visibility: p2.visibility !== false,
+              display: p2.display !== false,
+              hidden: p2.hidden !== false,
+              collapsed: p2.collapsed !== false,
+              inspector: p2.inspector !== false,
+            }
+          })(),
         }
       },
     }
