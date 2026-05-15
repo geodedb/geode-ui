@@ -150,7 +150,7 @@ export const GraphBenchPage: React.FC = () => {
         worker layout
       </label>
       <div style={{ flex: '1 1 auto', minHeight: 0 }}>
-        <GraphView resp={resp} fillHeight />
+        <GraphView resp={resp} />
       </div>
     </div>
   )

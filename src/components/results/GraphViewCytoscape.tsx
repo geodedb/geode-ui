@@ -10,7 +10,6 @@ import { labelToColor } from './cytoscapeStyle'
 import { DEFAULT_LAYOUT, useGraphPrefs } from './useGraphPrefs'
 import { QueryRespLike, resolveNodeLabel } from '../../lib/graphResult'
 import { useGraphPathMode } from './graph/useGraphPathMode'
-import { useFillHeight } from './graph/useFillHeight'
 import { GraphToolbar } from './graph/GraphToolbar'
 import { GraphMiniMap } from './graph/GraphMiniMap'
 import { FocusClearChip } from './graph/FocusClearChip'
@@ -75,38 +74,21 @@ export type GraphViewCytoscapeProps = {
   // synthesise nodes/edges when the response is scalar-only (no
   // NODE/EDGE columns ⇒ empty graph_summary).
   query?: string
-  height?: number
-  // fillHeight: when true (set by QueryPage's maximized result overlay)
-  // the canvas grows to fill the available viewport, the sidebar
-  // stacks below the canvas (so the canvas gets the full width), and
-  // the Cytoscape core is resized + re-fitted after the box grows. The
-  // 480 px default + side-by-side layout is kept for the inline view.
-  fillHeight?: boolean
 }
 
 export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   resp,
   query,
-  height = 480,
-  fillHeight = false,
 }) => {
   const { t } = useTranslation()
   const theme = useTheme()
   const ref = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
-  // The pixel height the Canvas / Side render at. In fill mode this is
-  // `undefined` — the Canvas and Side fall back to the flex chain
-  // (`flex: 1 1 auto` and `height: 100%`) so they grow to the available
-  // viewport, and Cytoscape's ResizeObserver re-fits on container
-  // resize. Otherwise it's the caller-provided `height`.
-  const effectiveHeight = useFillHeight({ fillHeight, height })
   const [selected, setSelected] = useState<Selected | null>(null)
   // Whether the inspector/controls sidebar is collapsed. Session-local
-  // (defaults expanded); not persisted. Useful in both layouts but most
-  // impactful in fill mode where it lets the canvas claim the full
-  // width of the overlay. When collapsed the <Side> isn't rendered and
-  // the Wrap grid becomes a single 1fr column — the canvas grows, which
-  // the ResizeObserver below catches to re-fit Cytoscape.
+  // (defaults expanded); not persisted. When collapsed the <Side> isn't
+  // rendered and the Wrap grid becomes a single 1fr column — the canvas
+  // grows, which the ResizeObserver below catches to re-fit Cytoscape.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   // GAP-04: errors thrown by extractElements / cytoscape() during the
   // build pass. Surfaced as a banner over the canvas instead of an
@@ -660,7 +642,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     labelToColor(label, theme.variant)
 
   return (
-    <Wrap $fill={fillHeight} $sidebarCollapsed={sidebarCollapsed}>
+    <Wrap $sidebarCollapsed={sidebarCollapsed}>
       <CanvasArea>
         <GraphToolbar
           t={t}
@@ -718,13 +700,12 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             position: 'relative',
             display: 'flex',
             flexDirection: 'column',
-            flex: fillHeight ? '1 1 auto' : '0 0 auto',
+            flex: '1 1 auto',
             minHeight: 0,
           }}
         >
           <Canvas
             ref={ref}
-            $height={effectiveHeight}
             role="img"
             aria-label={t('graph.canvasAria')}
             tabIndex={0}
@@ -749,7 +730,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
         </div>
       </CanvasArea>
       {!sidebarCollapsed && (
-        <GraphSidebar height={effectiveHeight} fill={fillHeight}>
+        <GraphSidebar>
           <GraphSidebarContents
             t={t}
             nodeLabelBuckets={nodeLabelBuckets}

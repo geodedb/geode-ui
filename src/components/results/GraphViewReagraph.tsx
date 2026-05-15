@@ -21,15 +21,11 @@ import { Canvas, Overlay, Wrap } from './graph/styled'
 export type GraphViewReagraphProps = {
   resp: QueryRespLike & { row_count?: number }
   query?: string
-  height?: number
-  fillHeight?: boolean
 }
 
 export const GraphViewReagraph: React.FC<GraphViewReagraphProps> = ({
   resp,
   query,
-  height = 480,
-  fillHeight = false,
 }) => {
   const { t } = useTranslation()
   const theme = useTheme()
@@ -96,11 +92,9 @@ export const GraphViewReagraph: React.FC<GraphViewReagraphProps> = ({
     [theme]
   )
   const empty = nodes.length === 0
-  const canvasHeight = fillHeight ? undefined : height
   return (
-    <Wrap $fill={fillHeight} $sidebarCollapsed>
+    <Wrap $sidebarCollapsed>
       <Canvas
-        $height={canvasHeight}
         role="img"
         aria-label={t('graph.canvasAria')}
         data-testid="graph-canvas"

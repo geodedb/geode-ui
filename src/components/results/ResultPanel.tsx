@@ -205,7 +205,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
         >
           {tab === 'graph' && (
             <Suspense fallback={graphFallback}>
-              <GraphView resp={resp} query={query} fillHeight={maximized} />
+              <GraphView resp={resp} query={query} />
             </Suspense>
           )}
         </TabPanel>
