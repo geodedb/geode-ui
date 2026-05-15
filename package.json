@@ -25,10 +25,14 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "cytoscape": "^3.33.3",
+    "monaco-languageclient": "^8.8.3",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-router-dom": "^7.5.0",
     "styled-components": "^6.1.0",
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "vscode-ws-jsonrpc": "^3.5.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
