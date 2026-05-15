@@ -43,11 +43,39 @@ export function runLayout(args: RunLayoutArgs): void {
   const { cy, layoutName, sig, currentIds, n, useWorker, onComplete } = args
   perfMarks.start('graph:layout')
 
-  // Full cache hit — apply and return.
-  const cached = layoutCache.get(`${layoutName}|${sig}`)
-  if (cached.hit === 'full' && cached.positions) {
-    applyPositions(cy, cached.positions)
+  // Full cache hit — all currentIds have cached positions; apply and return.
+  const partial = layoutCache.partialMatch(`${layoutName}|${sig}`, currentIds)
+  if (currentIds.length > 0 && partial.matched.length === currentIds.length) {
+    applyPositions(cy, partial.positions)
     cy.fit(undefined, 24)
+    perfMarks.end('graph:layout')
+    onComplete?.()
+    return
+  }
+
+  // Partial cache hit — if >= 60% of currentIds have cached positions,
+  // apply them, lock the matched nodes, run layout on the unlocked subset,
+  // then unlock + cache. Cytoscape's `lock`/`unlock` are respected by
+  // fcose / cose / dagre — locked nodes don't move.
+  if (
+    partial.matched.length > 0 &&
+    partial.matched.length >= currentIds.length * 0.6
+  ) {
+    applyPositions(cy, partial.positions)
+    const matchedSet = new Set(partial.matched)
+    cy.nodes().forEach((node) => {
+      if (matchedSet.has(node.id() as string)) {
+        const lockable = node as unknown as { lock: () => void }
+        lockable.lock()
+      }
+    })
+    mainThreadLayout(cy, layoutName)
+    cy.nodes().forEach((node) => {
+      const unlockable = node as unknown as { unlock: () => void }
+      unlockable.unlock()
+    })
+    cy.fit(undefined, 24)
+    layoutCache.set(`${layoutName}|${sig}`, snapshotPositions(cy))
     perfMarks.end('graph:layout')
     onComplete?.()
     return
