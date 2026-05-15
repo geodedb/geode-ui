@@ -25,6 +25,38 @@ type ProfileLookup interface {
 	Names() []string
 }
 
+// LspConfig controls the /ws/lsp WebSocket bridge to the upstream LSP
+// TCP listener (see RegisterLspWS). UpstreamAddr is the host:port the
+// bridge dials per connection — typically the colocated listener that
+// `geode serve` exposes (Task 28). Enabled gates whether the route is
+// registered at all: deployments that don't want to expose LSP over the
+// browser-facing surface can set Enabled=false and skip RegisterLspWS.
+//
+// Defaults: UpstreamAddr="127.0.0.1:3142", Enabled=true. Both are
+// applied by NewLspConfigWithDefaults, which is the canonical way to
+// construct an LspConfig — `bool`'s zero value can't distinguish "unset"
+// from "deliberately disabled", so use the constructor (or set Enabled
+// explicitly) instead of relying on the struct literal. main.go uses
+// the constructor; tests do likewise.
+type LspConfig struct {
+	UpstreamAddr string `json:"upstream_addr"`
+	Enabled      bool   `json:"enabled"`
+}
+
+// NewLspConfigWithDefaults returns an LspConfig with the documented
+// defaults applied: UpstreamAddr="127.0.0.1:3142", Enabled=true.
+// Use this as the starting point for any LspConfig construction site
+// instead of a bare struct literal — it gives callers a single
+// definition of "default LSP wiring" and sidesteps the bool-zero-value
+// problem (a `LspConfig{}` literal has Enabled=false, which would
+// silently disable the bridge).
+func NewLspConfigWithDefaults() LspConfig {
+	return LspConfig{
+		UpstreamAddr: "127.0.0.1:3142",
+		Enabled:      true,
+	}
+}
+
 // Config carries dependencies for GraphServer.
 // Fields are added incrementally as tasks need them.
 type Config struct {
@@ -43,6 +75,10 @@ type Config struct {
 	// Login to authenticate against the upstream Geode by opening a
 	// short-lived *sql.DB with the user's submitted credentials.
 	Profiles ProfileLookup
+	// LSP controls the /ws/lsp WebSocket-to-TCP bridge. See LspConfig
+	// for the per-field semantics and defaults. main.go reads cfg.LSP
+	// to decide whether to call RegisterLspWS.
+	LSP LspConfig
 }
 
 // GraphServer implements gen/api.ServerInterface.
@@ -51,13 +87,27 @@ type GraphServer struct {
 	cfg Config
 }
 
-// New constructs a GraphServer with the given Config.
+// New constructs a GraphServer with the given Config. The UpstreamAddr
+// field of LspConfig is back-filled with the documented default
+// (127.0.0.1:3142) when blank — that knob is safe to "default on",
+// since a wrong host:port surfaces only on the first /ws/lsp dial.
+// Enabled is *not* back-filled (bool's zero value is indistinguishable
+// from a deliberate disable); construction sites that want the full
+// defaults should start from NewLspConfigWithDefaults.
 func New(cfg Config) *GraphServer {
 	if cfg.Version == "" {
 		cfg.Version = "dev"
 	}
+	if cfg.LSP.UpstreamAddr == "" {
+		cfg.LSP.UpstreamAddr = "127.0.0.1:3142"
+	}
 	return &GraphServer{cfg: cfg}
 }
+
+// LSPConfig returns the effective LspConfig — defaults applied — so
+// main.go can decide whether to register /ws/lsp and which upstream
+// to dial without poking at the unexported GraphServer.cfg.
+func (s *GraphServer) LSPConfig() LspConfig { return s.cfg.LSP }
 
 // Healthz returns liveness info. Open route, no auth.
 func (s *GraphServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *gentypes.Empty) (*gentypes.HealthResp, error) {
@@ -75,11 +125,14 @@ func (s *GraphServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *gentype
 // same callback shape (*GraphServer).AuthJWT satisfies — wire it in
 // cmd/server/main.go alongside the generated /ws/query registration:
 //
-//	server.RegisterLspWS(mux, graphSrv.AuthJWT, "127.0.0.1:3142")
+//	cfg := graphSrv.LSPConfig()
+//	if cfg.Enabled {
+//	    server.RegisterLspWS(mux, graphSrv.AuthJWT, cfg.UpstreamAddr)
+//	}
 //
-// upstreamAddr is currently a hardcoded host:port; Task 31 plumbs it
-// through Config so deployments can colocate or fan out the LSP
-// listener independently.
+// upstreamAddr is the host:port the bridge dials per connection. It
+// flows from Config.LSP.UpstreamAddr (Task 31) so deployments can
+// colocate or fan out the LSP listener independently.
 func RegisterLspWS(mux *http.ServeMux, auth func(*http.Request) error, upstreamAddr string) {
 	mux.Handle("/ws/lsp", newWsLspHandler(upstreamAddr, auth))
 }

@@ -25,15 +25,19 @@ import (
 
 func main() {
 	var (
-		listen       string
-		profilesFile string
-		secretHex    string
-		jwtTTL       time.Duration
+		listen          string
+		profilesFile    string
+		secretHex       string
+		jwtTTL          time.Duration
+		lspUpstreamAddr string
+		lspEnabled      bool
 	)
 	flag.StringVar(&listen, "listen", ":8080", "address to listen on")
 	flag.StringVar(&profilesFile, "profiles", "", "path to JSON profiles config")
 	flag.StringVar(&secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
 	flag.DurationVar(&jwtTTL, "jwt-ttl", 8*time.Hour, "JWT TTL (1m..24h)")
+	flag.StringVar(&lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener (geode serve --lsp-port)")
+	flag.BoolVar(&lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP listener")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -81,6 +85,10 @@ func main() {
 		Profiles: pool,
 		JWT:      issuer,
 		TxStore:  server.NewTxStore(),
+		LSP: server.LspConfig{
+			UpstreamAddr: lspUpstreamAddr,
+			Enabled:      lspEnabled,
+		},
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
@@ -102,6 +110,18 @@ func main() {
 	genws.RegisterGeneratedWS(mux, wsSrv, genws.WSOptions{
 		AuthJWT: srv.AuthJWT,
 	})
+
+	// /ws/lsp WebSocket-to-TCP bridge to the upstream LSP listener
+	// (geode serve --lsp-port). The route is conditional on
+	// cfg.LSP.Enabled so deployments that don't expose LSP through
+	// the browser-facing surface can opt out via -lsp-enabled=false.
+	// UpstreamAddr defaults to 127.0.0.1:3142 (matches the colocated
+	// listener Task 28 wires up); override with -lsp-upstream.
+	lspCfg := srv.LSPConfig()
+	if lspCfg.Enabled {
+		server.RegisterLspWS(mux, srv.AuthJWT, lspCfg.UpstreamAddr)
+		slog.Info("lsp bridge registered", "upstream", lspCfg.UpstreamAddr)
+	}
 
 	// MCP surface — geode.json declares one tool ("query") on the http
 	// transport. genmcp.Register populates the package-level
