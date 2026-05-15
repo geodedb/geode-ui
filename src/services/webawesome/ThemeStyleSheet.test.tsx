@@ -48,8 +48,13 @@ describe('ThemeStyleSheet', () => {
         <ThemeStyleSheet />
       </ThemeProvider>
     )
+    // Both light and dark variants emit at :root — the stylesheet is
+    // re-mounted on variant change so :root always carries the
+    // current values. See theme-bridge.ts for why the prior
+    // [data-wa-theme="dark"] selector was wrong.
     const next =
       document.querySelector('style[data-wa-theme-sheet]')?.textContent ?? ''
-    expect(next).toMatch(/\[data-wa-theme="dark"\]\s*\{/)
+    expect(next).toMatch(/^:root\s*\{/m)
+    expect(next).not.toMatch(/\[data-wa-theme/)
   })
 })

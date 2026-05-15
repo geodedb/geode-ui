@@ -55,6 +55,14 @@ export interface Theme {
     link: string
     onPrimary: string
     onDanger: string
+    /**
+     * Text rendered on a `colors.success` fill (badges, success buttons).
+     * Distinct from onPrimary because success bg is always darker
+     * than the brand primary, so the contrast-correct text color is
+     * white in both themes — onPrimary in dark theme is a dark canvas
+     * color (sub-3:1 against success).
+     */
+    onSuccess: string
     danger: string
     success: string
   }

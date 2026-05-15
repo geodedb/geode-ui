@@ -55,9 +55,18 @@ describe('buildWaCssVariables', () => {
     expect(css).toContain('--wa-font-size-s: 14px;')
   })
 
-  it('respects dark variant by tagging the :root with [data-wa-theme="dark"]', () => {
+  it('writes variant overrides to :root for both light and dark', () => {
+    // The bridge always targets :root because ThemeStyleSheet re-mounts
+    // the stylesheet on every variant flip — so :root carries the
+    // current variant's values. A previous version scoped dark to
+    // [data-wa-theme="dark"], which never matched in production
+    // because ThemeContext sets data-theme="dark" instead, leaving
+    // WA's light-mode defaults active in dark mode.
     const dark = { ...stubTheme, variant: 'dark' } as unknown as Theme
-    const css = buildWaCssVariables(dark)
-    expect(css).toMatch(/\[data-wa-theme="dark"\]\s*\{/)
+    const cssDark = buildWaCssVariables(dark)
+    const cssLight = buildWaCssVariables(stubTheme)
+    expect(cssDark).toMatch(/:root\s*\{/)
+    expect(cssLight).toMatch(/:root\s*\{/)
+    expect(cssDark).not.toMatch(/\[data-wa-theme/)
   })
 })

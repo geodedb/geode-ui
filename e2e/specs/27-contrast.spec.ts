@@ -237,6 +237,33 @@ function inPageContrastReport(): ContrastReport {
 
   const failures: ContrastFailure[] = []
 
+  // Skip elements whose actual visible background is painted from a
+  // shadow-DOM ancestor (custom element). `wa-button`, `wa-badge`,
+  // wa-card etc. all render their own bg inside their shadow root —
+  // our light-DOM ancestor walk only sees the page/form bg behind
+  // the component, which gives a misleading effective bg and a
+  // false-positive contrast report. We can't safely compute the
+  // actual bg from outside the shadow root, so for those subtrees
+  // we trust WA's own contrast contract (which our bridge enforces
+  // via the brand/success/etc. fill+on token pairs).
+  const inShadowRenderingHost = (el: Element): boolean => {
+    let p: Element | null = el.parentElement
+    while (p) {
+      const name = p.tagName.toLowerCase()
+      if (
+        name === 'wa-button' ||
+        name === 'wa-badge' ||
+        name === 'wa-tab' ||
+        name === 'wa-tag' ||
+        name === 'wa-callout'
+      ) {
+        return true
+      }
+      p = p.parentElement
+    }
+    return false
+  }
+
   // Walk every element in the document. Cheap enough at our DOM sizes
   // and avoids missing anything via overly-targeted selectors.
   const all = document.querySelectorAll('*')
@@ -248,6 +275,7 @@ function inPageContrastReport(): ContrastReport {
     // border + adjacent-element semantics, not raw glyph contrast.
     if (text.length < 2 && !/[A-Za-z0-9]/.test(text)) return
     if (!isVisible(el)) return
+    if (inShadowRenderingHost(el)) return
     const cs = window.getComputedStyle(el as HTMLElement)
     const fg = parseColor(cs.color)
     if (!fg) return

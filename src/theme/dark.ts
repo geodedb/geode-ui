@@ -36,9 +36,17 @@ export const darkTheme: Theme = {
 
     secondary: neutralScale[400],
     tertiary: primaryScale[300],
-    success: '#10b981',
-    warning: '#f59e0b',
-    danger: '#f87171',
+    // Status fills are used as <wa-button variant=…> backgrounds with
+    // white text on top. The light-tinted dark-theme values
+    // (#10b981 / #f87171) pair white at 2.5–2.8:1 — below WCAG AA. Use
+    // shades 700–600 so white-on-fill clears 4.5:1. Caught by
+    // 27-contrast.spec.ts (admin/grants Revoke + dashboard "enabled"
+    // pill). The lighter palette is preserved on `text.danger` /
+    // `text.success` for inline body text rendered on dark surfaces
+    // (where the requirements are inverted).
+    success: '#047857',
+    warning: '#b45309',
+    danger: '#b91c1c',
     info: primaryScale[400],
 
     primaryScale,
@@ -53,6 +61,7 @@ export const darkTheme: Theme = {
     link: primaryScale[300],
     onPrimary: '#1c0f2e',
     onDanger: '#ffffff',
+    onSuccess: '#ffffff',
     danger: '#fca5a5',
     success: '#6ee7b7',
   },

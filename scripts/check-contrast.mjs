@@ -25,8 +25,11 @@ const themes = {
     'bg.surface': '#ffffff',
     'bg.subtle': '#f3ecff',
     'text.primary': '#2a1f3a',
-    'text.secondary': '#7a7285',
-    'text.muted': '#96929b',
+    // text.secondary + text.muted bumped (Nov 2026) so paragraph
+    // body text on bg.canvas / bg.subtle clears WCAG AA — caught by
+    // e2e/specs/27-contrast.spec.ts. Keep in sync with src/theme/light.ts.
+    'text.secondary': '#5b536a',
+    'text.muted': '#6a6275',
     'text.onPrimary': '#ffffff',
     'text.danger': '#b91c1c',
     'text.success': '#047857',

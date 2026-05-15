@@ -28,14 +28,23 @@ export const lightTheme: Theme = {
     background: '#f7f2ff',
     surface: '#ffffff',
     text: '#2a1f3a',
-    textSecondary: neutralScale[500],
+    // colors.textSecondary mirrors text.secondary so consumers that
+    // grab from `colors.*` (legacy admin/ops tab styling) and from
+    // `text.*` agree. See text.secondary note about the WCAG bump.
+    textSecondary: neutralScale[600],
     border: neutralScale[200],
 
-    secondary: neutralScale[500],
+    secondary: neutralScale[600],
     tertiary: primaryScale[400],
-    success: '#10b981',
-    warning: '#f59e0b',
-    danger: '#dc2626',
+    // Status fills double as <wa-button variant=…> backgrounds with
+    // white text on top. #10b981 (success) + #f59e0b (warning) pair
+    // white at 2.5:1 and 1.9:1 — below WCAG AA. Use shade 700 so
+    // white-on-fill clears 4.5:1. text.success / text.warning (for
+    // inline body text on surfaces) keep their lighter brand-aligned
+    // tints. Caught by 27-contrast.spec.ts.
+    success: '#047857',
+    warning: '#b45309',
+    danger: '#b91c1c',
     info: primaryScale[500],
 
     primaryScale,
@@ -44,12 +53,21 @@ export const lightTheme: Theme = {
 
   text: {
     primary: '#2a1f3a',
-    secondary: neutralScale[500],
-    muted: neutralScale[400],
+    // text.secondary + text.muted need to clear 4.5:1 against bg.canvas
+    // (#f7f2ff) and bg.subtle (#f3ecff) for any body text rendered on
+    // those surfaces — table headers, helper paragraphs, audit-log
+    // code cells. Prior values neutralScale[500]/[400] sat at
+    // 4.18/3.05 on canvas (caught by 27-contrast.spec). Bump
+    // secondary to neutralScale[600] (#5b536a → ~7:1) and muted to
+    // a custom #6a6275 between scale 500 and 600 so visual hierarchy
+    // (secondary darker than muted) is preserved while both pass AA.
+    secondary: neutralScale[600],
+    muted: '#6a6275',
     inverse: '#ffffff',
     link: primaryScale[700],
     onPrimary: '#ffffff',
     onDanger: '#ffffff',
+    onSuccess: '#ffffff',
     danger: '#b91c1c',
     success: '#047857',
   },

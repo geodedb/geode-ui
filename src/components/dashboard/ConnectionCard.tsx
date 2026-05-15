@@ -43,7 +43,11 @@ const Badge = styled.span<{ $on: boolean }>`
     return $on ? theme.colors.success : theme.bg.subtle
   }};
   color: ${({ theme, $on }) => {
-    return $on ? theme.text.onPrimary : theme.text.muted
+    // text.onSuccess is white in both themes — distinct from onPrimary,
+    // which is a dark canvas color in dark theme and only clears 3.1:1
+    // against the (already darker) success green. Caught by
+    // 27-contrast.spec.ts.
+    return $on ? theme.text.onSuccess : theme.text.muted
   }};
 `
 
