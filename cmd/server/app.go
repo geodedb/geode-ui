@@ -57,6 +57,13 @@ type appConfig struct {
 	profileCRUDRPS    float64
 	profileCRUDBurst  float64
 	trustProxyXFF     bool
+	// LSP bridge wiring (geode-ui platform LSP integration). The
+	// /ws/lsp WebSocket reverse-proxies to an upstream LSP TCP listener
+	// (geode serve --lsp-port). lspEnabled gates route registration so
+	// deployments that don't expose LSP through the browser-facing
+	// surface can opt out with -lsp-enabled=false.
+	lspUpstreamAddr string
+	lspEnabled      bool
 }
 
 // parseFlags builds an appConfig from args[1:] using a private FlagSet
@@ -94,6 +101,12 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// binary sits behind a TLS-terminating reverse proxy you control
 	// and that proxy strips/normalises any inbound XFF header.
 	fs.BoolVar(&cfg.trustProxyXFF, "trust-proxy-xff", false, "trust X-Forwarded-For header for per-IP rate limiting (enable only when behind a TLS-terminating reverse proxy you control)")
+	// /ws/lsp bridge wiring. The upstream defaults to 127.0.0.1:3142 to
+	// match `geode serve --lsp-port=3142` colocation. Enabled by default
+	// so a clean local boot of both binaries gives the browser editor
+	// schema-aware completion out of the box.
+	fs.StringVar(&cfg.lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener (geode serve --lsp-port)")
+	fs.BoolVar(&cfg.lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP listener")
 	if err := fs.Parse(args[1:]); err != nil {
 		return appConfig{}, err
 	}
@@ -297,6 +310,18 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	genws.RegisterGeneratedWS(mux, wsSrv, genws.WSOptions{
 		AuthJWT: srv.AuthJWT,
 	})
+
+	// /ws/lsp WebSocket-to-TCP bridge to the upstream LSP listener
+	// (geode serve --lsp-port). Conditional on cfg.lspEnabled so
+	// deployments that don't expose LSP through the browser-facing
+	// surface can opt out with -lsp-enabled=false. UpstreamAddr
+	// defaults to 127.0.0.1:3142 (matches the colocated listener
+	// `geode serve --lsp-port=3142` wires up); override with
+	// -lsp-upstream.
+	if cfg.lspEnabled {
+		server.RegisterLspWS(mux, srv.AuthJWT, cfg.lspUpstreamAddr)
+		slog.Info("lsp bridge registered", "upstream", cfg.lspUpstreamAddr)
+	}
 
 	// MCP surface — geode.json declares one tool ("query") on the http
 	// transport. genmcp.Register populates the package-level
