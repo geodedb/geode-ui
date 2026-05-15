@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 
 // Web Worker entry. Runs fcose against a node/edge topology and posts
-// final positions back. P1 does NOT emit per-tick snapshots — that
-// lands in P2 (T20).
+// per-tick position snapshots (every 33 ms) plus a final `done` message
+// at terminal `layoutstop`.
 
 import cytoscape from 'cytoscape'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -28,6 +28,7 @@ type WorkerIn =
   | { kind: 'cancel'; runId: number }
 
 type WorkerOut =
+  | { kind: 'tick'; runId: number; positions: Record<string, [number, number]> }
   | { kind: 'done'; runId: number; positions: Record<string, [number, number]> }
   | { kind: 'error'; runId: number; message: string }
 
@@ -66,7 +67,22 @@ self.onmessage = (ev: MessageEvent<WorkerIn>) => {
       fit: false,
     } as unknown as cytoscape.LayoutOptions)
 
+    let stopped = false
+    const tickInterval = setInterval(() => {
+      if (stopped || currentRunId !== msg.runId) return
+      const positions: Record<string, [number, number]> = {}
+      cy.nodes().forEach((n) => {
+        const p = n.position()
+        positions[n.id()] = [p.x, p.y]
+      })
+      const out: WorkerOut = { kind: 'tick', runId: msg.runId, positions }
+      const target = self as unknown as { postMessage(m: WorkerOut): void }
+      target.postMessage(out)
+    }, 33)
+
     layout.one('layoutstop', () => {
+      stopped = true
+      clearInterval(tickInterval)
       if (currentRunId !== msg.runId) {
         cy.destroy()
         return
