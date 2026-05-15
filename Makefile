@@ -54,7 +54,7 @@ bench-record: bench-baseline
 # inside the recipe (Make's $$(...) defers evaluation to recipe time),
 # so the Playwright spec itself stays shell-out free.
 bench-graph:
-	GIT_COMMIT_SHA=$$(git rev-parse HEAD) npx playwright test \
+	GIT_COMMIT_SHA=$$(git rev-parse --short=7 HEAD) npx playwright test \
 	  --config=e2e/playwright.config.ts \
 	  e2e/specs/19-graph-bench.spec.ts \
 	  --workers=1 --project=chromium
