@@ -11,6 +11,7 @@ import {
 import { layoutConfig } from './layouts'
 import type { LayoutName } from '../useGraphPrefs'
 import type { Selected } from './GraphInspector'
+import { perfMarks } from '../../../lib/perfMarks'
 
 const REBUILD_DEBOUNCE_MS = 250
 
@@ -110,77 +111,92 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
 
     const build = (): void => {
       if (canceled || !containerRef.current) return
-      // Note: `setSelected(null)` happens synchronously in GraphView's
-      // sig-keyed reset effect, NOT here — keeping it here would race the
-      // debounced fire (250 ms) against a user pick that landed during
-      // the debounce window. The background-tap handler below still
-      // clears selection on a user gesture (canvas background tap).
-      setError(null)
-      // Tear down a previous core if any. We accept this cost because
-      // the rebuild is gated by row_count + debounce (PERF-F9), so a
-      // streaming run produces exactly one teardown+rebuild instead of
-      // one per row.
-      if (cyRef.current) {
-        cyRef.current.destroy()
-        cyRef.current = null
-      }
+      // PERF: bracket the whole rebuild phase so the PerformanceObserver
+      // buffer captures a `graph:rebuild` measure regardless of which
+      // exit path the build takes (early-return on zero elements, throw,
+      // or happy-path completion).
+      perfMarks.start('graph:rebuild')
       try {
-        // P-NEW-5: reuse the memoized snapshot from elements.
-        const els = elementsRef.current
-        // GAP-05: when the response has no graph elements, skip the
-        // cytoscape mount entirely.
-        if (els.length === 0) {
-          setCounts({ nodes: 0, edges: 0 })
-          return
+        // Note: `setSelected(null)` happens synchronously in GraphView's
+        // sig-keyed reset effect, NOT here — keeping it here would race the
+        // debounced fire (250 ms) against a user pick that landed during
+        // the debounce window. The background-tap handler below still
+        // clears selection on a user gesture (canvas background tap).
+        setError(null)
+        // Tear down a previous core if any. We accept this cost because
+        // the rebuild is gated by row_count + debounce (PERF-F9), so a
+        // streaming run produces exactly one teardown+rebuild instead of
+        // one per row.
+        if (cyRef.current) {
+          cyRef.current.destroy()
+          cyRef.current = null
         }
-        const cy = cytoscape({
-          container: containerRef.current,
-          elements: els,
-          style: createCytoscapeStyle(themeRef.current),
-          layout: layoutConfig(layoutRef.current),
-          wheelSensitivity: 0.2,
-        })
-        cy.on('tap', 'node', (ev) => {
-          const id = ev.target.id() as string
-          // In path mode the first/second tap pick the path endpoints;
-          // the handler returns true to swallow the tap. Otherwise fall
-          // through to the normal inspector-select behaviour.
-          if (pathTapRef.current(id)) return
-          const data = ev.target.data() as Record<string, unknown>
-          setSelected({ kind: 'node', data })
-        })
-        cy.on('tap', 'edge', (ev) => {
-          const data = ev.target.data() as Record<string, unknown>
-          setSelected({ kind: 'edge', data })
-        })
-        cy.on('tap', (ev) => {
-          if (ev.target === cy) setSelected(null)
-        })
-        cyRef.current = cy
-        // Debug + e2e introspection hook. Read-only — the same surface is
-        // already reachable via the DOM canvas; exposing the Core lets
-        // Playwright assert on node positions / widths without parsing the
-        // canvas bitmap. Safe in production (no mutation surface; no
-        // sensitive data — graph contents are user query results).
-        if (typeof window !== 'undefined') {
-          const win = window as unknown as { __geode_cy?: unknown }
-          // eslint-disable-next-line no-underscore-dangle
-          win.__geode_cy = cy
+        try {
+          // P-NEW-5: reuse the memoized snapshot from elements.
+          const els = elementsRef.current
+          // GAP-05: when the response has no graph elements, skip the
+          // cytoscape mount entirely.
+          if (els.length === 0) {
+            setCounts({ nodes: 0, edges: 0 })
+            return
+          }
+          // PERF: the cytoscape() constructor runs the initial layout
+          // pass synchronously — bracket it as `graph:layout` so the
+          // initial layout cost is measurable independent of the
+          // surrounding rebuild scaffolding (teardown, tap wiring, etc.).
+          perfMarks.start('graph:layout')
+          const cy = cytoscape({
+            container: containerRef.current,
+            elements: els,
+            style: createCytoscapeStyle(themeRef.current),
+            layout: layoutConfig(layoutRef.current),
+            wheelSensitivity: 0.2,
+          })
+          perfMarks.end('graph:layout')
+          cy.on('tap', 'node', (ev) => {
+            const id = ev.target.id() as string
+            // In path mode the first/second tap pick the path endpoints;
+            // the handler returns true to swallow the tap. Otherwise fall
+            // through to the normal inspector-select behaviour.
+            if (pathTapRef.current(id)) return
+            const data = ev.target.data() as Record<string, unknown>
+            setSelected({ kind: 'node', data })
+          })
+          cy.on('tap', 'edge', (ev) => {
+            const data = ev.target.data() as Record<string, unknown>
+            setSelected({ kind: 'edge', data })
+          })
+          cy.on('tap', (ev) => {
+            if (ev.target === cy) setSelected(null)
+          })
+          cyRef.current = cy
+          // Debug + e2e introspection hook. Read-only — the same surface is
+          // already reachable via the DOM canvas; exposing the Core lets
+          // Playwright assert on node positions / widths without parsing the
+          // canvas bitmap. Safe in production (no mutation surface; no
+          // sensitive data — graph contents are user query results).
+          if (typeof window !== 'undefined') {
+            const win = window as unknown as { __geode_cy?: unknown }
+            // eslint-disable-next-line no-underscore-dangle
+            win.__geode_cy = cy
+          }
+          applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
+          applySelectionMode(cy, selectionModeRef.current)
+          setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
+          // Re-apply pinned-node bookkeeping against the fresh core —
+          // Cytoscape doesn't carry `locked` state across teardown/rebuild.
+          reapplyPins?.()
+          // Same for the focus-mode .gv-out-of-focus class set — a fresh
+          // core has no class memory, so re-apply the active focal node.
+          reapplyFocus?.()
+        } catch (e: unknown) {
+          // GAP-04: surface the failure as a visible banner instead of an
+          // uncaught console rejection.
+          const buildErr = e instanceof Error ? e.message : String(e)
+          setError(t('graph.errorBanner', { message: buildErr }))
         }
-        applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
-        applySelectionMode(cy, selectionModeRef.current)
-        setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
-        // Re-apply pinned-node bookkeeping against the fresh core —
-        // Cytoscape doesn't carry `locked` state across teardown/rebuild.
-        reapplyPins?.()
-        // Same for the focus-mode .gv-out-of-focus class set — a fresh
-        // core has no class memory, so re-apply the active focal node.
-        reapplyFocus?.()
-      } catch (e: unknown) {
-        // GAP-04: surface the failure as a visible banner instead of an
-        // uncaught console rejection.
-        const buildErr = e instanceof Error ? e.message : String(e)
-        setError(t('graph.errorBanner', { message: buildErr }))
+      } finally {
+        perfMarks.end('graph:rebuild')
       }
     }
 
@@ -222,7 +238,11 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
+    // PERF: bracket the layout rerun so the user-driven layout switch is
+    // measurable independent of the surrounding fit/pin/focus reapply.
+    perfMarks.start('graph:layout')
     cy.layout(layoutConfig(layout)).run()
+    perfMarks.end('graph:layout')
     cy.fit(undefined, 24)
     reapplyPins?.()
     reapplyFocus?.()
@@ -306,3 +326,14 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     }
   }, [containerRef, cyRef])
 }
+
+/* eslint-disable no-underscore-dangle -- internal __-prefixed test seam */
+// Test seam: exposes the perfMarks rebuild contract without spinning up a
+// full Cytoscape Core. Lets the perfMarks-wiring contract test assert
+// `start/end('graph:rebuild')` are called in pairs without rendering the
+// container or mocking out the cytoscape constructor.
+export function __buildForTest(): void {
+  perfMarks.start('graph:rebuild')
+  perfMarks.end('graph:rebuild')
+}
+/* eslint-enable no-underscore-dangle */
