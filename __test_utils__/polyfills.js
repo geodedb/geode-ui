@@ -137,6 +137,16 @@ if (
   }
 }
 
+// jsdom 20 also omits `PerformanceObserver`. Production code paths that
+// observe UserTiming entries (see src/lib/perfMarks.ts) need it. Delegate
+// to Node's `perf_hooks.PerformanceObserver`, which observes measures
+// created on the same Node `perf_hooks.performance` instance that the
+// UserTiming polyfill above already binds to `globalThis.performance`.
+if (typeof globalThis.PerformanceObserver === 'undefined') {
+  const { PerformanceObserver: NodePerformanceObserver } = require('perf_hooks')
+  globalThis.PerformanceObserver = NodePerformanceObserver
+}
+
 // jsdom ships HTMLDialogElement but stubs `.showModal()` / `.show()` /
 // `.close()` as missing. Web Awesome's <wa-dialog> calls `showModal()`
 // on its internal native <dialog> as soon as `open` flips true, which

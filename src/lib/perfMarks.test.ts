@@ -1,3 +1,4 @@
+/* eslint-disable no-underscore-dangle, no-promise-executor-return */
 import { perfMarks } from './perfMarks'
 
 describe('perfMarks', () => {
@@ -41,5 +42,67 @@ describe('perfMarks', () => {
     expect(() => perfMarks.start('x')).not.toThrow()
     expect(() => perfMarks.end('x')).not.toThrow()
     perfSeam.mark = orig
+  })
+})
+
+describe('perfMarks buffered upload', () => {
+  let fetchSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    // jsdom 20 doesn't define a global `Response`. perfMarks.flush() never
+    // inspects the resolved value (best-effort upload), so a plain object
+    // stub suffices and avoids a ReferenceError at spy-setup time.
+    fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ status: 204, ok: true } as unknown as Response)
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+    perfMarks.__resetForTest()
+  })
+
+  it('observes new measures and buffers them', async () => {
+    perfMarks.__startObserver('http://otel.local/v1/metrics')
+    perfMarks.start('graph:layout')
+    perfMarks.end('graph:layout')
+    // PerformanceObserver delivery is asynchronous (microtask / setImmediate
+    // in Node's perf_hooks). Yield to the event loop so the buffer is
+    // populated before we assert.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(perfMarks.__bufferSizeForTest()).toBeGreaterThanOrEqual(1)
+  })
+
+  it('flush() posts the buffer to the configured endpoint and clears it', async () => {
+    perfMarks.__startObserver('http://otel.local/v1/metrics')
+    perfMarks.start('graph:layout')
+    perfMarks.end('graph:layout')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await perfMarks.flush()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(perfMarks.__bufferSizeForTest()).toBe(0)
+  })
+
+  it('drops oldest entries when buffer would exceed 512', () => {
+    perfMarks.__startObserver('http://otel.local/v1/metrics')
+    for (let i = 0; i < 600; i += 1) {
+      perfMarks.__pushMeasureForTest({
+        name: `m${i}`,
+        startTime: i,
+        duration: 1,
+        entryType: 'measure',
+        toJSON: () => ({}),
+      } as PerformanceMeasure)
+    }
+    expect(perfMarks.__bufferSizeForTest()).toBe(512)
+  })
+
+  it('flush() failure is silent (fetch rejects)', async () => {
+    fetchSpy.mockRejectedValueOnce(new Error('boom'))
+    perfMarks.__startObserver('http://otel.local/v1/metrics')
+    perfMarks.start('graph:layout')
+    perfMarks.end('graph:layout')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await expect(perfMarks.flush()).resolves.toBeUndefined()
   })
 })
