@@ -116,12 +116,35 @@ export const LoginPage: React.FC = () => {
     }
   }, [profile, username])
 
+  // Read the live username + password values from the <wa-input> host
+  // properties at submit time, falling back to React state. Chrome's
+  // saved-password autofill writes to the shadow-DOM <input> directly
+  // and only fires `change` (not `input`) on the inner element. WA's
+  // wa-input host syncs its value property on either event, but the
+  // React-controlled `value` prop here only updates on `onInput`, so
+  // an autofilled password leaves `password` state empty and the form
+  // POSTs an empty string — server then 400s with "password: too
+  // short". Reading the host's current value at submit closes that
+  // gap without forcing onChange + onInput convergence in the wrapper.
+  // Caught by e2e/specs/26-login-edge-cases.spec.ts.
+  const readWaInputValue = (id: string, fallback: string): string => {
+    if (typeof document === 'undefined') return fallback
+    const el = document.getElementById(id) as
+      | (HTMLElement & { value?: string })
+      | null
+    const v = el?.value
+    if (typeof v === 'string' && v.length > 0) return v
+    return fallback
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
+    const liveUsername = readWaInputValue('login-username', username)
+    const livePassword = readWaInputValue('login-password', password)
     try {
-      await signIn(username, password, profile, savePw)
+      await signIn(liveUsername, livePassword, profile, savePw)
       nav('/', { replace: true })
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : t('auth.loginFailed'))

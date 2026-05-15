@@ -49,8 +49,20 @@ export async function login(
     credentials: 'same-origin',
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error_description || `login failed (${res.status})`)
+    const err = (await res.json().catch(() => ({}))) as {
+      error?: string
+      error_description?: string
+      message?: string
+    }
+    // genapi's writeJSONError emits the body as {"error": "..."}; legacy
+    // OAuth-style handlers used {"error_description": "..."}; some
+    // future shim may use {"message": "..."}. Try all of them before
+    // falling back to the bare status code so the operator gets the
+    // specific server message ("password: too short" / "username: too
+    // short" / rate-limit text) instead of an opaque "login failed
+    // (400)".
+    const detail = err.error || err.error_description || err.message
+    throw new Error(detail || `login failed (${res.status})`)
   }
   const result = (await res.json()) as LoginResult
   // Legacy backout: if the operator has flipped the flag, also write
