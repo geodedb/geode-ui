@@ -16,8 +16,7 @@ function safeMeasure(
   end: string
 ): PerformanceMeasure | null {
   try {
-    const m = performance.measure(name, start, end)
-    return m as PerformanceMeasure
+    return performance.measure(name, start, end)
   } catch {
     return null
   }
