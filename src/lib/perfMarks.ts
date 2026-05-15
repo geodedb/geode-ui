@@ -39,7 +39,6 @@ function push(m: PerformanceMeasure): void {
 
 function startObserver(uploadUrl: string): void {
   if (observer) return
-  endpoint = uploadUrl
   try {
     observer = new PerformanceObserver((list) => {
       list.getEntries().forEach((e) => {
@@ -47,10 +46,12 @@ function startObserver(uploadUrl: string): void {
       })
     })
     observer.observe({ entryTypes: ['measure'] })
+    endpoint = uploadUrl
   } catch {
     // PerformanceObserver unavailable (jsdom corner / hardened env);
-    // silently disable. Direct __pushMeasureForTest() callers still work.
+    // silently disable. endpoint stays null so flush() is a no-op.
     observer = null
+    endpoint = null
   }
 }
 

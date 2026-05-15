@@ -83,7 +83,7 @@ describe('perfMarks buffered upload', () => {
     expect(perfMarks.__bufferSizeForTest()).toBe(0)
   })
 
-  it('drops oldest entries when buffer would exceed 512', () => {
+  it('drops oldest entries when buffer would exceed 512', async () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     for (let i = 0; i < 600; i += 1) {
       perfMarks.__pushMeasureForTest({
@@ -95,6 +95,44 @@ describe('perfMarks buffered upload', () => {
       } as PerformanceMeasure)
     }
     expect(perfMarks.__bufferSizeForTest()).toBe(512)
+    // Verify it's the NEWEST 512 retained (not the oldest). A direction-flip
+    // in the slice would still pass the count check but fail the contents.
+    await perfMarks.flush()
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as { body: string }).body
+    ) as { measures: { name: string }[] }
+    expect(body.measures[0]?.name).toBe('m88')
+    expect(body.measures[511]?.name).toBe('m599')
+  })
+
+  it('entries pushed during in-flight flush are preserved for the next cycle', async () => {
+    let resolveFetch!: () => void
+    fetchSpy.mockImplementationOnce(
+      () =>
+        new Promise<Response>((res) => {
+          resolveFetch = () => res({ status: 204, ok: true } as Response)
+        })
+    )
+    perfMarks.__startObserver('http://otel.local/v1/metrics')
+    perfMarks.__pushMeasureForTest({
+      name: 'before',
+      startTime: 0,
+      duration: 1,
+      entryType: 'measure',
+      toJSON: () => ({}),
+    } as PerformanceMeasure)
+    const flushP = perfMarks.flush()
+    // Race window: push lands while fetch is still pending.
+    perfMarks.__pushMeasureForTest({
+      name: 'during',
+      startTime: 1,
+      duration: 1,
+      entryType: 'measure',
+      toJSON: () => ({}),
+    } as PerformanceMeasure)
+    resolveFetch()
+    await flushP
+    expect(perfMarks.__bufferSizeForTest()).toBe(1)
   })
 
   it('flush() failure is silent (fetch rejects)', async () => {
