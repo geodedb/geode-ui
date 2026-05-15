@@ -8,11 +8,11 @@ import {
   applySelectionMode,
   applyVisibility,
 } from './cyHelpers'
-import { layoutConfig } from './layouts'
 import { useGraphPrefs, type LayoutName } from '../useGraphPrefs'
 import type { Selected } from './GraphInspector'
 import { perfMarks } from '../../../lib/perfMarks'
 import { scaleTier } from './scaleTier'
+import { runLayout } from './runLayout'
 
 const REBUILD_DEBOUNCE_MS = 250
 
@@ -141,19 +141,35 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
             setCounts({ nodes: 0, edges: 0 })
             return
           }
-          // PERF: the cytoscape() constructor runs the initial layout
-          // pass synchronously — bracket it as `graph:layout` so the
-          // initial layout cost is measurable independent of the
-          // surrounding rebuild scaffolding (teardown, tap wiring, etc.).
-          perfMarks.start('graph:layout')
+          // Construct the core with a no-op `preset` layout — the real
+          // initial layout runs through the runLayout dispatcher below
+          // (cache → worker → main-thread fallback), which already
+          // brackets `graph:layout` perfMarks internally. Passing the
+          // live layout here would force a synchronous main-thread pass
+          // that the dispatcher would then re-run.
           const cy = cytoscape({
             container: containerRef.current,
             elements: els,
             style: createCytoscapeStyle(themeRef.current),
-            layout: layoutConfig(layoutRef.current),
+            layout: { name: 'preset' },
             wheelSensitivity: 0.2,
           })
-          perfMarks.end('graph:layout')
+          const initialIds: string[] = []
+          cy.nodes().forEach((node) => {
+            initialIds.push(node.id() as string)
+          })
+          runLayout({
+            cy,
+            layoutName: layoutRef.current,
+            sig,
+            currentIds: initialIds,
+            n: cy.nodes().length,
+            useWorker: useGraphPrefs.getState().useWorkerLayout,
+            onComplete: () => {
+              reapplyPins?.()
+              reapplyFocus?.()
+            },
+          })
           cy.on('tap', 'node', (ev) => {
             const id = ev.target.id() as string
             // In path mode the first/second tap pick the path endpoints;
@@ -254,20 +270,29 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
   }, [cyRef, theme])
 
   // Re-run the layout when the user picks a different one. We do NOT tear
-  // down the core; .layout().run() re-positions in place. Pins + focus
-  // classes are re-applied AFTER the new positions so locked nodes and
-  // dimmed nodes survive the layout swap.
+  // down the core; runLayout re-positions in place. Pins + focus classes
+  // are re-applied AFTER the new positions so locked nodes and dimmed
+  // nodes survive the layout swap. The dispatcher itself brackets
+  // `graph:layout` perfMarks and calls `cy.fit` — no explicit fit here.
   useEffect(() => {
     const cy = cyRef.current
     if (!cy) return
-    // PERF: bracket the layout rerun so the user-driven layout switch is
-    // measurable independent of the surrounding fit/pin/focus reapply.
-    perfMarks.start('graph:layout')
-    cy.layout(layoutConfig(layout)).run()
-    perfMarks.end('graph:layout')
-    cy.fit(undefined, 24)
-    reapplyPins?.()
-    reapplyFocus?.()
+    const ids: string[] = []
+    cy.nodes().forEach((node) => {
+      ids.push(node.id() as string)
+    })
+    runLayout({
+      cy,
+      layoutName: layout,
+      sig: `${layout}:${ids.length}`,
+      currentIds: ids,
+      n: cy.nodes().length,
+      useWorker: useGraphPrefs.getState().useWorkerLayout,
+      onComplete: () => {
+        reapplyPins?.()
+        reapplyFocus?.()
+      },
+    })
     // reapplyPins / reapplyFocus are intentionally NOT in deps — their
     // identity churns when focus/pin state changes, and we don't want
     // every focus toggle to trigger a full layout rerun. The dedicated
