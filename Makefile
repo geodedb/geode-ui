@@ -59,6 +59,19 @@ bench-graph:
 	  e2e/specs/19-graph-bench.spec.ts \
 	  --workers=1 --project=chromium
 
+# Perf-pipeline smoke: drives the bench harness end-to-end. The bench
+# emits graph:rebuild / graph:layout / graph:firstInteractive marks that
+# the harness extracts into the results JSON. Run after a container
+# rebuild (`make e2e-up`) so the running build contains the perfMarks
+# wiring and tier writeback. Not part of CI; manual / scheduled only.
+perf-smoke: bench-graph
+	@echo "==> perf-smoke: bench output landed at"
+	@echo "    docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json"
+	@echo "    Check the layoutMs / firstInteractiveMs / tier fields on each record."
+	@echo "perf-smoke OK"
+
+.PHONY: perf-smoke
+
 # ----- Web build/test (delegates to npm scripts) -----
 web-install:
 	npm ci

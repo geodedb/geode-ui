@@ -203,6 +203,14 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
           // Same for the focus-mode .gv-out-of-focus class set — a fresh
           // core has no class memory, so re-apply the active focal node.
           reapplyFocus?.()
+          // First-interactive timing mark — the bench harness reads this
+          // to report time-to-interactive per (renderer, n) combo. Wrapped
+          // in try so hardened-environment throws don't break the rebuild.
+          try {
+            performance.mark('graph:firstInteractive')
+          } catch {
+            /* hardened envs */
+          }
         } catch (e: unknown) {
           // GAP-04: surface the failure as a visible banner instead of an
           // uncaught console rejection.
