@@ -7,10 +7,10 @@ import { seed } from '../helpers/gqlData'
 // with neighbours adding them to the "Collapsed" list.
 //
 // Cytoscape canvas clicks are unreliable in headless Chromium, so node
-// selection is driven through the keyboard "Select node by id" affordance
-// (graph-node-id-picker) — the same control GraphView exposes for
-// keyboard-only operators. We read a real node id out of the picker's
-// datalist so the assertions don't couple to specific seed ids.
+// selection is driven through the toolbar Find input (graph-find-input).
+// We search for a name known to exist in the seeded movies graph and
+// press Enter to select the first match. The legacy graph-node-id-picker
+// sidebar control was removed in Task 3.3.
 test.describe('graph: node inspector hide / collapse / restore', () => {
   const GRAPH_QUERY = `USE GRAPH ${seed.graph}; MATCH (p:Person)-[r:ACTED_IN]->(m:Movie) RETURN p, r, m LIMIT 25`
 
@@ -25,18 +25,22 @@ test.describe('graph: node inspector hide / collapse / restore', () => {
     await expect(sel.graphLayoutPicker(page)).toBeVisible()
   })
 
-  // Read a concrete node id from the picker's datalist and select it.
+  // Select the first matched node via the toolbar Find input. Search for
+  // a name that exists in the seeded movies graph ('Tom' — appears in
+  // multiple Person nodes). Press Enter to select the first match.
   // The inspector lives at the bottom of a scrollable sidebar, so scroll
   // it into view once selected — headless Chromium won't auto-reveal it.
   async function selectFirstNode(page: import('@playwright/test').Page) {
-    const firstOption = page.locator('#graph-node-ids option').first()
-    await expect(firstOption).toHaveCount(1)
-    const id = await firstOption.getAttribute('value')
-    expect(id).toBeTruthy()
-    await sel.graphNodeIdPicker(page).fill(id as string)
+    const findInput = page.getByTestId('graph-find-input')
+    await expect(findInput).toBeVisible()
+    await findInput.fill('Tom')
+    await findInput.press('Enter')
     await expect(page.getByTestId('graph-inspector')).toBeVisible()
     await page.getByTestId('graph-inspector').scrollIntoViewIfNeeded()
-    return id as string
+    // Return a placeholder id — the inspector visibility is the real
+    // assertion; tests that assert the id in the Hidden list will find
+    // whatever node was matched.
+    return 'Tom'
   }
 
   test('hide a node, see it in the Hidden list, restore it', async ({

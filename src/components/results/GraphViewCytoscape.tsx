@@ -164,6 +164,11 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // so a regression in either is bisectable.
   const renderer = useGraphPrefs((s) => s.renderer)
   const setRenderer = useGraphPrefs((s) => s.setRenderer)
+  // Sticky per-section open/closed state for the sidebar collapsible
+  // blocks (Task 3.3). Persisted via useGraphPrefs so the chosen layout
+  // survives a query re-run and a full page reload.
+  const sectionsOpen = useGraphPrefs((s) => s.sectionsOpen)
+  const toggleSection = useGraphPrefs((s) => s.toggleSection)
   // Toggle handler hoisted into a callback so the <GraphToolbar /> JSX
   // doesn't need an arrow-with-implicit-return — prettier wants the
   // body on its own line, eslint's react/jsx-curly-newline rule
@@ -190,16 +195,8 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   })
 
   // Element-set + derived indices (memoized on resp/query/cluster).
-  const {
-    elements,
-    nodeOptions,
-    edgeOptions,
-    nodeIds,
-    edgeIds,
-    nodeDataById,
-    edgeDataById,
-    nodeLabelBuckets,
-  } = useGraphElements({ resp, query, clusterByLabel, degreeSizing })
+  const { elements, nodeOptions, edgeOptions, nodeDataById, nodeLabelBuckets } =
+    useGraphElements({ resp, query, clusterByLabel, degreeSizing })
 
   // Refs the debounced build callback reads on fire — they always hold
   // the latest snapshot without re-creating the timer every render.
@@ -357,23 +354,6 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // the rendered popover resets its internal useState between targets.
   const [expandFor, setExpandFor] = useState<string | null>(null)
 
-  // GAP-03: keyboard pickers — resolve typed/picked id back to data.
-  const onPickNodeId = (rawId: string): void => {
-    const id = rawId.trim()
-    if (!id) return
-    const data = nodeDataById.get(id)
-    if (!data) return
-    setSelected({ kind: 'node', data })
-    cyRef.current?.$id(id).select()
-  }
-  const onPickEdgeId = (rawId: string): void => {
-    const id = rawId.trim()
-    if (!id) return
-    const data = edgeDataById.get(id)
-    if (!data) return
-    setSelected({ kind: 'edge', data })
-    cyRef.current?.$id(id).select()
-  }
   const onToggleSelectionMode = (): void => {
     setSelectionMode(selectionMode === 'box' ? 'pan' : 'box')
   }
@@ -737,10 +717,6 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             hiddenLabels={hiddenLabels}
             toggleHiddenLabel={toggleHiddenLabel}
             swatchFor={swatchFor}
-            nodeIds={nodeIds}
-            edgeIds={edgeIds}
-            onPickNodeId={onPickNodeId}
-            onPickEdgeId={onPickEdgeId}
             nodeOptions={nodeOptions}
             edgeOptions={edgeOptions}
             nodeLabelPrefs={nodeLabelPrefs}
@@ -772,6 +748,8 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             focusActive={focusMode.state !== null}
             focusHops={focusHops}
             setFocusHops={setFocusHops}
+            sectionsOpen={sectionsOpen}
+            onToggleSection={toggleSection}
           />
         </GraphSidebar>
       )}

@@ -154,16 +154,14 @@ test.describe('query (graph view)', () => {
     await sel.queryTabGraph(page).click()
     await expect(sel.graphCanvas(page).first()).toBeVisible()
 
-    // The keyboard node id-picker is the deterministic way to select a
-    // node from Playwright. Pick the first id its <datalist> offers.
-    const picker = page.getByTestId('graph-node-id-picker')
-    await expect(picker).toBeVisible()
-    const firstNodeId = await page
-      .locator('#graph-node-ids option')
-      .first()
-      .getAttribute('value')
-    expect(firstNodeId).toBeTruthy()
-    await picker.fill(firstNodeId as string)
+    // The toolbar Find input is the deterministic way to select a node
+    // from Playwright (the canvas itself isn't reliably clickable in
+    // headless Chromium). Search for a person name known to exist in the
+    // seeded movies graph; press Enter to select the first match.
+    const findInput = page.getByTestId('graph-find-input')
+    await expect(findInput).toBeVisible()
+    await findInput.fill('Tom')
+    await findInput.press('Enter')
 
     // Structured property view is the default; the raw-JSON pane is not.
     await expect(page.getByTestId('graph-inspector-props')).toBeVisible()

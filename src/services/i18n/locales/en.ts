@@ -100,7 +100,6 @@ export const en = {
   graph: {
     canvasAria:
       'Cytoscape graph rendering. Use the Display panel to choose which property labels each node and edge.',
-    displayHeading: 'Display',
     noNodesToConfigure: 'No nodes to configure.',
     nodeFieldLabel: 'Display field for {{label}} nodes',
     edgeFieldLabel: 'Display field for {{type}} edges',
@@ -153,15 +152,8 @@ export const en = {
     neighborsHeading_other: '{{count}} neighbors',
     hiddenHeading: 'Hidden ({{count}})',
     collapsedHeading: 'Collapsed ({{count}})',
-    hiddenEmpty: 'No hidden nodes.',
-    collapsedEmpty: 'No collapsed nodes.',
     restore: 'Restore',
     expand: 'Expand',
-    selectionHeading: 'Selection',
-    selectNodeById: 'Select node by id',
-    selectEdgeById: 'Select edge by id',
-    nodeIdPlaceholder: 'node id…',
-    edgeIdPlaceholder: 'edge id…',
     empty: 'No nodes or edges to display for this query.',
     errorBanner: 'Failed to render graph: {{message}}',
     layoutLabel: 'Layout',
@@ -180,7 +172,6 @@ export const en = {
     fit: 'Fit',
     resetView: 'Reset',
     stats: '{{nodes}} nodes · {{edges}} edges',
-    visibilityHeading: 'Visibility',
     selectionModeLabel: 'Selection mode',
     selectionModePan: 'Pan',
     selectionModeBox: 'Box select',
@@ -207,6 +198,9 @@ export const en = {
     viewGroupLabel: 'View',
     filtersGroupLabel: 'Filters',
     analysisGroupLabel: 'Analysis',
+    sectionVisibility: 'Visibility',
+    sectionDisplay: 'Display fields',
+    sectionInspector: 'Inspector',
   },
 
   matrix: {

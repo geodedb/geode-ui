@@ -258,6 +258,9 @@ const cyFactory = jest.fn((opts: unknown) => {
     $id: (id: string) =>
       makeColl(elementIds.includes(id) ? [id] : [], classes, ctx),
     fit: jest.fn(),
+    // cy.center(node) — consumed by onFindPick (toolbar Find input) to
+    // pan the viewport to the picked node. No-op in the mock.
+    center: jest.fn(),
     animate: jest.fn(),
     pan: jest.fn(() => ({ x: 0, y: 0 })),
     zoom: jest.fn(() => 1),
@@ -516,11 +519,11 @@ test('GraphView shows an empty-graph overlay when there are no elements', () => 
   expect(overlay).not.toBeNull()
 })
 
-// GAP-03: the canvas itself isn't keyboard-interactive, but the
-// Display panel exposes a "Select node by id" combobox / button so a
-// keyboard-only user can still pick a node. Edge selection is
-// available via id input as well.
-test('GraphView exposes a keyboard-accessible node id picker', () => {
+// GAP-03: the canvas itself isn't keyboard-interactive, but the toolbar
+// exposes a Find input so a keyboard-only user can search for nodes by
+// id, label, or property value. (The legacy Selection-by-id sidebar block
+// was removed in Task 3.3 — the toolbar Find input supersedes it.)
+test('GraphView exposes a keyboard-accessible find input in the toolbar', () => {
   const resp = {
     rows: [],
     graph_summary: {
@@ -539,8 +542,8 @@ test('GraphView exposes a keyboard-accessible node id picker', () => {
   act(() => {
     jest.advanceTimersByTime(300)
   })
-  const picker = container.querySelector('[data-testid="graph-node-id-picker"]')
-  expect(picker).not.toBeNull()
+  const findInput = container.querySelector('[data-testid="graph-find-input"]')
+  expect(findInput).not.toBeNull()
 })
 
 // The sidebar (inspector + controls) can be collapsed via a toolbar
@@ -817,10 +820,13 @@ describe('graph inspector property view', () => {
     return view
   }
 
-  // Drive a deterministic node selection via the keyboard id picker.
+  // Drive a deterministic node selection via the toolbar Find input.
+  // fireEvent.change sets the internal `q` state; keyDown Enter picks the
+  // first match (which is the node whose id contains the search string).
   function selectNode(view: ReturnType<typeof render>, id: string): void {
-    const picker = view.getByTestId('graph-node-id-picker') as HTMLInputElement
-    fireEvent.change(picker, { target: { value: id } })
+    const findInput = view.getByTestId('graph-find-input')
+    fireEvent.change(findInput, { target: { value: id } })
+    fireEvent.keyDown(findInput, { key: 'Enter' })
   }
 
   test('inspector defaults to the structured property view (not raw JSON)', () => {
@@ -1171,11 +1177,13 @@ function renderHub(): ReturnType<typeof render> {
   return view
 }
 
-// Select a node via the keyboard id picker (deterministic — the canvas
-// isn't interactive in jsdom).
+// Select a node via the toolbar Find input (deterministic — the canvas
+// isn't interactive in jsdom). fireEvent.change sets the internal `q`
+// state; keyDown Enter picks the first match.
 function pickNode(view: ReturnType<typeof render>, id: string): void {
-  const picker = view.getByTestId('graph-node-id-picker') as HTMLInputElement
-  fireEvent.change(picker, { target: { value: id } })
+  const findInput = view.getByTestId('graph-find-input')
+  fireEvent.change(findInput, { target: { value: id } })
+  fireEvent.keyDown(findInput, { key: 'Enter' })
 }
 
 describe('Phase 2: inspector Hide / Collapse actions', () => {
@@ -1212,14 +1220,11 @@ describe('Phase 2: inspector Hide / Collapse actions', () => {
     )
   })
 
-  it('does not render the actions row when an edge is selected', () => {
-    const view = renderHub()
-    const picker = view.getByTestId('graph-edge-id-picker') as HTMLInputElement
-    fireEvent.change(picker, { target: { value: 'e12' } })
-    expect(view.getByTestId('graph-inspector')).toBeInTheDocument()
-    expect(view.queryByTestId('graph-action-hide')).toBeNull()
-    expect(view.queryByTestId('graph-action-collapse')).toBeNull()
-  })
+  // NOTE: the "edge selected → no Hide/Collapse actions" assertion was
+  // previously driven through graph-edge-id-picker, which was removed in
+  // Task 3.3 (the toolbar Find input only searches nodes). Edge selection
+  // is covered by the E2E suite (20-node-inspector.spec.ts) via real
+  // canvas interaction. Deferred to E2E post graph-edge-id-picker removal.
 })
 
 describe('Phase 2: Hidden / Collapsed restore lists', () => {
@@ -1285,18 +1290,20 @@ describe('Phase 2: Hidden / Collapsed restore lists', () => {
     // list no longer carries the leaves.
     expect(classesOf('2')).not.toContain('hidden-node')
     expect(classesOf('3')).not.toContain('hidden-node')
+    // After expanding, the Collapsed section is entirely hidden (no
+    // collapsed entries remain) — the old "Collapsed (0)" heading is
+    // gone; assert the section testid itself is absent instead.
     expect(view.queryByText(/collapsed \(1\)/i)).toBeNull()
-    expect(view.getByText(/collapsed \(0\)/i)).toBeInTheDocument()
+    expect(view.queryByTestId('graph-section-collapsed')).toBeNull()
   })
 
-  it('shows empty states when nothing is hidden or collapsed', () => {
+  it('hides the Hidden and Collapsed sections when nothing is hidden or collapsed', () => {
+    // Task 3.3: empty Hidden / Collapsed sections are omitted from the
+    // render tree entirely (previously they rendered with an empty-state
+    // "No hidden nodes." paragraph). Assert the section wrappers are absent.
     const view = renderHub()
-    expect(view.getByTestId('graph-hidden-list')).toHaveTextContent(
-      /no hidden nodes/i
-    )
-    expect(view.getByTestId('graph-collapsed-list')).toHaveTextContent(
-      /no collapsed nodes/i
-    )
+    expect(view.queryByTestId('graph-section-hidden')).toBeNull()
+    expect(view.queryByTestId('graph-section-collapsed')).toBeNull()
   })
 })
 
@@ -1449,10 +1456,11 @@ describe('GraphView — inspector neighbors', () => {
       jest.advanceTimersByTime(300)
     })
 
-    // Pick node "1" via the existing graph-node-id-picker input.
-    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+    // Pick node "1" via the toolbar Find input.
+    fireEvent.change(view.getByTestId('graph-find-input'), {
       target: { value: '1' },
     })
+    fireEvent.keyDown(view.getByTestId('graph-find-input'), { key: 'Enter' })
 
     // Neighbors panel should appear with at least one chip.
     const panel = view.getByTestId('graph-neighbors')
@@ -1482,10 +1490,11 @@ describe('GraphView — pin action', () => {
       jest.advanceTimersByTime(300)
     })
 
-    // Select node "1" via the existing id picker.
-    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+    // Select node "1" via the toolbar Find input.
+    fireEvent.change(view.getByTestId('graph-find-input'), {
       target: { value: '1' },
     })
+    fireEvent.keyDown(view.getByTestId('graph-find-input'), { key: 'Enter' })
     const pin = view.getByTestId('graph-action-pin')
     expect(pin).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(pin)
@@ -1509,10 +1518,11 @@ describe('GraphView — focus action', () => {
     act(() => {
       jest.advanceTimersByTime(300)
     })
-    // Select node "1" via the existing id picker.
-    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+    // Select node "1" via the toolbar Find input.
+    fireEvent.change(view.getByTestId('graph-find-input'), {
       target: { value: '1' },
     })
+    fireEvent.keyDown(view.getByTestId('graph-find-input'), { key: 'Enter' })
     const focusBtn = view.getByTestId('graph-action-focus')
     expect(focusBtn).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(focusBtn)
@@ -1542,10 +1552,11 @@ describe('GraphView — focus action', () => {
     act(() => {
       jest.advanceTimersByTime(300)
     })
-    // Select node "1" via the existing id picker.
-    fireEvent.change(view.getByTestId('graph-node-id-picker'), {
+    // Select node "1" via the toolbar Find input.
+    fireEvent.change(view.getByTestId('graph-find-input'), {
       target: { value: '1' },
     })
+    fireEvent.keyDown(view.getByTestId('graph-find-input'), { key: 'Enter' })
     fireEvent.click(view.getByTestId('graph-action-focus'))
     // The persistent chip is rendered.
     const chip = view.getByTestId('graph-focus-clear-chip')

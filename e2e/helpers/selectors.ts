@@ -86,11 +86,10 @@ export const sel = {
     p.getByTestId('graph-cluster-toggle'),
   graphPathMode: (p: Page): Locator => p.getByTestId('graph-path-mode'),
   graphPathClear: (p: Page): Locator => p.getByTestId('graph-path-clear'),
-  // Phase-2 node-inspector workflow (GraphView): the keyboard "select
-  // node by id" input, the inspector action buttons, and the sidebar
-  // Hidden/Collapsed restore lists.
-  graphNodeIdPicker: (p: Page): Locator =>
-    p.getByTestId('graph-node-id-picker'),
+  // Phase-2 node-inspector workflow (GraphView): the inspector action
+  // buttons and the sidebar Hidden/Collapsed restore lists. The
+  // graph-node-id-picker sidebar control was removed in Task 3.3 —
+  // use page.getByTestId('graph-find-input') for node selection in E2E.
   graphActionHide: (p: Page): Locator => p.getByTestId('graph-action-hide'),
   graphActionCollapse: (p: Page): Locator =>
     p.getByTestId('graph-action-collapse'),

@@ -7,16 +7,9 @@ import {
 } from '../../../lib/graphResult'
 import { ControlsBlock, RestoreList } from './styled'
 import { GraphInspector, Neighbor, Selected } from './GraphInspector'
-import type { InspectorView } from '../useGraphPrefs'
+import type { GraphSectionId, InspectorView } from '../useGraphPrefs'
 import { isRealNodeId } from './explore'
-
-// P-NEW-2 / Q-NEW-3: cap the datalist option count rendered by the
-// keyboard pickers. A 5k-node graph would otherwise materialise 5k
-// <option> elements unconditionally. Datalists are type-ahead
-// suggestions; 1000 entries is more than any human will scroll. The
-// underlying lookup Maps are NOT capped, so resolving a typed-in id
-// always works.
-const ID_PICKER_OPTION_CAP = 1000
+import { CollapsibleSection } from '../CollapsibleSection'
 
 // Sized to the matching types from lib/graphResult so callers don't
 // re-type the maps.
@@ -32,11 +25,6 @@ export type GraphSidebarContentsProps = {
   hiddenLabels: Set<string>
   toggleHiddenLabel: (label: string) => void
   swatchFor: (label: string) => string
-  // Keyboard id pickers.
-  nodeIds: string[]
-  edgeIds: string[]
-  onPickNodeId: (rawId: string) => void
-  onPickEdgeId: (rawId: string) => void
   // Display pref editors.
   nodeOptions: NodeOptions
   edgeOptions: EdgeOptions
@@ -77,24 +65,30 @@ export type GraphSidebarContentsProps = {
   focusActive: boolean
   focusHops: number
   setFocusHops: (n: number) => void
+  // Collapsible section state — lifted to the orchestrator and persisted
+  // via useGraphPrefs.sectionsOpen.
+  sectionsOpen: Record<GraphSectionId, boolean>
+  onToggleSection: (id: GraphSectionId) => void
 }
 
 // GraphSidebarContents renders the inner blocks of the graph sidebar:
-// visibility toggles, keyboard pickers, display-field selectors, the
-// hidden / collapsed restore lists, and the selected-element inspector.
-// All state lives in the orchestrator; this component is presentational
-// and accepts the data + handlers it needs as props. Kept separate so
-// the orchestrator's render block stays small enough to be readable.
+// visibility toggles, display-field selectors, the hidden / collapsed
+// restore lists (only when non-empty), and the selected-element
+// inspector. All state lives in the orchestrator; this component is
+// presentational and accepts the data + handlers it needs as props.
+// Kept separate so the orchestrator's render block stays small enough
+// to be readable.
+//
+// Each block is wrapped in a <CollapsibleSection> whose open/closed
+// state is threaded from useGraphPrefs.sectionsOpen (sticky). The
+// Hidden and Collapsed sections are only rendered when their respective
+// lists are non-empty — no empty-state clutter.
 export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
   t,
   nodeLabelBuckets,
   hiddenLabels,
   toggleHiddenLabel,
   swatchFor,
-  nodeIds,
-  edgeIds,
-  onPickNodeId,
-  onPickEdgeId,
   nodeOptions,
   edgeOptions,
   nodeLabelPrefs,
@@ -123,137 +117,110 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
   focusActive,
   focusHops,
   setFocusHops,
+  sectionsOpen,
+  onToggleSection,
 }) => {
   return (
     <>
       {nodeLabelBuckets.size > 1 && (
-        <ControlsBlock data-testid="graph-visibility-controls">
-          <h5>{t('graph.visibilityHeading')}</h5>
-          {Array.from(nodeLabelBuckets.entries())
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([label, count]) => {
-              const id = `gv-vis-${label || 'unlabeled'}`
-              return (
-                <label
-                  key={label || 'unlabeled'}
-                  className="toggle-row"
-                  htmlFor={id}
+        <CollapsibleSection
+          title={t('graph.sectionVisibility')}
+          open={sectionsOpen.visibility}
+          onToggle={() => onToggleSection('visibility')}
+          testId="graph-section-visibility"
+        >
+          <ControlsBlock data-testid="graph-visibility-controls">
+            {Array.from(nodeLabelBuckets.entries())
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([label, count]) => {
+                const id = `gv-vis-${label || 'unlabeled'}`
+                return (
+                  <label
+                    key={label || 'unlabeled'}
+                    className="toggle-row"
+                    htmlFor={id}
+                  >
+                    <input
+                      id={id}
+                      type="checkbox"
+                      checked={!hiddenLabels.has(label)}
+                      onChange={() => toggleHiddenLabel(label)}
+                    />
+                    <span
+                      className="swatch"
+                      style={{ background: swatchFor(label) }}
+                      aria-hidden="true"
+                    />
+                    <span className="toggle-label">
+                      {label || `(${t('graph.unlabeledNode')})`}
+                    </span>
+                    <span className="empty">{count}</span>
+                  </label>
+                )
+              })}
+          </ControlsBlock>
+        </CollapsibleSection>
+      )}
+      <CollapsibleSection
+        title={t('graph.sectionDisplay')}
+        open={sectionsOpen.display}
+        onToggle={() => onToggleSection('display')}
+        testId="graph-section-display"
+      >
+        <ControlsBlock data-testid="graph-display-controls">
+          {nodeOptions.size === 0 ? (
+            <p className="empty">{t('graph.noNodesToConfigure')}</p>
+          ) : (
+            Array.from(nodeOptions.entries()).map(([label, opts]) => (
+              <div className="row" key={`n-${label}`}>
+                <span>{label || `(${t('graph.unlabeledNode')})`}</span>
+                <select
+                  aria-label={t('graph.nodeFieldLabel', {
+                    label: label || t('graph.unlabeledNode'),
+                  })}
+                  value={nodeLabelPrefs[label] ?? NODE_LABEL_DEFAULT}
+                  onChange={(e) => setNodeLabelPref(label, e.target.value)}
                 >
-                  <input
-                    id={id}
-                    type="checkbox"
-                    checked={!hiddenLabels.has(label)}
-                    onChange={() => toggleHiddenLabel(label)}
-                  />
-                  <span
-                    className="swatch"
-                    style={{ background: swatchFor(label) }}
-                    aria-hidden="true"
-                  />
-                  <span className="toggle-label">
-                    {label || `(${t('graph.unlabeledNode')})`}
-                  </span>
-                  <span className="empty">{count}</span>
-                </label>
-              )
-            })}
-        </ControlsBlock>
-      )}
-      {(nodeIds.length > 0 || edgeIds.length > 0) && (
-        <ControlsBlock data-testid="graph-selection-controls">
-          <h5>{t('graph.selectionHeading')}</h5>
-          {nodeIds.length > 0 && (
-            <div className="row">
-              <span>{t('graph.selectNodeById')}</span>
-              <input
-                list="graph-node-ids"
-                data-testid="graph-node-id-picker"
-                aria-label={t('graph.selectNodeById')}
-                placeholder={t('graph.nodeIdPlaceholder')}
-                onChange={(e) => onPickNodeId(e.target.value)}
-              />
-              <datalist id="graph-node-ids">
-                {nodeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ))}
-              </datalist>
-            </div>
+                  {opts.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt === NODE_LABEL_DEFAULT
+                        ? `(${t('graph.optionLabelName')})`
+                        : opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))
           )}
-          {edgeIds.length > 0 && (
-            <div className="row">
-              <span>{t('graph.selectEdgeById')}</span>
-              <input
-                list="graph-edge-ids"
-                data-testid="graph-edge-id-picker"
-                aria-label={t('graph.selectEdgeById')}
-                placeholder={t('graph.edgeIdPlaceholder')}
-                onChange={(e) => onPickEdgeId(e.target.value)}
-              />
-              <datalist id="graph-edge-ids">
-                {edgeIds.slice(0, ID_PICKER_OPTION_CAP).map((id) => (
-                  <option key={id} value={id}>
-                    {id}
-                  </option>
-                ))}
-              </datalist>
-            </div>
-          )}
+          {edgeOptions.size > 0 &&
+            Array.from(edgeOptions.entries()).map(([type, opts]) => (
+              <div className="row" key={`e-${type}`}>
+                <span>{type}</span>
+                <select
+                  aria-label={t('graph.edgeFieldLabel', { type })}
+                  value={edgeLabelPrefs[type] ?? EDGE_TYPE_DEFAULT}
+                  onChange={(e) => setEdgeLabelPref(type, e.target.value)}
+                >
+                  {opts.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt === EDGE_TYPE_DEFAULT
+                        ? `(${t('graph.optionType')})`
+                        : opt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
         </ControlsBlock>
-      )}
-      <ControlsBlock data-testid="graph-display-controls">
-        <h5>{t('graph.displayHeading')}</h5>
-        {nodeOptions.size === 0 ? (
-          <p className="empty">{t('graph.noNodesToConfigure')}</p>
-        ) : (
-          Array.from(nodeOptions.entries()).map(([label, opts]) => (
-            <div className="row" key={`n-${label}`}>
-              <span>{label || `(${t('graph.unlabeledNode')})`}</span>
-              <select
-                aria-label={t('graph.nodeFieldLabel', {
-                  label: label || t('graph.unlabeledNode'),
-                })}
-                value={nodeLabelPrefs[label] ?? NODE_LABEL_DEFAULT}
-                onChange={(e) => setNodeLabelPref(label, e.target.value)}
-              >
-                {opts.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt === NODE_LABEL_DEFAULT
-                      ? `(${t('graph.optionLabelName')})`
-                      : opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))
-        )}
-        {edgeOptions.size > 0 &&
-          Array.from(edgeOptions.entries()).map(([type, opts]) => (
-            <div className="row" key={`e-${type}`}>
-              <span>{type}</span>
-              <select
-                aria-label={t('graph.edgeFieldLabel', { type })}
-                value={edgeLabelPrefs[type] ?? EDGE_TYPE_DEFAULT}
-                onChange={(e) => setEdgeLabelPref(type, e.target.value)}
-              >
-                {opts.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt === EDGE_TYPE_DEFAULT
-                      ? `(${t('graph.optionType')})`
-                      : opt}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
-      </ControlsBlock>
-      <ControlsBlock data-testid="graph-hidden-list">
-        <h5>{t('graph.hiddenHeading', { count: hiddenIds.length })}</h5>
-        {hiddenIds.length === 0 ? (
-          <p className="empty">{t('graph.hiddenEmpty')}</p>
-        ) : (
-          <RestoreList>
+      </CollapsibleSection>
+      {hiddenIds.length > 0 && (
+        <CollapsibleSection
+          title={t('graph.hiddenHeading', { count: hiddenIds.length })}
+          open={sectionsOpen.hidden}
+          onToggle={() => onToggleSection('hidden')}
+          testId="graph-section-hidden"
+        >
+          <RestoreList data-testid="graph-hidden-list">
             {hiddenIds.map((id) => {
               const label = nodeDisplayLabel(id)
               return (
@@ -269,16 +236,18 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
               )
             })}
           </RestoreList>
-        )}
-      </ControlsBlock>
-      <ControlsBlock data-testid="graph-collapsed-list">
-        <h5>
-          {t('graph.collapsedHeading', { count: collapsedEntries.length })}
-        </h5>
-        {collapsedEntries.length === 0 ? (
-          <p className="empty">{t('graph.collapsedEmpty')}</p>
-        ) : (
-          <RestoreList>
+        </CollapsibleSection>
+      )}
+      {collapsedEntries.length > 0 && (
+        <CollapsibleSection
+          title={t('graph.collapsedHeading', {
+            count: collapsedEntries.length,
+          })}
+          open={sectionsOpen.collapsed}
+          onToggle={() => onToggleSection('collapsed')}
+          testId="graph-section-collapsed"
+        >
+          <RestoreList data-testid="graph-collapsed-list">
             {collapsedEntries.map(([id, leaves]) => {
               const label = nodeDisplayLabel(id)
               return (
@@ -298,43 +267,50 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
               )
             })}
           </RestoreList>
-        )}
-      </ControlsBlock>
-      {selected ? (
-        <GraphInspector
-          selected={selected}
-          view={inspectorView}
-          onSetView={setInspectorView}
-          onHide={onHideNode}
-          onCollapse={onCollapseNode}
-          onExplore={onExploreNeighbours}
-          exploreLoading={
-            selected.kind === 'node' &&
-            exploringId === String(selected.data.id ?? '')
-          }
-          exploreDisabled={
-            selected.kind === 'node' &&
-            !isRealNodeId(String(selected.data.id ?? ''))
-          }
-          collapsedCount={
-            selected.kind === 'node'
-              ? (collapsed.get(String(selected.data.id ?? '')) ?? []).length
-              : 0
-          }
-          neighbors={neighbors}
-          onJumpNeighbor={onJumpNeighbor}
-          onPin={onPin}
-          isPinned={isPinned}
-          onFocus={onFocus}
-          onClearFocus={onClearFocus}
-          focusActive={focusActive}
-          focusHops={focusHops}
-          setFocusHops={setFocusHops}
-          t={t}
-        />
-      ) : (
-        <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
+        </CollapsibleSection>
       )}
+      <CollapsibleSection
+        title={t('graph.sectionInspector')}
+        open={sectionsOpen.inspector}
+        onToggle={() => onToggleSection('inspector')}
+        testId="graph-section-inspector"
+      >
+        {selected ? (
+          <GraphInspector
+            selected={selected}
+            view={inspectorView}
+            onSetView={setInspectorView}
+            onHide={onHideNode}
+            onCollapse={onCollapseNode}
+            onExplore={onExploreNeighbours}
+            exploreLoading={
+              selected.kind === 'node' &&
+              exploringId === String(selected.data.id ?? '')
+            }
+            exploreDisabled={
+              selected.kind === 'node' &&
+              !isRealNodeId(String(selected.data.id ?? ''))
+            }
+            collapsedCount={
+              selected.kind === 'node'
+                ? (collapsed.get(String(selected.data.id ?? '')) ?? []).length
+                : 0
+            }
+            neighbors={neighbors}
+            onJumpNeighbor={onJumpNeighbor}
+            onPin={onPin}
+            isPinned={isPinned}
+            onFocus={onFocus}
+            onClearFocus={onClearFocus}
+            focusActive={focusActive}
+            focusHops={focusHops}
+            setFocusHops={setFocusHops}
+            t={t}
+          />
+        ) : (
+          <p style={{ opacity: 0.6 }}>{t('graph.inspectHint')}</p>
+        )}
+      </CollapsibleSection>
     </>
   )
 }
