@@ -421,3 +421,30 @@ describe('QueryPage outer layout', () => {
     expect(cs.minHeight).toMatch(/^0(px)?$/)
   })
 })
+
+describe('QueryPage options dropdown', () => {
+  it('moves stream + expand toggles into the Options dropdown', () => {
+    renderPage()
+    // The previous inline checkboxes are gone.
+    expect(
+      screen.queryByRole('checkbox', { name: /^Stream$/ })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('checkbox', { name: /^Expand graph cells$/ })
+    ).not.toBeInTheDocument()
+    // They live inside the new dropdown.
+    expect(screen.getByTestId('query-options-stream')).toBeInTheDocument()
+    expect(screen.getByTestId('query-options-expand')).toBeInTheDocument()
+    expect(screen.getByTestId('query-options-dropdown')).toBeInTheDocument()
+  })
+
+  it('clicking the stream item toggles streamMode', () => {
+    renderPage()
+    const streamItem = screen.getByTestId('query-options-stream')
+    // jsdom doesn't reliably forward Lit's wa-select; the DropdownItem
+    // is also wired with a direct onClick handler that toggles state.
+    fireEvent.click(streamItem)
+    // After the click, aria-checked flips to 'true'.
+    expect(streamItem).toHaveAttribute('aria-checked', 'true')
+  })
+})

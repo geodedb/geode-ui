@@ -132,8 +132,8 @@ async function renderStreamingPage(): Promise<void> {
   await waitFor(() =>
     expect(screen.getByTestId('monaco-editor-stub')).toBeInTheDocument()
   )
-  // Flip stream mode on, then Run.
-  fireEvent.click(screen.getByRole('checkbox', { name: /stream/i }))
+  // Flip stream mode on via the Options dropdown item, then Run.
+  fireEvent.click(screen.getByTestId('query-options-stream'))
   fireEvent.click(screen.getByRole('button', { name: /run/i }))
   // Feed a schema + one batched-rows frame so the result panel mounts.
   const ws = lastWS!

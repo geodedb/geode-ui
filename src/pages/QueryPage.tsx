@@ -17,6 +17,7 @@ import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryHistory } from '../lib/useQueryHistory'
 import { useQueryStore } from '../lib/queryStore'
+import { Dropdown, DropdownItem } from '../services/webawesome/components'
 import {
   StreamState,
   initialStreamState,
@@ -83,14 +84,6 @@ const ResultRegion = styled.div`
   min-height: 0;
   display: flex;
   flex-direction: column;
-`
-
-const ToggleLabel = styled.label`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
 `
 
 // The fullscreen result overlay. Rendered via a portal into
@@ -406,27 +399,38 @@ export const QueryPage: React.FC = () => {
             {t('query.cancel')}
           </wa-button>
         )}
-        <ToggleLabel>
-          <input
+        <Dropdown placement="bottom-start" data-testid="query-options-dropdown">
+          <wa-button slot="trigger" appearance="outlined" size="m">
+            {t('query.optionsLabel')}
+          </wa-button>
+          <DropdownItem
             type="checkbox"
-            checked={streamMode}
-            onChange={(e) => {
-              setStreamMode(e.target.checked)
+            value="stream"
+            data-testid="query-options-stream"
+            checked={streamMode || undefined}
+            aria-checked={streamMode ? 'true' : 'false'}
+            role="menuitemcheckbox"
+            onClick={() => {
+              setStreamMode(!streamMode)
               dispatch({ type: 'reset' })
               setResp(null)
               setErr(null)
             }}
-          />
-          {t('query.streamMode')}
-        </ToggleLabel>
-        <ToggleLabel>
-          <input
+          >
+            {t('query.streamMode')}
+          </DropdownItem>
+          <DropdownItem
             type="checkbox"
-            checked={expand}
-            onChange={(e) => setExpand(e.target.checked)}
-          />
-          {t('query.expandGraphCells')}
-        </ToggleLabel>
+            value="expand"
+            data-testid="query-options-expand"
+            checked={expand || undefined}
+            aria-checked={expand ? 'true' : 'false'}
+            role="menuitemcheckbox"
+            onClick={() => setExpand((e) => !e)}
+          >
+            {t('query.expandGraphCells')}
+          </DropdownItem>
+        </Dropdown>
         {activeResp && (
           <span>
             {t('common.rowCount', { count: activeResp.row_count ?? 0 })} ·{' '}

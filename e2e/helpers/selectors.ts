@@ -54,7 +54,11 @@ export const sel = {
   // wa-button host) to pin the outer element.
   queryRunBtn: (p: Page): Locator => p.getByTestId('query-run-btn'),
   queryStreamToggle: (p: Page): Locator =>
-    p.getByRole('checkbox', { name: 'Stream' }),
+    p.getByTestId('query-options-stream'),
+  queryOptionsTrigger: (p: Page): Locator =>
+    p.getByTestId('query-options-dropdown'),
+  queryOptionsExpand: (p: Page): Locator =>
+    p.getByTestId('query-options-expand'),
   // Result-view tabs are role="tab" (Tabs is role="tablist") since the
   // a11y refactor — the i18n labels stayed lowercase ('table', 'json',
   // 'graph') so the exact match still works.

@@ -12,7 +12,8 @@ test.describe('query (stream)', () => {
     authedPage: page,
   }) => {
     await page.goto('/')
-    await sel.queryStreamToggle(page).check()
+    await sel.queryOptionsTrigger(page).click()
+    await sel.queryStreamToggle(page).click()
     // Filter to the matrix-cluster names so all rows fit in the
     // virtualized table's first viewport (TableView uses react-window
     // post-#26 — off-viewport rows aren't in the DOM). Streaming the
@@ -59,7 +60,8 @@ test.describe('query (stream)', () => {
       })
     })
     await page.goto('/')
-    await sel.queryStreamToggle(page).check()
+    await sel.queryOptionsTrigger(page).click()
+    await sel.queryStreamToggle(page).click()
     await page.locator('.monaco-editor').first().click()
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(

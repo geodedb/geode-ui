@@ -85,6 +85,7 @@ export const en = {
     loadingGraph: 'Loading graph view…',
     maximizeResults: 'Maximize results',
     exitFullscreen: 'Exit fullscreen',
+    optionsLabel: 'Options',
   },
 
   workspace: {

@@ -65,7 +65,8 @@ test.describe('query page survives many consecutive runs', () => {
     await expect(page.getByText(/1 rows?/)).toBeVisible({ timeout: 10_000 })
 
     // Stream run #2 with a different row count.
-    await sel.queryStreamToggle(page).check()
+    await sel.queryOptionsTrigger(page).click()
+    await sel.queryStreamToggle(page).click()
     await page.locator('.monaco-editor').first().click()
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type(
@@ -75,7 +76,8 @@ test.describe('query page survives many consecutive runs', () => {
     await expect(page.getByText(/4 rows?/)).toBeVisible({ timeout: 15_000 })
 
     // Sync run #3 — the previous stream's rows must NOT leak.
-    await sel.queryStreamToggle(page).uncheck()
+    await sel.queryOptionsTrigger(page).click()
+    await sel.queryStreamToggle(page).click()
     await page.locator('.monaco-editor').first().click()
     await page.keyboard.press('ControlOrMeta+A')
     await page.keyboard.type('RETURN 1 AS one')
