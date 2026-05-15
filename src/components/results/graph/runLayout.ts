@@ -96,8 +96,12 @@ export function runLayout(args: RunLayoutArgs): void {
       nodes,
       edges,
       opts: {},
-      onTick: () => {
-        // No-op in P1 — per-tick reveal lands in P2 (T21).
+      onTick: (positions) => {
+        // P2 progressive reveal: apply intermediate fcose snapshots as
+        // they stream in from the worker every ~33ms. applyPositions
+        // already runs inside cy.batch() so the render only happens
+        // once per tick despite N node writes.
+        applyPositions(cy, positions)
       },
       onDone: (positions) => {
         applyPositions(cy, positions)
