@@ -78,3 +78,24 @@ describe('ResultPanel', () => {
     expect(onToggle).toHaveBeenCalled()
   })
 })
+
+describe('ResultPanel flex chain', () => {
+  it('the tab-group host is a flex column', () => {
+    const { container } = render(
+      <ThemeProvider theme={theme}>
+        <ResultPanel
+          resp={resp}
+          tab="table"
+          onTabChange={() => {}}
+          onToggleMaximize={() => {}}
+        />
+      </ThemeProvider>
+    )
+    const tabsRow = container.firstChild as HTMLElement
+    const cs = getComputedStyle(tabsRow)
+    expect(cs.display).toBe('flex')
+    expect(cs.flexDirection).toBe('column')
+    expect(cs.flex).toMatch(/1 1 (0|auto)/)
+    expect(cs.minHeight).toMatch(/^0(px)?$/)
+  })
+})

@@ -30,15 +30,53 @@ export type ResultPanelProps = {
   maximizeBtnRef?: React.Ref<HTMLButtonElement>
 }
 
-// Row container for the WA tab-group plus the maximize toggle. The
-// toggle isn't a tab — it sits to the right of the tab strip on the
-// same row, like the old MaximizeBtn (`margin-left: auto`) did.
+// TabsRow hosts the WA <wa-tab-group> + the maximize toggle. It is a
+// flex column (not row!) so the active TabPanel below the tab strip
+// grows to fill the available height. The tab strip itself stays as a
+// horizontal row via tab-group's internal styling. flex: 1 1 0 +
+// min-height: 0 propagate the viewport-fill chain from QueryPage's
+// ResultRegion down into the active panel.
 const TabsRow = styled.div`
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  margin: ${({ theme }) => theme.spacing.sm} 0 0;
   gap: ${({ theme }) => theme.spacing.xs};
-  margin: ${({ theme }) => theme.spacing.md} 0
-    ${({ theme }) => theme.spacing.sm};
+
+  /* The WA tab-group host renders the nav row + the active panel. Pin
+     its flex to grow so the active panel uses the column height. */
+  wa-tab-group {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* WA mounts active panels as the slot consumer; force the wrapper
+     to expand. The light-DOM <wa-tab-panel> elements participate in
+     the flex chain through ::part(body) only on browsers; in jsdom
+     the styled descendant selector below is enough for the unit
+     tests. */
+  wa-tab-panel {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  wa-tab-panel[active] {
+    display: flex;
+    flex-direction: column;
+  }
+`
+
+// MaximizeBtnRow is a separate row that floats the toggle to the
+// right above the tab strip (the previous design placed it as a
+// sibling of <wa-tab-group> in a single row; with tab-group as
+// flex: 1 1 0 the toggle would have stretched the tab strip).
+const MaximizeBtnRow = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: -${({ theme }) => theme.spacing.xs};
 `
 
 export const ResultPanel: React.FC<ResultPanelProps> = ({
@@ -61,8 +99,28 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
 
   return (
     <TabsRow>
+      {onToggleMaximize && (
+        <MaximizeBtnRow>
+          <wa-button
+            ref={maximizeBtnRef as React.Ref<HTMLElement>}
+            appearance="outlined"
+            size="s"
+            data-testid="result-fullscreen-toggle"
+            aria-pressed={maximized ? 'true' : 'false'}
+            aria-label={
+              maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
+            }
+            title={
+              maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
+            }
+            onClick={onToggleMaximize}
+          >
+            {maximized ? '⤡' : '⤢'}
+          </wa-button>
+        </MaximizeBtnRow>
+      )}
       <TabGroup
-        style={{ flex: 1 }}
+        style={{ flex: '1 1 0', minHeight: 0 }}
         role="tablist"
         aria-label={t('query.resultViewLabel')}
         active={tab}
@@ -163,24 +221,6 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           {tab === 'matrix' && <MatrixView resp={resp} query={query} />}
         </TabPanel>
       </TabGroup>
-      {onToggleMaximize && (
-        <wa-button
-          ref={maximizeBtnRef as React.Ref<HTMLElement>}
-          appearance="outlined"
-          size="s"
-          data-testid="result-fullscreen-toggle"
-          aria-pressed={maximized ? 'true' : 'false'}
-          aria-label={
-            maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
-          }
-          title={
-            maximized ? t('query.exitFullscreen') : t('query.maximizeResults')
-          }
-          onClick={onToggleMaximize}
-        >
-          {maximized ? '⤡' : '⤢'}
-        </wa-button>
-      )}
     </TabsRow>
   )
 }
