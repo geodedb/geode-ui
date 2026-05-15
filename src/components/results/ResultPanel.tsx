@@ -120,7 +120,6 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
         </MaximizeBtnRow>
       )}
       <TabGroup
-        style={{ flex: '1 1 0', minHeight: 0 }}
         role="tablist"
         aria-label={t('query.resultViewLabel')}
         active={tab}
