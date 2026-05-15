@@ -212,6 +212,8 @@ export const en = {
     findAria: 'Find nodes by id, label, or property value',
     findCount_one: '{{count}} match',
     findCount_other: '{{count}} matches',
+    moreLabel: 'More…',
+    toggleSidebarFromMore: 'Show inspector sidebar',
   },
 
   matrix: {
