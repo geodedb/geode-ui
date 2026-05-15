@@ -50,11 +50,13 @@ const APPROX_CHAR_PX = 7
 // Cell horizontal padding (px) — 10 left + 10 right (see `Cell` below).
 const CELL_PADDING_PX = 20
 
-// Minimum + maximum body height. Replaces the previous fixed 480 px so
-// the virtualizer scales with viewport.
+// Minimum body height (px). Floored so a pathologically short parent
+// still gives the user a usable virtualized body.
 const VIRTUAL_BODY_MIN = 240
-const VIRTUAL_BODY_MAX = 720
-const VIRTUAL_BODY_DEFAULT = 480
+// The sticky header row (HeaderTable) renders inside Wrap above the
+// virtualized body; subtract it from the wrap height so the body +
+// header sum equals the wrap content box.
+const HEADER_BUDGET_PX = 40
 
 // Outer wrap. `overflow: hidden` on the outermost element clipped the
 // body when columns were wider than the viewport — silently dropping
@@ -63,6 +65,10 @@ const VIRTUAL_BODY_DEFAULT = 480
 // container) and let the inner ScrollArea provide horizontal scroll
 // when the grid is wider than the viewport.
 const Wrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
   overflow: clip;
@@ -178,11 +184,6 @@ type Props = {
   // structured cell — useful when the operator wants the raw graph
   // shape rather than a flattened table.
   expand?: boolean
-  // fillHeight: when true (set by QueryPage's maximized result overlay)
-  // the virtualized body grows to fill the available viewport instead
-  // of capping at min(60vh, 720px). The cap is the default so the
-  // inline result panel doesn't push the page off the fold.
-  fillHeight?: boolean
 }
 
 function columnName(col: Record<string, unknown>, i: number): string {
@@ -433,11 +434,7 @@ const VirtualRow = ({
   )
 }
 
-export const TableView: React.FC<Props> = ({
-  resp,
-  expand = true,
-  fillHeight = false,
-}) => {
+export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
   const view = useMemo(
     () => (expand ? projectColumns(resp) : resp),
     [resp, expand]
@@ -449,15 +446,17 @@ export const TableView: React.FC<Props> = ({
   // crushing columns into illegible thumb-widths.
   const minGridWidthPx = MIN_COLUMN_PX * columnCount
 
-  // Live container width (px). Drives the chars-per-column estimate
-  // for `estimateRowHeight` and the virtualizer body height. Falls
-  // back to undefined (legacy heuristic) before the first measurement
-  // and in jsdom-only test runs that don't exercise ResizeObserver.
+  // Live container width + height (px). Driven by a ResizeObserver on
+  // the outer wrap. The width drives the chars-per-column estimate for
+  // `estimateRowHeight`; the height drives the virtualizer body height
+  // so the table grows with the page's flex chain (no legacy 720 px
+  // cap). Floors at VIRTUAL_BODY_MIN so a tiny parent still shows a
+  // usable body.
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [containerWidth, setContainerWidth] = useState<number | undefined>(
     undefined
   )
-  const [bodyHeight, setBodyHeight] = useState<number>(VIRTUAL_BODY_DEFAULT)
+  const [bodyHeight, setBodyHeight] = useState<number>(VIRTUAL_BODY_MIN)
 
   useEffect(() => {
     const el = wrapRef.current
@@ -467,45 +466,20 @@ export const TableView: React.FC<Props> = ({
       const entry = entries[0]
       if (!entry) return
       const w = entry.contentRect.width
+      const h = entry.contentRect.height
       if (Number.isFinite(w) && w > 0) setContainerWidth(w)
+      if (Number.isFinite(h) && h > 0) {
+        setBodyHeight(Math.max(VIRTUAL_BODY_MIN, h - HEADER_BUDGET_PX))
+      }
     })
     ro.observe(el)
-    // Capture an initial measurement immediately so the first paint
-    // doesn't fall back to APPROX_CHARS_PER_COLUMN for one frame.
-    const initialW = el.getBoundingClientRect().width
-    if (Number.isFinite(initialW) && initialW > 0) setContainerWidth(initialW)
+    const r = el.getBoundingClientRect()
+    if (Number.isFinite(r.width) && r.width > 0) setContainerWidth(r.width)
+    if (Number.isFinite(r.height) && r.height > 0) {
+      setBodyHeight(Math.max(VIRTUAL_BODY_MIN, r.height - HEADER_BUDGET_PX))
+    }
     return () => ro.disconnect()
   }, [])
-
-  // Body height tracks the viewport: tall enough to be useful but
-  // capped so the data-table doesn't push the rest of the page off
-  // the fold. Uses min(60vh, VIRTUAL_BODY_MAX) clamped from below by
-  // VIRTUAL_BODY_MIN so phones still see at least 240 px of body. In
-  // fillHeight mode (the maximized result overlay) the cap is dropped:
-  // the body takes ~the whole viewport minus the overlay chrome (the
-  // tabs row, the table header, the overlay padding).
-  useEffect(() => {
-    const compute = (): number => {
-      const winH =
-        typeof window === 'undefined' ? 800 : Math.round(window.innerHeight)
-      if (fillHeight) {
-        // Overlay chrome budget: ~160 px (2× lg padding + tabs row +
-        // table header + a little breathing room). Floor so a tiny
-        // viewport still shows a usable body.
-        return Math.max(VIRTUAL_BODY_MIN, winH - 160)
-      }
-      const vh =
-        typeof window === 'undefined'
-          ? VIRTUAL_BODY_DEFAULT
-          : Math.round(winH * 0.6)
-      return Math.min(VIRTUAL_BODY_MAX, Math.max(VIRTUAL_BODY_MIN, vh))
-    }
-    setBodyHeight(compute())
-    if (typeof window === 'undefined') return undefined
-    const onResize = (): void => setBodyHeight(compute())
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [fillHeight])
 
   // Convert the live container width into a per-column character
   // budget. Below the grid's min-width the ScrollArea is scrolling, so

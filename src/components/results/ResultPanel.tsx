@@ -187,9 +187,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           active={tab === 'table'}
           aria-hidden={tab === 'table' ? 'false' : 'true'}
         >
-          {tab === 'table' && (
-            <TableView resp={resp} expand={expand} fillHeight={maximized} />
-          )}
+          {tab === 'table' && <TableView resp={resp} expand={expand} />}
         </TabPanel>
         <TabPanel
           name="json"

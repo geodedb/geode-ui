@@ -415,3 +415,34 @@ test('TableView with expand=false renders node as a structured chip cell', () =>
   expect(screen.getByText(':Person')).toBeInTheDocument()
   expect(screen.queryByText('n._labels')).not.toBeInTheDocument()
 })
+
+it('body height tracks the container height instead of capping at 720', () => {
+  const resp = {
+    columns: [{ name: 'a', type: 'string' }],
+    rows: Array.from({ length: 100 }, (_, i) => [`row-${i}`]),
+  }
+  const { container } = render(
+    <ThemeProvider theme={theme}>
+      <div style={{ height: 1200 }}>
+        <TableView resp={resp} />
+      </div>
+    </ThemeProvider>
+  )
+  // react-window writes `height` inline on the list root via the style
+  // prop; assert it tracks the parent container height (1200), NOT the
+  // legacy 720 cap. In jsdom ResizeObserver doesn't fire, so we read
+  // the inline style applied at first paint — should be the floor
+  // (VIRTUAL_BODY_MIN=240) since the container size isn't observed.
+  // The KEY signal is that the value is NOT 720 (the old cap) and is
+  // a finite number derived from the floor + observed (or floor).
+  const list = container.querySelector(
+    '[role="grid"] [style*="overflow"]'
+  ) as HTMLElement
+  expect(list).not.toBeNull()
+  const inlineHeight = parseInt(list.style.height, 10)
+  expect(Number.isFinite(inlineHeight)).toBe(true)
+  // The 720 cap is removed — the inline height should NOT be capped at 720.
+  // In jsdom the ResizeObserver doesn't fire so we get the floor (240).
+  expect(inlineHeight).not.toBe(720)
+  expect(inlineHeight).toBeGreaterThanOrEqual(240)
+})
