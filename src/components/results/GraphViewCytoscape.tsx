@@ -11,6 +11,7 @@ import { DEFAULT_LAYOUT, useGraphPrefs } from './useGraphPrefs'
 import { QueryRespLike, resolveNodeLabel } from '../../lib/graphResult'
 import { useGraphPathMode } from './graph/useGraphPathMode'
 import { GraphToolbar } from './graph/GraphToolbar'
+import { GraphFilterChips } from './graph/GraphFilterChips'
 import { GraphMiniMap } from './graph/GraphMiniMap'
 import { FocusClearChip } from './graph/FocusClearChip'
 import { GraphSidebar } from './graph/GraphSidebar'
@@ -656,6 +657,19 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
           counts={counts}
           renderer={renderer}
           onToggleRenderer={onToggleRenderer}
+        />
+        <GraphFilterChips
+          t={t}
+          hiddenLabels={hiddenLabels}
+          onClearHidden={(label) => toggleHiddenLabel(label)}
+          clusterByLabel={clusterByLabel}
+          onClearCluster={() => setClusterByLabel(false)}
+          focusActive={focusMode.state !== null}
+          focusId={focusMode.state?.id ?? null}
+          focusHops={focusMode.state?.hops ?? focusHops}
+          onClearFocus={() => focusMode.clear()}
+          pathActive={pathState.phase !== 'off'}
+          onClearPath={exitPathMode}
         />
         {pathStatusText && (
           <PathStatus data-testid="graph-path-status" role="status">
