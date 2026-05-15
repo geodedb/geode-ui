@@ -44,6 +44,13 @@ module.exports = {
     // (esbuild/vite) handles the ESM source path normally.
     '^cytoscape-lasso$':
       '<rootDir>/node_modules/cytoscape-lasso/dist/cytoscape-lasso.js',
+    // layoutWorkerUrl uses `new URL('./layoutWorker.ts', import.meta.url)`
+    // which webpack 5 detects statically to emit a worker bundle. ts-jest
+    // emits CJS and doesn't transform `import.meta`, so the production
+    // module would crash at parse time. Swap in a stub for tests — the
+    // FakeWorker installed by useLayoutWorker.test.ts ignores the URL.
+    '(^|/)layoutWorkerUrl$':
+      '<rootDir>/__test_utils__/mocks/layoutWorkerUrlMock.js',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style|nanoid)/)',
