@@ -66,6 +66,8 @@ function toQueryRespLike(
 export const GraphBenchPage: React.FC = () => {
   const { n, renderer } = useMemo(readQuery, [])
   const setRenderer = useGraphPrefs((s) => s.setRenderer)
+  const useWorkerLayout = useGraphPrefs((s) => s.useWorkerLayout)
+  const setUseWorkerLayout = useGraphPrefs((s) => s.setUseWorkerLayout)
   const resp = useMemo(() => toQueryRespLike(seededGraph(n)), [n])
   // Push the URL choice into the pref store so the dispatcher branches
   // correctly. Synchronous in useMemo would race with first render —
@@ -109,6 +111,26 @@ export const GraphBenchPage: React.FC = () => {
 
   return (
     <div style={{ height: '100vh' }} data-testid="graph-bench-page">
+      <label
+        htmlFor="bench-use-worker-layout"
+        style={{
+          position: 'absolute',
+          top: 8,
+          right: 8,
+          zIndex: 10,
+          padding: '2px 6px',
+          fontSize: 12,
+        }}
+      >
+        <input
+          id="bench-use-worker-layout"
+          type="checkbox"
+          data-testid="bench-use-worker-layout"
+          checked={useWorkerLayout}
+          onChange={(e) => setUseWorkerLayout(e.target.checked)}
+        />{' '}
+        worker layout
+      </label>
       <GraphView resp={resp} fillHeight />
     </div>
   )
