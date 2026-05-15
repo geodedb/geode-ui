@@ -43,9 +43,11 @@ test.describe('graph view sidebar responsiveness', () => {
     await expect.poll(() => pageOverflows(page)).toBe(false)
 
     // Collapse — the sidebar is unmounted, canvas claims the full width.
+    // The sidebar toggle migrated to a wa-dropdown-item carrying
+    // aria-checked (not aria-pressed) under Task 2.2.
     await sel.graphSidebarToggle(page).click()
     await expect(sel.graphSidebarToggle(page)).toHaveAttribute(
-      'aria-pressed',
+      'aria-checked',
       'true'
     )
     await expect(sel.graphSidebar(page)).toHaveCount(0)
