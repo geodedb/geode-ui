@@ -22,37 +22,75 @@ export const GqlEditor: React.FC<Props> = ({
   tenant,
 }) => {
   const lspRef = useRef<LspClientHandle | null>(null)
+  const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
   const { token } = useAuth()
 
-  const handleMount: OnMount = async (editor, monaco) => {
+  const handleMount: OnMount = (editor, monaco) => {
     registerGqlLanguage(monaco)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun)
-
-    if (!token) return
-    try {
-      const proto =
-        typeof window !== 'undefined' && window.location.protocol === 'https:'
-          ? 'wss'
-          : 'ws'
-      const host =
-        typeof window !== 'undefined' ? window.location.host : 'localhost'
-      // Lazy import keeps monaco-languageclient (ESM-only) out of the
-      // top-level dependency graph so jest's CJS transformer doesn't choke
-      // on it in tests that render parents of <GqlEditor/>.
-      const { startLspClient } = await import('../../lib/lsp/client')
-      lspRef.current = await startLspClient({
-        monaco: monaco as unknown as typeof import('monaco-editor'),
-        url: `${proto}://${host}/ws/lsp`,
-        accessToken: token,
-        graph: graph || 'default',
-        tenant,
-      })
-    } catch (e) {
-      // Editor still works without LSP — surface a console warning.
-      // eslint-disable-next-line no-console
-      console.warn('LSP client failed to start', e)
-    }
+    monacoRef.current = monaco as unknown as typeof import('monaco-editor')
   }
+
+  // Re-create the LSP client whenever the auth token, graph, or tenant
+  // changes. Tearing down + starting fresh is simpler (and matches the
+  // monaco-languageclient lifecycle, which doesn't support reusing a
+  // started client with a new transport).
+  useEffect(() => {
+    if (!token || !monacoRef.current) return undefined
+    let cancelled = false
+    // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
+    ;(async () => {
+      // Tear down any previous client first.
+      const prev = lspRef.current
+      lspRef.current = null
+      if (prev) {
+        try {
+          await prev.dispose()
+        } catch {
+          /* ignore */
+        }
+      }
+      if (cancelled) return
+      try {
+        const proto =
+          typeof window !== 'undefined' && window.location.protocol === 'https:'
+            ? 'wss'
+            : 'ws'
+        const host =
+          typeof window !== 'undefined' ? window.location.host : 'localhost'
+        // Lazy import keeps monaco-languageclient (ESM-only) out of the
+        // top-level dependency graph so jest's CJS transformer doesn't
+        // choke on it in tests that render parents of <GqlEditor/>.
+        const { startLspClient } = await import('../../lib/lsp/client')
+        if (cancelled) return
+        const handle = await startLspClient({
+          monaco: monacoRef.current!,
+          url: `${proto}://${host}/ws/lsp`,
+          accessToken: token,
+          graph: graph || 'default',
+          tenant,
+          onStateChange: (s) => {
+            // eslint-disable-next-line no-console
+            console.debug('[lsp] state =', s)
+          },
+        })
+        if (cancelled) {
+          handle.dispose().catch(() => {
+            /* ignore */
+          })
+          return
+        }
+        lspRef.current = handle
+      } catch (e) {
+        // Editor still works without LSP — surface a console warning.
+        // eslint-disable-next-line no-console
+        console.warn('LSP client failed to start', e)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [token, graph, tenant])
 
   useEffect(
     () => () => {
