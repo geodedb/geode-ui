@@ -12,9 +12,18 @@ import { useGraphPrefs, type LayoutName } from '../useGraphPrefs'
 import type { Selected } from './GraphInspector'
 import { perfMarks } from '../../../lib/perfMarks'
 import { scaleTier } from './scaleTier'
-import { runLayout } from './runLayout'
+import { runLayout, applyPositions } from './runLayout'
+import { layoutCache } from './layoutCache'
 
 const REBUILD_DEBOUNCE_MS = 250
+const STREAMING_WINDOW_MS = 1000
+
+// Module-level streaming tracker. We can't key this on a Core (WeakMap has
+// no iteration) because the prior core is destroyed before the next build
+// fires, and the new core is constructed inside the build itself. The
+// streaming gate only matters within a single tab/session, so a single
+// module-level slot is sufficient.
+let lastRebuild: { at: number; nodeCount: number } | null = null
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
@@ -158,18 +167,44 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
           cy.nodes().forEach((node) => {
             initialIds.push(node.id() as string)
           })
-          runLayout({
-            cy,
-            layoutName: layoutRef.current,
-            sig,
-            currentIds: initialIds,
-            n: cy.nodes().length,
-            useWorker: useGraphPrefs.getState().useWorkerLayout,
-            onComplete: () => {
-              reapplyPins?.()
-              reapplyFocus?.()
-            },
-          })
+          // Streaming gate: when two rebuilds occur within
+          // STREAMING_WINDOW_MS AND the node count is growing, infer that
+          // a streaming response is still flooding the snapshot. Suppress
+          // the layout pass in that case — apply cached positions if we
+          // have them (so existing nodes don't jump back to 0,0), and let
+          // the next rebuild after the stream stabilises do the full
+          // layout. row_count itself isn't reachable inside the hook; the
+          // post-rebuild cy.nodes().length is a faithful proxy.
+          const now = Date.now()
+          const currentNodeCount = cy.nodes().length
+          const stillStreaming =
+            lastRebuild !== null &&
+            now - lastRebuild.at < STREAMING_WINDOW_MS &&
+            currentNodeCount > lastRebuild.nodeCount
+          lastRebuild = { at: now, nodeCount: currentNodeCount }
+
+          if (stillStreaming) {
+            const cached = layoutCache.get(`${layoutRef.current}|${sig}`)
+            if (cached.hit === 'full' && cached.positions) {
+              applyPositions(cy, cached.positions)
+              cy.fit(undefined, 24)
+            }
+            reapplyPins?.()
+            reapplyFocus?.()
+          } else {
+            runLayout({
+              cy,
+              layoutName: layoutRef.current,
+              sig,
+              currentIds: initialIds,
+              n: cy.nodes().length,
+              useWorker: useGraphPrefs.getState().useWorkerLayout,
+              onComplete: () => {
+                reapplyPins?.()
+                reapplyFocus?.()
+              },
+            })
+          }
           cy.on('tap', 'node', (ev) => {
             const id = ev.target.id() as string
             // In path mode the first/second tap pick the path endpoints;
