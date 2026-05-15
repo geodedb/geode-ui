@@ -195,7 +195,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           active={tab === 'json'}
           aria-hidden={tab === 'json' ? 'false' : 'true'}
         >
-          {tab === 'json' && <JsonView data={resp} fillHeight={maximized} />}
+          {tab === 'json' && <JsonView data={resp} />}
         </TabPanel>
         <TabPanel
           name="graph"

@@ -78,3 +78,17 @@ describe('JsonView', () => {
     stringifySpy.mockRestore()
   })
 })
+
+it('the pre always fills its parent (no max-height cap)', () => {
+  const { container } = render(
+    <ThemeProvider theme={theme}>
+      <div style={{ height: 1000 }}>
+        <JsonView data={{ a: 1 }} />
+      </div>
+    </ThemeProvider>
+  )
+  const pre = container.querySelector('pre') as HTMLElement
+  const cs = getComputedStyle(pre)
+  expect(cs.maxHeight).toBe('none')
+  expect(cs.flex).toMatch(/1 1 (0|auto)/)
+})
