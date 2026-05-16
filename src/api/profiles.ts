@@ -1,4 +1,8 @@
-import type { CreateProfileReq } from '@api'
+// QUALITY #231: import the generated `Profile` shape so the API call
+// site is typed against the wire contract directly. fromWireProfile()
+// still accepts `unknown` to keep the parser fail-closed, but the
+// listProfiles() reader no longer carries the legacy `unknown[]` cast.
+import type { CreateProfileReq, Profile as GenProfile } from '@api'
 import { client } from './client'
 
 export type Scope = 'system' | 'personal'
@@ -244,12 +248,14 @@ export function toWireUpdateRequest(
 
 export async function listProfiles(): Promise<ProfileView[]> {
   const r = await client.getProfiles({})
-  // GAP-Q1 (#89): fromWireProfile now accepts `unknown` and narrows
-  // internally via isWireProfile, so the `as any` cast is gone. The
-  // surrounding `as unknown[]` cast persists because the genapi client
-  // types `r.profiles` as the legacy WireProfile-shaped struct (Q2 /
-  // genapi#216 will let us drop it once the upstream TS templates land).
-  return ((r.profiles ?? []) as unknown[]).map((p) => fromWireProfile(p))
+  // QUALITY #231: `r.profiles` is now typed as `Array<GenProfile>` via
+  // the generated `ProfileList` interface (gen/client/react/client.ts).
+  // fromWireProfile() still narrows internally via isWireProfile (it
+  // accepts `unknown` so the parser stays fail-closed against any
+  // future server-side schema drift), but the consumer no longer
+  // needs an `as unknown[]` cast.
+  const profiles: ReadonlyArray<GenProfile> = r.profiles ?? []
+  return profiles.map((p) => fromWireProfile(p))
 }
 
 // NOTE: a single-row `getProfile(id)` helper used to live here. It was
