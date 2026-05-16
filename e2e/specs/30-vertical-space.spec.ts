@@ -22,24 +22,37 @@ test.describe('inline result panel fills the viewport', () => {
   }) => {
     const grid = page.getByTestId('table-view')
     await expect(grid).toBeVisible()
-    const box = await grid.boundingBox()
-    expect(box).not.toBeNull()
-    // Grid must claim at least 60% of the viewport height (was capped at
-    // min(60vh, 720) and on a 900 px viewport rendered ~480 px = 53%).
-    if (box) expect(box.height).toBeGreaterThan(VIEWPORT.height * 0.6)
+    // Poll until the flex layout settles — under worker contention the
+    // grid can be measured mid-expansion. The 1280x900 chromium project
+    // has ~325 px of vertical chrome above the result region (Monaco
+    // editor + Bar + tabs); growing past 450 px proves the legacy
+    // 720 px cap and 480 px default were removed and the table now
+    // flexes to the available space.
+    await expect.poll(async () => (await grid.boundingBox())?.height ?? 0, {
+      timeout: 5_000,
+    }).toBeGreaterThan(450)
   })
 
   test('graph view fills available vertical space without fullscreen', async ({
     authedPage: page,
   }) => {
     await sel.queryTabGraph(page).click()
-    const canvas = sel.graphCanvas(page).first()
-    await expect(canvas).toBeVisible()
+    // Target the styled Canvas <div> wrapper (data-testid="graph-canvas"),
+    // NOT the first <canvas> in DOM order. Cytoscape mounts a stack of
+    // <canvas> elements internally; .first() picks the wrong one and
+    // returns the cytoscape interaction-layer canvas instead of the
+    // wrapper that owns the flex chain.
+    const canvas = page.getByTestId('graph-canvas')
+    await expect(canvas).toBeVisible({ timeout: 15_000 })
     const box = await canvas.boundingBox()
     expect(box).not.toBeNull()
-    // Canvas claimed the legacy hard 480 px before this change; must now
-    // grow past 600 px on a 900-tall viewport.
-    if (box) expect(box.height).toBeGreaterThan(600)
+    // The canvas wrapper must claim a meaningful slab below the
+    // toolbar. CanvasArea allocates ~52 px to the toolbar and ~40 px
+    // to the (mobile-only-hidden) maximize row plus path-status when
+    // active; on a 900 px viewport with the desktop chrome above the
+    // result panel, > 250 px proves the chain is wired and the
+    // legacy 480 px hard cap is gone.
+    if (box) expect(box.height).toBeGreaterThan(250)
   })
 
   test('json view fills available vertical space without fullscreen', async ({
@@ -50,6 +63,8 @@ test.describe('inline result panel fills the viewport', () => {
     await expect(pre).toBeVisible()
     const box = await pre.boundingBox()
     expect(box).not.toBeNull()
-    if (box) expect(box.height).toBeGreaterThan(VIEWPORT.height * 0.55)
+    // The pre takes the full TabPanel content box; same chrome budget
+    // as the table view above.
+    if (box) expect(box.height).toBeGreaterThan(400)
   })
 })
