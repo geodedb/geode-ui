@@ -214,6 +214,8 @@ export const en = {
     tableLabel: 'Label adjacency matrix',
     cellTitle: '{{from}} → {{to}}: {{count}} edges ({{types}})',
     cellTitleEmpty: '{{from}} → {{to}}: 0 edges',
+    overflow:
+      'Showing {{shown}} of {{shown}}+{{hidden}} labels (+{{hidden}} more, {{edges}} edges hidden)',
   },
 
   dashboard: {

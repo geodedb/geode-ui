@@ -117,6 +117,81 @@ describe('MatrixView', () => {
     ).toBeInTheDocument()
   })
 
+  it('skips zero-intensity cells from the styled cell pipeline (PERF #216)', () => {
+    // Two Person nodes (no edges between them), two Movie nodes, one
+    // Person→Movie edge. Cells: Person→Person=0, Person→Movie=1,
+    // Movie→Person=0, Movie→Movie=0. Only Person→Movie carries the
+    // intensity-coloured Td; the other three render as un-styled <td>.
+    const resp2 = {
+      graph_summary: {
+        nodes: [
+          { id: 1, labels: ['Person'], properties: {} },
+          { id: 2, labels: ['Person'], properties: {} },
+          { id: 3, labels: ['Movie'], properties: {} },
+        ],
+        edges: [
+          {
+            id: 13,
+            start_node: 1,
+            end_node: 3,
+            type: 'ACTED_IN',
+            properties: {},
+          },
+        ],
+      },
+    }
+    const { container } = render(
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <MatrixView resp={resp2} />
+        </ThemeProvider>
+      </LocalizationProvider>
+    )
+    // The Person→Movie cell has the populated count.
+    expect(screen.getByText('1')).toBeInTheDocument()
+    // The empty cells have no count text rendered (count was elided),
+    // so the only non-header text content in <td> elements is "1".
+    const dataCells = container.querySelectorAll('tbody td')
+    const counts: string[] = []
+    dataCells.forEach((td) => {
+      const text = (td.textContent || '').trim()
+      if (text) counts.push(text)
+    })
+    expect(counts).toEqual(['1'])
+  })
+
+  it('caps labels per dimension at the label budget and surfaces overflow (PERF #216)', () => {
+    // Build a 70-node graph with 70 distinct labels and a single
+    // Lk → L(k+1) edge between each consecutive pair. With budget=10,
+    // only ten labels render and the overflow banner appears.
+    const nodes = Array.from({ length: 70 }, (_, i) => ({
+      id: i + 1,
+      labels: [`L${String(i).padStart(2, '0')}`],
+      properties: {},
+    }))
+    const edges = Array.from({ length: 69 }, (_, i) => ({
+      id: 100 + i,
+      start_node: i + 1,
+      end_node: i + 2,
+      type: 'REL',
+      properties: {},
+    }))
+    const respBig = { graph_summary: { nodes, edges } }
+    renderWith(<MatrixView resp={respBig} labelBudget={10} />)
+    // Overflow banner present, labelled by aria.
+    const banner = screen.getByTestId('matrix-overflow')
+    expect(banner).toBeInTheDocument()
+    expect(banner.textContent || '').toMatch(/10/) // shown
+    expect(banner.textContent || '').toMatch(/60/) // hidden
+    // Exactly 10 column headers (one per kept label) + the empty
+    // top-left scope=col placeholder = 11 thead <th> nodes.
+    const headRow = screen
+      .getByRole('table')
+      .querySelector('thead tr') as HTMLTableRowElement
+    const colHeaders = headRow.querySelectorAll('th')
+    expect(colHeaders.length).toBe(11)
+  })
+
   it('the wrap is a flex column that fills its parent', () => {
     // Use the seeded `resp` defined at module scope (a Person→Movie
     // ACTED_IN edge) so the non-empty path renders the Wrap container.

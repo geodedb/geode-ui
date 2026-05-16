@@ -5,7 +5,9 @@ import type { ColorScale, Theme } from '../../theme/types'
 import type { QueryRespLike } from '../../lib/graphResult'
 import { extractElements } from '../../lib/graphResult'
 import {
+  applyMatrixBudget,
   buildAdjacencyMatrix,
+  DEFAULT_MATRIX_LABEL_BUDGET,
   matrixCellKey,
   type MatrixCell,
 } from '../../lib/adjacencyMatrix'
@@ -53,6 +55,30 @@ const Empty = styled.p`
   padding: ${({ theme }) => theme.spacing.md};
 `
 
+// Overflow disclosure shown above the table when applyMatrixBudget
+// drops one or more label rows/cols. The chip surface mirrors
+// TableView's "+N more" banner so the two over-budget UIs share a
+// visual language. See PERF #216.
+const OverflowBar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.spacing.xs};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.secondary};
+`
+
+const OverflowChip = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
+  border-radius: ${({ theme }) => theme.radii.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  color: ${({ theme }) => theme.text.primary};
+  font-weight: ${({ theme }) => theme.font.weights.medium};
+`
+
 // Map a 0..1 intensity to a ColorScale step in the 200..800 range
 // (intensity 0 → fully transparent, so an empty cell reads as "no edges"
 // rather than "the lightest possible heat"). The seven discrete steps
@@ -92,29 +118,41 @@ const MatrixCellTd: React.FC<{
 }> = ({ row, col, cell, max }) => {
   const { t } = useTranslation()
   const count = cell?.count ?? 0
+  // PERF #216: skip zero-intensity cells from the styled-components
+  // pipeline entirely. A 60×60 dense matrix with one edge per pair has
+  // 3.6k cells but typically <300 are non-zero; the un-styled `<td>`
+  // path renders an empty cell with the aria-label intact but skips
+  // the per-cell intensity-based background interpolation.
+  if (count <= 0) {
+    const empty = t('matrix.cellTitleEmpty', { from: row, to: col })
+    return <td aria-label={empty} />
+  }
   const intensity = max > 0 ? count / max : 0
-  const filledLabel = t('matrix.cellTitle', {
+  const label = t('matrix.cellTitle', {
     from: row,
     to: col,
     count,
     types: edgeTypesSummary(cell),
   })
-  const label =
-    count > 0 ? filledLabel : t('matrix.cellTitleEmpty', { from: row, to: col })
   return (
-    <Td
-      $intensity={intensity}
-      title={count > 0 ? label : undefined}
-      aria-label={label}
-    >
-      {count > 0 ? count : ''}
+    <Td $intensity={intensity} title={label} aria-label={label}>
+      {count}
     </Td>
   )
 }
 
-export const MatrixView: React.FC<{ resp: QueryRespLike; query?: string }> = ({
+type MatrixViewProps = {
+  resp: QueryRespLike
+  query?: string
+  // PERF #216: per-dimension label budget. Defaults to
+  // DEFAULT_MATRIX_LABEL_BUDGET (60); pass 0 to disable the cap (tests).
+  labelBudget?: number
+}
+
+export const MatrixView: React.FC<MatrixViewProps> = ({
   resp,
   query,
+  labelBudget = DEFAULT_MATRIX_LABEL_BUDGET,
 }) => {
   const { t } = useTranslation()
   // Subscribe to the theme so the heatmap re-renders on a light/dark
@@ -129,6 +167,12 @@ export const MatrixView: React.FC<{ resp: QueryRespLike; query?: string }> = ({
     () => buildAdjacencyMatrix(extractElements(resp, query)),
     [resp, query]
   )
+  // PERF #216: apply the label budget BEFORE the render walk so we
+  // cap the rendered cell count at budget² (3.6k at the default 60).
+  const budgetResult = useMemo(
+    () => applyMatrixBudget(matrix, labelBudget),
+    [matrix, labelBudget]
+  )
   const max = useMemo(() => {
     let m = 0
     matrix.cells.forEach((c) => {
@@ -141,13 +185,35 @@ export const MatrixView: React.FC<{ resp: QueryRespLike; query?: string }> = ({
     return <Empty role="note">{t('matrix.empty')}</Empty>
   }
 
+  const visibleLabels = budgetResult.labels
+  const hiddenCount = budgetResult.hiddenLabels.length
+
   return (
     <Wrap>
+      {hiddenCount > 0 && (
+        <OverflowBar
+          role="note"
+          data-testid="matrix-overflow"
+          aria-label={t('matrix.overflow', {
+            hidden: hiddenCount,
+            shown: visibleLabels.length,
+            edges: budgetResult.hiddenEdges,
+          })}
+        >
+          <OverflowChip>
+            {t('matrix.overflow', {
+              hidden: hiddenCount,
+              shown: visibleLabels.length,
+              edges: budgetResult.hiddenEdges,
+            })}
+          </OverflowChip>
+        </OverflowBar>
+      )}
       <Table role="table" aria-label={t('matrix.tableLabel')}>
         <thead>
           <tr>
             <th scope="col" aria-hidden="true" />
-            {matrix.labels.map((col) => (
+            {visibleLabels.map((col) => (
               <th key={col} scope="col">
                 {col}
               </th>
@@ -155,10 +221,10 @@ export const MatrixView: React.FC<{ resp: QueryRespLike; query?: string }> = ({
           </tr>
         </thead>
         <tbody>
-          {matrix.labels.map((row) => (
+          {visibleLabels.map((row) => (
             <tr key={row}>
               <th scope="row">{row}</th>
-              {matrix.labels.map((col) => (
+              {visibleLabels.map((col) => (
                 <MatrixCellTd
                   key={col}
                   row={row}

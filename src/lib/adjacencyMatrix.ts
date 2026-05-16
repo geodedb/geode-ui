@@ -90,3 +90,89 @@ export function buildAdjacencyMatrix(
 
   return { labels: Array.from(labelSet).sort(), cells }
 }
+
+// Sensible default for MatrixView label budget (per dimension) — beyond
+// ~60 labels the rendered DOM table approaches 3.6k cells, which is the
+// inflection point where layout / scroll work starts to dominate the
+// frame budget on commodity hardware. Callers can override the budget
+// for tests or future tuning. See PERF #216.
+export const DEFAULT_MATRIX_LABEL_BUDGET = 60
+
+export type MatrixBudgetResult = {
+  // Sorted labels kept under the budget (by descending total edge count
+  // touching the label, with stable alpha order as the tiebreaker). For
+  // matrices with `labels.length <= budget`, this is just `labels` in
+  // alpha order — no overflow.
+  labels: string[]
+  // Labels dropped from the rendered table. Empty when no overflow.
+  hiddenLabels: string[]
+  // Total edges in the input matrix that are NOT covered by `labels`
+  // (every cell where row or col is hidden). Useful for surfacing
+  // "+N more" disclosure with an accurate dropped-edge count.
+  hiddenEdges: number
+}
+
+/**
+ * applyMatrixBudget caps a matrix to `budget` rows/cols (per dimension)
+ * by total-edge-degree. Labels are ranked by how many edges touch them
+ * (sum of cell counts where the label is the row OR the column), so the
+ * densest part of the heatmap is what survives the cap. Ties break on
+ * alpha order. The returned `labels` array is alpha-sorted (so the
+ * DOM render order matches the un-budgeted path), and `hiddenLabels`
+ * is alpha-sorted too — UI surfaces want a stable display order, not
+ * a degree-ranked one.
+ *
+ * Budget semantics:
+ *   - `budget <= 0` disables the cap (returns labels unchanged).
+ *   - `budget >= labels.length` is a no-op (no overflow).
+ *   - Otherwise the top-`budget` labels by degree win.
+ *
+ * Skipping zero-intensity cells from the DOM is the consumer's job
+ * (MatrixView reads cell counts via matrix.cells.get(...) and renders
+ * `null` when count is 0 / undefined — see PERF #216). This helper only
+ * controls which row/col labels are eligible to be rendered.
+ */
+export function applyMatrixBudget(
+  matrix: AdjacencyMatrix,
+  budget: number = DEFAULT_MATRIX_LABEL_BUDGET
+): MatrixBudgetResult {
+  const labels = matrix.labels
+  if (budget <= 0 || labels.length <= budget) {
+    return { labels: labels.slice(), hiddenLabels: [], hiddenEdges: 0 }
+  }
+  const degree = new Map<string, number>()
+  labels.forEach((lbl) => degree.set(lbl, 0))
+  matrix.cells.forEach((cell, key) => {
+    const idx = key.indexOf('\0')
+    if (idx <= 0) return
+    const row = key.slice(0, idx)
+    const col = key.slice(idx + 1)
+    degree.set(row, (degree.get(row) ?? 0) + cell.count)
+    if (col !== row) {
+      degree.set(col, (degree.get(col) ?? 0) + cell.count)
+    }
+  })
+  // Stable sort: degree desc, then alpha asc.
+  const ranked = labels.slice().sort((a, b) => {
+    const da = degree.get(a) ?? 0
+    const db = degree.get(b) ?? 0
+    if (db !== da) return db - da
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
+  })
+  const kept = new Set(ranked.slice(0, budget))
+  const keptLabels = labels.filter((l) => kept.has(l))
+  const hiddenLabels = labels.filter((l) => !kept.has(l))
+  let hiddenEdges = 0
+  matrix.cells.forEach((cell, key) => {
+    const idx = key.indexOf('\0')
+    if (idx <= 0) return
+    const row = key.slice(0, idx)
+    const col = key.slice(idx + 1)
+    if (!kept.has(row) || !kept.has(col)) {
+      hiddenEdges += cell.count
+    }
+  })
+  return { labels: keptLabels, hiddenLabels, hiddenEdges }
+}
