@@ -18,6 +18,51 @@ import { layoutCache } from './layoutCache'
 const REBUILD_DEBOUNCE_MS = 250
 const STREAMING_WINDOW_MS = 1000
 
+// createResizeCoalescer returns a single-frame coalescing scheduler.
+// PERF #222: the ResizeObserver in useGraphCytoscape can fire many
+// times in rapid succession (browser window drag, CSS transitions,
+// flexbox re-layouts), and each observation otherwise would trigger
+// a Cytoscape resize + fit which is expensive on large graphs. The
+// coalescer guarantees at most ONE refit per animation frame: every
+// schedule() call within the same frame coalesces into a single rAF
+// callback, and that callback resets the guard so the next frame can
+// schedule again.
+//
+// Exported so the PERF #222 regression test (useGraphCytoscape.resize.test)
+// can drive it directly without spinning up a ResizeObserver +
+// Cytoscape core.
+export function createResizeCoalescer(refit: () => void): {
+  schedule: () => void
+  dispose: () => void
+} {
+  let raf = 0
+  const onFrame = (): void => {
+    raf = 0
+    refit()
+  }
+  return {
+    schedule: () => {
+      if (typeof requestAnimationFrame !== 'function') {
+        // No rAF available (jsdom or SSR): fall back to a synchronous
+        // refit. This matches the prior inline behavior.
+        refit()
+        return
+      }
+      // Single-flight: if a frame is already pending, drop the
+      // duplicate. The pending frame's callback will see the latest
+      // container size.
+      if (raf) return
+      raf = requestAnimationFrame(onFrame)
+    },
+    dispose: () => {
+      if (raf && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(raf)
+      }
+      raf = 0
+    },
+  }
+}
+
 // Module-level streaming tracker. We can't key this on a Core (WeakMap has
 // no iteration) because the prior core is destroyed before the next build
 // fires, and the new core is constructed inside the build itself. The
@@ -378,33 +423,27 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
   // ResizeObserver: re-fit when the canvas box changes size. Guarded
   // for jsdom (no-op stub from polyfills.js, so the observer simply
   // never fires there — those tests assert on markup, not on cy.fit).
+  //
+  // PERF #222 — the rAF-keyed coalescing means a rapid burst of
+  // resize observations within a single animation frame fires the
+  // refit AT MOST once. The scheduler is also exported as
+  // createResizeCoalescer for unit tests that pin the coalescing
+  // ratio without spinning up Cytoscape + ResizeObserver.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return undefined
     if (typeof ResizeObserver === 'undefined') return undefined
-    let raf = 0
-    const refit = (): void => {
-      raf = 0
+    const coalescer = createResizeCoalescer(() => {
       const cy = cyRef.current
       if (!cy) return
       cy.resize()
       cy.fit(undefined, 24)
-    }
-    const schedule = (): void => {
-      if (typeof requestAnimationFrame !== 'function') {
-        refit()
-        return
-      }
-      if (raf) return
-      raf = requestAnimationFrame(refit)
-    }
-    const ro = new ResizeObserver(schedule)
+    })
+    const ro = new ResizeObserver(coalescer.schedule)
     ro.observe(el)
     return () => {
       ro.disconnect()
-      if (raf && typeof cancelAnimationFrame === 'function') {
-        cancelAnimationFrame(raf)
-      }
+      coalescer.dispose()
     }
   }, [containerRef, cyRef])
 }
