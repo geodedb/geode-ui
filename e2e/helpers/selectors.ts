@@ -112,11 +112,20 @@ export const sel = {
   graphDisplayControls: (p: Page): Locator =>
     p.getByTestId('graph-display-controls'),
   // GraphToolbarMore overflow dropdown selectors.
-  graphToolbarMore: (p: Page): Locator => p.getByTestId('graph-toolbar-more'),
+  // graph-toolbar-more is the wa-dropdown host (no visible bounding
+  // box on its own); the clickable trigger is the slot=trigger
+  // wa-button child carrying graph-toolbar-more-trigger.
+  graphToolbarMore: (p: Page): Locator =>
+    p.getByTestId('graph-toolbar-more-trigger'),
   graphMoreMiniMap: (p: Page): Locator => p.getByTestId('graph-more-minimap'),
   graphMoreLasso: (p: Page): Locator => p.getByTestId('graph-more-lasso'),
   graphMoreDomNodes: (p: Page): Locator => p.getByTestId('graph-more-domnodes'),
   graphMoreSidebar: (p: Page): Locator => p.getByTestId('graph-more-sidebar'),
+  // graph-find-input is a <wa-input> (Web Awesome custom element). The
+  // shadow DOM <input> inside it is what Playwright can .fill()/.press()
+  // on. Use this selector to get the actual input element directly.
+  graphFindInput: (p: Page): Locator =>
+    p.getByTestId('graph-find-input').locator('input'),
 
   // Workspace (21-workspace.spec.ts) — multi-pane query surface mounted
   // at /workspace. The "+ Add pane" button is disabled at MAX_PANES (4);
