@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 import { testTheme as theme } from '../../test-utils/theme'
 
@@ -75,6 +75,70 @@ describe('WorkspacePane', () => {
     expect(
       await screen.findByRole('tab', { name: /table/i })
     ).toBeInTheDocument()
+  })
+
+  it('suspends the Monaco editor when the pane scrolls out of view (PERF #213)', () => {
+    // Capture IntersectionObserver callbacks via a factory-style shim
+    // so the test can flip visibility. WorkspacePane defaults to
+    // visible-on-first-render, so the editor renders initially.
+    type IoCb = (entries: Array<{ isIntersecting: boolean }>) => void
+    type FakeInstance = {
+      observe: () => void
+      disconnect: () => void
+      unobserve: () => void
+      takeRecords: () => IntersectionObserverEntry[]
+    }
+    const ioCallbacks: IoCb[] = []
+    const originalIO = (
+      globalThis as { IntersectionObserver?: typeof IntersectionObserver }
+    ).IntersectionObserver
+    const fake = function FakeIO(cb: IoCb): FakeInstance {
+      ioCallbacks.push(cb)
+      return {
+        observe: () => undefined,
+        disconnect: () => undefined,
+        unobserve: () => undefined,
+        takeRecords: () => [],
+      }
+    } as unknown
+    const ioGlobal = globalThis as { IntersectionObserver?: unknown }
+    ioGlobal.IntersectionObserver = fake as typeof IntersectionObserver
+    try {
+      render(
+        <ThemeProvider theme={theme}>
+          <WorkspacePane paneId="pane-1" canClose={false} onClose={jest.fn()} />
+        </ThemeProvider>
+      )
+      // Editor mounts initially (visible-by-default), and the suspended
+      // placeholder is not in the DOM yet.
+      expect(screen.getByTestId('pane-editor')).toBeInTheDocument()
+      expect(screen.queryByTestId('pane-editor-suspended')).toBeNull()
+      // Simulate the pane scrolling off-screen.
+      const cb = ioCallbacks[0]
+      if (!cb) throw new Error('expected an IntersectionObserver callback')
+      act(() => {
+        cb([{ isIntersecting: false }])
+      })
+      // Editor unmounted; suspended placeholder takes its slot.
+      expect(screen.queryByTestId('pane-editor')).toBeNull()
+      expect(screen.getByTestId('pane-editor-suspended')).toBeInTheDocument()
+      // The Run / Close controls stay visible — the stream state lives
+      // on, only the editor is dropped.
+      expect(screen.getByTestId('pane-run-btn')).toBeInTheDocument()
+      expect(screen.getByTestId('pane-close-btn')).toBeInTheDocument()
+      // Scrolling back into view re-mounts the editor.
+      act(() => {
+        cb([{ isIntersecting: true }])
+      })
+      expect(screen.getByTestId('pane-editor')).toBeInTheDocument()
+      expect(screen.queryByTestId('pane-editor-suspended')).toBeNull()
+    } finally {
+      if (originalIO) {
+        ioGlobal.IntersectionObserver = originalIO
+      } else {
+        delete ioGlobal.IntersectionObserver
+      }
+    }
   })
 
   it('close button calls onClose and is disabled when canClose is false', () => {

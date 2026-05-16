@@ -14,6 +14,7 @@ import styled from 'styled-components'
 import { Button } from '../../components/ui'
 import { ResultPanel } from '../../components/results/ResultPanel'
 import { usePane } from './usePane'
+import { usePaneVisibility } from './usePaneVisibility'
 
 // F10 (#54) parity with QueryPage: Monaco (~MiB-scale) is React.lazy'd
 // so webpack emits it as a separate async chunk fetched only when a
@@ -107,20 +108,37 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
 }) => {
   const { t } = useTranslation()
   const pane = usePane()
+  // PERF #213: only mount the Monaco editor when the pane is on screen.
+  // The pane's stream/result state lives on regardless, so a query
+  // issued in a now-scrolled-away pane still completes and renders
+  // (the user just doesn't pay the Monaco model cost while the pane
+  // is off-screen). See usePaneVisibility for the IntersectionObserver
+  // implementation.
+  const { ref: visRef, visible } = usePaneVisibility()
 
   const editorFallback = (
     <LazyFallback role="status">{t('query.loadingEditor')}</LazyFallback>
   )
 
   return (
-    <Pane data-testid="workspace-pane" aria-label={paneId}>
-      <Suspense fallback={editorFallback}>
-        <GqlEditor
-          value={pane.statement}
-          onChange={pane.setStatement}
-          onRun={pane.run}
-        />
-      </Suspense>
+    <Pane ref={visRef} data-testid="workspace-pane" aria-label={paneId}>
+      {visible ? (
+        <Suspense fallback={editorFallback}>
+          <GqlEditor
+            value={pane.statement}
+            onChange={pane.setStatement}
+            onRun={pane.run}
+          />
+        </Suspense>
+      ) : (
+        <LazyFallback
+          role="status"
+          aria-label={t('workspace.paneSuspended')}
+          data-testid="pane-editor-suspended"
+        >
+          {t('workspace.paneSuspended')}
+        </LazyFallback>
+      )}
       <PaneBar>
         <Button
           size="sm"

@@ -96,6 +96,7 @@ export const en = {
     paneCancel: 'Cancel',
     closePane: 'Close pane',
     paneEmpty: 'Run a query to see results.',
+    paneSuspended: 'Editor suspended (scroll to re-enable).',
   },
 
   graph: {
