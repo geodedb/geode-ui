@@ -1,8 +1,23 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useMemo, useRef } from 'react'
 import styled from 'styled-components'
 import { List, RowComponentProps } from 'react-window'
 import { projectColumns } from './projectColumns'
 import { formatPropValue } from './propFormat'
+import {
+  type AnyRecord,
+  formatCell,
+  isEdge,
+  isNode,
+} from '../../lib/cellFormat'
+import { useTableBodySize } from './useTableBodySize'
+
+// Q rank 19 / #184: cell formatting helpers (formatCell, isNode,
+// isEdge, isPath, formatNode, formatEdge, formatPath, summarizeProps)
+// moved into src/lib/cellFormat.ts so this component file is rendering
+// + virtualizer config only. We re-export the public `formatCell`
+// symbol below so existing imports (`./TableView` -> formatCell) keep
+// working without churn.
+export { formatCell }
 
 // PERF-F5 + PERF-F6 (issue #26):
 //
@@ -196,75 +211,14 @@ function columnType(col: Record<string, unknown>): string {
   return typeof t === 'string' ? t : ''
 }
 
-// Graph result types come back as plain JSON objects with the canonical
-// {id, labels, properties} (node), {id, start_node, end_node, type,
-// properties} (edge), or {nodes[], edges[]} (path) shape — see
-// gen/types/types.gen.go and the geode-client-go conversion in
-// rows.go:118-138. We render them in a Cypher-like notation so the
-// table is readable, falling back to JSON for any other object.
-type AnyRecord = Record<string, unknown>
-
-function isNode(o: AnyRecord): boolean {
-  return (
-    typeof o.id !== 'undefined' &&
-    Array.isArray(o.labels) &&
-    typeof o.properties === 'object' &&
-    o.properties !== null &&
-    typeof (o as AnyRecord).start_node === 'undefined'
-  )
-}
-function isEdge(o: AnyRecord): boolean {
-  return (
-    typeof o.id !== 'undefined' &&
-    typeof o.start_node !== 'undefined' &&
-    typeof o.end_node !== 'undefined' &&
-    typeof o.type === 'string'
-  )
-}
-function isPath(o: AnyRecord): boolean {
-  return Array.isArray(o.nodes) && Array.isArray(o.edges)
-}
-
+// Cell-formatting helpers (isNode/isEdge/isPath/formatNode/formatEdge/
+// formatPath/summarizeProps/formatCell) and the AnyRecord type live in
+// src/lib/cellFormat.ts -- imported at the top of this file. The
+// `formatCell` symbol is re-exported above for back-compat.
+//
 // formatPropValue (cypher-style single-value formatter) lives in
 // ./propFormat so the graph inspector's structured property view can
-// share it. summarizeProps renders ALL keys of a node/edge property bag in a
-// cypher-like " {k: v, ...}" form. We deliberately do NOT truncate —
-// the previous "first 2 props + …" form was unhelpful for admin views
-// where the interesting fields (username, email, roles) routinely
-// landed past the cap. Cell-level wrapping (white-space: pre-wrap on
-// the cell) keeps the row readable when the property bag is large.
-function summarizeProps(props: AnyRecord): string {
-  const keys = Object.keys(props)
-  if (keys.length === 0) return ''
-  const pairs = keys.map((k) => `${k}: ${formatPropValue(props[k])}`)
-  return ` {${pairs.join(', ')}}`
-}
-
-function formatNode(o: AnyRecord): string {
-  const labels = (o.labels as string[]).map((l) => `:${l}`).join('')
-  return `(${labels}${summarizeProps(o.properties as AnyRecord)})`
-}
-function formatEdge(o: AnyRecord): string {
-  return `[:${o.type as string}${summarizeProps(o.properties as AnyRecord)}]`
-}
-function formatPath(o: AnyRecord): string {
-  const n = (o.nodes as unknown[]).length
-  const e = (o.edges as unknown[]).length
-  return `<path: ${n} nodes, ${e} edges>`
-}
-
-export function formatCell(v: unknown): string {
-  if (v === null || v === undefined) return ''
-  if (Array.isArray(v)) return JSON.stringify(v)
-  if (typeof v === 'object') {
-    const o = v as AnyRecord
-    if (isNode(o)) return formatNode(o)
-    if (isEdge(o)) return formatEdge(o)
-    if (isPath(o)) return formatPath(o)
-    return JSON.stringify(o)
-  }
-  return String(v)
-}
+// share it.
 
 // cellLines estimates how many wrapped lines a single cell occupies.
 //   • null / undefined / '' → 1 line
@@ -501,40 +455,15 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
   // crushing columns into illegible thumb-widths.
   const minGridWidthPx = MIN_COLUMN_PX * columnCount
 
-  // Live container width + height (px). Driven by a ResizeObserver on
+  // Live container width + height (px) tracked by ResizeObserver on
   // the outer wrap. The width drives the chars-per-column estimate for
   // `estimateRowHeight`; the height drives the virtualizer body height
   // so the table grows with the page's flex chain (no legacy 720 px
-  // cap). Floors at VIRTUAL_BODY_MIN so a tiny parent still shows a
-  // usable body.
-  const wrapRef = useRef<HTMLDivElement | null>(null)
-  const [containerWidth, setContainerWidth] = useState<number | undefined>(
-    undefined
-  )
-  const [bodyHeight, setBodyHeight] = useState<number>(VIRTUAL_BODY_MIN)
-
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return undefined
-    if (typeof ResizeObserver === 'undefined') return undefined
-    const ro = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-      const w = entry.contentRect.width
-      const h = entry.contentRect.height
-      if (Number.isFinite(w) && w > 0) setContainerWidth(w)
-      if (Number.isFinite(h) && h > 0) {
-        setBodyHeight(Math.max(VIRTUAL_BODY_MIN, h - HEADER_BUDGET_PX))
-      }
-    })
-    ro.observe(el)
-    const r = el.getBoundingClientRect()
-    if (Number.isFinite(r.width) && r.width > 0) setContainerWidth(r.width)
-    if (Number.isFinite(r.height) && r.height > 0) {
-      setBodyHeight(Math.max(VIRTUAL_BODY_MIN, r.height - HEADER_BUDGET_PX))
-    }
-    return () => ro.disconnect()
-  }, [])
+  // cap). Hook lives in ./useTableBodySize (Q rank 19 / #184).
+  const { wrapRef, containerWidth, bodyHeight } = useTableBodySize({
+    minBodyHeight: VIRTUAL_BODY_MIN,
+    headerBudgetPx: HEADER_BUDGET_PX,
+  })
 
   // Convert the live container width into a per-column character
   // budget. Below the grid's min-width the ScrollArea is scrolling, so
