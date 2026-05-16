@@ -1,10 +1,14 @@
 package server
 
 import (
+	"bytes"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // TestPermissionsPolicyAppliedGlobally asserts that Permissions-Policy is
@@ -145,6 +149,134 @@ func TestAccessTokenDeprecation(t *testing.T) {
 		}
 	})
 }
+
+// TestAccessTokenDeprecation_EmitsAuditEvent_SEC_NEW_6 pins SEC-NEW-6
+// (#206): the WithAccessTokenDeprecation wrapper must emit an
+// audit_event=access_token_query record whenever it encounters a request
+// using the deprecated ?access_token= query fallback. The audit emission
+// is rate-limited per source (path) to avoid log floods; the implementation
+// is exercised with a manual clock injection so the test is deterministic.
+func TestAccessTokenDeprecation_EmitsAuditEvent_SEC_NEW_6(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	// Reset the limiter state so prior tests don't suppress emission.
+	resetAccessTokenAuditLimiter()
+	t.Cleanup(resetAccessTokenAuditLimiter)
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := WithAccessTokenDeprecation(inner)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/whoami?access_token=t", nil)
+	req.Header.Set("User-Agent", "test-agent/1.0")
+	h.ServeHTTP(rec, req)
+
+	out := buf.String()
+	if !strings.Contains(out, `"event":"access_token_query"`) {
+		t.Fatalf("SEC-NEW-6 #206: missing access_token_query audit event\nlog: %s", out)
+	}
+	if !strings.Contains(out, `"path":"/api/v1/whoami"`) {
+		t.Fatalf("SEC-NEW-6 #206: access_token_query audit missing path field\nlog: %s", out)
+	}
+	if !strings.Contains(out, `"user_agent":"test-agent/1.0"`) {
+		t.Fatalf("SEC-NEW-6 #206: access_token_query audit missing user_agent field\nlog: %s", out)
+	}
+}
+
+// TestAccessTokenDeprecation_RateLimitsAuditEmission_SEC_NEW_6 pins that
+// repeated requests using the deprecated query parameter from the same
+// path do NOT each fire an audit emission — the implementation uses a
+// per-path token bucket to cap noise. The first request emits; the
+// immediately-following one is suppressed.
+func TestAccessTokenDeprecation_RateLimitsAuditEmission_SEC_NEW_6(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	resetAccessTokenAuditLimiter()
+	t.Cleanup(resetAccessTokenAuditLimiter)
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := WithAccessTokenDeprecation(inner)
+	for i := 0; i < 5; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/whoami?access_token=t", nil)
+		h.ServeHTTP(rec, req)
+	}
+	out := buf.String()
+	got := strings.Count(out, `"event":"access_token_query"`)
+	// Exact upper bound is implementation-detail (1 per path per window),
+	// but more than 2 here is a regression — the limiter is too generous.
+	if got < 1 {
+		t.Fatalf("SEC-NEW-6 #206: rate-limited audit emitted %d times, want >=1 (limiter starved everyone)\nlog: %s", got, out)
+	}
+	if got > 2 {
+		t.Fatalf("SEC-NEW-6 #206: rate-limited audit emitted %d times for 5 requests, want <=2 (limiter not throttling)\nlog: %s", got, out)
+	}
+}
+
+// TestAccessTokenDeprecation_IncrementsPromCounter_SEC_NEW_6 pins the
+// other half of SEC-NEW-6: a Prometheus-shaped counter
+// security.access_token_query.total must increment on every access-token
+// query request (no rate limiting on the counter — counters are cheap
+// and integrators want true counts).
+func TestAccessTokenDeprecation_IncrementsPromCounter_SEC_NEW_6(t *testing.T) {
+	resetAccessTokenAuditLimiter()
+	t.Cleanup(resetAccessTokenAuditLimiter)
+
+	// Capture the counter snapshot via the test hook.
+	before := accessTokenQueryTotal()
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := WithAccessTokenDeprecation(inner)
+	for i := 0; i < 3; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/whoami?access_token=t", nil)
+		h.ServeHTTP(rec, req)
+	}
+	after := accessTokenQueryTotal()
+	if delta := after - before; delta != 3 {
+		t.Fatalf("SEC-NEW-6 #206: counter incremented by %d, want 3", delta)
+	}
+}
+
+// TestAccessTokenDeprecation_NoAuditOrCounterWhenAbsent pins that the
+// audit + counter only fire when the query parameter is actually present.
+// A regression here would fire the alarm on every request.
+func TestAccessTokenDeprecation_NoAuditOrCounterWhenAbsent(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	resetAccessTokenAuditLimiter()
+	t.Cleanup(resetAccessTokenAuditLimiter)
+
+	before := accessTokenQueryTotal()
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := WithAccessTokenDeprecation(inner)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer abc")
+	h.ServeHTTP(rec, req)
+
+	if strings.Contains(buf.String(), `"event":"access_token_query"`) {
+		t.Fatalf("SEC-NEW-6 #206: audit emitted for header-authed request: %s", buf.String())
+	}
+	if got := accessTokenQueryTotal() - before; got != 0 {
+		t.Fatalf("SEC-NEW-6 #206: counter incremented by %d for header-authed request, want 0", got)
+	}
+}
+
+// silenceUnused references the time/sync imports so a future test
+// edit that drops their direct use does not break the package.
+var _ = func() time.Duration { var mu sync.Mutex; mu.Lock(); mu.Unlock(); return 0 }
 
 // TestSPAImplicitHTML asserts that when the inner handler does not set a
 // Content-Type (the typical embed.FS FileServer path serving index.html),

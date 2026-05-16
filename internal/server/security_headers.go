@@ -1,8 +1,12 @@
 package server
 
 import (
+	"expvar"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // Security-headers wrappers complement the genapi-emitted httpx.WrapHandler
@@ -95,10 +99,77 @@ func WithPermissionsPolicy(next http.Handler) http.Handler {
 // should be deleted.
 const AccessTokenSunsetDate = "Wed, 01 Jul 2026 00:00:00 GMT"
 
+// accessTokenQueryCounter is the SEC-NEW-6 (#206) expvar-backed counter
+// for every request that arrives with the deprecated `?access_token=`
+// query parameter. Registered under the conventional Prometheus name
+// `security_access_token_query_total` so the existing
+// /debug/vars surface (and any Prometheus expvar exporter wired to it)
+// can scrape it. Reads via accessTokenQueryTotal() for tests.
+var accessTokenQueryCounter = expvar.NewInt("security_access_token_query_total")
+
+// accessTokenQueryTotal returns the current value of the SEC-NEW-6
+// counter. Exported for tests; production callers should scrape the
+// expvar surface instead.
+func accessTokenQueryTotal() int64 { return accessTokenQueryCounter.Value() }
+
+// accessTokenAuditWindow is how long a path can pass between audit
+// emissions before the limiter re-opens. The window is intentionally
+// loose (10 s) — the goal is to avoid log floods, not to dedupe every
+// burst. Each (path) key emits at most one audit per window.
+const accessTokenAuditWindow = 10 * time.Second
+
+// accessTokenAuditLimiterState backs the per-path one-shot emission
+// limiter used by WithAccessTokenDeprecation. The map keys on request
+// path so /api/v1/whoami floods do not silence /api/v1/users floods
+// (which would mask a different deprecated client surfacing later).
+// nowFn is overridable for the regression tests.
+var (
+	accessTokenAuditMu   sync.Mutex
+	accessTokenAuditLast = map[string]time.Time{}
+	accessTokenAuditNow  atomic.Pointer[func() time.Time]
+)
+
+// resetAccessTokenAuditLimiter wipes the per-path emission ledger so
+// tests can re-arm the limiter between cases.
+func resetAccessTokenAuditLimiter() {
+	accessTokenAuditMu.Lock()
+	defer accessTokenAuditMu.Unlock()
+	accessTokenAuditLast = map[string]time.Time{}
+}
+
+// shouldEmitAccessTokenAudit reports whether the audit emission for path
+// is allowed in the current window. State-mutating: a true return
+// records the emission timestamp so the next call within the window
+// returns false.
+func shouldEmitAccessTokenAudit(path string) bool {
+	nowFn := time.Now
+	if p := accessTokenAuditNow.Load(); p != nil {
+		nowFn = *p
+	}
+	now := nowFn()
+	accessTokenAuditMu.Lock()
+	defer accessTokenAuditMu.Unlock()
+	if last, ok := accessTokenAuditLast[path]; ok {
+		if now.Sub(last) < accessTokenAuditWindow {
+			return false
+		}
+	}
+	accessTokenAuditLast[path] = now
+	return true
+}
+
 // WithAccessTokenDeprecation wraps next so any request that arrived with
 // `?access_token=` on the URL gets a Deprecation: true + Sunset: <date>
 // response header. Browsers, intermediaries, and API clients log these
 // as advisory; the auth path still works until AccessTokenSunsetDate.
+//
+// SEC-NEW-6 (#206): every such request ALSO increments the
+// `security_access_token_query_total` expvar counter (no throttling —
+// counters are cheap and operators want true counts) AND emits a
+// rate-limited `audit_event=access_token_query` audit record with the
+// request path + User-Agent so operators can see who is still using
+// the deprecated surface and plan migration. The audit emission is
+// per-path-throttled to avoid log floods; the counter is not.
 //
 // The check runs unconditionally on the request URL (not the auth
 // context) so the deprecation signal is emitted even when the token
@@ -111,6 +182,17 @@ func WithAccessTokenDeprecation(next http.Handler) http.Handler {
 			w.Header().Set("Sunset", AccessTokenSunsetDate)
 			w.Header().Set("Link",
 				`<https://geodedb.com/docs/auth/cookie-mode>; rel="deprecation"`)
+			accessTokenQueryCounter.Add(1)
+			path := ""
+			if r.URL != nil {
+				path = r.URL.Path
+			}
+			if shouldEmitAccessTokenAudit(path) {
+				emitAudit("access_token_query",
+					"path", path,
+					"user_agent", r.UserAgent(),
+				)
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
