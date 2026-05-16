@@ -123,7 +123,14 @@ const SRC_DIR = path.join(__dirname, '/src')
 const DIST_DIR = path.join(__dirname, '/internal/ui/dist')
 
 module.exports = {
-  stats: { warnings: false },
+  // Q rank 18 / #232: emit warnings explicitly so a new build-time
+  // warning is loud rather than scrolling past silently. The previous
+  // `warnings: false` was a Band-Aid for postcss-calc choking on Web
+  // Awesome's modern CSS color functions; the minimizer config below
+  // now disables calc so the build emits zero unexpected warnings,
+  // and surface-level real warnings (e.g. new asset-budget breaches,
+  // ESM-CJS interop bailouts) become visible again.
+  stats: { warnings: true },
   plugins,
   module: { rules },
   entry: `${SRC_DIR}/index.tsx`,
@@ -146,7 +153,31 @@ module.exports = {
     },
   },
   optimization: {
-    minimizer: ['...', new CssMinimizerPlugin()],
+    // Q rank 18 / #232: CssMinimizerPlugin's default preset includes
+    // postcss-calc, which can't parse Web Awesome's modern CSS color
+    // functions (`color-mix(in oklab, ...)` etc.) and emits two
+    // "Lexical error" warnings on every production build. The warnings
+    // were silenced by stats:{warnings:false} which also hid any future
+    // real warning. The fix selects the same `default` cssnano preset
+    // (so minification quality stays identical) but turns calc off —
+    // calc is a no-op for the WA CSS surface anyway (no nested
+    // computations to fold), and the OS-native CSS engine handles the
+    // `calc()` expressions at runtime without preprocessing.
+    minimizer: [
+      '...',
+      new CssMinimizerPlugin({
+        minimizerOptions: {
+          preset: [
+            'default',
+            {
+              // postcss-calc fails on modern color/space functions;
+              // disable so the build emits zero unexpected warnings.
+              calc: false,
+            },
+          ],
+        },
+      }),
+    ],
     splitChunks: {
       chunks: 'all',
       cacheGroups: {
