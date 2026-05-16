@@ -243,9 +243,13 @@ build:
     - job: audit-ratchets
   script:
     - npm run build
+  # QUALITY rank 2 / #226: webpack emits `internal/ui/dist`
+  # (webpack.common.js:123). The artifact path MUST point at the same
+  # directory or the `pages` job downstream finds an empty tree and
+  # silently publishes a 404 site.
   artifacts:
     paths:
-      - dist/
+      - internal/ui/dist/
     expire_in: 7 days
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -260,8 +264,10 @@ pages:
   stage: pages
   needs: ['build']
   before_script: []
+  # QUALITY rank 2 / #226: consume the `build` artifact at its actual
+  # emit location, then rename to `public` (GitLab Pages contract).
   script:
-    - mv dist public
+    - mv internal/ui/dist public
   artifacts:
     paths:
       - public
