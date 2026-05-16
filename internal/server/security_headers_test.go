@@ -6,9 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 )
 
 // TestPermissionsPolicyAppliedGlobally asserts that Permissions-Policy is
@@ -273,10 +271,6 @@ func TestAccessTokenDeprecation_NoAuditOrCounterWhenAbsent(t *testing.T) {
 		t.Fatalf("SEC-NEW-6 #206: counter incremented by %d for header-authed request, want 0", got)
 	}
 }
-
-// silenceUnused references the time/sync imports so a future test
-// edit that drops their direct use does not break the package.
-var _ = func() time.Duration { var mu sync.Mutex; mu.Lock(); mu.Unlock(); return 0 }
 
 // TestSPAImplicitHTML asserts that when the inner handler does not set a
 // Content-Type (the typical embed.FS FileServer path serving index.html),

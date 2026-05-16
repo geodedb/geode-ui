@@ -1496,7 +1496,7 @@ func TestRewrapSensitiveColumns_WrongPrevKeyFailsLoudly(t *testing.T) {
 	_ = st1.Close()
 
 	st2 := openEncryptedSQLiteWithKey(t, tmp, newKey)
-	defer st2.Close()
+	defer func() { _ = st2.Close() }()
 	rewrapper := st2.(Rewrapper)
 	wrongPrev, _ := NewCipherFromKey(bogusOldKey)
 	_, err := rewrapper.RewrapSensitiveColumns(context.Background(), wrongPrev)
@@ -1529,7 +1529,7 @@ func TestRewrapSensitiveColumns_LeavesPlaintextRowsAlone(t *testing.T) {
 
 	// Reopen with the new key + run a sweep that names old as prev.
 	st2 := openEncryptedSQLiteWithKey(t, tmp, newKey)
-	defer st2.Close()
+	defer func() { _ = st2.Close() }()
 	rewrapper := st2.(Rewrapper)
 	prev, _ := NewCipherFromKey(oldKey)
 	res, err := rewrapper.RewrapSensitiveColumns(context.Background(), prev)
