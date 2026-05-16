@@ -4,6 +4,7 @@
 # linked (CGO_ENABLED=0 in goreleaser builds). Pair with the alpine tag
 # stream from .goreleaser.yaml's docker_manifests.
 
+# image-pin: 2026-05-16 @ alpine:3.20 stable; refresh per cadence.
 FROM alpine:3.20
 
 LABEL org.opencontainers.image.title="geode-ui-alpine" \

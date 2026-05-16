@@ -10,6 +10,7 @@
 # DO NOT use this Dockerfile for local dev builds — for that, use
 # deploy/Dockerfile (full source-based multi-stage build).
 
+# image-pin: 2026-05-16 @ debian:bookworm-slim; refresh per cadence.
 FROM debian:bookworm-slim
 
 LABEL org.opencontainers.image.title="geode-ui" \

@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # Pre-baked Playwright runner for CI. Has Node 22 + Playwright 1.59 +
 # Chromium baked in, with the e2e package layout staged.
+# image-pin: 2026-05-16 @ matches @playwright/test pin in package.json;
+# refresh both in lockstep when Playwright is bumped.
 FROM mcr.microsoft.com/playwright:v1.59.1-jammy
 
 WORKDIR /work

@@ -55,6 +55,9 @@ variables:
   # image variants are built locally but not pushed.
 
 default:
+  # image-pin: 2026-05-16 @ NODE_VERSION (top of file) controls the
+  # base tag; refresh on the same cadence as deploy/Dockerfile node
+  # stage. QUALITY #233 / scripts/check-image-pins.sh enforces cadence.
   image: node:${NODE_VERSION}
   before_script:
     # Configure GitLab npm registry for @devnw scope
@@ -181,12 +184,33 @@ electron-typecheck:
 ci-pins-check:
   stage: lint
   needs: []
+  # image-pin: 2026-05-16 @ alpine:3 floating major tag — refresh per cadence.
   image: alpine:3
   before_script: []
   cache: []
   script:
     - apk add --no-cache bash grep
     - bash scripts/check-ci-pins.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# QUALITY #233: image-pin staleness gate. Walks .gitlab-ci.yml and
+# deploy/Dockerfile* looking for the
+# `# image-pin: <YYYY-MM-DD> @ <reason>` marker we use to date every
+# container/CI image reference, and warns when a pin is older than
+# 60 days (refresh cadence the team agreed to). Fails loudly if an
+# image reference carries no pin comment at all.
+image-pins-check:
+  stage: lint
+  needs: []
+  # image-pin: 2026-05-16 @ alpine:3 floating major tag — refresh per cadence.
+  image: alpine:3
+  before_script: []
+  cache: []
+  script:
+    - apk add --no-cache bash grep
+    - bash scripts/check-image-pins.sh
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -198,6 +222,7 @@ ci-pins-check:
 error-codes-check:
   stage: lint
   needs: []
+  # image-pin: 2026-05-16 @ alpine:3 floating major tag — refresh per cadence.
   image: alpine:3
   before_script: []
   cache: []
@@ -290,6 +315,8 @@ pages:
 # install/lint/test/build stages declared above.
 
 .go_defaults: &go_defaults
+  # image-pin: 2026-05-16 @ golang:1.26-alpine; bump in lockstep with
+  # go.mod toolchain. Shared across go:lint, go:test, go:bench-gate.
   image: golang:1.26-alpine
   variables:
     GOEXPERIMENT: jsonv2
@@ -393,6 +420,8 @@ bench-gate:
 # parent dir so docker build sees the expected layout.
 docker:build:
   stage: build
+  # image-pin: 2026-05-16 @ docker:25 + docker:25-dind (matched pair);
+  # refresh per cadence.
   image: docker:25
   services:
     - docker:25-dind
@@ -425,6 +454,7 @@ docker:build:
 # release artifact.
 e2e:playwright:
   stage: test
+  # image-pin: 2026-05-16 @ docker:25 + docker:25-dind; refresh per cadence.
   image: docker:25
   services:
     - docker:25-dind
@@ -498,6 +528,7 @@ e2e:playwright:
 # pipe-to-shell), authenticate to registries, then invoke goreleaser.
 
 .goreleaser-base:
+  # image-pin: 2026-05-16 @ docker:25 + docker:25-dind; refresh per cadence.
   image: docker:25
   services:
     - docker:25-dind
@@ -634,6 +665,8 @@ goreleaser:release:
 
 electron:linux:
   extends: .electron-base
+  # image-pin: 2026-05-16 @ NODE_VERSION (top of file) — same cadence
+  # as the default top-level image.
   image: node:${NODE_VERSION}
   script:
     - npm ci
@@ -696,6 +729,9 @@ electron:win:
 
 release:publish:
   stage: publish
+  # image-pin: 2026-05-16 @ release-cli :latest is GitLab's recommended
+  # tag for the release-cli helper; pin the digest at the next 60d
+  # cycle. QUALITY #233 / scripts/check-image-pins.sh enforces cadence.
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   needs:
     - job: goreleaser:release

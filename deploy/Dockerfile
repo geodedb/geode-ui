@@ -22,6 +22,8 @@
 #   replace directive in go.mod and the COPY of geode-client-go/ below.
 
 # ----- Stage 1: build the SPA -----
+# image-pin: 2026-05-16 @ pinned to node:22-alpine (LTS line); refresh
+# digest on the next 60d cycle via scripts/check-image-pins.sh.
 FROM node:22-alpine AS web
 WORKDIR /work
 COPY geode-ui/package.json geode-ui/package-lock.json ./
@@ -41,6 +43,8 @@ ENV GEODE_E2E_BUILD=true
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
+# image-pin: 2026-05-16 @ matches the GOTOOLCHAIN floor below; refresh
+# alongside go.mod toolchain bumps.
 FROM golang:1.26-alpine AS gobuild
 ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3
 RUN apk add --no-cache git
@@ -60,6 +64,7 @@ RUN go mod download
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/geode-ui ./cmd/server
 
 # ----- Stage 3: minimal runtime -----
+# image-pin: 2026-05-16 @ alpine 3.20 stable; refresh per cadence.
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates && \
     addgroup -S geode && adduser -S -G geode geode

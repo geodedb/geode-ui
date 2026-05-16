@@ -36,6 +36,8 @@
 # and the geode binary. It mirrors upstream's Dockerfile.release layout
 # (debian:bookworm-slim runtime, non-root user, /data volume).
 
+# image-pin: 2026-05-16 @ debian:bookworm-slim pinned by SHA256 digest;
+# refresh on the same 60d cadence as the other deploy/ Dockerfiles.
 FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
