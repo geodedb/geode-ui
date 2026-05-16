@@ -222,7 +222,7 @@ func TestParse_TolersClockSkew(t *testing.T) {
 			Subject:   "alice",
 		},
 	})
-	signed, err := tok.SignedString(iss.secret)
+	signed, err := tok.SignedString(iss.keys[iss.activeKID])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestParse_RejectsExpiredBeyondLeeway(t *testing.T) {
 			Subject:   "alice",
 		},
 	})
-	signed, err := tok.SignedString(iss.secret)
+	signed, err := tok.SignedString(iss.keys[iss.activeKID])
 	if err != nil {
 		t.Fatal(err)
 	}

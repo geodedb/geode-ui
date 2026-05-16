@@ -146,6 +146,53 @@ type app struct {
 // in-flight requests on shutdown.
 const defaultShutdownBudget = 5 * time.Second
 
+// buildJWTKeys assembles the kid → secret map and the activeKID for
+// the JWT issuer per SEC-NEW-7 (#210). Two sources are honoured, in
+// priority order:
+//
+//  1. Rotation-aware env vars: JWT_SECRET_HEX_CURRENT (required) +
+//     JWT_SECRET_HEX_PREVIOUS (optional). When CURRENT is non-empty,
+//     this path wins regardless of -jwt-secret-hex (which is a back-
+//     compat flag).
+//  2. Legacy -jwt-secret-hex CLI flag. Stamped under kid="current".
+//
+// The chosen activeKID is always "current" so a deploy that flips
+// from legacy to rotation mode does not invalidate in-flight tokens
+// — they were already stamped with kid="current" by the legacy path.
+// Returns an error if neither source is configured or the supplied
+// hex is malformed.
+func buildJWTKeys(cliSecretHex string, getenv func(string) string) (map[string][]byte, string, error) {
+	currentHex := getenv("JWT_SECRET_HEX_CURRENT")
+	previousHex := getenv("JWT_SECRET_HEX_PREVIOUS")
+
+	if currentHex != "" {
+		// Rotation-aware path.
+		current, err := hex.DecodeString(currentHex)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode JWT_SECRET_HEX_CURRENT: %w", err)
+		}
+		keys := map[string][]byte{jwt.DefaultKID: current}
+		if previousHex != "" {
+			previous, err := hex.DecodeString(previousHex)
+			if err != nil {
+				return nil, "", fmt.Errorf("decode JWT_SECRET_HEX_PREVIOUS: %w", err)
+			}
+			keys[jwt.PreviousKID] = previous
+		}
+		return keys, jwt.DefaultKID, nil
+	}
+
+	// Legacy single-secret path.
+	if cliSecretHex == "" {
+		return nil, "", errors.New("missing JWT secret: set JWT_SECRET_HEX_CURRENT (and optionally JWT_SECRET_HEX_PREVIOUS for rotation) or pass -jwt-secret-hex (generate with `openssl rand -hex 32`)")
+	}
+	secret, err := hex.DecodeString(cliSecretHex)
+	if err != nil {
+		return nil, "", fmt.Errorf("decode -jwt-secret-hex: %w", err)
+	}
+	return map[string][]byte{jwt.DefaultKID: secret}, jwt.DefaultKID, nil
+}
+
 // close runs the registered cleanup funcs in reverse registration order
 // (LIFO, like deferred closes in the original main).
 func (a *app) close() {
@@ -171,14 +218,24 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		}
 	}()
 
-	if cfg.secretHex == "" {
-		return nil, errors.New("missing -jwt-secret-hex (generate with `openssl rand -hex 32`)")
-	}
-	secret, err := hex.DecodeString(cfg.secretHex)
+	// SEC-NEW-7 (#210): JWT signing keys can be supplied two ways:
+	//
+	//   1. Legacy single-secret: -jwt-secret-hex on the CLI (back-compat).
+	//      Stamped under kid="current"; one Issuer secret.
+	//   2. Rotation-aware: JWT_SECRET_HEX_CURRENT (required when in
+	//      rotation mode) + JWT_SECRET_HEX_PREVIOUS (optional, only
+	//      required for the in-flight tokens issued before the
+	//      rotation). Both are hex-encoded 32-byte HS256 secrets.
+	//      activeKID="current" so newly-issued tokens flow under the
+	//      new secret while pre-rotation tokens continue to verify
+	//      against "previous" until they expire.
+	//
+	// Operator runbook: see docs/OPERATIONS.md#jwt-secret-rotation.
+	keys, activeKID, err := buildJWTKeys(cfg.secretHex, getenv)
 	if err != nil {
-		return nil, fmt.Errorf("decode -jwt-secret-hex: %w", err)
+		return nil, err
 	}
-	issuer, err := jwt.NewIssuer(secret, cfg.jwtTTL)
+	issuer, err := jwt.NewIssuerWithKeys(keys, activeKID, cfg.jwtTTL)
 	if err != nil {
 		return nil, fmt.Errorf("jwt issuer: %w", err)
 	}

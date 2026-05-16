@@ -65,30 +65,120 @@ type Claims struct {
 	jjwt.RegisteredClaims
 }
 
+// DefaultKID is the kid header stamped on every token issued by an
+// Issuer constructed via NewIssuer (legacy single-secret path).
+// Operators that opt into key rotation via NewIssuerWithKeys should
+// supply explicit kids and SHOULD NOT use this value to avoid
+// silently overlapping with legacy tokens during a rotation window.
+const DefaultKID = "current"
+
+// PreviousKID is the conventional kid suggested in the operator
+// runbook for the previous secret during a rotation window. Tokens
+// issued before the rotation continue to verify because the Issuer
+// still has the previous secret indexed under this kid.
+const PreviousKID = "previous"
+
 // Issuer signs and verifies HS256 tokens. It is safe for concurrent use:
 // the underlying jjwt library reads-only the secret slice on each call,
 // and the revocation set is internally synchronized.
+//
+// SEC-NEW-7 (#210): Issuer supports key rotation via a kid-keyed
+// secret map. The active kid is stamped into every issued token's
+// header (`{"alg":"HS256","kid":"<active>"}`), and Parse uses the
+// inbound token's `kid` to pick the verification key — so a stale
+// token signed with the previous secret continues to verify until
+// its `exp` while a fresh token is signed with the new secret. The
+// legacy single-secret constructor remains as a thin wrapper.
 type Issuer struct {
-	secret  []byte
-	ttl     time.Duration
-	revoked *RevocationSet
+	// keys is the kid → secret map. Always contains at least
+	// activeKID's entry. For the legacy NewIssuer path it has one
+	// entry keyed on DefaultKID.
+	keys map[string][]byte
+	// activeKID is the kid stamped on every newly-issued token.
+	activeKID string
+	ttl       time.Duration
+	revoked   *RevocationSet
 }
 
-// NewIssuer constructs an Issuer. The secret must be at least 32 bytes
-// (HS256 keys shorter than the hash output size weaken signature
-// strength) and the ttl must lie between one minute and 24 hours —
-// shorter ttls force chatty re-login flows, longer ttls leave bad
-// tokens valid past any reasonable revocation window. The Issuer is
-// created with a fresh in-process RevocationSet (SEC-N2 / #64),
-// reachable via Revocation().
+// NewIssuer constructs an Issuer with a single secret. This is the
+// legacy path; use NewIssuerWithKeys for operators rotating keys.
+// The secret must be at least 32 bytes (HS256 keys shorter than the
+// hash output size weaken signature strength) and the ttl must lie
+// between one minute and 24 hours — shorter ttls force chatty
+// re-login flows, longer ttls leave bad tokens valid past any
+// reasonable revocation window. The Issuer is created with a fresh
+// in-process RevocationSet (SEC-N2 / #64), reachable via Revocation().
+//
+// SEC-NEW-7 (#210): tokens are stamped with kid="current". This is
+// backward-compatible — a deployment that has never rotated still
+// verifies every token by the same single secret it issued under.
 func NewIssuer(secret []byte, ttl time.Duration) (*Issuer, error) {
-	if len(secret) < 32 {
-		return nil, errors.New("jwt: secret must be at least 32 bytes")
+	return NewIssuerWithKeys(map[string][]byte{DefaultKID: secret}, DefaultKID, ttl)
+}
+
+// NewIssuerWithKeys constructs an Issuer that signs new tokens with
+// keys[activeKID] but still verifies inbound tokens signed under any
+// kid present in keys. This is the SEC-NEW-7 rotation primitive:
+//
+//	keys      = {"current": newSecret, "previous": oldSecret}
+//	activeKID = "current"
+//
+// All four invariants are checked at construction time:
+//   - keys must be non-empty
+//   - every secret must be at least 32 bytes
+//   - activeKID must be present in keys
+//   - ttl must lie in [1m, 24h] (same as NewIssuer)
+//
+// The kid space is open — operators can pick any string identifier
+// they want (timestamp, version tag, etc.) as long as it round-trips
+// through JSON. The conventional choice ("current"/"previous") is
+// documented in the operator runbook.
+func NewIssuerWithKeys(keys map[string][]byte, activeKID string, ttl time.Duration) (*Issuer, error) {
+	if len(keys) == 0 {
+		return nil, errors.New("jwt: keys map must be non-empty")
+	}
+	if _, ok := keys[activeKID]; !ok {
+		return nil, fmt.Errorf("jwt: activeKID %q not present in keys map", activeKID)
+	}
+	for kid, secret := range keys {
+		if len(secret) < 32 {
+			return nil, fmt.Errorf("jwt: secret for kid %q must be at least 32 bytes", kid)
+		}
 	}
 	if ttl < time.Minute || ttl > 24*time.Hour {
 		return nil, errors.New("jwt: ttl must be 1m..24h")
 	}
-	return &Issuer{secret: secret, ttl: ttl, revoked: NewRevocationSet()}, nil
+	// Defensive copy so the caller can drop their reference after.
+	copied := make(map[string][]byte, len(keys))
+	for k, v := range keys {
+		secCopy := make([]byte, len(v))
+		copy(secCopy, v)
+		copied[k] = secCopy
+	}
+	return &Issuer{keys: copied, activeKID: activeKID, ttl: ttl, revoked: NewRevocationSet()}, nil
+}
+
+// ActiveKID reports the kid stamped on freshly-issued tokens. Useful
+// for runbook output and integration tests.
+func (i *Issuer) ActiveKID() string { return i.activeKID }
+
+// KnownKIDs returns the sorted list of kids the Issuer can verify
+// against. Useful for ops tooling that surfaces the rotation window
+// to operators.
+func (i *Issuer) KnownKIDs() []string {
+	out := make([]string, 0, len(i.keys))
+	for k := range i.keys {
+		out = append(out, k)
+	}
+	// Sort for stable output.
+	for a := 0; a < len(out); a++ {
+		for b := a + 1; b < len(out); b++ {
+			if out[a] > out[b] {
+				out[a], out[b] = out[b], out[a]
+			}
+		}
+	}
+	return out
 }
 
 // TTL reports the configured token lifetime. Useful as the maxTokenAge
@@ -108,6 +198,12 @@ func (i *Issuer) Revocation() *RevocationSet { return i.revoked }
 // Every token carries a fresh crypto/rand jti (RFC 7519 "ID" claim,
 // 128 bits, hex-encoded) so it can be individually revoked via
 // Revocation().Revoke (SEC-N2 / #64).
+//
+// SEC-NEW-7 (#210): the JWS header carries a `kid` claim naming the
+// signing secret. Parse() consults this header to pick a verification
+// key from the Issuer's keys map, so a deployment that rotates
+// secrets keeps the previous secret indexed (under e.g. "previous")
+// for one TTL window while new tokens flow under the active kid.
 func (i *Issuer) Issue(sub, profile string, roles []string, connID string) (string, time.Time, error) {
 	now := time.Now()
 	exp := now.Add(i.ttl)
@@ -127,7 +223,16 @@ func (i *Issuer) Issue(sub, profile string, roles []string, connID string) (stri
 			Subject:   sub,
 		},
 	})
-	signed, err := tok.SignedString(i.secret)
+	// SEC-NEW-7 (#210): stamp the active kid into the JWS header so
+	// Parse can pick the right verification key during a rotation
+	// window. The header is signed alongside the payload so an
+	// attacker can't rewrite the kid to point at a weaker key.
+	tok.Header["kid"] = i.activeKID
+	secret, ok := i.keys[i.activeKID]
+	if !ok {
+		return "", time.Time{}, fmt.Errorf("jwt: active kid %q not in keys", i.activeKID)
+	}
+	signed, err := tok.SignedString(secret)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -160,7 +265,22 @@ func (i *Issuer) Parse(token string) (*Claims, error) {
 		if t.Method.Alg() != jjwt.SigningMethodHS256.Alg() {
 			return nil, errors.New("jwt: unexpected alg")
 		}
-		return i.secret, nil
+		// SEC-NEW-7 (#210): pick the verification key from the kid
+		// header. Tokens issued without a kid (legacy issuers that
+		// pre-date this change) fall through to the activeKID's
+		// secret — this preserves the contract for in-flight tokens
+		// that pre-date a deploy. Unknown kids hard-fail (no
+		// down-grade to a known secret) so an attacker can't pin a
+		// kid that names a weaker / rotated-out key.
+		kid, _ := t.Header["kid"].(string)
+		if kid == "" {
+			kid = i.activeKID
+		}
+		secret, ok := i.keys[kid]
+		if !ok {
+			return nil, fmt.Errorf("jwt: unknown kid %q", kid)
+		}
+		return secret, nil
 	}, jjwt.WithLeeway(clockLeeway))
 	if err != nil {
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -39,6 +40,118 @@ func validProfilestoreKey() string {
 // validJWTSecretHex returns a hex-encoded 32-byte HS256 secret.
 func validJWTSecretHex() string {
 	return strings.Repeat("ab", 32)
+}
+
+// TestBuildJWTKeys_LegacySingleSecret pins the back-compat path:
+// -jwt-secret-hex on the CLI yields a single-entry keys map keyed on
+// DefaultKID.
+func TestBuildJWTKeys_LegacySingleSecret(t *testing.T) {
+	keys, activeKID, err := buildJWTKeys(validJWTSecretHex(), envFunc(nil))
+	if err != nil {
+		t.Fatalf("buildJWTKeys: %v", err)
+	}
+	if activeKID != "current" {
+		t.Fatalf("activeKID=%q want current", activeKID)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("len(keys)=%d want 1 (legacy single-secret)", len(keys))
+	}
+	if _, ok := keys["current"]; !ok {
+		t.Fatalf("keys missing 'current' entry: %v", keys)
+	}
+}
+
+// TestBuildJWTKeys_RotationEnvVars pins SEC-NEW-7 #210: env-var-driven
+// rotation mode honors both current + previous secrets.
+func TestBuildJWTKeys_RotationEnvVars(t *testing.T) {
+	current := validJWTSecretHex()
+	previous := strings.Repeat("cd", 32)
+	keys, activeKID, err := buildJWTKeys("", envFunc(map[string]string{
+		"JWT_SECRET_HEX_CURRENT":  current,
+		"JWT_SECRET_HEX_PREVIOUS": previous,
+	}))
+	if err != nil {
+		t.Fatalf("buildJWTKeys: %v", err)
+	}
+	if activeKID != "current" {
+		t.Fatalf("activeKID=%q want current", activeKID)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("len(keys)=%d want 2 (rotation mode)", len(keys))
+	}
+	if _, ok := keys["current"]; !ok {
+		t.Fatalf("rotation keys missing 'current': %v", keys)
+	}
+	if _, ok := keys["previous"]; !ok {
+		t.Fatalf("rotation keys missing 'previous': %v", keys)
+	}
+}
+
+// TestBuildJWTKeys_RotationCurrentOnly pins the early-rotation case
+// (operator has already cleared the previous secret).
+func TestBuildJWTKeys_RotationCurrentOnly(t *testing.T) {
+	keys, activeKID, err := buildJWTKeys("", envFunc(map[string]string{
+		"JWT_SECRET_HEX_CURRENT": validJWTSecretHex(),
+	}))
+	if err != nil {
+		t.Fatalf("buildJWTKeys: %v", err)
+	}
+	if activeKID != "current" {
+		t.Fatalf("activeKID=%q want current", activeKID)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("len(keys)=%d want 1 (CURRENT only)", len(keys))
+	}
+}
+
+// TestBuildJWTKeys_EnvBeatsCli pins that JWT_SECRET_HEX_CURRENT
+// overrides -jwt-secret-hex when both are set (so a deploy can flip
+// to rotation mode without removing the CLI flag from the unit file).
+func TestBuildJWTKeys_EnvBeatsCli(t *testing.T) {
+	cliSecret := strings.Repeat("ab", 32)
+	envSecret := strings.Repeat("cd", 32)
+	keys, _, err := buildJWTKeys(cliSecret, envFunc(map[string]string{
+		"JWT_SECRET_HEX_CURRENT": envSecret,
+	}))
+	if err != nil {
+		t.Fatalf("buildJWTKeys: %v", err)
+	}
+	got := keys["current"]
+	want, _ := hex.DecodeString(envSecret)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("env-current did not win over CLI flag")
+	}
+}
+
+// TestBuildJWTKeys_MissingSecret pins the fatal-init: neither source
+// configured returns an error naming both options.
+func TestBuildJWTKeys_MissingSecret(t *testing.T) {
+	_, _, err := buildJWTKeys("", envFunc(nil))
+	if err == nil {
+		t.Fatalf("want error when neither secret source is configured")
+	}
+	if !strings.Contains(err.Error(), "JWT_SECRET_HEX_CURRENT") {
+		t.Fatalf("error should name JWT_SECRET_HEX_CURRENT: %v", err)
+	}
+}
+
+// TestBuildJWTKeys_MalformedHex pins that bad hex on either source
+// returns a descriptive error.
+func TestBuildJWTKeys_MalformedHex(t *testing.T) {
+	if _, _, err := buildJWTKeys("zzzz", envFunc(nil)); err == nil {
+		t.Fatalf("want error on malformed CLI hex")
+	}
+	if _, _, err := buildJWTKeys("", envFunc(map[string]string{
+		"JWT_SECRET_HEX_CURRENT": "zzzz",
+	})); err == nil {
+		t.Fatalf("want error on malformed env-current hex")
+	}
+	if _, _, err := buildJWTKeys("", envFunc(map[string]string{
+		"JWT_SECRET_HEX_CURRENT":  validJWTSecretHex(),
+		"JWT_SECRET_HEX_PREVIOUS": "zzzz",
+	})); err == nil {
+		t.Fatalf("want error on malformed env-previous hex")
+	}
 }
 
 func TestRun_MissingJWTSecret_ExitsNonZero(t *testing.T) {
