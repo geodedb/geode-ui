@@ -455,10 +455,16 @@ services:
       geode-init:
         condition: service_completed_successfully
     environment:
-      JWT_SECRET_HEX: ${JWT_SECRET_HEX:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      # SEC F-SUP-5 (#161): NEVER commit a literal JWT secret to a plan
+      # or doc, even a deterministic one — detect-secrets and gitleaks
+      # both flag it, and a future copy-paste into a real compose file
+      # would inherit the value. The fallback below is the documented
+      # placeholder; the operator MUST replace it with the output of
+      # `openssl rand -hex 32` before bringing the stack up.
+      JWT_SECRET_HEX: ${JWT_SECRET_HEX:-<GENERATE_WITH_openssl_rand_hex_32>}
     command: [
       "-listen", ":8080",
-      "-jwt-secret-hex", "${JWT_SECRET_HEX:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}",
+      "-jwt-secret-hex", "${JWT_SECRET_HEX:-<GENERATE_WITH_openssl_rand_hex_32>}",
       "-profiles", "/etc/geode-ui/profiles.json"
     ]
     volumes:
@@ -1694,7 +1700,9 @@ e2e:playwright:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
     GEODE_ADMIN_PASSWORD: geode-test-pw-12
-    JWT_SECRET_HEX: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    # SEC F-SUP-5 (#161): placeholder; the real CI value is injected
+    # from a CI variable. Never commit the literal secret.
+    JWT_SECRET_HEX: <GENERATE_WITH_openssl_rand_hex_32>
   script:
     # Bring up the test stack.
     - apk add --no-cache make git bash
