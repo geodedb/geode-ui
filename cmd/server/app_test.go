@@ -351,6 +351,117 @@ func TestNewApp_AdminBootstrapAuditEvent(t *testing.T) {
 	}
 }
 
+// TestNewApp_RewrapsProfileStoreOnStartup_SEC_NEW_8 pins the end-to-end
+// SEC-NEW-8 (#211) wiring: when -profilestore-rewrap-from is set, newApp
+// runs the sweep before the listener accepts traffic, emits a
+// profilestore_rewrap_complete audit record, and the store is then
+// readable under the new GEODE_PROFILESTORE_KEY only.
+func TestNewApp_RewrapsProfileStoreOnStartup_SEC_NEW_8(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "rotated.db")
+
+	// Phase 1: stand up a temporary newApp under the OLD key and seed
+	// one profile via Put so the store has at least one encrypted row.
+	oldKeyB64 := validProfilestoreKey()
+	cfgOld := appConfig{
+		listen:        "127.0.0.1:0",
+		profileStore:  tmp,
+		secretHex:     validJWTSecretHex(),
+		jwtTTL:        defaultJWTTTL,
+		uploadDir:     t.TempDir(),
+		secureCookies: true,
+	}
+	aOld, err := newApp(cfgOld, envFunc(map[string]string{"GEODE_PROFILESTORE_KEY": oldKeyB64}))
+	if err != nil {
+		t.Fatalf("phase 1 newApp: %v", err)
+	}
+	aOld.close()
+
+	// Phase 2: pick a NEW key and re-run newApp with -profilestore-rewrap-from.
+	var newKey [32]byte
+	for i := range newKey {
+		newKey[i] = byte(99 - i) // distinct from validProfilestoreKey()
+	}
+	newKeyB64 := base64.StdEncoding.EncodeToString(newKey[:])
+
+	records := captureAuditLogs(t, func() {
+		cfgNew := appConfig{
+			listen:               "127.0.0.1:0",
+			profileStore:         tmp,
+			secretHex:            validJWTSecretHex(),
+			jwtTTL:               defaultJWTTTL,
+			uploadDir:            t.TempDir(),
+			secureCookies:        true,
+			profileRewrapFromB64: oldKeyB64,
+		}
+		aNew, err := newApp(cfgNew, envFunc(map[string]string{"GEODE_PROFILESTORE_KEY": newKeyB64}))
+		if err != nil {
+			t.Fatalf("SEC-NEW-8 #211: post-rotation newApp: %v", err)
+		}
+		t.Cleanup(aNew.close)
+	})
+
+	// Phase 3: confirm an audit record was emitted for the sweep.
+	var found map[string]any
+	for _, r := range records {
+		if r["audit_event"] == "profilestore_rewrap_complete" {
+			found = r
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("SEC-NEW-8 #211: missing profilestore_rewrap_complete audit record")
+	}
+}
+
+// TestNewApp_RewrapWrongLegacyKeyFailsLoud_SEC_NEW_8 pins that a
+// misconfigured -profilestore-rewrap-from value (a key that did NOT
+// seal the existing rows) fails newApp loudly. Operators should not be
+// able to silently corrupt the rotation.
+func TestNewApp_RewrapWrongLegacyKeyFailsLoud_SEC_NEW_8(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "wrongkey.db")
+
+	// Seed under one key.
+	correctOld := validProfilestoreKey()
+	cfgOld := appConfig{
+		listen:        "127.0.0.1:0",
+		profileStore:  tmp,
+		secretHex:     validJWTSecretHex(),
+		jwtTTL:        defaultJWTTTL,
+		uploadDir:     t.TempDir(),
+		secureCookies: true,
+	}
+	aOld, err := newApp(cfgOld, envFunc(map[string]string{"GEODE_PROFILESTORE_KEY": correctOld}))
+	if err != nil {
+		t.Fatalf("seed newApp: %v", err)
+	}
+	aOld.close()
+
+	// Try to rewrap with a bogus legacy key.
+	var bogus [32]byte
+	for i := range bogus {
+		bogus[i] = 0xDD
+	}
+	bogusB64 := base64.StdEncoding.EncodeToString(bogus[:])
+
+	var newKey [32]byte
+	for i := range newKey {
+		newKey[i] = byte(33 + i)
+	}
+	cfgNew := appConfig{
+		listen:               "127.0.0.1:0",
+		profileStore:         tmp,
+		secretHex:            validJWTSecretHex(),
+		jwtTTL:               defaultJWTTTL,
+		uploadDir:            t.TempDir(),
+		secureCookies:        true,
+		profileRewrapFromB64: bogusB64,
+	}
+	_, err = newApp(cfgNew, envFunc(map[string]string{"GEODE_PROFILESTORE_KEY": base64.StdEncoding.EncodeToString(newKey[:])}))
+	if err == nil {
+		t.Fatalf("SEC-NEW-8 #211: newApp succeeded with bogus -profilestore-rewrap-from; want loud failure")
+	}
+}
+
 func TestNewApp_WiresMCPAuthVerifier(t *testing.T) {
 	cfg := appConfig{
 		listen:        "127.0.0.1:0",

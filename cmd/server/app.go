@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -46,18 +47,19 @@ const restWriteTimeout = 60 * time.Second
 // — newApp pulls those from its getenv argument so the value never sits
 // in a struct that might get logged.
 type appConfig struct {
-	listen            string
-	profilesFile      string
-	profileStore      string
-	secretHex         string
-	jwtTTL            time.Duration
-	adminUsers        string
-	uploadDir         string
-	secureCookies     bool
-	passwordHIBPCheck bool
-	profileCRUDRPS    float64
-	profileCRUDBurst  float64
-	trustProxyXFF     bool
+	listen               string
+	profilesFile         string
+	profileStore         string
+	secretHex            string
+	jwtTTL               time.Duration
+	adminUsers           string
+	uploadDir            string
+	secureCookies        bool
+	passwordHIBPCheck    bool
+	profileCRUDRPS       float64
+	profileCRUDBurst     float64
+	trustProxyXFF        bool
+	profileRewrapFromB64 string
 	// LSP bridge wiring (geode-ui platform LSP integration). The
 	// /ws/lsp WebSocket reverse-proxies to an upstream LSP TCP listener
 	// (geode serve --lsp-port). lspEnabled gates route registration so
@@ -96,6 +98,20 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	fs.StringVar(&cfg.uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
 	fs.BoolVar(&cfg.secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
 	fs.BoolVar(&cfg.passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and air-gap-friendly")
+	// SEC-NEW-8 (#211): one-shot startup sweep that re-seals every
+	// encrypted profile-store column under the active
+	// GEODE_PROFILESTORE_KEY after decrypting with the supplied
+	// LEGACY key (base64-encoded 32 bytes, same shape as the env
+	// var). Runs once after the store opens; the server then proceeds
+	// to listen normally. Operators rotate the key by:
+	//   1. snapshot the .db file
+	//   2. swap GEODE_PROFILESTORE_KEY to the new key
+	//   3. start the server once with -profilestore-rewrap-from <old>
+	//   4. confirm the startup log shows non-zero RowsTouched and zero
+	//      SkippedPlaintext
+	//   5. drop the flag on subsequent startups
+	// See docs/OPERATIONS.md#profile-store-key-rotation.
+	fs.StringVar(&cfg.profileRewrapFromB64, "profilestore-rewrap-from", "", "one-shot startup sweep: base64-encoded LEGACY 32-byte AES-256 key (see docs/OPERATIONS.md#profile-store-key-rotation); empty disables the sweep")
 	// Per-actor profile-CRUD rate limit (GAP-S7 #120). Production default
 	// is a deliberately tight 30 req/min (rps 0.5) / burst 10 — see
 	// server.ProfileLimiterDefaults(). Tunable here so heavy automated
@@ -273,6 +289,40 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		return nil, fmt.Errorf("profile store open: %w", err)
 	}
 	a.cleanups = append(a.cleanups, func() { _ = store.Close() })
+
+	// SEC-NEW-8 (#211): if -profilestore-rewrap-from <base64> was set,
+	// re-seal every encrypted column under the active GEODE_PROFILESTORE_KEY
+	// by decrypting first with the legacy key the operator supplied. The
+	// sweep is a one-shot — it runs once on startup and the operator drops
+	// the flag on the next restart.
+	if cfg.profileRewrapFromB64 != "" {
+		rewrapper, ok := store.(profilestore.Rewrapper)
+		if !ok {
+			return nil, fmt.Errorf("profile store rewrap: store backend does not support Rewrapper")
+		}
+		legacyKey, err := base64.StdEncoding.DecodeString(cfg.profileRewrapFromB64)
+		if err != nil {
+			return nil, fmt.Errorf("profile store rewrap: decode legacy key: %w", err)
+		}
+		legacyCipher, err := profilestore.NewCipherFromKey(legacyKey)
+		if err != nil {
+			return nil, fmt.Errorf("profile store rewrap: legacy cipher: %w", err)
+		}
+		res, err := rewrapper.RewrapSensitiveColumns(context.Background(), legacyCipher)
+		if err != nil {
+			return nil, fmt.Errorf("profile store rewrap: %w", err)
+		}
+		obsx.LogAudit("profilestore_rewrap_complete", map[string]any{
+			"rows_touched":      res.RowsTouched,
+			"seals_rewritten":   res.SealsRewritten,
+			"skipped_plaintext": res.SkippedPlaintext,
+		})
+		slog.Info("profilestore rewrap sweep complete",
+			"rows_touched", res.RowsTouched,
+			"seals_rewritten", res.SealsRewritten,
+			"skipped_plaintext", res.SkippedPlaintext,
+		)
+	}
 
 	// First-launch seed: if the store has zero profiles AND a -profiles
 	// JSON file was supplied, seed the store with the JSON contents as

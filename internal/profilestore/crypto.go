@@ -179,3 +179,48 @@ func (c *Cipher) Decrypt(ciphertext []byte) ([]byte, error) {
 func IsCiphertext(b []byte) bool {
 	return len(b) > 0 && b[0] == ciphertextSentinelV1
 }
+
+// Rewrap (SEC-NEW-8 / #211) re-encrypts a single sealed value under the
+// receiver's key. The input must be a v1 ciphertext produced by `prev`;
+// the output is a fresh v1 ciphertext produced by `c` (with a fresh
+// nonce). Used by the on-startup `-profilestore-rewrap-from <hex>` sweep
+// to migrate every sealed column from the legacy key to the active key
+// without forcing a full SQLite export/import round-trip.
+//
+// Rewrap is idempotent if `prev == c` (the input round-trips back to a
+// fresh nonce-randomised ciphertext of identical plaintext). Operators
+// using the rewrap sweep should re-run it after dropping the legacy key
+// to confirm no rows remain sealed under it (the second pass will hit
+// "decrypt: <gcm tag>" and abort, which is the desired fail-loud).
+//
+// Rewrap returns an error if prev or c is nil, prev.Decrypt fails on the
+// supplied bytes (including the "not ciphertext" case), or c.Encrypt
+// fails (only on crypto/rand exhaustion).
+func (c *Cipher) Rewrap(prev *Cipher, sealed []byte) ([]byte, error) {
+	if c == nil {
+		return nil, errors.New("profilestore: rewrap: receiver cipher is nil")
+	}
+	if prev == nil {
+		return nil, errors.New("profilestore: rewrap: prev cipher is nil")
+	}
+	if !IsCiphertext(sealed) {
+		return nil, fmt.Errorf(
+			"profilestore: rewrap: input is not v1 ciphertext (first byte %#x, want %#x)",
+			func() byte {
+				if len(sealed) == 0 {
+					return 0
+				}
+				return sealed[0]
+			}(), ciphertextSentinelV1,
+		)
+	}
+	plain, err := prev.Decrypt(sealed)
+	if err != nil {
+		return nil, fmt.Errorf("profilestore: rewrap: decrypt under prev: %w", err)
+	}
+	resealed, err := c.Encrypt(plain)
+	if err != nil {
+		return nil, fmt.Errorf("profilestore: rewrap: encrypt under new: %w", err)
+	}
+	return resealed, nil
+}

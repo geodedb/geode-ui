@@ -199,3 +199,114 @@ func TestCipher_DecryptRejectsNonCiphertext(t *testing.T) {
 		t.Errorf("Decrypt of sentinel-only input: want error, got nil")
 	}
 }
+
+// rawKey returns a deterministic 32-byte AES-256 key seeded by tag.
+func rawKey(tag byte) []byte {
+	k := make([]byte, cipherKeySize)
+	for i := range k {
+		k[i] = tag + byte(i)
+	}
+	return k
+}
+
+// TestCipher_Rewrap_RoundtripUnderNewKey_SEC_NEW_8 pins the core
+// SEC-NEW-8 (#211) contract: a value sealed under the legacy key can
+// be re-sealed under a fresh key and the result round-trips back to
+// the original plaintext via the new key only.
+func TestCipher_Rewrap_RoundtripUnderNewKey_SEC_NEW_8(t *testing.T) {
+	prev, err := NewCipherFromKey(rawKey('P'))
+	if err != nil {
+		t.Fatalf("prev cipher: %v", err)
+	}
+	curr, err := NewCipherFromKey(rawKey('C'))
+	if err != nil {
+		t.Fatalf("curr cipher: %v", err)
+	}
+
+	plain := []byte("quic://prod-east.geode.internal:3141 user=alice pw=hunter2")
+	sealed, err := prev.Encrypt(plain)
+	if err != nil {
+		t.Fatalf("prev.Encrypt: %v", err)
+	}
+
+	resealed, err := curr.Rewrap(prev, sealed)
+	if err != nil {
+		t.Fatalf("SEC-NEW-8 #211: Rewrap failed: %v", err)
+	}
+	if !IsCiphertext(resealed) {
+		t.Fatalf("SEC-NEW-8 #211: Rewrap output is not v1 ciphertext")
+	}
+	if bytes.Equal(sealed, resealed) {
+		t.Fatalf("SEC-NEW-8 #211: Rewrap returned the input verbatim — different ciphertext required (fresh nonce + key)")
+	}
+	// Round-trip via the new key.
+	got, err := curr.Decrypt(resealed)
+	if err != nil {
+		t.Fatalf("SEC-NEW-8 #211: Decrypt(resealed) under new key: %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatalf("SEC-NEW-8 #211: round-trip plaintext mismatch:\n got=%q\nwant=%q", got, plain)
+	}
+	// New ciphertext MUST NOT decrypt under the old key.
+	if _, err := prev.Decrypt(resealed); err == nil {
+		t.Fatalf("SEC-NEW-8 #211: resealed ciphertext still decrypts under previous key — rotation never completes")
+	}
+}
+
+// TestCipher_Rewrap_RejectsPlaintext pins that Rewrap fails loudly
+// when the input is not a v1 ciphertext. A migration sweep that calls
+// Rewrap on every column relies on this discipline to avoid masking
+// a legacy plaintext row as a successful re-seal.
+func TestCipher_Rewrap_RejectsPlaintext(t *testing.T) {
+	prev, _ := NewCipherFromKey(rawKey('P'))
+	curr, _ := NewCipherFromKey(rawKey('C'))
+
+	for _, bad := range [][]byte{
+		[]byte("quic://plaintext.example/dsn"),
+		[]byte("-----BEGIN CERTIFICATE-----"),
+		nil,
+		{},
+	} {
+		if _, err := curr.Rewrap(prev, bad); err == nil {
+			t.Fatalf("SEC-NEW-8 #211: Rewrap of plaintext %q should fail", bad)
+		}
+	}
+}
+
+// TestCipher_Rewrap_RejectsNilArgs pins the input contract.
+func TestCipher_Rewrap_RejectsNilArgs(t *testing.T) {
+	curr, _ := NewCipherFromKey(rawKey('C'))
+	plain := []byte("x")
+	sealed, _ := curr.Encrypt(plain)
+	if _, err := curr.Rewrap(nil, sealed); err == nil {
+		t.Fatalf("Rewrap with nil prev: want error")
+	}
+	var nilCipher *Cipher
+	if _, err := nilCipher.Rewrap(curr, sealed); err == nil {
+		t.Fatalf("Rewrap with nil receiver: want error")
+	}
+}
+
+// TestCipher_Rewrap_IdempotentWhenSameKey pins that Rewrap is a
+// nonce-randomising no-op when prev == c — useful for testing the
+// migration sweep against a deployment that hasn't actually rotated.
+func TestCipher_Rewrap_IdempotentWhenSameKey(t *testing.T) {
+	c, _ := NewCipherFromKey(rawKey('C'))
+	plain := []byte("idempotent")
+	sealed, _ := c.Encrypt(plain)
+	resealed, err := c.Rewrap(c, sealed)
+	if err != nil {
+		t.Fatalf("Rewrap(prev==c): %v", err)
+	}
+	if bytes.Equal(sealed, resealed) {
+		t.Fatalf("Rewrap(prev==c) returned bytes verbatim — should produce a fresh nonce")
+	}
+	got, err := c.Decrypt(resealed)
+	if err != nil {
+		t.Fatalf("Decrypt(idempotent resealed): %v", err)
+	}
+	if !bytes.Equal(got, plain) {
+		t.Fatalf("idempotent Rewrap plaintext mismatch")
+	}
+	_ = rand.Reader // appease unused import
+}
