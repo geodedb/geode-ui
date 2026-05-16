@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"geodedb.com/geode-ui/gen/pkg/securex"
 )
 
 // AuthCookieName is the name of the HttpOnly + SameSite=Strict cookie
@@ -56,19 +58,28 @@ func (s *GraphServer) AuthJWT(r *http.Request) error {
 	ctx = context.WithValue(ctx, cidCtxKey, claims.ConnectionID)
 	src := sourceForRequest(r)
 	ctx = context.WithValue(ctx, authSourceCtxKey, src)
+	// S-NEW-3 (genapi v0.3.2): stash a *securex.Claims on the context
+	// so the generated per-route authz middleware reads pre-validated
+	// claims directly via securex.ClaimsFromContext instead of
+	// re-parsing the Authorization header. The geode jwt.Claims has
+	// no scopes field — leave Scopes empty. Profile + ConnectionID are
+	// forwarded into Attributes so a future required_attributes policy
+	// can gate on them without a separate registry lookup.
+	ctx = securex.ContextWithClaims(ctx, &securex.Claims{
+		Subject: claims.Subject,
+		Roles:   append([]string(nil), claims.Roles...),
+		Attributes: map[string]string{
+			"profile": claims.Profile,
+			"cid":     claims.ConnectionID,
+		},
+	})
 	*r = *r.WithContext(ctx)
-	// The genapi-emitted per-route middleware (gen/api/handlers_gen.go)
-	// re-parses claims out of `Authorization: Bearer ...` to enforce
-	// `required_roles` — it doesn't read the AuthJWT-populated context.
-	// When the token arrived via cookie or query string the header is
-	// empty and that re-parse fails with 401, blocking every admin
-	// endpoint. Since the token has already been validated here, set
-	// the header so the downstream re-parse succeeds. This is a
-	// targeted shim for SEC-F7 cookie-mode; the structural fix is to
-	// have genapi consume the context, tracked as a follow-up issue.
-	if src != authSourceHeader {
-		r.Header.Set("Authorization", "Bearer "+tok)
-	}
+	// PRE-v0.3.2: the genapi-emitted per-route middleware re-parsed
+	// Authorization: Bearer to enforce required_roles, so AuthJWT had
+	// to re-set the header for cookie/query-mode requests. POST-v0.3.2
+	// the template prefers securex.ClaimsFromContext(r.Context()) and
+	// only falls back to ParseClaims if the ctx is empty, so the
+	// header shim is redundant. Removed (S-NEW-3 closed).
 	return nil
 }
 
