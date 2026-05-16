@@ -1,5 +1,12 @@
 # Multi-Pane Query Workspace + Homepage Dashboard — Implementation Plan
 
+> **Status: SHIPPED 2026-05-12.** GAP-027 closure note (2026-05-16): the
+> 64 `- [ ]` checkboxes below are retained as historical notes of the
+> implementation steps. The work shipped across commits `a90cb62`,
+> `c07668b`, `b614d20`, `ce40930`, and `a4a787b`. Subsequent perf/quality
+> closures (PERF #237 dashboard graph-stats cache, PERF #213 pane
+> visibility-gating) build on this delivery.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add (Part A) a multi-pane query workspace at a new `/workspace` route — 2–4 independent editor+result panes tiled side-by-side, each with its own WebSocket stream and result tabs — and (Part B) a homepage overview dashboard at a new `/dashboard` route — summary cards for the graph list, recent queries, and connection/capabilities status. This is Phases 4 & 5 of the broader Geode-Dashboard-integration effort (`docs/superpowers/plans/2026-05-12-geode-dashboard-integration.md`), now planned in detail with the design decisions settled.
