@@ -92,7 +92,9 @@ test.describe('@mobile @responsive data-view UX on mobile viewports', () => {
     // The three groups exist (may scroll horizontally inside the toolbar).
     await expect(page.getByTestId('graph-toolbar-group-view')).toBeAttached()
     await expect(page.getByTestId('graph-toolbar-group-filters')).toBeAttached()
-    await expect(page.getByTestId('graph-toolbar-group-analysis')).toBeAttached()
+    await expect(
+      page.getByTestId('graph-toolbar-group-analysis')
+    ).toBeAttached()
     // The More dropdown trigger is reachable. The wa-dropdown host
     // itself has no visible bounding box (it's display:inline with no
     // intrinsic size); the visible click target is the slot=trigger
@@ -198,7 +200,9 @@ test.describe('@mobile @responsive data-view UX on mobile viewports', () => {
     expect(canvasBox).not.toBeNull()
     expect(sidebarBox).not.toBeNull()
     if (canvasBox && sidebarBox) {
-      expect(sidebarBox.y).toBeGreaterThanOrEqual(canvasBox.y + canvasBox.height - 4)
+      expect(sidebarBox.y).toBeGreaterThanOrEqual(
+        canvasBox.y + canvasBox.height - 4
+      )
     }
   })
 
@@ -298,9 +302,7 @@ test.describe('@mobile @responsive data-view UX on mobile viewports', () => {
         // visible width (8 px tolerance for sub-pixel rounding + the
         // Group's 1 px border-right + the toolbar's inner padding).
         // Otherwise it sits behind the overflow scrollbar.
-        expect(box.x + box.width).toBeLessThanOrEqual(
-          tbBox.x + tbBox.width + 8
-        )
+        expect(box.x + box.width).toBeLessThanOrEqual(tbBox.x + tbBox.width + 8)
       }
     }, Promise.resolve())
     // And the document itself must NOT have a horizontal scrollbar.

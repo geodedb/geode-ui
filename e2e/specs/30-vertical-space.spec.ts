@@ -28,9 +28,11 @@ test.describe('inline result panel fills the viewport', () => {
     // editor + Bar + tabs); growing past 450 px proves the legacy
     // 720 px cap and 480 px default were removed and the table now
     // flexes to the available space.
-    await expect.poll(async () => (await grid.boundingBox())?.height ?? 0, {
-      timeout: 5_000,
-    }).toBeGreaterThan(450)
+    await expect
+      .poll(async () => (await grid.boundingBox())?.height ?? 0, {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(450)
   })
 
   test('graph view fills available vertical space without fullscreen', async ({
