@@ -43,8 +43,11 @@ test.describe('graph view sidebar responsiveness', () => {
     await expect.poll(() => pageOverflows(page)).toBe(false)
 
     // Collapse — the sidebar is unmounted, canvas claims the full width.
-    // The sidebar toggle migrated to a wa-dropdown-item carrying
-    // aria-checked (not aria-pressed) under Task 2.2.
+    // The sidebar toggle migrated to a wa-dropdown-item under Task 2.2.
+    // The item lives inside the More dropdown's hidden panel; open the
+    // dropdown first so the item is visible, then click. Re-open before
+    // each subsequent click since the dropdown auto-closes on select.
+    await sel.graphToolbarMore(page).click()
     await sel.graphSidebarToggle(page).click()
     await expect(sel.graphSidebarToggle(page)).toHaveAttribute(
       'aria-checked',
@@ -53,6 +56,7 @@ test.describe('graph view sidebar responsiveness', () => {
     await expect(sel.graphSidebar(page)).toHaveCount(0)
 
     // Re-expand — the sidebar comes back and must fit beside the canvas.
+    await sel.graphToolbarMore(page).click()
     await sel.graphSidebarToggle(page).click()
     await expect(sel.graphSidebar(page)).toBeVisible()
     await expect(sel.graphDisplayControls(page)).toBeVisible()

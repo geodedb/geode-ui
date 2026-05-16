@@ -155,10 +155,9 @@ test.describe('graph power features', () => {
   test('find-node input picks a match on Enter', async ({
     authedPage: page,
   }) => {
-    // FindNodeInput is now a <wa-input data-testid="graph-find-input">.
-    // .fill()/.press() must target the real <input> inside its shadow
-    // DOM — Playwright pierces shadow roots when chaining a locator.
-    const input = page.getByTestId('graph-find-input').locator('input')
+    // graph-find-input is a <wa-input>; use the selector helper that
+    // chains to the shadow-DOM <input> for .fill()/.press().
+    const input = sel.graphFindInput(page)
     await input.fill('Movie')
     await expect(page.getByTestId('graph-find-count')).toContainText(/\d/)
     await input.press('Enter')
@@ -168,7 +167,12 @@ test.describe('graph power features', () => {
   test('lasso toggle enables lasso selection mode', async ({
     authedPage: page,
   }) => {
+    // The lasso item lives inside the More overflow dropdown; open the
+    // trigger first so the dropdown item is visible and clickable.
+    await sel.graphToolbarMore(page).click()
     await page.getByTestId('graph-more-lasso').click()
+    // Re-open to read the updated aria-checked state.
+    await sel.graphToolbarMore(page).click()
     await expect(page.getByTestId('graph-more-lasso')).toHaveAttribute(
       'aria-checked',
       'true'
@@ -203,17 +207,27 @@ test.describe('graph power features', () => {
   test('HTML-node toggle flips the sticky pref', async ({
     authedPage: page,
   }) => {
+    // The DOM-nodes item lives inside the More overflow dropdown; open
+    // the trigger first so the dropdown item is visible.
+    await sel.graphToolbarMore(page).click()
     const toggle = page.getByTestId('graph-more-domnodes')
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
     await toggle.click()
+    // Re-open to read the updated state.
+    await sel.graphToolbarMore(page).click()
     await expect(toggle).toHaveAttribute('aria-checked', 'true')
   })
 
   test('mini-map toggle renders ONE panel inside the canvas wrapper (no body leak)', async ({
     authedPage: page,
   }) => {
+    // The minimap item lives inside the More overflow dropdown; open the
+    // trigger first so the item is visible.
     // Default off → toggle on.
+    await sel.graphToolbarMore(page).click()
     await page.getByTestId('graph-more-minimap').click()
+    // Re-open to read the updated state.
+    await sel.graphToolbarMore(page).click()
     await expect(page.getByTestId('graph-more-minimap')).toHaveAttribute(
       'aria-checked',
       'true'

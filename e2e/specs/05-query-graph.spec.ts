@@ -42,11 +42,18 @@ test.describe('query (graph view)', () => {
 
     // Sidebar is expanded by default — the display-controls block shows.
     await expect(page.getByTestId('graph-display-controls')).toBeVisible()
+
+    // The sidebar toggle lives inside the More overflow dropdown.
+    // Open the trigger first so the dropdown item becomes visible.
+    await sel.graphToolbarMore(page).click()
     const toggle = page.getByTestId('graph-more-sidebar')
+    await expect(toggle).toBeVisible()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
 
     // Collapse — the sidebar and its control blocks are removed.
+    // The dropdown auto-closes on click, so re-open to verify state.
     await toggle.click()
+    await sel.graphToolbarMore(page).click()
     await expect(page.getByTestId('graph-more-sidebar')).toHaveAttribute(
       'aria-checked',
       'true'
@@ -55,7 +62,8 @@ test.describe('query (graph view)', () => {
     // The canvas is still mounted.
     await expect(sel.graphCanvas(page).first()).toBeVisible()
 
-    // Expand again — the controls come back.
+    // Expand again — the dropdown is still open from the re-open above;
+    // click the item directly to toggle back on.
     await page.getByTestId('graph-more-sidebar').click()
     await expect(page.getByTestId('graph-display-controls')).toBeVisible()
   })
@@ -154,13 +162,16 @@ test.describe('query (graph view)', () => {
     await sel.queryTabGraph(page).click()
     await expect(sel.graphCanvas(page).first()).toBeVisible()
 
-    // The toolbar Find input is the deterministic way to select a node
-    // from Playwright (the canvas itself isn't reliably clickable in
-    // headless Chromium). Search for a person name known to exist in the
-    // seeded movies graph; press Enter to select the first match.
-    const findInput = page.getByTestId('graph-find-input')
+    // graph-find-input is a <wa-input> custom element; use the
+    // selector helper that chains to the shadow-DOM <input>.
+    // Search for 'Movie' — every graph result set has Movie nodes, so
+    // there is always at least one match regardless of LIMIT ordering.
+    const findInput = sel.graphFindInput(page)
     await expect(findInput).toBeVisible()
-    await findInput.fill('Tom')
+    await findInput.fill('Movie')
+    // Wait for the match count to update before pressing Enter so the
+    // onKey handler has matches in its closure to dispatch to onPick.
+    await expect(page.getByTestId('graph-find-count')).toContainText(/\d+/)
     await findInput.press('Enter')
 
     // Structured property view is the default; the raw-JSON pane is not.
