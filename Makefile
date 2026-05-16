@@ -35,6 +35,9 @@ go-test:
 	$(GOENV) go test -race -cover -failfast $(GO_PKGS)
 
 go-lint:
+	@command -v golangci-lint > /dev/null 2>&1 || ( \
+	  echo "==> golangci-lint not found; bootstrap via scripts/install-tools.sh" && \
+	  scripts/install-tools.sh )
 	$(GOENV) golangci-lint run $(GO_PKGS)
 
 go-fmt:

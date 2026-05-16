@@ -1,0 +1,109 @@
+# QUALITY #46 / GAP-018: pinned golangci-lint config.
+#
+# This is the canonical Go lint config — the same set of linters runs
+# locally (`make go-lint`) and in CI (.gitlab-ci.yml `go:lint`). Pinned
+# to golangci-lint@v2.12.2 via `scripts/install-tools.sh`; bump
+# deliberately in lock-step with CI.
+#
+# Linter selection rationale:
+#
+# - gocognit / gocyclo: cognitive + cyclomatic complexity caps. Mirror
+#   the planner spec; defaults are slightly relaxed because the codebase
+#   carries a few legitimately-complex switch statements (queryStream
+#   reducer, secure middleware) that aren't worth refactoring today.
+# - nestif: deep `if` nesting cap. Catches the same antipattern as
+#   gocyclo from a different angle.
+# - dupl: code-duplication detector. Mostly catches table-driven test
+#   helpers; the token threshold is high enough that legitimate
+#   parallel test cases are not flagged.
+# - revive: replacement for the (deprecated) golint with configurable
+#   rules. Stays out of the way unless a rule fires.
+#
+# When this file is in place, `make go-lint` runs the same gate locally
+# as CI does. Without it, golangci-lint runs with empty defaults and
+# nearly every linter is opt-in by name.
+
+version: '2'
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+  - errcheck
+  - govet
+  - ineffassign
+  - staticcheck
+  - unused
+  - gocognit
+  - gocyclo
+  - nestif
+  - dupl
+  - revive
+  settings:
+    gocognit:
+      # Default 30 is too tight for the streaming-reducer + secure
+      # middleware. 50 leaves headroom for legitimately complex
+      # state machines (PatchUsername sits at 45). Ratchet down
+      # in a follow-up once the worst offenders are refactored.
+      min-complexity: 50
+    gocyclo:
+      # Default 30. Same rationale as gocognit.
+      min-complexity: 30
+    nestif:
+      # Default 5; raise to 6 so reducer state-machine switches don't
+      # blow the budget on their first arm.
+      min-complexity: 6
+    dupl:
+      # Default 150 tokens. Raise to 200 so genapi-emitted table-driven
+      # test boilerplate doesn't flood the report.
+      threshold: 200
+    revive:
+      # Start with a tight subset that already passes on the current
+      # codebase (CIS / quality-gate goal: ratchet up cleanly, not
+      # fail the first run). The full revive default pack covers
+      # many style-only rules (exported comment requirement,
+      # var-naming for ws-go-style acronyms, unused-parameter) that
+      # would generate dozens of pre-existing findings — those are
+      # captured in QUALITY follow-ups and turned on per linter
+      # in subsequent commits.
+      severity: warning
+      rules:
+      - name: context-keys-type
+      - name: dot-imports
+      - name: empty-block
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: errorf
+      - name: indent-error-flow
+      - name: range
+      - name: receiver-naming
+      - name: redefines-builtin-id
+      - name: superfluous-else
+      - name: time-naming
+      - name: unreachable-code
+      - name: var-declaration
+  exclusions:
+    # Test files run looser style/complexity rules — table-driven
+    # cases hit dupl/gocyclo regularly and the noise drowns out real
+    # signal in the report.
+    rules:
+    - path: _test\.go
+      linters:
+      - dupl
+      - gocognit
+      - gocyclo
+      - nestif
+      - revive
+      # gen/ is genapi output — formatted by the generator, not by us.
+    - path: ^gen/
+      linters:
+      - dupl
+      - gocognit
+      - gocyclo
+      - nestif
+      - revive
+      - unused
