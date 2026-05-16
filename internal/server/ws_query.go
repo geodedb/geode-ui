@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"geodedb.com/geode-ui/gen/pkg/wsx"
@@ -219,15 +220,14 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 		stmt = "USE GRAPH " + sanitizeGraphName(first.Graph) + "; " + stmt
 	}
 
-	// Spawn the cancel-reader: it watches for {kind:"cancel"}, a read
-	// error, EOF, or a close frame and cancels the query context so
-	// db.QueryContext aborts promptly. Closing done on return makes the
-	// coordinator goroutine exit without waiting for the next frame.
-	done := make(chan struct{})
-	defer close(done)
-	// production ignores the returned exited channel; the cancel-reader
-	// coordinator's teardown is observable in tests via onCancelReaderExit.
-	s.startCancelReader(conn, cancel, done)
+	// Spawn the single cancel-reader goroutine (PERF #218): it watches
+	// for {kind:"cancel"}, a read error, EOF, or a close frame and
+	// cancels the query context so db.QueryContext aborts promptly.
+	// On graceful return Query MUST call cr.Shutdown(conn) so the
+	// parked ReadMessage wakes up; otherwise the reader would sit on
+	// the 30s read deadline before noticing shutdown.
+	cr := s.startCancelReader(conn, cancel)
+	defer cr.Shutdown(conn)
 
 	args, err := mapToNamedArgs(first.Params)
 	if err != nil {
@@ -274,13 +274,6 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 	return writeMsg(conn, queryStreamMsg{Kind: "end"})
 }
 
-// readResult is the cancel-reader's relay payload: one decoded message
-// (or the read error that ended the stream).
-type readResult struct {
-	msg queryStreamMsg
-	err error
-}
-
 // errStreamAborted is the sentinel streamRowsOverWS returns after it has
 // already emitted a terminal frame ("scan" / "canceled" / "query_error")
 // to the client. Query treats any non-nil return from streamRowsOverWS as
@@ -289,64 +282,88 @@ type readResult struct {
 // without leaking it onto the wire.
 var errStreamAborted = errors.New("ws: stream aborted (terminal frame already sent)")
 
-// startCancelReader spawns the goroutine that watches the inbound side
+// cancelReader holds the per-session state for the single
+// cancel-reader goroutine (PERF #218). The prior implementation used
+// two goroutines per /ws/query session (coordinator + relay) which
+// allocated a channel and a struct per session. This struct is owned
+// by Query and lives on its stack: zero heap allocations per session
+// beyond the single goroutine itself.
+type cancelReader struct {
+	// shutdown flips from 0 -> 1 exactly once when Shutdown() is called
+	// by the handler's defer chain. The reader goroutine consults it on
+	// every readMsg return to discriminate caller-initiated shutdown
+	// (poison-deadline wakeup) from genuine peer error.
+	shutdown atomic.Bool
+	exited   chan struct{}
+}
+
+// startCancelReader spawns ONE goroutine that watches the inbound side
 // of a /ws/query connection and cancels the query context on the first
 // {kind:"cancel"} message, read error, EOF, or close frame.
 //
-// Lifetime: the caller MUST `defer close(done)` so this returns on the
-// happy path instead of blocking on the next readMsg until the framework
-// tears the conn down. The coordinator goroutine selects between the
-// relayed read result and <-done; once done closes it returns without
-// touching conn (waking on <-done after the conn has been closed is fine
-// — it just returns). cancel() is still called by Query's own defer
-// regardless, so closing done here races nothing.
-//
-// A bounded inner relay goroutine performs the blocking readMsg; it too
-// exits on <-done or on the first read error. It may briefly outlive the
-// handler while parked in readMsg, but it shares no mutable state with
-// the rest of Query and the conn lifetime bounds it.
-//
-// The returned exited channel is closed by the coordinator goroutine
-// when it has fully returned; production ignores it, tests assert on it.
-func (s *WSServer) startCancelReader(conn *wsx.Conn, cancel context.CancelFunc, done <-chan struct{}) <-chan struct{} {
-	exited := make(chan struct{})
+// PERF #218: the prior version spawned two goroutines per /ws/query
+// session (a coordinator that selected on <-done and a bounded relay
+// that blocked in readMsg), so 1000 concurrent sessions cost 2000
+// goroutines plus per-session channel allocations. We collapse both
+// into ONE goroutine using the per-read deadline that
+// wsx.Conn.ReadMessage already applies on each call (see
+// gen/pkg/wsx/ws.go). When the handler defers Shutdown(), the read
+// deadline on the underlying net.Conn is pushed into the past, the
+// parked ReadMessage returns immediately with a deadline-exceeded
+// error, and the reader sees shutdown=true and exits without calling
+// cancel() (cancel() is already deferred by Query on the happy path).
+func (s *WSServer) startCancelReader(conn *wsx.Conn, cancel context.CancelFunc) *cancelReader {
+	cr := &cancelReader{exited: make(chan struct{})}
 	go func() {
-		defer close(exited)
+		defer close(cr.exited)
 		if s.onCancelReaderExit != nil {
 			defer s.onCancelReaderExit()
 		}
-		msgs := make(chan readResult, 1)
-		go func() {
-			for {
-				m, err := readMsg(conn)
-				select {
-				case msgs <- readResult{msg: m, err: err}:
-				case <-done:
-					return
-				}
-				if err != nil {
-					return
-				}
-			}
-		}()
 		for {
-			select {
-			case <-done:
+			m, err := readMsg(conn)
+			// Check shutdown FIRST so a deadline-poison wakeup driven
+			// by cr.Shutdown(conn) is recognised as graceful shutdown
+			// rather than a spurious error/cancel.
+			if cr.shutdown.Load() {
 				return
-			case r := <-msgs:
-				if r.err != nil {
-					cancel()
-					return
-				}
-				if r.msg.Kind == "cancel" {
-					cancel()
-					return
-				}
+			}
+			if err != nil {
+				cancel()
+				return
+			}
+			if m.Kind == "cancel" {
+				cancel()
+				return
 			}
 		}
 	}()
-	return exited
+	return cr
 }
+
+// Shutdown signals the cancel-reader goroutine to exit promptly. It is
+// safe to call multiple times. The implementation flips shutdown=true
+// then pushes the read deadline on conn's underlying net.Conn into the
+// past so the parked ReadMessage returns immediately. Safe to call on
+// nil conn or on a conn whose NetConn is nil (test pipes).
+func (cr *cancelReader) Shutdown(conn *wsx.Conn) {
+	cr.shutdown.Store(true)
+	if conn == nil {
+		return
+	}
+	nc := conn.NetConn()
+	if nc == nil {
+		return
+	}
+	// time.Unix(1, 0) is strictly in the past; using a non-zero value
+	// avoids the "zero time = no deadline" interpretation some net.Conn
+	// implementations apply, while still firing the deadline immediately.
+	_ = nc.SetReadDeadline(time.Unix(1, 0))
+}
+
+// Exited returns a channel that closes when the cancel-reader
+// goroutine has fully returned. Production ignores it; tests assert
+// on it.
+func (cr *cancelReader) Exited() <-chan struct{} { return cr.exited }
 
 // streamRowsOverWS drives the rows cursor: it scans each row into a fresh
 // []any (so the batcher may hold rows until its next flush), feeds the

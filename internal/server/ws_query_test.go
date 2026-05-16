@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -202,14 +203,14 @@ func TestMapToNamedArgs_Values(t *testing.T) {
 	}
 }
 
-// TestStartCancelReader_ExitsOnDone is the Q40 (#151) regression guard:
-// the cancel-reader coordinator goroutine must return promptly once the
-// handler signals done (Query's `defer close(done)`), instead of staying
-// parked in readMsg until the framework tears the conn down. We assert
-// the coordinator's exit hook fires within a short timeout after done is
-// closed, without ever sending it a frame. Run under -race this also
-// catches a double-close of done or a panic on conn-already-closed.
-func TestStartCancelReader_ExitsOnDone(t *testing.T) {
+// TestStartCancelReader_ExitsOnShutdown is the Q40 (#151) regression
+// guard, ported to the PERF #218 single-goroutine API: the cancel-reader
+// must return promptly once the handler invokes cr.Shutdown(conn),
+// instead of staying parked in readMsg until the 30s wsx read deadline
+// fires. We assert the exit hook runs within a short timeout after
+// Shutdown returns. Run under -race this also catches a double-shutdown
+// or a panic on conn-already-closed.
+func TestStartCancelReader_ExitsOnShutdown(t *testing.T) {
 	a, b := net.Pipe()
 	defer func() { _ = a.Close() }()
 	conn := wsx.NewConn(b, wsx.Options{MaxFrame: 4096, MaxMessage: 4096})
@@ -221,27 +222,25 @@ func TestStartCancelReader_ExitsOnDone(t *testing.T) {
 	wg.Add(1)
 	s := &WSServer{onCancelReaderExit: wg.Done}
 
-	done := make(chan struct{})
-	exited := s.startCancelReader(conn, cancel, done)
+	cr := s.startCancelReader(conn, cancel)
 
-	// Happy path: the handler returns -> done is closed. The coordinator
-	// must exit even though no frame ever arrived on the conn.
-	close(done)
+	// Happy path: the handler returns -> Shutdown is called via defer.
+	// The single reader goroutine must exit even though no frame ever
+	// arrived on the conn.
+	cr.Shutdown(conn)
 
 	exitDone := make(chan struct{})
 	go func() { wg.Wait(); close(exitDone) }()
 	select {
 	case <-exitDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("cancel-reader coordinator did not exit within 2s of done being closed")
+		t.Fatal("cancel-reader did not exit within 2s of Shutdown")
 	}
 	select {
-	case <-exited:
+	case <-cr.Exited():
 	case <-time.After(time.Second):
-		t.Fatal("startCancelReader exited channel not closed after coordinator returned")
+		t.Fatal("cancel-reader Exited() channel not closed after reader returned")
 	}
-	// Closing the conn lets the bounded inner relay goroutine (parked in
-	// readMsg) unwind too, so -race's leak/teardown checks stay clean.
 	_ = conn.Close()
 }
 
@@ -255,11 +254,10 @@ func TestStartCancelReader_CancelsOnError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &WSServer{}
-	done := make(chan struct{})
-	defer close(done)
-	s.startCancelReader(conn, cancel, done)
+	cr := s.startCancelReader(conn, cancel)
+	defer cr.Shutdown(conn)
 
-	// Drop the peer: readMsg returns an error, the coordinator must call
+	// Drop the peer: readMsg returns an error, the reader must call
 	// cancel().
 	_ = a.Close()
 	select {
@@ -268,6 +266,41 @@ func TestStartCancelReader_CancelsOnError(t *testing.T) {
 		t.Fatal("cancel-reader did not cancel ctx after peer dropped")
 	}
 	_ = conn.Close()
+}
+
+// TestStartCancelReader_GoroutineCount is the PERF #218 acceptance test:
+// the single-goroutine refactor must spawn exactly ONE goroutine per
+// session (the reader itself). We measure runtime.NumGoroutine() before
+// and after starting a session and assert the delta is exactly 1. Under
+// the prior implementation this delta was 2 (coordinator + relay).
+func TestStartCancelReader_GoroutineCount(t *testing.T) {
+	a, b := net.Pipe()
+	defer func() { _ = a.Close() }()
+	conn := wsx.NewConn(b, wsx.Options{MaxFrame: 4096, MaxMessage: 4096})
+
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &WSServer{}
+
+	// Stabilise: let any background goroutines settle.
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+	before := runtime.NumGoroutine()
+
+	cr := s.startCancelReader(conn, cancel)
+	defer func() {
+		cr.Shutdown(conn)
+		<-cr.Exited()
+		_ = conn.Close()
+	}()
+
+	// Give the reader goroutine time to be scheduled and park in readMsg.
+	time.Sleep(20 * time.Millisecond)
+	after := runtime.NumGoroutine()
+	delta := after - before
+	if delta > 1 {
+		t.Fatalf("cancel-reader spawned delta=%d goroutines; want exactly 1 (PERF #218)", delta)
+	}
 }
 
 // TestReadMsg_OpcodeConstants is a behavioral guard — it documents which opcodes
