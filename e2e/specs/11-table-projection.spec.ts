@@ -47,15 +47,27 @@ test.describe('table column projection', () => {
     await sel.queryRunBtn(page).click()
     await expect(page.getByText(/\d+ rows?/)).toBeVisible({ timeout: 10_000 })
 
-    // Toggle Expand off.
-    await page.getByRole('checkbox', { name: /Expand graph cells/i }).uncheck()
+    // Toggle Expand off — the control moved to the Options dropdown
+    // (wa-dropdown-item data-testid="query-options-expand"). The
+    // queryOptionsTrigger selector targets the wa-dropdown HOST which
+    // may have no bounding box; use the inner wa-button[slot="trigger"]
+    // via role=button to open the panel.
+    await sel
+      .queryOptionsTrigger(page)
+      .locator('wa-button[slot="trigger"]')
+      .click()
+    await sel.queryOptionsExpand(page).click()
 
     // Compact mode: a single column "n" with the chip cell inside.
     await expect(page.getByRole('columnheader', { name: /^n\b/ })).toBeVisible()
     await expect(page.getByText(':Person', { exact: true })).toBeVisible()
 
-    // Re-enable for the next assertion: projected headers come back.
-    await page.getByRole('checkbox', { name: /Expand graph cells/i }).check()
+    // Re-enable — open trigger again, click the item, projected headers come back.
+    await sel
+      .queryOptionsTrigger(page)
+      .locator('wa-button[slot="trigger"]')
+      .click()
+    await sel.queryOptionsExpand(page).click()
     await expect(
       page.getByRole('columnheader', { name: /n\.name/ })
     ).toBeVisible()
