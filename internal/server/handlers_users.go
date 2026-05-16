@@ -665,8 +665,15 @@ func permissionFromRow(cols []string, row []any) gentypes.Permission {
 
 // driftSeen deduplicates the per-(statement,column) drift warning so a
 // large result set does not spam the log with one line per row.
+//
+// PERF #221: the dedupe is overwhelmingly a read-mostly path — the
+// first occurrence of a (stmt, col) pair writes once and every
+// subsequent observation hits the existing-entry branch and reads
+// only. Switch to sync.RWMutex so concurrent observers on already-
+// seen keys take RLock() and proceed in parallel; only the cold
+// "first sighting" path takes Lock().
 var driftSeen = struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
 	set map[string]struct{}
 }{set: map[string]struct{}{}}
 
@@ -675,8 +682,24 @@ var driftSeen = struct {
 // not map. The data for that column is dropped from the typed response;
 // the warning is the signal to extend the projection (and the geode.json
 // schema) when the upstream Geode catalogue grows.
+//
+// PERF #221: hot path takes RLock() on existing entries. The "first
+// sighting" path takes Lock() and re-checks the set under the write
+// lock so a racing pair of first-sightings does not double-log.
 func warnRowDrift(stmt, col string) {
 	key := stmt + "\x00" + col
+
+	// Read-mostly fast path: already-seen entries return immediately.
+	driftSeen.mu.RLock()
+	if _, ok := driftSeen.set[key]; ok {
+		driftSeen.mu.RUnlock()
+		return
+	}
+	driftSeen.mu.RUnlock()
+
+	// Cold path: first sighting. Take the write lock + re-check (a
+	// concurrent caller may have inserted between our RUnlock and
+	// Lock; if so, drop the duplicate log line).
 	driftSeen.mu.Lock()
 	if _, ok := driftSeen.set[key]; ok {
 		driftSeen.mu.Unlock()
