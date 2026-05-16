@@ -39,7 +39,12 @@ export const GraphToolbarMore: React.FC<GraphToolbarMoreProps> = ({
   onToggleSidebar,
 }) => (
   <Dropdown data-testid="graph-toolbar-more" placement="bottom-end">
-    <wa-button slot="trigger" appearance="outlined" size="s">
+    <wa-button
+      slot="trigger"
+      appearance="outlined"
+      size="s"
+      data-testid="graph-toolbar-more-trigger"
+    >
       {t('graph.moreLabel')}
     </wa-button>
     <DropdownItem

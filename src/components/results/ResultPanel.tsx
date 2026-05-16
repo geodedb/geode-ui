@@ -72,11 +72,22 @@ const TabsRow = styled.div`
 // MaximizeBtnRow is a separate row that floats the toggle to the
 // right above the tab strip (the previous design placed it as a
 // sibling of <wa-tab-group> in a single row; with tab-group as
-// flex: 1 1 0 the toggle would have stretched the tab strip).
+// flex: 1 1 0 the toggle would have stretched the tab strip). At
+// mobile widths the dedicated row wastes ~48 px of vertical chrome
+// for a control that has limited value on touch — the page's flex
+// chain already fills the viewport, and a fullscreen overlay buys
+// the user almost nothing on a 375 px phone. Hide the row below md
+// so the tab strip + result body get those pixels back. The toggle
+// remains in the DOM at desktop widths; mobile users who genuinely
+// need fullscreen can rotate to landscape and exceed the breakpoint.
 const MaximizeBtnRow = styled.div`
   display: flex;
   justify-content: flex-end;
   margin-bottom: -${({ theme }) => theme.spacing.xs};
+
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    display: none;
+  }
 `
 
 export const ResultPanel: React.FC<ResultPanelProps> = ({

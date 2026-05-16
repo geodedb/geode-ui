@@ -38,13 +38,24 @@ export const CanvasArea = styled.div`
 
 // Canvas renders the Cytoscape <canvas> host. Always flexes to fill
 // its CanvasArea parent; the cytoscape ResizeObserver re-fits the graph
-// on container resize.
+// on container resize. At mobile widths the Wrap collapses to a single
+// grid column (CanvasArea stacks above Sidebar with auto rows), so the
+// flex chain loses its positive parent height — without a hard mobile
+// min-height the canvas would collapse to 0 px and the graph would be
+// invisible behind the toolbar. The min-height: 60vh floor keeps the
+// canvas usable at mobile widths and reverts to pure flex-fill above
+// the md breakpoint where the side-by-side grid provides height
+// through its parent flex chain.
 export const Canvas = styled.div`
   flex: 1 1 auto;
   min-height: 0;
   border: 1px solid ${({ theme }) => theme.border.subtle};
   border-radius: ${({ theme }) => theme.radii.md};
   background: ${({ theme }) => theme.bg.graphCanvas};
+
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    min-height: 60vh;
+  }
 `
 
 // Path-mode status line — shown under the toolbar while path mode is

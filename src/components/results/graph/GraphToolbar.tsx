@@ -37,6 +37,17 @@ const Toolbar = styled.div`
     color: ${({ theme }) => theme.text.muted};
     white-space: nowrap;
   }
+
+  /* At mobile widths the single-row layout pushes the Filters /
+     Analysis / More clusters off-screen behind an overflow-x scroll
+     that most touch users don't discover. Let the toolbar wrap so
+     every group is visible without horizontal scroll; the stats span
+     becomes a second-row right-aligned element via margin-left: auto. */
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    scrollbar-gutter: auto;
+  }
 `
 
 // Group is a labelled cluster of related controls. The `data-testid` is
