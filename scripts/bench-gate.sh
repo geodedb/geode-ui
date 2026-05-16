@@ -61,12 +61,22 @@ run_benches() {
     "${BENCH_PKGS[@]}" | tee "$out" >&2
 }
 
+# Q rank 17 / #230: pin benchstat to an immutable pseudo-version so a
+# silently-pulled-in upstream change can't shift our regression-gate
+# numbers under us. The version below is the latest tagged pseudo-
+# version at the time of pinning (refreshed in lockstep with
+# scripts/check-ci-pins.sh which now broadens its scan to cover this
+# file). To bump:
+#   curl -sS https://proxy.golang.org/golang.org/x/perf/@latest
+# and replace BENCHSTAT_PIN with the returned Version.
+BENCHSTAT_PIN="v0.0.0-20260512194132-3cf34090a3db"
+
 ensure_benchstat() {
   if command -v benchstat >/dev/null 2>&1; then
     return 0
   fi
-  echo "==> benchstat not on PATH; installing golang.org/x/perf/cmd/benchstat@latest" >&2
-  go install golang.org/x/perf/cmd/benchstat@latest
+  echo "==> benchstat not on PATH; installing golang.org/x/perf/cmd/benchstat@${BENCHSTAT_PIN}" >&2
+  go install "golang.org/x/perf/cmd/benchstat@${BENCHSTAT_PIN}"
   # `go install` drops binaries in $GOBIN or $(go env GOPATH)/bin.
   local gobin
   gobin="$(go env GOBIN)"

@@ -94,15 +94,16 @@ repos:
 - repo: local
   hooks:
       # ── pre-commit (fast: formatters + per-file linters) ───────────────
-      # Supply-chain pin guard (Q32 / #127, SEC F-SUP-3 / #153): fails if
-      # any `go install ...@latest` line or ci-catalog `component:` ref in
-      # .gitlab-ci.yml is unpinned. Cheap; runs only when the CI file moves.
+      # Supply-chain pin guard (Q32 / #127, SEC F-SUP-3 / #153, Q rank 17 /
+      # #230): fails if any `go install ...@latest` line or ci-catalog
+      # `component:` ref in .gitlab-ci.yml or scripts/bench-gate.sh is
+      # unpinned. Cheap; runs only when either file moves.
   - id: check-ci-pins
     name: check-ci-pins
-    entry: scripts/check-ci-pins.sh
+    entry: scripts/check-ci-pins.sh .gitlab-ci.yml scripts/bench-gate.sh
     language: system
     pass_filenames: false
-    files: ^\.gitlab-ci\.yml$
+    files: ^(\.gitlab-ci\.yml|scripts/bench-gate\.sh)$
 
       # Error-code seam guard: every server error code the SPA branches on
       # (exported from src/api/serverErrorCodes.ts) must still exist as an
