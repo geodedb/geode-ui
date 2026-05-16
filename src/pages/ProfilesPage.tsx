@@ -39,6 +39,7 @@ import { DeleteProfileModal } from '../components/profiles/DeleteProfileModal'
 import { useAuth } from '../auth/AuthProvider'
 
 const Page = styled.section`
+  width: 100%;
   max-width: 1024px;
   margin: 0 auto;
   padding: ${({ theme }) => theme.spacing.lg};
