@@ -72,3 +72,8 @@ coverage.txt
 # Stray build artifacts (a `go build` without -o bin/, an accidental pnpm install)
 /server
 /pnpm-lock.yaml
+
+# QUALITY #177: code-generation staleness sentinel; locally written
+# by `make generate` to skip a no-op regen when geode.json hasn't
+# changed. Recreated by the next `make generate` after deletion.
+/gen/.sentinel

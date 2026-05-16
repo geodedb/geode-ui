@@ -23,9 +23,21 @@ help:
 	@cat scripts/help.txt
 
 # ----- Code generation -----
+#
+# QUALITY #177: stale-detect sentinel. `make build` previously ran
+# `genapi generate` + `go mod tidy` on every invocation even when
+# geode.json hadn't changed since the last regen — adding ~10s of
+# no-op work to every warm rebuild. `scripts/generate-if-stale.sh`
+# hashes geode.json and short-circuits when the SHA matches the
+# value recorded in gen/.sentinel. Force a re-run with
+# `make generate-force` or by setting `FORCE_REGEN=1`.
 generate:
-	$(GOENV) genapi generate --config geode.json --out gen/ --with-tests
-	$(GOENV) go mod tidy
+	@$(GOENV) scripts/generate-if-stale.sh
+
+generate-force:
+	@FORCE_REGEN=1 $(GOENV) scripts/generate-if-stale.sh
+
+.PHONY: generate-force
 
 # ----- Go build/test -----
 go-build: web-build
