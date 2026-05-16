@@ -20,9 +20,28 @@ const common = require('./webpack.common.js')
 // dependency added to the critical path, or a regression that re-pulls
 // monaco/cytoscape into the entry — the build fails and the offending
 // asset is named in the error.
+
+// PERF #235: production source maps used to be emitted into
+// internal/ui/dist/ alongside the JS bundles, where they were captured
+// by the //go:embed all:dist directive and shipped inside the Go binary
+// — a 48.78 MiB waste of release artifact size that did NOT improve
+// production debugging (the maps were never uploaded to any crash
+// reporter and end users can't open them anyway).
+//
+// We gate source-map emission on the EMBEDDED_BUILD env var. When that
+// is set (the embedded release/Docker build path), devtool is `false`
+// and webpack emits no *.map files. Dev / local production builds
+// (without the env var) keep `source-map` so devtools-driven debugging
+// still resolves to original sources.
+//
+// To verify after a release-shaped build:
+//   EMBEDDED_BUILD=1 npm run build
+//   ls internal/ui/dist/*.map 2>/dev/null | wc -l   # expect 0
+const embeddedBuild = process.env.EMBEDDED_BUILD === '1'
+
 module.exports = merge(common, {
   mode: 'production',
-  devtool: 'source-map',
+  devtool: embeddedBuild ? false : 'source-map',
   performance: {
     hints: 'error',
     maxAssetSize: 1024 * 1024, // 1 MiB

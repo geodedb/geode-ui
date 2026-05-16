@@ -28,7 +28,14 @@ before:
     # Build the SPA so internal/ui/dist/* is populated before `go build`
     # runs the //go:embed pass. CI seeds node_modules via the install
     # job; locally, the engineer should `npm ci` first.
-  - npm run build
+    #
+    # PERF #235: EMBEDDED_BUILD=1 disables webpack source-map emission
+    # so the //go:embed all:dist directive does NOT pull 48.78 MiB of
+    # *.map files into the release binary. Dev builds (no env var) keep
+    # source-map for devtools-driven debugging.
+  - cmd: npm run build
+    env:
+    - EMBEDDED_BUILD=1
 
 builds:
 - id: geode-ui

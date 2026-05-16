@@ -40,6 +40,11 @@ COPY geode-ui/ ./
 # deliberately do NOT set the env var, so production bundles dead-code-
 # eliminate the gated block.
 ENV GEODE_E2E_BUILD=true
+# PERF #235: EMBEDDED_BUILD=1 skips webpack source-map emission so the
+# subsequent //go:embed all:dist pull in the Go stage does NOT capture
+# 48.78 MiB of *.map files into the binary. Source maps stay enabled
+# for plain `npm run build` (dev) where the env var is unset.
+ENV EMBEDDED_BUILD=1
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
