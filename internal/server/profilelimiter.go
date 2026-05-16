@@ -67,10 +67,25 @@ type ProfileLimiterConfig struct {
 	// #201 hardening). Set true only when the binary sits behind a
 	// TLS-terminating reverse proxy the operator controls.
 	TrustProxyXFF bool
+	// MaxIdle is the duration after which an unused per-actor bucket
+	// is eligible for eviction by the TTL janitor (PERF #225). Default
+	// 24h. A zero or negative value disables eviction entirely.
+	MaxIdle time.Duration
+	// PruneInterval is how often the TTL janitor goroutine sweeps the
+	// perActor map. Default 5 minutes. A zero or negative value
+	// disables the janitor (eviction only happens on the cap-trim
+	// path).
+	PruneInterval time.Duration
+	// MaxEntries is the hard ceiling on the perActor map's
+	// cardinality. When an insert would push the map past this size,
+	// the cap-trim path removes the oldest entries first. Default
+	// 100,000. Set <= 0 to disable the cap entirely (NOT recommended).
+	MaxEntries int
 }
 
 // ProfileLimiterDefaults applies production defaults: 30 req/min per
-// actor with burst 10. Production callers can pass an empty
+// actor with burst 10, 24h idle eviction, 5-min janitor cadence, 100k
+// entries cap (PERF #225). Production callers can pass an empty
 // ProfileLimiterConfig{} (with JWT set) and let NewProfileLimiter fill
 // these in.
 func ProfileLimiterDefaults() ProfileLimiterConfig {
@@ -78,6 +93,9 @@ func ProfileLimiterDefaults() ProfileLimiterConfig {
 		PerActorRate:  0.5, // 30 req/min
 		PerActorBurst: 10,
 		Now:           time.Now,
+		MaxIdle:       24 * time.Hour,
+		PruneInterval: 5 * time.Minute,
+		MaxEntries:    100_000,
 	}
 }
 
@@ -93,11 +111,19 @@ type ProfileLimiter struct {
 
 	perActor atomic.Pointer[map[string]*ipBucket]
 	writeMu  sync.Mutex
+
+	// janitorStop is closed by Stop() to terminate the TTL janitor
+	// goroutine started by StartJanitor() (PERF #225).
+	janitorStop chan struct{}
+	janitorOnce sync.Once
 }
 
 // NewProfileLimiter constructs a ProfileLimiter, applying defaults for
 // any zero-valued tunable. Pass time.Now (or a fake) as cfg.Now in
 // tests.
+//
+// NOTE: NewProfileLimiter does NOT spawn the TTL janitor goroutine;
+// call StartJanitor() once at startup to begin background pruning.
 func NewProfileLimiter(cfg ProfileLimiterConfig) *ProfileLimiter {
 	def := ProfileLimiterDefaults()
 	if cfg.PerActorRate <= 0 {
@@ -108,6 +134,15 @@ func NewProfileLimiter(cfg ProfileLimiterConfig) *ProfileLimiter {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.MaxIdle == 0 {
+		cfg.MaxIdle = def.MaxIdle
+	}
+	if cfg.PruneInterval == 0 {
+		cfg.PruneInterval = def.PruneInterval
+	}
+	if cfg.MaxEntries == 0 {
+		cfg.MaxEntries = def.MaxEntries
 	}
 	l := &ProfileLimiter{cfg: cfg}
 	empty := make(map[string]*ipBucket)
@@ -155,12 +190,21 @@ func (l *ProfileLimiter) Allow(key string) (bool, time.Duration) {
 
 // insertBucket COW-inserts a new bucket for key. Returns the inserted
 // bucket (or, on a race, the bucket the winner installed).
+//
+// PERF #225: cap-trim discipline mirrors LoginLimiter.insertIPBucket.
 func (l *ProfileLimiter) insertBucket(key string, now time.Time) *ipBucket {
 	l.writeMu.Lock()
 	defer l.writeMu.Unlock()
 	current := *l.perActor.Load()
 	if bkt, ok := current[key]; ok {
 		return bkt
+	}
+	if l.cfg.MaxEntries > 0 && len(current) >= l.cfg.MaxEntries {
+		batch := l.cfg.MaxEntries / 10
+		if batch < 1 {
+			batch = 1
+		}
+		current = trimOldestIPBuckets(current, l.cfg.MaxEntries-batch)
 	}
 	bkt := &ipBucket{tokens: l.cfg.PerActorBurst, last: now}
 	next := make(map[string]*ipBucket, len(current)+1)
@@ -170,6 +214,85 @@ func (l *ProfileLimiter) insertBucket(key string, now time.Time) *ipBucket {
 	next[key] = bkt
 	l.perActor.Store(&next)
 	return bkt
+}
+
+// PERF #225: TTL janitor for ProfileLimiter.
+
+// StartJanitor spawns the background TTL janitor goroutine. Idempotent.
+// See LoginLimiter.StartJanitor for the contract.
+func (l *ProfileLimiter) StartJanitor() {
+	if l.cfg.PruneInterval <= 0 {
+		return
+	}
+	l.janitorOnce.Do(func() {
+		l.janitorStop = make(chan struct{})
+		go l.janitorLoop()
+	})
+}
+
+// Stop signals the TTL janitor to terminate. Idempotent.
+func (l *ProfileLimiter) Stop() {
+	if l.janitorStop != nil {
+		select {
+		case <-l.janitorStop:
+			// already closed
+		default:
+			close(l.janitorStop)
+		}
+	}
+}
+
+func (l *ProfileLimiter) janitorLoop() {
+	t := time.NewTicker(l.cfg.PruneInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-l.janitorStop:
+			return
+		case <-t.C:
+			l.PruneOnce()
+		}
+	}
+}
+
+// PruneOnce sweeps the perActor map and removes buckets idle for more
+// than cfg.MaxIdle. Also enforces cfg.MaxEntries by trimming the
+// oldest entries when needed. Returns the number of evicted entries.
+func (l *ProfileLimiter) PruneOnce() int {
+	if l.cfg.MaxIdle <= 0 && l.cfg.MaxEntries <= 0 {
+		return 0
+	}
+	now := l.cfg.Now()
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	current := *l.perActor.Load()
+	if len(current) == 0 {
+		return 0
+	}
+	next := make(map[string]*ipBucket, len(current))
+	for k, b := range current {
+		b.mu.Lock()
+		idle := now.Sub(b.last)
+		b.mu.Unlock()
+		if l.cfg.MaxIdle <= 0 || idle <= l.cfg.MaxIdle {
+			next[k] = b
+		}
+	}
+	if l.cfg.MaxEntries > 0 && len(next) > l.cfg.MaxEntries {
+		next = trimOldestIPBuckets(next, l.cfg.MaxEntries)
+	}
+	removed := len(current) - len(next)
+	if removed == 0 {
+		return 0
+	}
+	l.perActor.Store(&next)
+	return removed
+}
+
+// PerActorCount returns the current cardinality of the perActor map.
+// Used by tests to assert eviction behavior.
+func (l *ProfileLimiter) PerActorCount() int {
+	return len(*l.perActor.Load())
 }
 
 // isProfileCRUDPath reports whether (method, path) targets the

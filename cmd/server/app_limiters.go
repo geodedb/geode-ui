@@ -29,6 +29,11 @@ func buildRateLimiters(cfg appConfig, issuer *jwt.Issuer, mux http.Handler) http
 	loginLimiterCfg := server.LoginLimiterDefaults()
 	loginLimiterCfg.TrustProxyXFF = cfg.trustProxyXFF
 	loginLimiter := server.NewLoginLimiter(loginLimiterCfg)
+	// PERF #225: spawn the TTL janitor goroutine so the per-IP +
+	// per-(profile, user) maps cannot grow unbounded under an attacker
+	// that rotates the bucket key (defaults: 24h MaxIdle, 5-min sweep
+	// cadence, 100k MaxEntries hard cap).
+	loginLimiter.StartJanitor()
 	limited := server.WrapLoginLimit(loginLimiter, mux)
 
 	// Per-actor (JWT subject) profile-CRUD limiter (GAP-S7 #120).
@@ -47,5 +52,7 @@ func buildRateLimiters(cfg appConfig, issuer *jwt.Issuer, mux http.Handler) http
 		profileLimiterCfg.PerActorBurst = cfg.profileCRUDBurst
 	}
 	profileLimiter := server.NewProfileLimiter(profileLimiterCfg)
+	// PERF #225: same TTL janitor coverage for the per-actor map.
+	profileLimiter.StartJanitor()
 	return server.WrapProfileLimit(profileLimiter, limited)
 }

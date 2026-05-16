@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,10 +69,28 @@ type LoginLimiterConfig struct {
 	// operator controls and that proxy strips/normalises any inbound
 	// XFF header.
 	TrustProxyXFF bool
+	// MaxIdle is the duration after which an unused per-IP or
+	// per-(profile, user) bucket is eligible for eviction by the TTL
+	// janitor (PERF #225). Default 24h. A zero or negative value
+	// disables eviction entirely.
+	MaxIdle time.Duration
+	// PruneInterval is how often the TTL janitor goroutine sweeps both
+	// maps. Default 5 minutes. A zero or negative value disables the
+	// janitor (eviction only happens on the cap-trim path below).
+	PruneInterval time.Duration
+	// MaxEntries is the hard ceiling on each map's cardinality. When a
+	// COW insert would push the map past this size, the janitor's
+	// cap-trim path removes the oldest entries (by `last` /
+	// `lastFail`) until the map fits. Default 100,000. Set <= 0 to
+	// disable the cap entirely (NOT recommended in production — the
+	// cap is the panic-prevention floor against an attacker that
+	// rotates the bucket key on every request).
+	MaxEntries int
 }
 
 // LoginLimiterDefaults applies production defaults (5 rps per IP,
-// burst 10, 5 fails -> 15-min lockout). Production callers can pass an
+// burst 10, 5 fails -> 15-min lockout, 24h idle eviction, 5-min
+// janitor cadence, 100k entries cap). Production callers can pass an
 // empty LoginLimiterConfig{} and let NewLoginLimiter fill these in.
 func LoginLimiterDefaults() LoginLimiterConfig {
 	return LoginLimiterConfig{
@@ -80,6 +99,9 @@ func LoginLimiterDefaults() LoginLimiterConfig {
 		FailThreshold: 5,
 		LockoutWindow: 15 * time.Minute,
 		Now:           time.Now,
+		MaxIdle:       24 * time.Hour,
+		PruneInterval: 5 * time.Minute,
+		MaxEntries:    100_000,
 	}
 }
 
@@ -125,6 +147,14 @@ type LoginLimiter struct {
 	// perIP.
 	perUserFails   atomic.Pointer[map[string]*userLockout]
 	perUserWriteMu sync.Mutex
+
+	// janitorStop is closed by Stop() to terminate the TTL janitor
+	// goroutine started by StartJanitor(). nil when the janitor was
+	// never started.
+	janitorStop chan struct{}
+	// janitorOnce guards StartJanitor so concurrent invocations spawn
+	// at most one goroutine.
+	janitorOnce sync.Once
 }
 
 type ipBucket struct {
@@ -146,6 +176,11 @@ type userLockout struct {
 // NewLoginLimiter constructs a LoginLimiter with cfg, applying defaults
 // for any zero-valued tunable. Pass time.Now (or a fake) as cfg.Now in
 // tests.
+//
+// NOTE: NewLoginLimiter does NOT spawn the TTL janitor goroutine; call
+// StartJanitor() once at startup to begin background pruning. Tests
+// that drive Allow() / NoteFail() synchronously can call PruneOnce()
+// directly without a background goroutine.
 func NewLoginLimiter(cfg LoginLimiterConfig) *LoginLimiter {
 	def := LoginLimiterDefaults()
 	if cfg.PerIPRate <= 0 {
@@ -162,6 +197,15 @@ func NewLoginLimiter(cfg LoginLimiterConfig) *LoginLimiter {
 	}
 	if cfg.Now == nil {
 		cfg.Now = def.Now
+	}
+	if cfg.MaxIdle == 0 {
+		cfg.MaxIdle = def.MaxIdle
+	}
+	if cfg.PruneInterval == 0 {
+		cfg.PruneInterval = def.PruneInterval
+	}
+	if cfg.MaxEntries == 0 {
+		cfg.MaxEntries = def.MaxEntries
 	}
 	l := &LoginLimiter{cfg: cfg}
 	emptyIP := make(map[string]*ipBucket)
@@ -257,6 +301,12 @@ func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration,
 // insertIPBucket COW-inserts a new bucket for ip. Returns the inserted
 // bucket (or, if a concurrent caller raced us and inserted first, the
 // existing bucket so we both converge on the same instance).
+//
+// PERF #225: when the COW would push the map past MaxEntries, we
+// inline-prune the oldest entries first so the cap is enforced even
+// without a background janitor (e.g. tests, short-lived processes).
+// The cap is the panic-prevention floor against an attacker that
+// rotates the per-IP key on every request.
 func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
 	l.perIPWriteMu.Lock()
 	defer l.perIPWriteMu.Unlock()
@@ -264,6 +314,19 @@ func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
 	current := *l.perIP.Load()
 	if bkt, ok := current[ip]; ok {
 		return bkt
+	}
+	// Inline cap-trim when we are about to overflow. To amortise the
+	// O(n log n) sort cost we drop a batch (10% of the cap, minimum 1)
+	// so the next ~10% of inserts hit the fast path without another
+	// trim. Without the batching, every post-cap insert pays the full
+	// O(n log n) cost, which would dominate runtime under an attacker
+	// rotating the bucket key on every request.
+	if l.cfg.MaxEntries > 0 && len(current) >= l.cfg.MaxEntries {
+		batch := l.cfg.MaxEntries / 10
+		if batch < 1 {
+			batch = 1
+		}
+		current = trimOldestIPBuckets(current, l.cfg.MaxEntries-batch)
 	}
 	bkt := &ipBucket{tokens: l.cfg.PerIPBurst, last: now}
 	next := make(map[string]*ipBucket, len(current)+1)
@@ -276,12 +339,22 @@ func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
 }
 
 // insertUserLockout COW-inserts a new userLockout for key.
+//
+// PERF #225: same cap-trim discipline as insertIPBucket (10% batch
+// drop on overflow so trim cost amortises across inserts).
 func (l *LoginLimiter) insertUserLockout(key string) *userLockout {
 	l.perUserWriteMu.Lock()
 	defer l.perUserWriteMu.Unlock()
 	current := *l.perUserFails.Load()
 	if u, ok := current[key]; ok {
 		return u
+	}
+	if l.cfg.MaxEntries > 0 && len(current) >= l.cfg.MaxEntries {
+		batch := l.cfg.MaxEntries / 10
+		if batch < 1 {
+			batch = 1
+		}
+		current = trimOldestUserLockouts(current, l.cfg.MaxEntries-batch)
 	}
 	u := &userLockout{}
 	next := make(map[string]*userLockout, len(current)+1)
@@ -441,6 +514,246 @@ func peekLoginCreds(r *http.Request) (profile, username string, err error) {
 		return "", "", nil
 	}
 	return vals.Get("profile"), vals.Get("username"), nil
+}
+
+// PERF #225: TTL janitor for both LoginLimiter maps.
+
+// StartJanitor spawns the background TTL janitor goroutine. The
+// janitor wakes every cfg.PruneInterval, calls PruneOnce(), and exits
+// when Stop() is called. Safe to call from multiple goroutines; only
+// the first invocation actually starts the loop.
+//
+// Production callers (cmd/server/app.go) should call StartJanitor()
+// once at startup and Stop() on graceful shutdown. Tests can drive
+// PruneOnce() directly without a background goroutine.
+func (l *LoginLimiter) StartJanitor() {
+	if l.cfg.PruneInterval <= 0 {
+		// Janitor disabled by config; cap-trim path still enforces the
+		// MaxEntries ceiling on insert.
+		return
+	}
+	l.janitorOnce.Do(func() {
+		l.janitorStop = make(chan struct{})
+		go l.janitorLoop()
+	})
+}
+
+// Stop signals the TTL janitor to terminate. Idempotent. Safe to call
+// even when StartJanitor was never called.
+func (l *LoginLimiter) Stop() {
+	if l.janitorStop != nil {
+		select {
+		case <-l.janitorStop:
+			// already closed
+		default:
+			close(l.janitorStop)
+		}
+	}
+}
+
+func (l *LoginLimiter) janitorLoop() {
+	t := time.NewTicker(l.cfg.PruneInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-l.janitorStop:
+			return
+		case <-t.C:
+			l.PruneOnce()
+		}
+	}
+}
+
+// PruneOnce sweeps both maps and removes entries idle for more than
+// cfg.MaxIdle. Also enforces the cfg.MaxEntries cap by trimming the
+// oldest entries when the post-prune map size still exceeds the cap.
+// Exported so tests can drive the janitor synchronously.
+//
+// Concurrency: PruneOnce takes the writer mutex on each map (the same
+// lock new-bucket inserts use), so a concurrent Allow/NoteFail call
+// on the cache-hit path observes either the pre-prune or post-prune
+// snapshot atomically.
+func (l *LoginLimiter) PruneOnce() (perIPRemoved, perUserRemoved int) {
+	if l.cfg.MaxIdle <= 0 && l.cfg.MaxEntries <= 0 {
+		return 0, 0
+	}
+	now := l.cfg.Now()
+	perIPRemoved = l.pruneIPBuckets(now)
+	perUserRemoved = l.pruneUserLockouts(now)
+	return
+}
+
+func (l *LoginLimiter) pruneIPBuckets(now time.Time) int {
+	l.perIPWriteMu.Lock()
+	defer l.perIPWriteMu.Unlock()
+	current := *l.perIP.Load()
+	if len(current) == 0 {
+		return 0
+	}
+	// Build the post-TTL map: keep entries that have been touched in
+	// the last MaxIdle window. Reads bucket.last under bucket.mu so we
+	// race-cleanly with an in-flight Allow() refilling the bucket.
+	next := make(map[string]*ipBucket, len(current))
+	for k, b := range current {
+		b.mu.Lock()
+		idle := now.Sub(b.last)
+		b.mu.Unlock()
+		if l.cfg.MaxIdle <= 0 || idle <= l.cfg.MaxIdle {
+			next[k] = b
+		}
+	}
+	if l.cfg.MaxEntries > 0 && len(next) > l.cfg.MaxEntries {
+		next = trimOldestIPBuckets(next, l.cfg.MaxEntries)
+	}
+	removed := len(current) - len(next)
+	if removed == 0 {
+		// Nothing changed — keep the existing pointer so readers
+		// don't churn through a new map for no benefit.
+		return 0
+	}
+	l.perIP.Store(&next)
+	return removed
+}
+
+func (l *LoginLimiter) pruneUserLockouts(now time.Time) int {
+	l.perUserWriteMu.Lock()
+	defer l.perUserWriteMu.Unlock()
+	current := *l.perUserFails.Load()
+	if len(current) == 0 {
+		return 0
+	}
+	next := make(map[string]*userLockout, len(current))
+	for k, u := range current {
+		u.mu.Lock()
+		idle := now.Sub(u.lastFail)
+		// Treat a zero lastFail (NoteSuccess cleared it) as "evict
+		// immediately if MaxIdle is configured": there is no fail
+		// streak to remember, and the bucket adds zero security value.
+		zeroFail := u.lastFail.IsZero()
+		u.mu.Unlock()
+		switch {
+		case zeroFail:
+			// drop on the floor
+		case l.cfg.MaxIdle <= 0 || idle <= l.cfg.MaxIdle:
+			next[k] = u
+		}
+	}
+	if l.cfg.MaxEntries > 0 && len(next) > l.cfg.MaxEntries {
+		next = trimOldestUserLockouts(next, l.cfg.MaxEntries)
+	}
+	removed := len(current) - len(next)
+	if removed == 0 {
+		return 0
+	}
+	l.perUserFails.Store(&next)
+	return removed
+}
+
+// trimOldestIPBuckets returns a map whose size is at most keepN,
+// removing the entries with the oldest `last` timestamps first. Used
+// by both the cap-trim insert path and the post-prune cap enforcer.
+//
+// operates on a different concrete value type with a different
+// mutex-guarded timestamp field; a generic helper would obscure the
+// per-type lock acquisition pattern.
+//
+//nolint:dupl // trimOldestUserLockouts is structurally identical but
+func trimOldestIPBuckets(in map[string]*ipBucket, keepN int) map[string]*ipBucket {
+	if keepN <= 0 {
+		return make(map[string]*ipBucket)
+	}
+	if len(in) <= keepN {
+		// Nothing to trim. Return a copy so the caller's COW invariant
+		// (don't mutate the snapshot anyone might be reading) holds.
+		out := make(map[string]*ipBucket, len(in))
+		for k, v := range in {
+			out[k] = v
+		}
+		return out
+	}
+	// Build a (key, last) slice, sort by `last` ascending, drop the
+	// oldest (len-keepN) entries. The trim path is rare (only fires at
+	// the cap) so the sort is acceptable.
+	type entry struct {
+		key  string
+		last time.Time
+	}
+	entries := make([]entry, 0, len(in))
+	for k, b := range in {
+		b.mu.Lock()
+		entries = append(entries, entry{key: k, last: b.last})
+		b.mu.Unlock()
+	}
+	// Insertion sort would be cheaper for very small drops, but for a
+	// 100k cap the difference is negligible vs the simplicity of
+	// sort.Slice.
+	slices.SortStableFunc(entries, func(a, b entry) int {
+		switch {
+		case a.last.Before(b.last):
+			return -1
+		case a.last.After(b.last):
+			return 1
+		default:
+			return 0
+		}
+	})
+	out := make(map[string]*ipBucket, keepN)
+	dropN := len(entries) - keepN
+	for i := dropN; i < len(entries); i++ {
+		out[entries[i].key] = in[entries[i].key]
+	}
+	return out
+}
+
+//nolint:dupl // mirror of trimOldestIPBuckets; see note above.
+func trimOldestUserLockouts(in map[string]*userLockout, keepN int) map[string]*userLockout {
+	if keepN <= 0 {
+		return make(map[string]*userLockout)
+	}
+	if len(in) <= keepN {
+		out := make(map[string]*userLockout, len(in))
+		for k, v := range in {
+			out[k] = v
+		}
+		return out
+	}
+	type entry struct {
+		key      string
+		lastFail time.Time
+	}
+	entries := make([]entry, 0, len(in))
+	for k, u := range in {
+		u.mu.Lock()
+		entries = append(entries, entry{key: k, lastFail: u.lastFail})
+		u.mu.Unlock()
+	}
+	slices.SortStableFunc(entries, func(a, b entry) int {
+		switch {
+		case a.lastFail.Before(b.lastFail):
+			return -1
+		case a.lastFail.After(b.lastFail):
+			return 1
+		default:
+			return 0
+		}
+	})
+	out := make(map[string]*userLockout, keepN)
+	dropN := len(entries) - keepN
+	for i := dropN; i < len(entries); i++ {
+		out[entries[i].key] = in[entries[i].key]
+	}
+	return out
+}
+
+// PerIPCount returns the current cardinality of the per-IP map. Used
+// by tests to assert eviction behavior.
+func (l *LoginLimiter) PerIPCount() int {
+	return len(*l.perIP.Load())
+}
+
+// PerUserCount returns the current cardinality of the per-user map.
+func (l *LoginLimiter) PerUserCount() int {
+	return len(*l.perUserFails.Load())
 }
 
 // clientIP returns the best-guess remote IP for the request.
