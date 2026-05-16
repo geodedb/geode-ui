@@ -298,6 +298,71 @@ verify_graph() {
     return 1
 }
 
+# Geode v0.5.15's `geode query -f` duplicates the last statement of
+# each ~100-statement batch when ingesting a multi-statement seed
+# file (one extra row per batch boundary; observed empirically at
+# ~110-line intervals in our 1700-statement vulndb.gql). The
+# duplicates have distinct internal node ids but the same property
+# id, so a single dedupe pass per label collapses them back down.
+#
+# Why we don't just patch the server: the CLI quirk is upstream of
+# this repo and affects any -f ingest. Cleaning up post-hoc keeps the
+# bootstrap idempotent and matches the count the seed file declares.
+dedupe_graph_label() {
+    local graph="$1" label="$2"
+    local dup_query="USE GRAPH ${graph}; MATCH (n:${label}) WITH n.id AS xid, count(n) AS c WHERE c > 1 RETURN xid"
+    local resp
+    resp=$(echo "${dup_query}" | query_admin - 2>/dev/null || true)
+    # Extract dup ids from the JSON `{"xid":"<value>"...}` rows. The
+    # geode image ships busybox-only userland (no python, no jq), so
+    # we use grep + sed against the well-known response shape.
+    local dup_ids
+    dup_ids=$(printf '%s' "${resp}" \
+        | grep -oE '"xid":"[^"]+"' \
+        | sed -E 's/.*"xid":"([^"]+)".*/\1/' \
+        | tr '\n' ' ' || true)
+    if [[ -z "${dup_ids// /}" ]]; then
+        return 0
+    fi
+    local removed=0
+    for xid in ${dup_ids}; do
+        # Cap the per-id pass at 16 — a runaway duplicate count shouldn't
+        # spin forever (real-world max observed is 2 per id).
+        local pass
+        for ((pass = 0; pass < 16; pass++)); do
+            local count_resp n
+            count_resp=$(echo "USE GRAPH ${graph}; MATCH (n:${label} {id: '${xid}'}) RETURN count(n) AS c" \
+                | query_admin - 2>/dev/null || true)
+            n=$(printf '%s' "${count_resp}" \
+                | grep -oE '"c":[0-9]+' \
+                | head -1 \
+                | cut -d: -f2)
+            [[ -z "${n}" ]] && n=0
+            if [[ "${n}" -le 1 ]]; then
+                break
+            fi
+            # Get one internal id to delete.
+            local int_resp internal_id
+            int_resp=$(echo "USE GRAPH ${graph}; MATCH (n:${label} {id: '${xid}'}) RETURN id(n) AS i LIMIT 1" \
+                | query_admin - 2>/dev/null || true)
+            internal_id=$(printf '%s' "${int_resp}" \
+                | grep -oE '"i":[0-9]+' \
+                | head -1 \
+                | cut -d: -f2)
+            if [[ -z "${internal_id}" ]]; then
+                break
+            fi
+            echo "USE GRAPH ${graph}; MATCH (n:${label}) WHERE id(n) = ${internal_id} DETACH DELETE n" \
+                | query_admin - >/dev/null 2>&1 || true
+            removed=$((removed + 1))
+        done
+    done
+    if [[ "${removed}" -gt 0 ]]; then
+        log "deduped ${removed} duplicate ${label} node(s) in ${graph} (geode v0.5.15 CLI batch artifact)"
+    fi
+    return 0
+}
+
 main() {
     wait_for_wire
     ensure_admin_password
@@ -312,6 +377,13 @@ main() {
     if [[ -f "${GEODE_VULNDB_GQL}" ]]; then
         seed_graph vulndb "${GEODE_VULNDB_GQL}" 1369 || \
             log "vulndb seed reported a non-zero status (continuing)"
+        # Strip the geode CLI's batch-boundary duplicate artifacts
+        # before verifying the row count. See dedupe_graph_label for the
+        # quirk; without this, vulndb routinely lands at 1379 (10 extras
+        # across CWE + CVE) and fails the strict count check.
+        dedupe_graph_label vulndb CWE
+        dedupe_graph_label vulndb CVE
+        dedupe_graph_label vulndb Package
         verify_graph vulndb 1369 || \
             log "vulndb seed is partial; check convert-vulndb.py output for parse-rejected rows"
     else

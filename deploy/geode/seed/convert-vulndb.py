@@ -43,6 +43,17 @@ def gql_str(value: object) -> str:
     statement and corrupt the rest of the seed file. We collapse all
     whitespace to single spaces and strip ASCII control characters
     other than space before doubling quotes.
+
+    Geode also follows the openCypher escape grammar where `\\` is the
+    escape introducer inside string literals (`\\\\` → literal `\\`,
+    `\\n` → newline, etc.). Source values like the CWE-40 description
+    ('\\UNC\\share\\name') therefore must have their backslashes
+    doubled — an unescaped `\\s` is an invalid escape that produces a
+    `42000` parse error at the offending statement AND consumes the
+    next several statements as part of a runaway string (a single bad
+    backslash in CWE-40 cost us 223 CWE rows before this fix). Escape
+    backslashes BEFORE quotes so the doubled-quote pass doesn't
+    accidentally consume a backslash-introducer.
     """
     s = "" if value is None else str(value)
     # Normalise CR/LF/tab + any other control char (incl. NUL) to a
@@ -58,6 +69,10 @@ def gql_str(value: object) -> str:
     while "  " in s:
         s = s.replace("  ", " ")
     s = s.strip()
+    # Order matters: backslashes first, then quotes. Reversing would
+    # leave any newly-inserted `''` quote-escape vulnerable to a
+    # backslash-escape consuming its leading `'`.
+    s = s.replace("\\", "\\\\")
     return "'" + s.replace("'", "''") + "'"
 
 
