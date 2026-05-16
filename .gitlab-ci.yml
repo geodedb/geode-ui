@@ -334,7 +334,9 @@ go:test:
     - apk add --no-cache git make nodejs npm
     - npm ci
     - npm run build
-    - go test -race -cover -failfast ./...
+    # QUALITY #174: scope Go enumeration to project-owned trees so
+    # `./...` doesn't walk into `node_modules/flatted/golang/`.
+    - go test -race -cover -failfast ./cmd/... ./gen/... ./internal/...
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

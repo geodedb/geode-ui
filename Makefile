@@ -4,6 +4,17 @@ GOTOOLCHAIN ?= go1.26.3
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
+# QUALITY #174: Go package discovery enumeration.
+#
+# `./...` from the repo root walks `node_modules/flatted/golang/pkg/flatted`
+# (an unrelated Go file shipped inside an npm dependency) and tries to
+# include it in package discovery. Enumerating the project's own Go
+# trees explicitly keeps `go list`, `go test`, `go vet`, and friends
+# scoped to the source we actually own.
+#
+# Update this list when a new top-level Go directory is added.
+GO_PKGS := ./cmd/... ./gen/... ./internal/...
+
 .PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
 
 all: lint test build
@@ -21,10 +32,10 @@ go-build: web-build
 	$(GOENV) go build -o $(BIN) ./cmd/server
 
 go-test:
-	$(GOENV) go test -race -cover -failfast ./...
+	$(GOENV) go test -race -cover -failfast $(GO_PKGS)
 
 go-lint:
-	$(GOENV) golangci-lint run
+	$(GOENV) golangci-lint run $(GO_PKGS)
 
 go-fmt:
 	$(GOENV) gofmt -s -w .
