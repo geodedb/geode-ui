@@ -119,12 +119,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Quick targets:
 
 ```bash
 make help            # list all targets
-make generate        # regenerate gen/ from geode.json
+make generate        # regenerate gen/ from geode.json (sentinel-aware)
 make build           # production build (SPA + Go binary)
 make test            # all tests (Go + JS)
 make lint            # all linters
 make web-dev         # webpack dev server (port 3000, proxies to :8080)
 ```
+
+> **API contract:** `geode.json` is the source of truth for every
+> REST endpoint, WebSocket channel, and MCP tool. Hand-edits to
+> `gen/` are forbidden — regenerate via `make generate`. See
+> [ADR 0001 — Generated API Boundary](docs/adr/0001-generated-api-boundary.md)
+> for the full rules.
 
 ## E2E testing
 

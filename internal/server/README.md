@@ -5,6 +5,11 @@ The HTTP server layer for geode-ui. Wires the genapi-emitted routes
 `handlers_*.go`, plus session/auth/CSRF/rate-limit middleware and
 shared helpers.
 
+> **See also:** [ADR 0001 — Generated API Boundary](../../docs/adr/0001-generated-api-boundary.md)
+> documents the rules around `geode.json`, `gen/`, and the
+> SPA-vs-server contract. Hand-edits to `gen/*.go` are forbidden —
+> regenerate via `make generate` instead.
+
 ## Layout
 
 - `handlers_*.go` — per-domain handlers (auth, profiles, profiles_crud,
