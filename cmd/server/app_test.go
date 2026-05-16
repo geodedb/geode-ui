@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"geodedb.com/geode-ui/gen/pkg/obsx"
 	"geodedb.com/geode-ui/internal/jwt"
 )
 
@@ -119,6 +122,119 @@ func TestNewApp_HappyPath(t *testing.T) {
 	a.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz through the assembled handler: want 200, got %d (body %q)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestParseFlags_AdminUsersDefaultEmpty pins SEC-NEW-2 (#202): the
+// -admin-users flag must default to "" so no user is silently auto-granted
+// the 'admin' role on a fresh install. Deployments that want the old
+// behaviour must opt in explicitly with -admin-users=geode.
+func TestParseFlags_AdminUsersDefaultEmpty(t *testing.T) {
+	var out bytes.Buffer
+	cfg, err := parseFlags([]string{"geode-ui"}, &out)
+	if err != nil {
+		t.Fatalf("parseFlags with no -admin-users: unexpected error: %v", err)
+	}
+	if cfg.adminUsers != "" {
+		t.Fatalf("SEC-NEW-2 #202: -admin-users default = %q, want empty (no admin auto-bootstrap)", cfg.adminUsers)
+	}
+}
+
+// captureAuditLogs swaps the obsx slog logger to one writing JSON into a
+// buffer for the duration of fn, then restores the previous logger. It
+// returns every decoded JSON record emitted during fn.
+func captureAuditLogs(t *testing.T, fn func()) []map[string]any {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	logger := slog.New(slog.NewJSONHandler(&buf, nil))
+	obsx.SetLogger(logger)
+	t.Cleanup(func() { obsx.SetLogger(prev) })
+	fn()
+	var records []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var r map[string]any
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("decode audit line %q: %v", line, err)
+		}
+		records = append(records, r)
+	}
+	return records
+}
+
+// TestNewApp_AdminBootstrapAuditEvent pins SEC-NEW-2 (#202): every newApp
+// boot emits an audit_event=admin_bootstrap record so operators can
+// forensically confirm what set of admin usernames the process started
+// with — including the zero-admin case after the default flipped to "".
+func TestNewApp_AdminBootstrapAuditEvent(t *testing.T) {
+	cases := []struct {
+		name         string
+		flagValue    string
+		wantCount    int
+		wantContains []string
+	}{
+		{name: "empty default (no opt-in)", flagValue: "", wantCount: 0, wantContains: nil},
+		{name: "single admin", flagValue: "geode", wantCount: 1, wantContains: []string{"geode"}},
+		{name: "multi admin sorted", flagValue: "zara,alex,geode", wantCount: 3, wantContains: []string{"alex", "geode", "zara"}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := appConfig{
+				listen:        "127.0.0.1:0",
+				profileStore:  filepath.Join(t.TempDir(), "profiles.db"),
+				secretHex:     validJWTSecretHex(),
+				jwtTTL:        defaultJWTTTL,
+				adminUsers:    tc.flagValue,
+				uploadDir:     t.TempDir(),
+				secureCookies: true,
+			}
+			records := captureAuditLogs(t, func() {
+				a, err := newApp(cfg, envFunc(map[string]string{"GEODE_PROFILESTORE_KEY": validProfilestoreKey()}))
+				if err != nil {
+					t.Fatalf("newApp: unexpected error: %v", err)
+				}
+				t.Cleanup(a.close)
+			})
+			// Find admin_bootstrap record.
+			var found map[string]any
+			for _, r := range records {
+				if r["audit_event"] == "admin_bootstrap" {
+					found = r
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("SEC-NEW-2 #202: no audit_event=admin_bootstrap record emitted (got %d records)", len(records))
+			}
+			// admin_count
+			gotCount, ok := found["admin_count"].(float64)
+			if !ok {
+				t.Fatalf("admin_bootstrap.admin_count missing or not numeric: %v (%T)", found["admin_count"], found["admin_count"])
+			}
+			if int(gotCount) != tc.wantCount {
+				t.Fatalf("admin_bootstrap.admin_count = %d, want %d", int(gotCount), tc.wantCount)
+			}
+			// admin_users
+			rawList, _ := found["admin_users"].([]any)
+			gotList := make([]string, 0, len(rawList))
+			for _, v := range rawList {
+				if s, ok := v.(string); ok {
+					gotList = append(gotList, s)
+				}
+			}
+			if len(gotList) != len(tc.wantContains) {
+				t.Fatalf("admin_bootstrap.admin_users len = %d (%v), want %d (%v)", len(gotList), gotList, len(tc.wantContains), tc.wantContains)
+			}
+			for i, want := range tc.wantContains {
+				if gotList[i] != want {
+					t.Fatalf("admin_bootstrap.admin_users[%d] = %q, want %q (sorted)", i, gotList[i], want)
+				}
+			}
+		})
 	}
 }
 

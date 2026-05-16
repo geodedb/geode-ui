@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -79,7 +80,19 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	fs.StringVar(&cfg.profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
 	fs.StringVar(&cfg.secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
 	fs.DurationVar(&cfg.jwtTTL, "jwt-ttl", defaultJWTTTL, "JWT TTL (1m..24h)")
-	fs.StringVar(&cfg.adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
+	// SEC-NEW-2 (#202): default is empty — no usernames are auto-granted
+	// the 'admin' role unless the operator opts in explicitly. The previous
+	// hard-coded "geode" default silently bootstrapped an admin account on
+	// every fresh install, which is a privilege-escalation footgun in any
+	// deployment that didn't already know about it. Operators that want the
+	// old behaviour pass `-admin-users=geode` (or whatever set they need)
+	// at startup; the audit event below records what was bootstrapped (or
+	// not) for forensic review.
+	//
+	// BREAKING CHANGE: deployments that relied on the old "geode" default
+	// must add `-admin-users=geode` (or equivalent) to their startup args.
+	// See docs/RELEASE.md for the migration note.
+	fs.StringVar(&cfg.adminUsers, "admin-users", "", "comma-separated upstream usernames granted the 'admin' role on login (default: empty — no admin auto-bootstrap; pass e.g. -admin-users=geode to opt in). Geode v0.5.11 doesn't expose role enumeration on the wire yet.")
 	fs.StringVar(&cfg.uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
 	fs.BoolVar(&cfg.secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
 	fs.BoolVar(&cfg.passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and air-gap-friendly")
@@ -250,6 +263,24 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 			adminSet[name] = true
 		}
 	}
+	// SEC-NEW-2 (#202): forensic record of what the operator opted into at
+	// startup. We log the *count* and the SORTED *list* of admin
+	// usernames (not from any inbound request — these came off the
+	// operator's CLI flag, so they're already in the trust boundary of
+	// "things the operator chose"); a non-zero count without a
+	// corresponding deployment-doc reference is the smoking gun for the
+	// old silent-default footgun. Emitted via obsx.LogAudit so the entry
+	// flows through the central redactor (usernames don't match the
+	// sensitive-keys list but the indirection is the contract).
+	adminList := make([]string, 0, len(adminSet))
+	for name := range adminSet {
+		adminList = append(adminList, name)
+	}
+	sort.Strings(adminList)
+	obsx.LogAudit("admin_bootstrap", map[string]any{
+		"admin_count": len(adminList),
+		"admin_users": adminList,
+	})
 
 	srv := server.New(server.Config{
 		Version:        "v0.1.0",

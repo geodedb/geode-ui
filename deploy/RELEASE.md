@@ -63,6 +63,15 @@ ssl.com's eSigner cloud HSM. Setup steps live in that component's
 For Apple-side macOS notarization, the existing `CSC_LINK` variables
 feed electron-builder directly (no separate ci-catalog component yet).
 
+## Breaking changes (operator migration notes)
+
+Operators upgrading across these versions MUST take the listed action or
+the new build will silently change behaviour:
+
+| Version | Change | Required operator action |
+|---|---|---|
+| _unreleased_ (SEC-NEW-2 / #202) | `-admin-users` flag now defaults to `""` (no auto-bootstrap) | Add `-admin-users=geode` (or your existing comma-separated list) to startup args. Without this, no user is granted the `admin` role on login. The startup log emits a single `audit_event=admin_bootstrap` record with `admin_count` and the sorted `admin_users` list — verify it matches your expectation. |
+
 ## Cutting a release
 
 1. Make sure `main` is green (lint + unit + go:test + e2e all passing).
