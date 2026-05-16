@@ -54,7 +54,9 @@ func TestContextWithClaims_NilIsTransparent(t *testing.T) {
 // TestContextWithClaims_NilContextIsSafe proves passing a nil ctx
 // returns a non-nil derived ctx so downstream code that always
 // derives from the result does not crash. This mirrors the existing
-// ContextWithRoles behaviour in pkg/mcpx/engine.go.
+// ContextWithRoles behaviour in pkg/mcpx/engine.go. The nil input
+// is the explicit fail-safe contract we are testing here, hence the
+// staticcheck suppression.
 func TestContextWithClaims_NilContextIsSafe(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -62,6 +64,7 @@ func TestContextWithClaims_NilContextIsSafe(t *testing.T) {
 		}
 	}()
 	c := &Claims{Subject: "bob"}
+	//nolint:staticcheck // SA1012: testing the documented nil-ctx fallback path
 	ctx := ContextWithClaims(nil, c)
 	if ctx == nil {
 		t.Fatalf("ContextWithClaims(nil, claims) returned nil ctx")
