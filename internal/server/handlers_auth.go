@@ -181,23 +181,43 @@ func (s *GraphServer) mintAndSetAuthCookie(w http.ResponseWriter, token string, 
 	return expiresIn
 }
 
-// HandleLogout (SEC-F7 / #62) clears the geode-ui-auth cookie and
-// returns 204. Idempotent — safe to call without an authenticated
-// session. Server-side JWT revocation is out of scope (tracked
-// separately under SEC-N2); the cookie clear is sufficient for
-// browser-side logout because SameSite=Strict prevents cross-site
-// replay even if the JWT is still cryptographically valid.
+// HandleLogout (SEC-F7 / #62 + SEC-NEW-9 / #205) clears the
+// geode-ui-auth cookie, best-effort revokes the JTI of the
+// presented JWT via the durable RevocationSet (SEC-N2), and returns
+// 204. Always emits an `auth_logout` audit event so SOC dashboards
+// can build session-lifetime metrics.
 //
-// Wired in cmd/server/main.go as a hand-rolled mux.HandleFunc rather
+// The JTI revoke path is best-effort by design: a malformed cookie,
+// expired token, signature mismatch, or missing Issuer all collapse
+// into a 204 with the cookie cleared and `revoked=false` in the
+// audit record. This preserves the idempotent-anonymous-logout
+// contract from SEC-F7 — a client that has lost track of its
+// session must still be able to ask the server to clear the cookie
+// — while closing the SEC-NEW-9 nuisance-replay vector for the
+// common cookie-authenticated case.
+//
+// Wired in cmd/server/app.go as a hand-rolled mux.HandleFunc rather
 // than through genapi because the route is intentionally
-// authentication-optional: a client that has lost track of its session
-// must still be able to ask the server to clear the cookie.
+// authentication-optional.
 func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	// SEC-NEW-9 (#205): best-effort revoke before clearing the cookie.
+	// We re-extract the token through the same priority order as
+	// AuthJWT (Authorization header → cookie → ?access_token=) so a
+	// programmatic client that authed by header still gets its JTI
+	// blacklisted. Failure at any step is silent — there is no body
+	// shape to surface a failure to and no security benefit to
+	// announcing that the server didn't recognise the token.
+	sub, revoked := s.bestEffortRevokeFromRequest(r)
+	emitAudit("auth_logout",
+		"sub", sub,
+		"revoked", revoked,
+		"path", r.URL.Path,
+	)
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    "",
@@ -208,6 +228,36 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// bestEffortRevokeFromRequest is the SEC-NEW-9 helper: it pulls a JWT
+// off r (cookie / header / query), validates it via Issuer.Parse, and
+// if everything succeeds calls RevocationSet.Revoke(jti, exp). Returns
+// the token's Subject (empty if extraction or parse failed) and a
+// boolean reporting whether a revoke was actually issued. Every error
+// path is silent — auditing happens at the caller via the returned
+// boolean, NOT via per-step warning logs (those would only help an
+// attacker probe the auth surface).
+func (s *GraphServer) bestEffortRevokeFromRequest(r *http.Request) (sub string, revoked bool) {
+	if s.cfg.JWT == nil {
+		return "", false
+	}
+	tok, err := extractToken(r)
+	if err != nil || tok == "" {
+		return "", false
+	}
+	claims, err := s.cfg.JWT.Parse(tok)
+	if err != nil || claims == nil {
+		return "", false
+	}
+	// claims.ID is the jti from Issue(); claims.ExpiresAt is exp. Both
+	// must be present for Revoke to take effect — if exp is in the
+	// past, RevocationSet.Revoke is a no-op anyway (Sweep drops it).
+	if claims.ID == "" || claims.ExpiresAt == nil {
+		return claims.Subject, false
+	}
+	s.cfg.JWT.Revocation().Revoke(claims.ID, claims.ExpiresAt.Time)
+	return claims.Subject, true
 }
 
 // authenticateUpstream opens a fresh *sql.DB for the named profile with

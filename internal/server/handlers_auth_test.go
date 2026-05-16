@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/internal/conn"
+	"geodedb.com/geode-ui/internal/jwt"
 )
 
 // fakeProfileLookup is a tiny ProfileLookup implementation for tests
@@ -590,6 +593,162 @@ func TestLogout_ClearsAuthCookie(t *testing.T) {
 	}
 	if !got.HttpOnly {
 		t.Fatalf("logout cookie HttpOnly=false want true")
+	}
+}
+
+// jwtSecret32ForTest returns a 32-byte HS256 secret for tests in this package.
+func jwtSecret32ForTest() []byte {
+	b := make([]byte, 32)
+	for i := range b {
+		b[i] = 0xab
+	}
+	return b
+}
+
+// TestLogout_RevokesCookieJTI_SEC_NEW_9 pins SEC-NEW-9 (#205):
+// HandleLogout best-effort parses the JWT off the auth cookie and calls
+// Revocation().Revoke(jti, exp) so a stolen token cannot be replayed
+// after the user explicitly logs out. The cookie-clearing behavior of
+// the prior contract is preserved.
+func TestLogout_RevokesCookieJTI_SEC_NEW_9(t *testing.T) {
+	issuer, err := jwt.NewIssuer(jwtSecret32ForTest(), time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	// Mint a real token so the JTI revoke path can be exercised end-to-end.
+	tok, _, err := issuer.Issue("alice", "default", []string{"user"}, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	parsed, err := issuer.Parse(tok)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if parsed.ID == "" {
+		t.Fatalf("issued token missing jti")
+	}
+
+	srv := New(Config{SecureCookies: true, JWT: issuer})
+
+	// POST /api/v1/auth/logout carrying the auth cookie.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: tok})
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+
+	// After logout, the same token must be rejected by Parse.
+	if _, err := issuer.Parse(tok); err == nil {
+		t.Fatalf("SEC-NEW-9 #205: token still parses after logout — Revoke not called")
+	} else if !errors.Is(err, jwt.ErrRevoked) {
+		t.Fatalf("SEC-NEW-9 #205: post-logout parse returned %v, want ErrRevoked", err)
+	}
+}
+
+// TestLogout_RevokesAuthorizationHeaderJTI_SEC_NEW_9 pins that
+// HandleLogout also accepts the JWT from an Authorization: Bearer
+// header (programmatic / mobile clients that don't use cookies).
+func TestLogout_RevokesAuthorizationHeaderJTI_SEC_NEW_9(t *testing.T) {
+	issuer, err := jwt.NewIssuer(jwtSecret32ForTest(), time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	tok, _, err := issuer.Issue("bob", "default", []string{"user"}, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	srv := New(Config{SecureCookies: true, JWT: issuer})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.Header.Set("Authorization", "Bearer "+tok)
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+	if _, err := issuer.Parse(tok); !errors.Is(err, jwt.ErrRevoked) {
+		t.Fatalf("SEC-NEW-9 #205: header-token post-logout parse returned %v, want ErrRevoked", err)
+	}
+}
+
+// TestLogout_NoTokenStillReturns204 pins that HandleLogout is still
+// idempotent / safe to call without an authenticated session — a
+// regression here would re-introduce the failure mode the original
+// SEC-F7 closure deliberately avoided.
+func TestLogout_NoTokenStillReturns204(t *testing.T) {
+	issuer, err := jwt.NewIssuer(jwtSecret32ForTest(), time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	srv := New(Config{SecureCookies: true, JWT: issuer})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("SEC-NEW-9 #205: anonymous logout status=%d want 204 (idempotent)", w.Code)
+	}
+}
+
+// TestLogout_GarbageCookieReturns204 pins that HandleLogout never 5xxs
+// when the cookie value is malformed JWT. The revoke is best-effort.
+func TestLogout_GarbageCookieReturns204(t *testing.T) {
+	issuer, err := jwt.NewIssuer(jwtSecret32ForTest(), time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	srv := New(Config{SecureCookies: true, JWT: issuer})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: "not.a.jwt"})
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("SEC-NEW-9 #205: malformed-cookie logout status=%d want 204 (best-effort)", w.Code)
+	}
+}
+
+// TestLogout_EmitsAuthLogoutAuditEvent_SEC_NEW_9 pins that every
+// HandleLogout call emits an audit_event=auth_logout record so SOC
+// dashboards can build session-lifetime metrics and spot suspicious
+// patterns (e.g. an attacker logging out a victim's session).
+func TestLogout_EmitsAuthLogoutAuditEvent_SEC_NEW_9(t *testing.T) {
+	t.Cleanup(resetAuditRing())
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	issuer, err := jwt.NewIssuer(jwtSecret32ForTest(), time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	tok, _, err := issuer.Issue("alice", "default", []string{"user"}, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	srv := New(Config{SecureCookies: true, JWT: issuer})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: tok})
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"event":"auth_logout"`) {
+		t.Fatalf("SEC-NEW-9 #205: missing auth_logout audit event\nlog: %s", out)
+	}
+	// We deliberately do NOT log the JTI — it identifies a session.
+	// Instead we expect the subject (so SOC can correlate to a user)
+	// and a "revoked" boolean indicating whether the best-effort parse
+	// found a JTI to revoke.
+	if !strings.Contains(out, `"sub":"alice"`) {
+		t.Fatalf("SEC-NEW-9 #205: auth_logout audit missing sub field\nlog: %s", out)
+	}
+	if !strings.Contains(out, `"revoked":true`) {
+		t.Fatalf("SEC-NEW-9 #205: auth_logout audit missing revoked=true\nlog: %s", out)
 	}
 }
 
