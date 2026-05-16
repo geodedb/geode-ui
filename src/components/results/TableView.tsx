@@ -434,6 +434,61 @@ const VirtualRow = ({
   )
 }
 
+// OverflowNotice (PERF #236 / #234c) styles the "+N more / N more rows"
+// banner emitted above the table when projectColumns caps materialised
+// columns or rows. Theme tokens drive the surface + border so the
+// banner respects dark mode (lint:hardcoded-styles catches rgba()
+// literals outside src/theme/).
+const OverflowNotice = styled.div`
+  padding: 4px 8px;
+  background: ${({ theme }) => theme.bg.subtle};
+  border-bottom: 1px solid ${({ theme }) => theme.border.default};
+  color: ${({ theme }) => theme.text.primary};
+  font-size: 0.85em;
+`
+
+// exportRespAsNdjson (PERF #234c / #234) writes the FULL response (one
+// JSON record per row, NDJSON-formatted) to a downloadable Blob. Used
+// by the overflow-notice "Download full result" button so an operator
+// who needed the truncated rows can still retrieve them.
+//
+// The exporter intentionally does NOT re-run projectColumns — it emits
+// the raw {columns, row} pairs so the receiver gets the unflattened
+// graph shape. NDJSON is chosen over CSV because the raw row may
+// contain nested NODE/EDGE objects that CSV cannot represent without
+// information loss.
+function exportRespAsNdjson(resp: {
+  columns: Array<{ name: string; type: string } | Record<string, unknown>>
+  rows: unknown[][]
+}): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  const columnNames = resp.columns.map((c) => {
+    const r = c as Record<string, unknown>
+    return typeof r.name === 'string' ? r.name : ''
+  })
+  const lines: string[] = []
+  for (let r = 0; r < resp.rows.length; r += 1) {
+    const row = resp.rows[r] as unknown[]
+    const record: Record<string, unknown> = {}
+    for (let c = 0; c < columnNames.length; c += 1) {
+      record[columnNames[c] || `col${c}`] = row[c] ?? null
+    }
+    lines.push(JSON.stringify(record))
+  }
+  const blob = new Blob([lines.join('\n') + (lines.length ? '\n' : '')], {
+    type: 'application/x-ndjson',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `geode-result-${Date.now()}.ndjson`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  // Revoke on the next tick so the click handler's blob fetch completes.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
   const view = useMemo(
     () => (expand ? projectColumns(resp) : resp),
@@ -522,6 +577,22 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
     []
   )
 
+  // PERF #236 / #234c (#236, #234): the projection may have capped
+  // visible columns or rows. Surface the cap via a small disclosure
+  // banner above the header so operators can see why the result is
+  // truncated and reach the "download full result" affordance. The
+  // banner is only rendered when overflow is present; in the common
+  // case it costs zero DOM.
+  const overflow = (
+    view as {
+      overflow?: {
+        columnsHidden: number
+        rowsHidden: number
+        totalRows: number
+        totalColumns: number
+      }
+    }
+  ).overflow
   // Explicit ARIA roles: react-window renders the body as div-based
   // CSS grid (not a <tbody>), which severs the implicit columnheader
   // role on the standalone <thead><tr><th>. Wrap the whole composition
@@ -534,6 +605,35 @@ export const TableView: React.FC<Props> = ({ resp, expand = true }) => {
       aria-rowcount={view.rows.length}
       data-testid="table-view"
     >
+      {overflow && (overflow.columnsHidden > 0 || overflow.rowsHidden > 0) ? (
+        <OverflowNotice
+          data-testid="table-overflow-notice"
+          role="status"
+          aria-live="polite"
+        >
+          {overflow.columnsHidden > 0 ? (
+            <span data-testid="table-overflow-cols">
+              +{overflow.columnsHidden} more columns hidden (showing{' '}
+              {view.columns.length} of {overflow.totalColumns}).
+            </span>
+          ) : null}{' '}
+          {overflow.rowsHidden > 0 ? (
+            <span data-testid="table-overflow-rows">
+              {overflow.rowsHidden} more rows hidden (showing {view.rows.length}{' '}
+              of {overflow.totalRows}).
+            </span>
+          ) : null}{' '}
+          {overflow.rowsHidden > 0 ? (
+            <button
+              type="button"
+              data-testid="table-overflow-export"
+              onClick={() => exportRespAsNdjson(resp)}
+            >
+              Download full result (NDJSON)
+            </button>
+          ) : null}
+        </OverflowNotice>
+      ) : null}
       <ScrollArea data-testid="table-scroll-area">
         <HeaderTable $minWidthPx={minGridWidthPx} role="presentation">
           <thead>

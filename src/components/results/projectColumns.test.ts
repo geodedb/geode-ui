@@ -225,6 +225,95 @@ describe('projectColumns', () => {
     }
   })
 
+  // PERF #236 (#236) — column-budget tests.
+  test('PERF #236: caps materialised property columns at the budget', () => {
+    const keys = Array.from({ length: 200 }, (_, i) => `prop${i}`)
+    const props: Record<string, unknown> = Object.fromEntries(
+      keys.map((k) => [k, k])
+    )
+    const node = { id: 'n1', labels: ['L'], properties: props }
+    const out = projectColumns(
+      { columns: [{ name: 'n', type: 'NODE' }], rows: [[node]] },
+      { columnBudget: 16 }
+    )
+    expect(out.columns.length).toBe(16)
+    expect(out.overflow).toBeDefined()
+    expect(out.overflow?.columnsHidden).toBe(200 - 15)
+    expect(out.overflow?.totalColumns).toBe(1 + 200)
+  })
+
+  test('PERF #236: distributes property budget across multiple node columns', () => {
+    const buildNode = (id: string): Record<string, unknown> => {
+      const props: Record<string, unknown> = {}
+      for (let i = 0; i < 50; i += 1) props[`k${id}_${i}`] = i
+      return { id, labels: ['L'], properties: props }
+    }
+    const out = projectColumns(
+      {
+        columns: [
+          { name: 'a', type: 'NODE' },
+          { name: 'b', type: 'NODE' },
+        ],
+        rows: [[buildNode('A'), buildNode('B')]],
+      },
+      { columnBudget: 22 }
+    )
+    expect(out.columns.length).toBe(2 + 20)
+    expect(out.overflow?.columnsHidden).toBe(100 - 20)
+  })
+
+  test('PERF #236: zero budget disables the cap (back-compat)', () => {
+    const props: Record<string, unknown> = {}
+    for (let i = 0; i < 80; i += 1) props[`p${i}`] = i
+    const node = { id: 'n', labels: ['L'], properties: props }
+    const out = projectColumns(
+      { columns: [{ name: 'n', type: 'NODE' }], rows: [[node]] },
+      { columnBudget: 0 }
+    )
+    expect(out.columns.length).toBe(1 + 80)
+    expect(out.overflow).toBeUndefined()
+  })
+
+  // PERF #234c (#234) — row display cap tests.
+  test('PERF #234c: row display cap truncates and reports rowsHidden', () => {
+    const rows: unknown[][] = []
+    for (let i = 0; i < 100; i += 1) rows.push([i])
+    const out = projectColumns(
+      { columns: [{ name: 'x', type: 'INT' }], rows },
+      { rowDisplayCap: 25 }
+    )
+    expect(out.rows.length).toBe(25)
+    expect(out.overflow?.rowsHidden).toBe(75)
+    expect(out.overflow?.totalRows).toBe(100)
+  })
+
+  test('PERF #234c: zero rowDisplayCap disables the cap (back-compat)', () => {
+    const rows: unknown[][] = []
+    for (let i = 0; i < 100; i += 1) rows.push([i])
+    const out = projectColumns(
+      { columns: [{ name: 'x', type: 'INT' }], rows },
+      { rowDisplayCap: 0 }
+    )
+    expect(out.rows.length).toBe(100)
+    expect(out.overflow).toBeUndefined()
+  })
+
+  test('PERF #234c: row cap works alongside #236 column cap', () => {
+    const props: Record<string, unknown> = {}
+    for (let i = 0; i < 80; i += 1) props[`p${i}`] = i
+    const node = { id: 'n', labels: ['L'], properties: props }
+    const rows: unknown[][] = []
+    for (let i = 0; i < 200; i += 1) rows.push([node])
+    const out = projectColumns(
+      { columns: [{ name: 'n', type: 'NODE' }], rows },
+      { columnBudget: 16, rowDisplayCap: 50 }
+    )
+    expect(out.rows.length).toBe(50)
+    expect(out.columns.length).toBe(16)
+    expect(out.overflow?.columnsHidden).toBe(80 - 15)
+    expect(out.overflow?.rowsHidden).toBe(200 - 50)
+  })
+
   test('F7 single-pass: declared NODE/EDGE type drives output even for empty rows', () => {
     // Even with zero rows, a column declared as NODE must still
     // emit its structural _labels column. The pre-F7 implementation
