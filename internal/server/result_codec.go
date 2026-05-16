@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"database/sql"
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
@@ -302,6 +303,15 @@ type queryRowScanner interface {
 // here still surfaces as a clean 500 because nothing has been written yet.
 // Returns the marshalled descriptors and the raw column-name slice (the
 // caller needs len(cols) to size its scan buffers).
+//
+// PERF #219: the descriptor shape is fixed (`{"name":STRING,"type":STRING}`)
+// so the per-column json.Marshal call (with its anonymous-struct reflect
+// hop and per-call buffer alloc) is replaced by a single shared scratch
+// buffer that we write the JSON tokens into directly via jsontext.Encoder.
+// Each descriptor gets its own []byte slice cut from the encoded scratch
+// so the returned []jsontext.Value is safely independent. The single
+// encoder + single buffer eliminates the per-column allocation we used to
+// pay (~1 alloc per column for the struct, ~1 for the marshal result).
 func queryColumnDescs(rows queryRowScanner) ([]jsontext.Value, []string, error) {
 	cols, err := rows.Columns()
 	if err != nil {
@@ -311,18 +321,65 @@ func queryColumnDescs(rows queryRowScanner) ([]jsontext.Value, []string, error) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("column types: %w", err)
 	}
-	colDescs := make([]jsontext.Value, len(cols))
-	for i, name := range cols {
-		raw, mErr := json.Marshal(struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-		}{Name: name, Type: colTypes[i].DatabaseTypeName()})
-		if mErr != nil {
-			return nil, nil, fmt.Errorf("marshal column desc: %w", mErr)
-		}
-		colDescs[i] = jsontext.Value(raw)
+	if len(cols) != len(colTypes) {
+		return nil, nil, fmt.Errorf("column/type count mismatch: %d vs %d", len(cols), len(colTypes))
 	}
-	return colDescs, cols, nil
+
+	// Build typeName slice once; the encoding helper takes the raw
+	// strings so unit tests (which can't synthesise *sql.ColumnType
+	// because it has no public constructor) can exercise the fast path
+	// directly via encodeColumnDescs.
+	typeNames := make([]string, len(colTypes))
+	for i, t := range colTypes {
+		typeNames[i] = t.DatabaseTypeName()
+	}
+	return encodeColumnDescs(cols, typeNames), cols, nil
+}
+
+// encodeColumnDescs writes the `{"name":STRING,"type":STRING}` JSON
+// descriptor for each (name, typeName) pair using a single shared
+// scratch buffer + encoder. Each per-column slice is copied out so
+// the returned []jsontext.Value entries do not alias the scratch.
+//
+// PERF #219: a single jsontext.Encoder bound to a single bytes.Buffer
+// is reused for every column. Previously this loop did a json.Marshal
+// against an anonymous struct per column (reflect hop + per-call
+// buffer alloc); the new path avoids both.
+//
+// names and typeNames MUST have the same length (queryColumnDescs
+// guards this for the production caller; tests pass equal-length
+// slices directly).
+func encodeColumnDescs(names, typeNames []string) []jsontext.Value {
+	colDescs := make([]jsontext.Value, len(names))
+	var scratch bytes.Buffer
+	enc := jsontext.NewEncoder(&scratch)
+	for i, name := range names {
+		scratch.Reset()
+		// Token sequence: `{` "name" name "type" type `}` — the
+		// jsontext encoder handles JSON string escaping for us, so
+		// column names with embedded quotes / backslashes / control
+		// chars marshal correctly.
+		_ = enc.WriteToken(jsontext.BeginObject)
+		_ = enc.WriteToken(jsontext.String("name"))
+		_ = enc.WriteToken(jsontext.String(name))
+		_ = enc.WriteToken(jsontext.String("type"))
+		_ = enc.WriteToken(jsontext.String(typeNames[i]))
+		_ = enc.WriteToken(jsontext.EndObject)
+		// jsontext.Encoder appends a trailing newline after every value;
+		// strip it so the wire format matches the prior json.Marshal
+		// output exactly (no extra `\n` between commas inside the
+		// columns array).
+		b := scratch.Bytes()
+		for len(b) > 0 && b[len(b)-1] == '\n' {
+			b = b[:len(b)-1]
+		}
+		// Copy out — scratch is reused on the next iteration so we
+		// cannot retain a slice into its backing array.
+		out := make([]byte, len(b))
+		copy(out, b)
+		colDescs[i] = jsontext.Value(out)
+	}
+	return colDescs
 }
 
 // streamFlushEvery is the row interval at which streamQueryResult flushes

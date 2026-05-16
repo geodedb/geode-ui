@@ -258,3 +258,107 @@ func BenchmarkStreamQueryResult_PerRowAlloc(b *testing.B) {
 		}
 	}
 }
+
+// TestEncodeColumnDescs_ShapeAndEscaping pins the JSON shape of the
+// PERF #219 fast path so a future refactor of encodeColumnDescs cannot
+// silently change the wire format consumed by the SPA. The shape was
+// previously produced by an anonymous-struct json.Marshal call; the
+// fast path uses a single jsontext.Encoder + shared scratch buffer.
+//
+// The escaping case covers a column name with a JSON-significant
+// character (a double-quote) so a regression that bypasses the
+// jsontext.String escape path would surface as a malformed byte
+// sequence — the test would fail to decode.
+func TestEncodeColumnDescs_ShapeAndEscaping(t *testing.T) {
+	names := []string{"id", `quoted"name`, "props"}
+	types := []string{"INT8", "TEXT", "JSONB"}
+
+	got := encodeColumnDescs(names, types)
+	if len(got) != 3 {
+		t.Fatalf("want 3 descs, got %d", len(got))
+	}
+
+	for i, raw := range got {
+		var dec struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &dec); err != nil {
+			t.Fatalf("desc[%d] %s: unmarshal: %v", i, raw, err)
+		}
+		if dec.Name != names[i] {
+			t.Fatalf("desc[%d] name=%q want %q", i, dec.Name, names[i])
+		}
+		if dec.Type != types[i] {
+			t.Fatalf("desc[%d] type=%q want %q", i, dec.Type, types[i])
+		}
+	}
+}
+
+// TestEncodeColumnDescs_IndependentSlices guards the copy-out behavior
+// in the fast path: the shared scratch buffer is reused across the
+// loop, so each returned jsontext.Value MUST hold an independent
+// []byte (not a slice into the scratch). A future refactor that drops
+// the explicit `out := make(...) + copy` step would cause earlier
+// descs to corrupt as later iterations overwrite the buffer.
+func TestEncodeColumnDescs_IndependentSlices(t *testing.T) {
+	names := []string{"a", "b", "c"}
+	types := []string{"INT", "INT", "INT"}
+
+	got := encodeColumnDescs(names, types)
+	want := []string{`{"name":"a","type":"INT"}`, `{"name":"b","type":"INT"}`, `{"name":"c","type":"INT"}`}
+	for i, raw := range got {
+		if string(raw) != want[i] {
+			t.Fatalf("desc[%d] = %s, want %s", i, raw, want[i])
+		}
+	}
+}
+
+// BenchmarkEncodeColumnDescs_64Cols is the PERF #219 regression gate.
+// A 64-column descriptor encode (typical wide-result-set shape) should
+// allocate substantially fewer times than the per-column json.Marshal
+// it replaced — the prior path paid ~2 allocs per column (anonymous
+// struct + marshal buffer), the fast path pays 1 alloc per column for
+// the copy-out plus a small fixed cost for the encoder + scratch.
+func BenchmarkEncodeColumnDescs_64Cols(b *testing.B) {
+	names := make([]string, 64)
+	types := make([]string, 64)
+	for i := range names {
+		names[i] = "col"
+		types[i] = "TEXT"
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = encodeColumnDescs(names, types)
+	}
+}
+
+// BenchmarkEncodeColumnDescs_64Cols_PriorPath reproduces the pre-PERF #219
+// implementation (per-column anonymous struct + json.Marshal) so the
+// allocation comparison is grounded in the same harness. The fast path
+// above should beat this on both ns/op and B/op.
+func BenchmarkEncodeColumnDescs_64Cols_PriorPath(b *testing.B) {
+	names := make([]string, 64)
+	types := make([]string, 64)
+	for i := range names {
+		names[i] = "col"
+		types[i] = "TEXT"
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		descs := make([]jsontext.Value, len(names))
+		for i, name := range names {
+			raw, err := json.Marshal(struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			}{Name: name, Type: types[i]})
+			if err != nil {
+				b.Fatalf("marshal col desc: %v", err)
+			}
+			descs[i] = jsontext.Value(raw)
+		}
+		_ = descs
+	}
+}
