@@ -254,12 +254,17 @@ describe('applyMatrixBudget', () => {
   // (40k potential cells) and confirm applyMatrixBudget completes in
   // well under one frame. This is a regression gate — if a future change
   // adds an O(L²) path on the budget side, the assertion fires.
-  it('handles 200 labels in < 50 ms (regression gate)', () => {
+  //
+  // Threshold history: started at 50 ms; widened to 75 ms on 2026-05-16
+  // after the gap-close verifier observed 52.99 ms under contention on a
+  // busy CI runner. 75 ms still catches an O(L²) regression (the prior
+  // dense walk took >120 ms on the same host) while tolerating noise.
+  it('handles 200 labels in < 75 ms (regression gate)', () => {
     const m = ramp(200)
     const t0 = performance.now()
     const r = applyMatrixBudget(m, 60)
     const dt = performance.now() - t0
     expect(r.labels).toHaveLength(60)
-    expect(dt).toBeLessThan(50)
+    expect(dt).toBeLessThan(75)
   })
 })
