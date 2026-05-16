@@ -4,8 +4,7 @@ import cytoscape, { Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import dagre from 'cytoscape-dagre'
 import spread from 'cytoscape-spread'
-import { createRoot, type Root } from 'react-dom/client'
-import { ThemeProvider, useTheme } from 'styled-components'
+import { useTheme } from 'styled-components'
 import { labelToColor } from './cytoscapeStyle'
 import { DEFAULT_LAYOUT, useGraphPrefs } from './useGraphPrefs'
 import { QueryRespLike, resolveNodeLabel } from '../../lib/graphResult'
@@ -23,24 +22,22 @@ import { usePinnedNodes } from './graph/usePinnedNodes'
 import { useFocusMode } from './graph/useFocusMode'
 import { useGraphBadges } from './graph/useGraphBadges'
 import { GraphBadges } from './graph/GraphBadges'
-import {
-  COSE_NODE_LIMIT,
-  LAYOUTS,
-  layoutConfig,
-  layoutLabel,
-} from './graph/layouts'
+import { COSE_NODE_LIMIT, LAYOUTS, layoutLabel } from './graph/layouts'
 import { respSignature } from './graph/cyHelpers'
 import { allowedFeatures } from './graph/scaleTier'
 import type { Neighbor, Selected } from './graph/GraphInspector'
 import { useCxtMenu } from './graph/useCxtMenu'
 import { useLasso } from './graph/useLasso'
 import { useDomNodes } from './graph/useDomNodes'
-import { CustomNodeTemplate } from './graph/CustomNodeTemplate'
 import { useNodeTooltip } from './graph/useNodeTooltip'
 import { GraphTooltip } from './graph/GraphTooltip'
-import { zoomToNode } from './graph/zoomToNode'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
+// QUALITY #164: extracted from this orchestrator so the file focuses on
+// state assembly + JSX wiring instead of inline action / lifecycle code.
+import { useGraphDomNodeRoots } from './graph/useGraphDomNodeRoots'
+import { useGraphNodeActions } from './graph/useGraphNodeActions'
+import { useGraphToolbarActions } from './graph/useGraphToolbarActions'
 import {
   Canvas,
   CanvasArea,
@@ -355,43 +352,24 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // the rendered popover resets its internal useState between targets.
   const [expandFor, setExpandFor] = useState<string | null>(null)
 
-  const onToggleSelectionMode = (): void => {
-    setSelectionMode(selectionMode === 'box' ? 'pan' : 'box')
-  }
-  const onToggleClusterByLabel = (): void => {
-    const next = !clusterByLabel
-    setClusterByLabel(next)
-    // Clustering ON auto-picks fcose (best for compound graphs); off
-    // doesn't force a layout change, so a manual pick is respected.
-    if (next) setLayout('fcose')
-  }
-  const onZoomIn = (): void => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.zoom({
-      level: cy.zoom() * 1.25,
-      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
-    })
-  }
-  const onZoomOut = (): void => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.zoom({
-      level: cy.zoom() / 1.25,
-      renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
-    })
-  }
-  const onFit = (): void => {
-    cyRef.current?.fit(undefined, 24)
-  }
-  const onResetView = (): void => {
-    const cy = cyRef.current
-    if (!cy) return
-    setSelected(null)
-    setHiddenLabels(new Set())
-    cy.layout(layoutConfig(layout)).run()
-    cy.fit(undefined, 24)
-  }
+  const {
+    onToggleSelectionMode,
+    onToggleClusterByLabel,
+    onZoomIn,
+    onZoomOut,
+    onFit,
+    onResetView,
+  } = useGraphToolbarActions({
+    cyRef,
+    selectionMode,
+    setSelectionMode,
+    clusterByLabel,
+    setClusterByLabel,
+    layout,
+    setLayout,
+    setSelected,
+    setHiddenLabels,
+  })
 
   // 1-hop neighbours of the currently-selected node, read straight off
   // the live cy core via `cyRef.current.$id(id).neighborhood('node')`.
@@ -462,33 +440,17 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // any other entry point that needs to route an action by node id.
   // Each one closes over the orchestrator's existing state / helpers —
   // the names match CxtMenuHandlers's fields exactly so the wiring at
-  // the mount site is a no-rename pass-through.
-  const onZoomTo = (id: string): void => {
-    if (cyRef.current) zoomToNode(cyRef.current, id)
-  }
-  const onExpand = (id: string): void => {
-    // Open the configurable popover. The user's chosen
-    // direction / labelFilter / limit is forwarded to
-    // onExploreNeighbours via onExpandRun below.
-    setExpandFor(id)
-  }
-  const onHide = (id: string): void => {
-    onHideNode(id)
-  }
-  const onCollapse = (id: string): void => {
-    onCollapseNode(id)
-  }
-  const onFocus = (id: string): void => {
-    focusMode.focus({ id, hops: focusHops })
-  }
-  const onPin = (id: string): void => {
-    pinning.togglePin(id)
-  }
-  const onCopyId = (id: string): void => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(id).catch(() => {})
-    }
-  }
+  // the mount site is a no-rename pass-through. See useGraphNodeActions
+  // for the per-handler bodies (QUALITY #164).
+  const nodeActions = useGraphNodeActions({
+    cyRef,
+    setExpandFor,
+    onHideNode,
+    onCollapseNode,
+    focusMode,
+    focusHops,
+    pinning,
+  })
 
   // Right-click / long-press radial context menu on a node. Passing `sig`
   // forces the hook's subscription effect to re-bind whenever the
@@ -499,15 +461,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // styled-components context tree).
   useCxtMenu({
     cyRef,
-    handlers: {
-      onZoomTo,
-      onExpand,
-      onHide,
-      onCollapse,
-      onFocus,
-      onPin,
-      onCopyId,
-    },
+    handlers: nodeActions,
     t,
     sig,
     theme,
@@ -525,68 +479,13 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   // current toggle.
   useLasso({ cyRef, enabled: lasso, sig })
 
-  // Track mounted React roots keyed by node id so they can be unmounted
-  // on rebuild / sig change. Without this, every cytoscape rebuild leaks
-  // N mounted createRoot() instances — they outlive the underlying nodes
-  // because nothing else points at them.
-  const domRootsRef = useRef<Map<string, Root>>(new Map())
-
   // Build a single HTML element + React root per node when DOM-node
-  // rendering is enabled. We never write innerHTML — each container
-  // gets its own createRoot() so the rendered CustomNodeTemplate
-  // is XSS-safe and future interactive children (event handlers,
-  // controlled inputs, etc.) keep working.
-  const renderNode = useCallback(
-    (data: Record<string, unknown>): HTMLElement => {
-      const labelField = data.label
-      let label = ''
-      if (typeof labelField === 'string') {
-        label = labelField
-      } else if (
-        Array.isArray(labelField) &&
-        typeof labelField[0] === 'string'
-      ) {
-        label = labelField[0]
-      }
-      const swatchColor = labelToColor(label, theme.variant)
-      const id = data.id != null ? String(data.id) : ''
-      const pinned = id ? pinning.isPinned(id) : false
-      const container = document.createElement('div')
-      const root = createRoot(container)
-      root.render(
-        <ThemeProvider theme={theme}>
-          <CustomNodeTemplate
-            label={label}
-            swatchColor={swatchColor}
-            pinned={pinned}
-          />
-        </ThemeProvider>
-      )
-      if (id) {
-        const prev = domRootsRef.current.get(id)
-        if (prev) prev.unmount()
-        domRootsRef.current.set(id, root)
-      }
-      return container
-    },
-    [pinning, theme]
-  )
-
-  // Tear down every mounted root on unmount or sig change so a fresh
-  // cytoscape core doesn't leak the previous run's React trees.
-  useEffect(() => {
-    const roots = domRootsRef.current
-    return () => {
-      roots.forEach((root) => {
-        try {
-          root.unmount()
-        } catch {
-          /* already unmounted */
-        }
-      })
-      roots.clear()
-    }
-  }, [sig])
+  // rendering is enabled. The per-id root pool + sig-keyed cleanup
+  // lives in useGraphDomNodeRoots (QUALITY #164). We never write
+  // innerHTML — each container gets its own createRoot() so the
+  // rendered CustomNodeTemplate is XSS-safe and future interactive
+  // children (event handlers, controlled inputs) keep working.
+  const { renderNode } = useGraphDomNodeRoots({ theme, pinning, sig })
 
   useDomNodes({ cyRef, enabled: domNodes, renderNode, sig })
 
