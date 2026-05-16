@@ -15,7 +15,7 @@ BIN := bin/geode-ui
 # Update this list when a new top-level Go directory is added.
 GO_PKGS := ./cmd/... ./gen/... ./internal/...
 
-.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
+.PHONY: all help generate go-build go-test go-cover go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
 
 all: lint test build
 
@@ -33,6 +33,13 @@ go-build: web-build
 
 go-test:
 	$(GOENV) go test -race -cover -failfast $(GO_PKGS)
+
+# QUALITY #48: Go coverage ratchet. Runs go test with -coverprofile,
+# extracts the total ratio via `go tool cover -func`, and compares
+# against the committed floor (79% today; bump in a follow-up after
+# a deliberate coverage push).
+go-cover:
+	scripts/check-go-coverage.sh
 
 go-lint:
 	@command -v golangci-lint > /dev/null 2>&1 || ( \

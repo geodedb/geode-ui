@@ -55,4 +55,24 @@ module.exports = {
   transformIgnorePatterns: [
     'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style|nanoid)/)',
   ],
+  // QUALITY #48 / GAP-019: ratcheted coverage thresholds. Set to the
+  // current measured floor minus 1 pp so a micro-regression (a
+  // pre-existing test deleted or a freshly-merged feature shipping
+  // without a unit test) fails the gate without producing flake on
+  // the green path. Refresh the floor in a follow-up commit when a
+  // deliberate coverage push lands.
+  //
+  // Today's measured floor (2026-05-16, 773 tests across 118 suites):
+  //   statements 80.32 -> 79
+  //   branches   67.80 -> 66
+  //   functions  75.60 -> 74
+  //   lines      82.48 -> 81
+  coverageThreshold: {
+    global: {
+      statements: 79,
+      branches: 66,
+      functions: 74,
+      lines: 81,
+    },
+  },
 }
