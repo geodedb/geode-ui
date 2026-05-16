@@ -263,12 +263,18 @@ test.describe('UI health — horizontal overflow sweep', () => {
       await visit(page, base, r)
     }
 
-    // Allow framework-level chatter — vite HMR, favicon 404 etc. The
-    // assertion targets app code paths, not infra noise.
+    // Allow framework-level chatter — vite HMR, favicon 404, and Web
+    // Awesome / Font Awesome icon-fetch noise (the library attempts
+    // Fetch API requests against data: URIs for its SVG icon kit; the
+    // browser rejects these with "Fetch API cannot load data:…" and a
+    // paired "Connecting to …" message — both are benign because the
+    // icons still render via the inline SVG fallback path).
     const BENIGN = [
       /Failed to load resource: net::ERR_NETWORK_CHANGED/,
       /favicon\.ico/,
       /\[vite\]/,
+      /Connecting to 'data:/,
+      /Fetch API cannot load data:/,
     ]
     const errs = consoleErrorBuf.get(page) ?? []
     errs.forEach((e) => {
