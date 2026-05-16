@@ -52,7 +52,7 @@ beforeEach(() => {
   mockClient.getCapabilities.mockResolvedValue(capsWritable(true))
 })
 
-test('renders the grants form with apply and revoke buttons', () => {
+test('renders the grants form with apply and revoke buttons', async () => {
   renderPanel()
 
   expect(screen.getByText('Grants')).toBeInTheDocument()
@@ -63,6 +63,13 @@ test('renders the grants form with apply and revoke buttons', () => {
   expect(screen.getByText('Resource')).toBeInTheDocument()
   expect(screen.getByText('Grantee')).toBeInTheDocument()
   expect(screen.getByText('Grantee kind')).toBeInTheDocument()
+  // QUALITY #227: GrantsPanel kicks off `getCapabilities` on mount via
+  // useApiResource. Without awaiting the async resolution the
+  // `dispatch({kind:'success'})` fires after the test exits, producing
+  // an act() warning. Wait for the CTA to settle (enabled-by-caps).
+  await waitFor(() =>
+    expect(screen.getByTestId('admin-grants-apply-btn')).toBeEnabled()
+  )
 })
 
 // --- Phase 1: CTA gating --------------------------------------------

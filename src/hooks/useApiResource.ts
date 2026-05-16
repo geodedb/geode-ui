@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef } from 'react'
 
 // useApiResource centralizes the `useEffect → fetch → setState` pattern
 // that previously lived inline in 7+ admin/ops pages. It owns:
@@ -29,13 +29,54 @@ export type UseApiResourceResult<T> = {
   refetch: () => void
 }
 
+// QUALITY #227: a single reducer over {data, status, error} so each
+// async resolution dispatches ONE state update. With React 18 automatic
+// batching outside a sync update boundary is best-effort; coalescing the
+// state into one slot guarantees the success/error/loading transitions
+// each fire exactly one render and exactly one React-internal "update"
+// scheduling event. This is what eliminates the residual `act(...)`
+// warnings cited in the gap evidence — three sequential setState calls
+// in the .then() callback were each scheduling a separate flush.
+type State<T> = {
+  data: T | null
+  status: Status
+  error: string | null
+}
+
+type Action<T> =
+  | { kind: 'start' }
+  | { kind: 'success'; data: T }
+  | { kind: 'error'; error: string }
+
+function reducer<T>(s: State<T>, a: Action<T>): State<T> {
+  switch (a.kind) {
+    case 'start':
+      // Loading: clear any prior error but keep stale data so consumers
+      // can render a "previous result + spinner" pattern without a flash
+      // of empty state. This mirrors the pre-reducer behaviour.
+      return { ...s, status: 'loading', error: null }
+    case 'success':
+      return { data: a.data, status: 'success', error: null }
+    case 'error':
+      return { ...s, status: 'error', error: a.error }
+    default:
+      return s
+  }
+}
+
+function initialState<T>(): State<T> {
+  return { data: null, status: 'idle', error: null }
+}
+
 export function useApiResource<T>(
   fetcher: (signal: AbortSignal) => Promise<T>,
   deps: ReadonlyArray<unknown>
 ): UseApiResourceResult<T> {
-  const [data, setData] = useState<T | null>(null)
-  const [status, setStatus] = useState<Status>('idle')
-  const [error, setError] = useState<string | null>(null)
+  const [state, dispatch] = useReducer(
+    reducer as React.Reducer<State<T>, Action<T>>,
+    undefined,
+    initialState<T>
+  )
 
   // mountedRef guards setState after unmount; effect-cleanup flips it
   // to false. controllerRef exposes the active controller to refetch().
@@ -58,16 +99,14 @@ export function useApiResource<T>(
     controllerRef.current = controller
     const signal = controller.signal
 
-    setStatus('loading')
-    setError(null)
+    dispatch({ kind: 'start' })
 
     fetcherRef.current(signal).then(
       (value) => {
         // Stale-resolve guard: ignore if this controller was aborted
         // (deps changed, refetch fired again, or component unmounted).
         if (signal.aborted || !mountedRef.current) return
-        setData(value)
-        setStatus('success')
+        dispatch({ kind: 'success', data: value })
       },
       (err: unknown) => {
         if (signal.aborted || !mountedRef.current) return
@@ -82,8 +121,7 @@ export function useApiResource<T>(
         if (isAbort) return
         const message =
           err instanceof Error ? err.message : String(err ?? 'unknown error')
-        setError(message)
-        setStatus('error')
+        dispatch({ kind: 'error', error: message })
       }
     )
   }, [])
@@ -110,5 +148,10 @@ export function useApiResource<T>(
     run()
   }, [run])
 
-  return { data, status, error, refetch }
+  return {
+    data: state.data,
+    status: state.status,
+    error: state.error,
+    refetch,
+  }
 }

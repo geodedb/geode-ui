@@ -78,8 +78,24 @@ export const LoginPage: React.FC = () => {
   const { t } = useTranslation()
   const nav = useNavigate()
 
-  const [profiles, setProfiles] = useState<PublicProfile[] | null>(null)
-  const [loadErr, setLoadErr] = useState<boolean>(false)
+  // QUALITY #227: collapse profiles + loadErr + default profile name
+  // into a single state slot so the public-profile fetch's success and
+  // failure paths each dispatch exactly ONE setState. The original shape
+  // (`setProfiles` + `setProfile` + a separate `setLoadErr`) fired two
+  // or three setStates back-to-back outside any act() block in the
+  // tests, producing the documented `act(...)` warning. Collapsing
+  // them into one tuple eliminates the warning without changing UX.
+  type ProfilesState = {
+    profiles: PublicProfile[] | null
+    loadErr: boolean
+    initialProfileName: string | null
+  }
+  const [profilesState, setProfilesState] = useState<ProfilesState>({
+    profiles: null,
+    loadErr: false,
+    initialProfileName: null,
+  })
+  const { profiles, loadErr } = profilesState
   const [profile, setProfile] = useState<string>('default')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -92,17 +108,35 @@ export const LoginPage: React.FC = () => {
     fetchPublicProfiles()
       .then((list) => {
         if (cancelled) return
-        setProfiles(list)
-        if (list.length > 0 && list[0]) setProfile(list[0].name)
+        const initial = list.length > 0 && list[0] ? list[0].name : null
+        setProfilesState({
+          profiles: list,
+          loadErr: false,
+          initialProfileName: initial,
+        })
       })
       .catch(() => {
         if (cancelled) return
-        setLoadErr(true)
+        setProfilesState({
+          profiles: null,
+          loadErr: true,
+          initialProfileName: null,
+        })
       })
     return () => {
       cancelled = true
     }
   }, [])
+
+  // Apply the discovered default profile name in a separate effect so
+  // the fetcher's single-state-update invariant stays clean. The effect
+  // runs synchronously after the fetcher's setState commits, inside
+  // the same React update boundary RTL's act() wraps.
+  useEffect(() => {
+    if (profilesState.initialProfileName) {
+      setProfile(profilesState.initialProfileName)
+    }
+  }, [profilesState.initialProfileName])
 
   useEffect(() => {
     if (!username || !profile) return undefined

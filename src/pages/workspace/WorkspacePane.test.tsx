@@ -65,13 +65,21 @@ describe('WorkspacePane', () => {
     const handle = streamHandles[0]
     if (!handle) throw new Error('streamQuery was not called')
     expect(handle.statement).toBe('MATCH (n) RETURN n LIMIT 1')
-    handle.onMessage({
-      kind: 'schema',
-      columns: [{ name: 'n', type: 'NODE' }],
+    // QUALITY #227: wrap the synthetic WS message deliveries in act()
+    // so React knows the dispatches that follow are part of the test's
+    // update boundary. Without this each `handle.onMessage(...)` call
+    // schedules a reducer dispatch outside any act() block and fires
+    // the "An update to WorkspacePane inside a test was not wrapped
+    // in act(...)" warning.
+    act(() => {
+      handle.onMessage({
+        kind: 'schema',
+        columns: [{ name: 'n', type: 'NODE' }],
+      })
+      handle.onMessage({ kind: 'rowBatch', rows: [[1]] })
+      handle.onMessage({ kind: 'summary', row_count: 1, elapsed_ms: 1 })
+      handle.onMessage({ kind: 'end' })
     })
-    handle.onMessage({ kind: 'rowBatch', rows: [[1]] })
-    handle.onMessage({ kind: 'summary', row_count: 1, elapsed_ms: 1 })
-    handle.onMessage({ kind: 'end' })
     expect(
       await screen.findByRole('tab', { name: /table/i })
     ).toBeInTheDocument()

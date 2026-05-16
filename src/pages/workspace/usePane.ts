@@ -57,7 +57,6 @@ export type Pane = {
 export function usePane(initialStatement: string = DEFAULT_STATEMENT): Pane {
   const [statement, setStatement] = useState(initialStatement)
   const [tab, setTab] = useState<ResultTab>('table')
-  const [busy, setBusy] = useState(false)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
   // The statement the in-flight run actually started with. `statement`
@@ -65,12 +64,26 @@ export function usePane(initialStatement: string = DEFAULT_STATEMENT): Pane {
   // so the history entry is keyed off this run-time snapshot instead.
   const runStmtRef = useRef('')
 
+  // QUALITY #227: derive `busy` from the reducer status (single source
+  // of truth) instead of carrying a parallel useState that the stream
+  // callback flips out-of-band. The earlier pattern produced an `act(...)`
+  // warning each time the WS `end`/`error` message arrived after a test
+  // had moved past its act() block, because setBusy() scheduled a
+  // separate React render outside any sync update boundary. Reducer
+  // dispatch fires inside the same callback that already updates
+  // stream state, so there's exactly one React update event per
+  // message instead of two.
+  const busy = stream.status === 'running'
+
   const cancel = useCallback(() => {
     if (handleRef.current) {
       handleRef.current.cancel()
       handleRef.current = null
     }
-    setBusy(false)
+    // Reducer transitions to 'done' when the stream goes from running
+    // to idle. cancel() is the user-initiated path; tell the reducer
+    // explicitly so the derived `busy` flips synchronously.
+    dispatch({ type: 'closed' })
   }, [])
 
   const run = useCallback(() => {
@@ -81,15 +94,14 @@ export function usePane(initialStatement: string = DEFAULT_STATEMENT): Pane {
     runStmtRef.current = statement
     dispatch({ type: 'reset' })
     dispatch({ type: 'start' })
-    setBusy(true)
     const h = streamQuery(statement, undefined, (m) => {
       dispatch({ type: 'msg', msg: m })
-      if (m.kind === 'end' || m.kind === 'error') setBusy(false)
+      // No setBusy() here — `busy` is derived from stream.status, which
+      // the dispatch above already updated. One render per message.
     })
     handleRef.current = h
     h.done.then(() => {
       dispatch({ type: 'closed' })
-      setBusy(false)
       handleRef.current = null
     })
   }, [statement])
