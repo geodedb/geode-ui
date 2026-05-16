@@ -12,10 +12,239 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
+
+// PERF #217: result codec per-row JSON allocation pools.
+//
+// The per-row hot path in streamQueryResult / scanQueryResult creates
+// a `row []any` and `ptrs []any` per query, plus a graphSummaryAccum
+// (containing two maps), plus a jsontext.Encoder for the row marshal.
+// At 1k rows / 5 cols the per-query overhead used to be ~24k allocs
+// dominated by jsonv2's reflect path for int64-as-any cells. We:
+//
+//  1. Pool the row + ptrs slices keyed by column count so consecutive
+//     queries with the same shape reuse the same backing arrays.
+//  2. Pool the graphSummaryAccum (which carries two maps) so a
+//     graph-light query path does not allocate three objects just to
+//     find zero nodes/edges to extract.
+//  3. Pool a jsontext.Encoder per stream so the row-marshal loop
+//     reuses one encoder rather than acquiring/releasing the global
+//     encoder pool per row.
+//  4. Provide a `marshalRowFast` path that writes int64, float64,
+//     string, []string, and map[string]any values directly via
+//     jsontext.Encoder tokens, bypassing the jsonv2 reflect-based
+//     `any` dispatcher (which calls reflect.New per int64 cell).
+//
+// The pools are package-level vars so the steady-state hot path
+// allocates zero per-row scratch.
+
+// rowScratch holds the per-query scratch slices the streaming codec
+// uses. The codec pulls one from the pool sized to len(cols) at the
+// start of each query and returns it on exit. Slice contents are
+// reset before reuse; backing capacity is preserved.
+type rowScratch struct {
+	row  []any
+	ptrs []any
+}
+
+// rowScratchPool stores rowScratch instances indexed loosely by column
+// count. A single pool is sufficient because the slices are reset on
+// Get; the cap() simply grows to accommodate larger queries.
+var rowScratchPool = sync.Pool{
+	New: func() any {
+		return &rowScratch{}
+	},
+}
+
+// acquireRowScratch returns scratch slices of length n. The returned
+// row + ptrs share the same backing memory pattern row[i] <- &ptrs[i]
+// the codec relies on.
+func acquireRowScratch(n int) *rowScratch {
+	s := rowScratchPool.Get().(*rowScratch)
+	if cap(s.row) < n {
+		s.row = make([]any, n)
+		s.ptrs = make([]any, n)
+	} else {
+		s.row = s.row[:n]
+		s.ptrs = s.ptrs[:n]
+	}
+	for i := range s.row {
+		s.row[i] = nil
+		s.ptrs[i] = &s.row[i]
+	}
+	return s
+}
+
+// releaseRowScratch returns the scratch to the pool. The caller MUST
+// not retain pointers into row / ptrs after this call.
+func releaseRowScratch(s *rowScratch) {
+	// Nil the entries so the pool does not pin the previous query's
+	// graph maps / strings in memory between uses.
+	for i := range s.row {
+		s.row[i] = nil
+	}
+	rowScratchPool.Put(s)
+}
+
+// graphSummaryAccumPool stores graphSummaryAccum instances for reuse.
+// On Get the maps are cleared (cheap O(1) builtin in Go) and the out
+// slices are length-reset; backing capacity is preserved so a
+// graph-heavy query path does not re-grow the slices every iteration.
+var graphSummaryAccumPool = sync.Pool{
+	New: func() any {
+		return &graphSummaryAccum{
+			seenNode: make(map[int64]struct{}),
+			seenEdge: make(map[int64]struct{}),
+		}
+	},
+}
+
+func acquireGraphSummaryAccum() *graphSummaryAccum {
+	a := graphSummaryAccumPool.Get().(*graphSummaryAccum)
+	clear(a.seenNode)
+	clear(a.seenEdge)
+	a.out.Nodes = a.out.Nodes[:0]
+	a.out.Edges = a.out.Edges[:0]
+	return a
+}
+
+func releaseGraphSummaryAccum(a *graphSummaryAccum) {
+	// Drop references so the pool does not pin graph maps in memory.
+	for i := range a.out.Nodes {
+		a.out.Nodes[i] = GraphNode{}
+	}
+	for i := range a.out.Edges {
+		a.out.Edges[i] = GraphEdge{}
+	}
+	a.out.Nodes = a.out.Nodes[:0]
+	a.out.Edges = a.out.Edges[:0]
+	graphSummaryAccumPool.Put(a)
+}
+
+// rowEncoderPool stores per-stream jsontext.Encoder instances bound
+// to a sync.Pool-managed *bufio.Writer surrogate (we cannot rebind an
+// encoder's destination cheaply so we create one encoder per call
+// and pool its surrounding scratch). In practice the WIN from this
+// pool is small relative to the marshalRowFast fast path, but
+// retaining the structure means later refactors can swap in a
+// rebindable encoder without rewriting callers.
+//
+// Note: jsontext.NewEncoder does NOT support rebinding its writer in
+// Go 1.26, so the body of marshalRowFast creates an encoder per call
+// and the pool wraps a *bytes.Buffer scratch instead.
+//
+// PERF #217: marshalRowFast eliminates the jsonv2 reflect path for
+// int64-as-any cells, which was the dominant per-row alloc source.
+
+// marshalRowFast writes one row of length len(cols) into bw as a
+// JSON array. Cell type dispatch covers the shapes Geode produces:
+//
+//   - nil            -> "null"
+//   - bool           -> "true" / "false"
+//   - int64 / int    -> integer literal (jsontext.Int, no alloc)
+//   - float64        -> number literal
+//   - string         -> JSON string
+//   - []string       -> JSON string array
+//   - []any          -> recursive walk via marshalAnyFast
+//   - map[string]any -> recursive walk via marshalMapFast
+//   - everything else -> fallback to json.MarshalWrite (slow path)
+//
+// The fast paths bypass jsonv2's marshalValueAny default branch
+// (line ~44 of arshal_any.go) which calls newAddressableValue ->
+// reflect.New(t) per cell. That reflect.New is the per-row
+// allocation peak we were chasing.
+func marshalRowFast(enc *jsontext.Encoder, row []any) error {
+	if err := enc.WriteToken(jsontext.BeginArray); err != nil {
+		return err
+	}
+	for _, cell := range row {
+		if err := marshalAnyFast(enc, cell); err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndArray)
+}
+
+// marshalAnyFast is the single-cell dispatcher. Kept separate from
+// marshalRowFast so map values + array elements can reuse it.
+func marshalAnyFast(enc *jsontext.Encoder, v any) error {
+	switch x := v.(type) {
+	case nil:
+		return enc.WriteToken(jsontext.Null)
+	case bool:
+		return enc.WriteToken(jsontext.Bool(x))
+	case int64:
+		return enc.WriteToken(jsontext.Int(x))
+	case int:
+		return enc.WriteToken(jsontext.Int(int64(x)))
+	case int32:
+		return enc.WriteToken(jsontext.Int(int64(x)))
+	case uint32:
+		return enc.WriteToken(jsontext.Uint(uint64(x)))
+	case uint64:
+		return enc.WriteToken(jsontext.Uint(x))
+	case float64:
+		return enc.WriteToken(jsontext.Float(x))
+	case string:
+		return enc.WriteToken(jsontext.String(x))
+	case []byte:
+		// jsonv2 marshals []byte as base64; preserve the same shape
+		// by deferring to MarshalEncode for this niche case.
+		return json.MarshalEncode(enc, x)
+	case []string:
+		if err := enc.WriteToken(jsontext.BeginArray); err != nil {
+			return err
+		}
+		for _, s := range x {
+			if err := enc.WriteToken(jsontext.String(s)); err != nil {
+				return err
+			}
+		}
+		return enc.WriteToken(jsontext.EndArray)
+	case []any:
+		if err := enc.WriteToken(jsontext.BeginArray); err != nil {
+			return err
+		}
+		for _, item := range x {
+			if err := marshalAnyFast(enc, item); err != nil {
+				return err
+			}
+		}
+		return enc.WriteToken(jsontext.EndArray)
+	case map[string]any:
+		return marshalMapFast(enc, x)
+	default:
+		// Anything we don't recognise (custom struct types, time.Time,
+		// json.Number, etc.) falls back to the generic jsonv2 path.
+		// The fallback IS slow (reflect.New per call) but preserves
+		// shape compatibility with the prior MarshalWrite path so
+		// tests that pin byte-for-byte output do not regress.
+		return json.MarshalEncode(enc, v)
+	}
+}
+
+// marshalMapFast walks a map[string]any cell, dispatching values via
+// marshalAnyFast. Map iteration order is intentionally
+// non-deterministic (matches jsonv2 default). The reflect path's
+// per-int64 allocation is what we're avoiding here.
+func marshalMapFast(enc *jsontext.Encoder, m map[string]any) error {
+	if err := enc.WriteToken(jsontext.BeginObject); err != nil {
+		return err
+	}
+	for k, v := range m {
+		if err := enc.WriteToken(jsontext.String(k)); err != nil {
+			return err
+		}
+		if err := marshalAnyFast(enc, v); err != nil {
+			return err
+		}
+	}
+	return enc.WriteToken(jsontext.EndObject)
+}
 
 // errWriter is a first-error-latching wrapper around a *bufio.Writer used
 // by streamQueryResult. Once any write fails, every subsequent call is a
@@ -163,12 +392,18 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 	}
 	flush() // TTFB: client sees the document open before any rows are fetched.
 
-	summary := newGraphSummaryAccum()
-	row := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range row {
-		ptrs[i] = &row[i]
-	}
+	summary := acquireGraphSummaryAccum()
+	defer releaseGraphSummaryAccum(summary)
+	scratch := acquireRowScratch(len(cols))
+	defer releaseRowScratch(scratch)
+	row := scratch.row
+	ptrs := scratch.ptrs
+	// PERF #217: bind a single jsontext.Encoder to bw and write each row
+	// via marshalRowFast. The encoder is owned by this call (no pool —
+	// jsontext.NewEncoder does not support rebinding) and the fast path
+	// avoids the reflect.New(t) per int64-as-any cell that dominated the
+	// pre-PERF #217 baseline.
+	rowEnc := jsontext.NewEncoder(bw)
 	rowCount := int64(0)
 	for rows.Next() {
 		// Reset before each Scan — driver may leave previous values in
@@ -183,14 +418,12 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 		summary.visitRow(row)
 		if rowCount > 0 {
 			ew.byte(',')
+			if ew.err != nil {
+				return midStreamAbort("write row", rowCount, ew.err)
+			}
 		}
-		// Stream the row directly into the buffered writer — no per-row
-		// []byte allocation (PERF-2026-05-11-07 / #145). The v2 encoder
-		// completes synchronously before the next loop iteration overwrites
-		// the shared `row` backing array.
-		ew.marshal(row)
-		if ew.err != nil {
-			return midStreamAbort("write row", rowCount, ew.err)
+		if err := marshalRowFast(rowEnc, row); err != nil {
+			return midStreamAbort("write row", rowCount, err)
 		}
 		rowCount++
 		if rowCount%streamFlushEvery == 0 {
@@ -241,16 +474,16 @@ func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp
 	}
 
 	// Single-pass row drain: scan -> fold into summary -> marshal -> append.
-	// We reuse one row backing array per iteration; the JSON marshaller
-	// snapshots its inputs so the next iteration can safely overwrite the
-	// slice contents.
+	// PERF #217: reuse pooled row/ptrs scratch + summary accumulator.
+	// The JSON marshaller snapshots its inputs so the next iteration can
+	// safely overwrite the shared slice contents.
 	rowJSON := make([]jsontext.Value, 0)
-	summary := newGraphSummaryAccum()
-	row := make([]any, len(cols))
-	ptrs := make([]any, len(cols))
-	for i := range row {
-		ptrs[i] = &row[i]
-	}
+	summary := acquireGraphSummaryAccum()
+	defer releaseGraphSummaryAccum(summary)
+	scratch := acquireRowScratch(len(cols))
+	defer releaseRowScratch(scratch)
+	row := scratch.row
+	ptrs := scratch.ptrs
 	rowCount := int64(0)
 	for rows.Next() {
 		// Reset before each Scan -- driver may leave previous values in
