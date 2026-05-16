@@ -73,7 +73,7 @@ describe('usePaneVisibility', () => {
       // Bind the node via the ref before the effect runs.
       const { result } = renderHook(() => {
         const r = usePaneVisibility()
-        const mutRef = r.ref as { current: HTMLDivElement | null }
+        const mutRef = r.ref as { current: HTMLElement | null }
         mutRef.current = node
         return r
       })
@@ -125,7 +125,7 @@ describe('usePaneVisibility', () => {
       document.body.appendChild(node)
       const hook = renderHook(() => {
         const r = usePaneVisibility()
-        const mutRef = r.ref as { current: HTMLDivElement | null }
+        const mutRef = r.ref as { current: HTMLElement | null }
         mutRef.current = node
         return r
       })

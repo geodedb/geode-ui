@@ -110,6 +110,10 @@ install:
 typecheck:
   stage: lint
   needs: ['install']
+  # QUALITY #228: `npm run test:ts` typechecks the SPA tree, the e2e
+  # specs, AND the support scripts in one pass (see package.json:14-16
+  # for the three composed projects). A regression in any of the three
+  # fails the gate.
   script:
     - npm run test:ts
   rules:

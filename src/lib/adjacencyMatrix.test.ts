@@ -158,7 +158,7 @@ describe('applyMatrixBudget', () => {
     labels.forEach((row, ri) => {
       // ri+1 outgoing edges, all directed L{ri} → L{(ri+1) % n}
       for (let k = 0; k <= ri; k += 1) {
-        const col = labels[(ri + k + 1) % n]
+        const col = labels[(ri + k + 1) % n]!
         const key = matrixCellKey(row, col)
         const existing = cells.get(key)
         if (existing) {

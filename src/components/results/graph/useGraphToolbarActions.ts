@@ -9,9 +9,10 @@
 import { useCallback } from 'react'
 import type { Core } from 'cytoscape'
 import { layoutConfig } from './layouts'
+import type { LayoutName } from '../useGraphPrefs'
 import type { Selected } from './GraphInspector'
 
-export type GraphLayoutSetter = (l: string) => void
+export type GraphLayoutSetter = (l: LayoutName) => void
 
 export type GraphToolbarActions = {
   onToggleSelectionMode: () => void
@@ -28,7 +29,7 @@ export function useGraphToolbarActions(opts: {
   setSelectionMode: (m: 'pan' | 'box') => void
   clusterByLabel: boolean
   setClusterByLabel: (v: boolean) => void
-  layout: string
+  layout: LayoutName
   setLayout: GraphLayoutSetter
   setSelected: (s: Selected | null) => void
   setHiddenLabels: (s: Set<string>) => void

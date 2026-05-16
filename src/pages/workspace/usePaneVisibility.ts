@@ -22,7 +22,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 export type UsePaneVisibility = {
-  ref: React.RefObject<HTMLDivElement | null>
+  // Pane root is a styled.section (HTMLElement). Typed as HTMLElement
+  // so the consumer's `<Pane ref={ref}/>` resolves to the styled-
+  // components ref overload without a manual cast.
+  ref: React.RefObject<HTMLElement | null>
   visible: boolean
 }
 
@@ -31,7 +34,7 @@ export function usePaneVisibility(
   // should accept the default (true → no flicker on first render).
   initial: boolean = true
 ): UsePaneVisibility {
-  const ref = useRef<HTMLDivElement | null>(null)
+  const ref = useRef<HTMLElement | null>(null)
   const [visible, setVisible] = useState<boolean>(initial)
 
   useEffect(() => {

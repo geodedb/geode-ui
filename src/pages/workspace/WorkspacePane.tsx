@@ -121,7 +121,11 @@ export const WorkspacePane: React.FC<WorkspacePaneProps> = ({
   )
 
   return (
-    <Pane ref={visRef} data-testid="workspace-pane" aria-label={paneId}>
+    <Pane
+      ref={visRef as React.RefObject<HTMLElement>}
+      data-testid="workspace-pane"
+      aria-label={paneId}
+    >
       {visible ? (
         <Suspense fallback={editorFallback}>
           <GqlEditor
