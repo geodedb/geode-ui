@@ -89,7 +89,7 @@
     "@typescript-eslint/parser": "^7.0.0",
     "babel-loader": "^9.1.0",
     "babel-plugin-styled-components": "^2.1.0",
-    "copy-webpack-plugin": "^12.0.0",
+    "copy-webpack-plugin": "^14.0.0",
     "css-loader": "^6.11.0",
     "css-minimizer-webpack-plugin": "^6.0.0",
     "electron": "^42.0.1",
