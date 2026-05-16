@@ -1,12 +1,58 @@
 package securex
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json/v2"
 	"net/http"
 	"slices"
 	"strings"
 )
+
+// claimsKey is the unexported context key under which securex stashes
+// the verifier-validated Claims pointer. Owned by this package so
+// consumers go through ContextWithClaims / ClaimsFromContext rather
+// than guessing the key. Mirrors the ctxRolesKey pattern in
+// pkg/mcpx/engine.go for the role-context stash.
+type claimsKey struct{}
+
+// ContextWithClaims returns a copy of ctx carrying the supplied Claims
+// pointer. The generated per-route middleware first checks
+// ClaimsFromContext(r.Context()) before re-parsing the bearer token,
+// so a verifier (e.g. APIOptions.AuthJWT) that calls this once per
+// request avoids the second base64-decode-and-Unmarshal per route.
+// (S-NEW-3.)
+//
+// Passing a nil claims pointer stores a typed-nil so subsequent
+// ClaimsFromContext(ctx) returns (nil, false) — this mirrors the
+// "auth ran, but no claims attached" sentinel used by mcpx's
+// ContextWithRoles when called with a nil slice.
+//
+// Passing a nil ctx is safe and returns a context.Background()-derived
+// value so downstream code can always derive a new ctx from the result.
+func ContextWithClaims(ctx context.Context, claims *Claims) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, claimsKey{}, claims)
+}
+
+// ClaimsFromContext returns the Claims pointer stashed by
+// ContextWithClaims, or (nil, false) if no claims have been attached.
+// The returned pointer is the same value passed to ContextWithClaims
+// (not a copy); callers MUST treat it as read-only or risk torn reads
+// across goroutines that share the request context.
+// (S-NEW-3.)
+func ClaimsFromContext(ctx context.Context) (*Claims, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	v, _ := ctx.Value(claimsKey{}).(*Claims)
+	if v == nil {
+		return nil, false
+	}
+	return v, true
+}
 
 // Role represents an RBAC privilege level. Higher values mean greater privilege.
 type Role int

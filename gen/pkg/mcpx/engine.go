@@ -84,6 +84,79 @@ var toolRoles map[string][]string
 var wsOriginAllowlist []string
 var wsAllowAnyOrigin bool
 
+// serialTools marks tools that must execute strictly in batch order
+// even when parallel batch dispatch (PERF #238) is enabled. Tools
+// that mutate shared in-process state (counters, caches, queue
+// position) belong here. Mirrors SetToolRoles semantics: absent or
+// false means parallel-eligible.
+var serialTools map[string]bool
+
+// batchMaxConcurrency caps the in-flight goroutine count for parallel
+// batch dispatch (PERF #238). 8 is the documented default — large
+// enough to overlap I/O-bound tools, small enough not to starve a
+// shared DB connection pool or thread the GC. SetBatchMaxConcurrency
+// overrides at runtime.
+var batchMaxConcurrency int64 = 8
+
+// batchToolTimeout overrides toolTimeout for batch members; it
+// defaults to 30 seconds per PERF #238 design, on the theory that
+// batch dispatch lets a slow tool not block the whole pipeline so a
+// longer per-tool deadline is acceptable. Set to 0 to inherit
+// toolTimeout.
+var batchToolTimeout = 30 * time.Second
+
+// SetBatchMaxConcurrency overrides the parallel-batch concurrency cap
+// (default 8). A value <= 0 falls back to the default; 1 effectively
+// disables parallelism (serial dispatch) without re-introducing the
+// torn-read between Snapshot and Allow.
+func SetBatchMaxConcurrency(n int64) {
+	if n <= 0 {
+		batchMaxConcurrency = 8
+		return
+	}
+	batchMaxConcurrency = n
+}
+
+// BatchMaxConcurrency reports the current cap. Used by tests and by
+// operator-facing /debug/config introspection.
+func BatchMaxConcurrency() int64 { return batchMaxConcurrency }
+
+// SetBatchToolTimeout overrides the per-tool deadline applied inside
+// parallel batch dispatch (default 30s). Set to 0 to fall back to
+// SetToolTimeout(). Both values are evaluated per-tool inside the
+// dispatcher so a runtime change takes effect on the next batch.
+func SetBatchToolTimeout(d time.Duration) { batchToolTimeout = d }
+
+// BatchToolTimeout reports the current per-tool timeout for batch
+// dispatch. Returns 0 if SetBatchToolTimeout has not been called and
+// toolTimeout should be used.
+func BatchToolTimeout() time.Duration { return batchToolTimeout }
+
+// SetSerialTools marks tools whose batch invocations must run in
+// strict request order (no parallelism). Pass nil to clear. Mirrors
+// SetToolRoles for the parallel-batch opt-out. Tools that mutate
+// shared state belong on this list. PERF #238.
+func SetSerialTools(s map[string]bool) {
+	if s == nil {
+		serialTools = nil
+		return
+	}
+	cpy := make(map[string]bool, len(s))
+	for k, v := range s {
+		cpy[k] = v
+	}
+	serialTools = cpy
+}
+
+// isSerialTool reports whether name is registered as serial-only.
+// Returns false if SetSerialTools was never called or name is absent.
+func isSerialTool(name string) bool {
+	if serialTools == nil {
+		return false
+	}
+	return serialTools[name]
+}
+
 // ctxRolesKey is the unexported context key under which mcpx stashes the
 // caller's role set for per-tool role enforcement. It is owned by this
 // package so consumers go through ContextWithRoles / RolesFromContext
@@ -312,22 +385,142 @@ func dispatchHTTP(ctx context.Context, w http.ResponseWriter, body []byte, tools
 			_ = json.MarshalWrite(w, objErr(nil, -32600, "invalid request"))
 			return
 		}
-		out := make([]any, 0, len(batch))
-		for _, raw := range batch {
-			env, err := decodeEnvelope(raw)
-			if err != nil {
-				continue
-			}
-			res := handleRaw(ctx, env, tools, toolBuckets)
-			if res != nil {
-				out = append(out, res)
-			}
-		}
+		out := dispatchBatch(ctx, batch, tools, toolBuckets)
 		_ = json.MarshalWrite(w, out)
 	default:
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.MarshalWrite(w, objErr(nil, -32600, "invalid request"))
 	}
+}
+
+// dispatchBatch executes a JSON-RPC 2.0 batch with bounded parallel
+// concurrency and ordered response reassembly (PERF #238).
+//
+// Per the design:
+//   - max-concurrency = batchMaxConcurrency (default 8, settable via
+//     SetBatchMaxConcurrency). Implemented as a semaphore channel so
+//     a slot is acquired before launching each worker goroutine.
+//   - per-tool timeout = batchToolTimeout (default 30s, settable via
+//     SetBatchToolTimeout). handleRaw applies the per-tool deadline
+//     internally via context.WithTimeout.
+//   - ordered reassembly = responses are written into a fixed-size
+//     slice indexed by request position; notifications (nil
+//     response) leave that slot empty and are filtered before the
+//     wire response is built.
+//   - serial opt-out = tools registered via SetSerialTools dispatch
+//     in strict request order (one in-flight at a time across the
+//     whole batch). The default decision uses isSerialTool keyed on
+//     the tool name extracted from the request envelope.
+//
+// Notifications (envelopes with no id) are dispatched but produce no
+// response, mirroring the pre-fix loop. Malformed envelopes are
+// skipped (compatibility with the pre-fix continue-on-err behaviour).
+func dispatchBatch(ctx context.Context, batch []jsontext.Value, tools map[string]Tool, buckets map[string]*bucket) []any {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	n := len(batch)
+	if n == 0 {
+		return []any{}
+	}
+	results := make([]any, n)
+	// Decode envelopes first so the serial/parallel decision and
+	// the index-keyed result slot are both known before any worker
+	// launches. Malformed envelopes are recorded as a sentinel and
+	// skipped in the final output assembly.
+	envs := make([]*rawEnvelope, n)
+	serialIndices := make([]int, 0, n)
+	parallelIndices := make([]int, 0, n)
+	for i, raw := range batch {
+		env, err := decodeEnvelope(raw)
+		if err != nil {
+			envs[i] = nil
+			continue
+		}
+		envs[i] = env
+		name := extractToolNameFromEnv(env)
+		if isSerialTool(name) {
+			serialIndices = append(serialIndices, i)
+		} else {
+			parallelIndices = append(parallelIndices, i)
+		}
+	}
+
+	// Serial pass: dispatch in batch order, one at a time. Tools
+	// that mutate shared state never race each other; serial-tool
+	// dispatch also runs before parallel dispatch starts so a
+	// serial-then-parallel batch sees a clean state when the
+	// parallel phase begins.
+	for _, i := range serialIndices {
+		results[i] = handleRawWithTimeout(ctx, envs[i], tools, buckets)
+	}
+
+	// Parallel pass: bounded by batchMaxConcurrency via a semaphore
+	// channel. errgroup-style fan-out without the explicit error
+	// channel because handleRawWithTimeout always returns a usable
+	// envelope (success or RPC-error) — there is no Go-level error
+	// to propagate.
+	cap := batchMaxConcurrency
+	if cap <= 0 {
+		cap = 8
+	}
+	sem := make(chan struct{}, cap)
+	var wg sync.WaitGroup
+	for _, idx := range parallelIndices {
+		idx := idx // capture for closure
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[idx] = handleRawWithTimeout(ctx, envs[idx], tools, buckets)
+		}()
+	}
+	wg.Wait()
+
+	// Assemble the on-wire response array. Notifications (nil res)
+	// and undecodable envelopes (envs[i] == nil) drop out so the
+	// wire format matches the pre-fix loop.
+	out := make([]any, 0, n)
+	for i := 0; i < n; i++ {
+		if envs[i] == nil {
+			continue
+		}
+		if results[i] != nil {
+			out = append(out, results[i])
+		}
+	}
+	return out
+}
+
+// handleRawWithTimeout wraps handleRaw with the batch per-tool
+// timeout. handleRaw already applies toolTimeout internally; this
+// indirection lets the batch path use a more generous deadline
+// (default 30s) without altering the single-request path.
+func handleRawWithTimeout(ctx context.Context, env *rawEnvelope, tools map[string]Tool, buckets map[string]*bucket) any {
+	if env == nil {
+		return nil
+	}
+	if batchToolTimeout > 0 {
+		// Apply the batch-specific deadline to the per-tool context.
+		// handleRaw will derive its own context.WithTimeout from this
+		// for the tool body, which is the inner deadline.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, batchToolTimeout)
+		defer cancel()
+	}
+	return handleRaw(ctx, env, tools, buckets)
+}
+
+// extractToolNameFromEnv pulls the tool name out of a decoded
+// envelope's params for tools/call requests. Returns "" for any
+// other method or malformed params; isSerialTool(""")  is false so
+// non-tools/call methods naturally take the parallel path.
+func extractToolNameFromEnv(env *rawEnvelope) string {
+	if env == nil || env.Method != "tools/call" {
+		return ""
+	}
+	return extractToolNameRaw(env.Params)
 }
 
 // ServeWS upgrades to WS and serves JSON-RPC 2.0 messages bidirectionally (simple text frames JSON).
@@ -448,17 +641,7 @@ func serveSTDIOWith(in io.Reader, out io.Writer, tools map[string]Tool) error {
 				_, _ = out.Write([]byte("\n"))
 				continue
 			}
-			outArr := make([]any, 0, len(batch))
-			for _, raw := range batch {
-				env, e := decodeEnvelope(raw)
-				if e != nil {
-					continue
-				}
-				res := handleRaw(ctx, env, tools, toolBuckets)
-				if res != nil {
-					outArr = append(outArr, res)
-				}
-			}
+			outArr := dispatchBatch(ctx, batch, tools, toolBuckets)
 			_ = json.MarshalWrite(out, outArr)
 			_, _ = out.Write([]byte("\n"))
 		default:

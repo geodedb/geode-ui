@@ -2,6 +2,7 @@ package securex
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -25,7 +26,15 @@ import (
 // PERF-0012 the body was io.ReadAll'd with no cap, which let an attacker
 // tie up memory by sending a large body just before the signature check.
 // Callers who need a different limit can use APIKeyAuthWithLimit directly.
-const defaultHMACBodyLimit int64 = 10 * 1024 * 1024 // 10 MiB
+//
+// PERF #171 (Option B: sign-or-413). The 1 MiB cap is the boundary above
+// which a body is rejected with HTTP 413 rather than buffered for replay.
+// HMAC-signed endpoints (login, profile mutation, token issue) are small
+// and idempotent, so a hard reject is the right error class — there is
+// no replay machinery (in-memory chunk + spilled file) to engage. See
+// APIKeyAuthHTTP for the wrapper that maps ErrBodyTooLarge to HTTP 413
+// with a JSON envelope carrying error_code = 413.
+const defaultHMACBodyLimit int64 = 1 << 20 // 1 MiB (PERF #171)
 
 // APIKeyAuth verifies Authorization: Bearer <hmac-hex> using a canonical request
 // signature bound to method/path/body/nonce/timestamp and secret.
@@ -85,6 +94,54 @@ func APIKeyAuthWithLimit(r *http.Request, secret []byte, window time.Duration, s
 		return ErrAuthFailed
 	}
 	return nil
+}
+
+// APIKeyAuthHTTP wraps APIKeyAuth with HTTP error mapping for PERF #171
+// (sign-or-413). On success it returns true and the caller continues
+// dispatch with r.Body re-staged (pooledBuffer). On failure it writes
+// the appropriate status (413 for ErrBodyTooLarge, 401 for any other
+// auth error) and a JSON envelope carrying error_code = <status> so
+// observability pipelines can route alerts off a structured field
+// instead of regex-matching on Message.
+//
+// The 413 status is reserved for the body-size condition; any other
+// authentication failure (bad signature, missing headers, expired
+// timestamp, replayed nonce, etc.) collapses to 401 with the same
+// envelope shape. This is "Option B" from PERF_GAP_ANALYSIS row 13.
+func APIKeyAuthHTTP(w http.ResponseWriter, r *http.Request, secret []byte, window time.Duration, seen *sync.Map) bool {
+	return APIKeyAuthHTTPWithLimit(w, r, secret, window, seen, defaultHMACBodyLimit)
+}
+
+// APIKeyAuthHTTPWithLimit is the explicit-limit variant of APIKeyAuthHTTP.
+// A maxBodyBytes of 0 resolves to defaultHMACBodyLimit so that callers
+// who have not migrated to an explicit cap still get the 1 MiB safe
+// default. (PERF #171.)
+func APIKeyAuthHTTPWithLimit(w http.ResponseWriter, r *http.Request, secret []byte, window time.Duration, seen *sync.Map, maxBodyBytes int64) bool {
+	err := APIKeyAuthWithLimit(r, secret, window, seen, maxBodyBytes)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ErrBodyTooLarge) {
+		writeHMACErrorEnvelope(w, http.StatusRequestEntityTooLarge, err.Error())
+		return false
+	}
+	// Surface every other failure as 401 with a stable envelope.
+	writeHMACErrorEnvelope(w, http.StatusUnauthorized, ErrAuthFailed.Error())
+	return false
+}
+
+// writeHMACErrorEnvelope emits the {"error":"…","error_code":N} body
+// shape used by APIKeyAuthHTTP. The Content-Type is set to
+// application/json so the envelope is machine-readable; the status
+// code is also encoded in the body as error_code so log pipelines that
+// only ever see the JSON line can still route by HTTP class.
+func writeHMACErrorEnvelope(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	// Hand-roll the small envelope so this path stays dependency-free
+	// (no json/v2 round-trip overhead) and the field order is stable
+	// for downstream log assertions.
+	_, _ = fmt.Fprintf(w, `{"error":%q,"error_code":%d}`, msg, status)
 }
 
 // SignAPIKeyRequest signs r using the same canonical request rules enforced by
@@ -469,6 +526,73 @@ func (b *Bucket) Snapshot() (int, int, time.Time) {
 	remaining := int(b.tokens)
 	reset := time.Now().Add(time.Second)
 	return limit, remaining, reset
+}
+
+// BucketSnapshot is the value form of (limit, remaining, resetTime).
+// Used by AllowAndSnapshot so callers can capture the snapshot and the
+// admit decision in one lock acquisition. Fields mirror the legacy
+// Snapshot()-tuple order so renaming a local variable is the only
+// migration step required.
+type BucketSnapshot struct {
+	// Limit is b.burst rounded to int — the X-RateLimit-Limit value.
+	Limit int
+	// Remaining is the post-admit token count rounded to int. On a
+	// denied call this is 0; on an allowed call it is the count after
+	// the token deduction so the X-RateLimit-Remaining header reflects
+	// the state seen by the next caller.
+	Remaining int
+	// Reset is the wall-clock instant at which the next token becomes
+	// available, approximated as now+1s to match the legacy Snapshot()
+	// behaviour. Callers format this as the X-RateLimit-Reset epoch
+	// seconds value.
+	Reset time.Time
+}
+
+// AllowAndSnapshot is the combined admit + snapshot operation that
+// closes PERF #167: a single b.mu.Lock() covers both the token refill,
+// the allow/deny decision, AND the snapshot capture. The pre-fix
+// per-route middleware called b.Snapshot() then b.Allow() back-to-back
+// — two lock cycles on every request, with a torn-read window between
+// them. The combined op halves the contention cost AND guarantees the
+// snapshot reflects exactly the state at admit-time.
+//
+// On a canceled context the call returns (false, zero-value-snapshot)
+// without taking the lock; this lets a request that has already
+// blown its deadline skip the rate-limit charge.
+//
+// Allowed == true ⇒ snap.Remaining is the post-deduction token count.
+// Allowed == false ⇒ snap.Remaining == 0; the burst is currently
+// exhausted.
+//
+// The legacy Allow() and Snapshot() remain for back-compat with callers
+// that legitimately need only one operation (e.g. a header refresher
+// that does not want to charge a token). New per-route middleware
+// should use AllowAndSnapshot.
+func (b *Bucket) AllowAndSnapshot(ctx context.Context) (allowed bool, snap BucketSnapshot) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return false, BucketSnapshot{}
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := time.Now()
+	dt := now.Sub(b.last).Seconds()
+	b.tokens += dt * b.rate
+	if b.tokens > b.burst {
+		b.tokens = b.burst
+	}
+	b.last = now
+	if b.tokens >= 1 {
+		b.tokens -= 1
+		allowed = true
+	}
+	snap = BucketSnapshot{
+		Limit:     int(b.burst),
+		Remaining: int(b.tokens),
+		Reset:     now.Add(time.Second),
+	}
+	return allowed, snap
 }
 
 // SetRateHeaders sets basic rate-limit headers on the response.

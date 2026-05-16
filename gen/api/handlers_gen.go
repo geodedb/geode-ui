@@ -1680,16 +1680,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -1727,9 +1736,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Audit != nil { lim, rem, reset := bkt_get_Audit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Audit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Audit != nil { _allowed, _snap := bkt_get_Audit.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.AuditQuery
 		req.Event = r.URL.Query().Get("event")
 		req.Since = r.URL.Query().Get("since")
@@ -1764,9 +1776,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Login != nil { lim, rem, reset := bkt_post_Login.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Login.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Login != nil { _allowed, _snap := bkt_post_Login.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseForm(); err != nil { writeJSONError(w, "bad request", 400); return }
 		var req types.LoginReq
 		req.Password = r.FormValue("password")
@@ -1810,16 +1825,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -1857,9 +1881,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetBackups != nil { lim, rem, reset := bkt_get_GetBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetBackups != nil { _allowed, _snap := bkt_get_GetBackups.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetBackups(w, r, &req)
@@ -1899,16 +1926,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -1946,9 +1982,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostBackups != nil { lim, rem, reset := bkt_post_PostBackups.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostBackups.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostBackups != nil { _allowed, _snap := bkt_post_PostBackups.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -1989,16 +2028,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2036,9 +2084,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Cleanup != nil { lim, rem, reset := bkt_post_Cleanup.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Cleanup.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Cleanup != nil { _allowed, _snap := bkt_post_Cleanup.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2079,16 +2130,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2126,9 +2186,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_BackupUpload != nil { lim, rem, reset := bkt_post_BackupUpload.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_BackupUpload.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_BackupUpload != nil { _allowed, _snap := bkt_post_BackupUpload.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		defer func() {
 			if r.MultipartForm != nil { _ = r.MultipartForm.RemoveAll() }
@@ -2181,16 +2244,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2228,9 +2300,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteFile != nil { lim, rem, reset := bkt_delete_DeleteFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteFile != nil { _allowed, _snap := bkt_delete_DeleteFile.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupFileParam
 		req.File = r.URL.Query().Get("file")
 		req.File = r.PathValue("file")
@@ -2272,16 +2347,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2319,9 +2403,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetFile != nil { lim, rem, reset := bkt_get_GetFile.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetFile.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetFile != nil { _allowed, _snap := bkt_get_GetFile.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.BackupFileParam
 		req.File = r.URL.Query().Get("file")
 		req.File = r.PathValue("file")
@@ -2365,9 +2452,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetCapabilities != nil { lim, rem, reset := bkt_get_GetCapabilities.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetCapabilities.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetCapabilities != nil { _allowed, _snap := bkt_get_GetCapabilities.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetCapabilities(w, r, &req)
@@ -2407,16 +2497,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2454,9 +2553,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Grants != nil { lim, rem, reset := bkt_post_Grants.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Grants.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Grants != nil { _allowed, _snap := bkt_post_Grants.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GrantReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2497,16 +2599,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2544,9 +2655,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Revoke != nil { lim, rem, reset := bkt_post_Revoke.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Revoke.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Revoke != nil { _allowed, _snap := bkt_post_Revoke.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GrantReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2589,9 +2703,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Graphs != nil { lim, rem, reset := bkt_get_Graphs.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Graphs.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Graphs != nil { _allowed, _snap := bkt_get_Graphs.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Graphs(w, r, &req)
@@ -2633,9 +2750,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Constraints != nil { lim, rem, reset := bkt_get_Constraints.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Constraints.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Constraints != nil { _allowed, _snap := bkt_get_Constraints.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
 		req.Graph = r.PathValue("graph")
@@ -2679,9 +2799,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_EdgeTypes != nil { lim, rem, reset := bkt_get_EdgeTypes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_EdgeTypes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_EdgeTypes != nil { _allowed, _snap := bkt_get_EdgeTypes.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
 		req.Graph = r.PathValue("graph")
@@ -2725,9 +2848,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Indexes != nil { lim, rem, reset := bkt_get_Indexes.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Indexes.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Indexes != nil { _allowed, _snap := bkt_get_Indexes.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
 		req.Graph = r.PathValue("graph")
@@ -2771,9 +2897,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Labels != nil { lim, rem, reset := bkt_get_Labels.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Labels.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Labels != nil { _allowed, _snap := bkt_get_Labels.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.GraphParam
 		req.Graph = r.URL.Query().Get("graph")
 		req.Graph = r.PathValue("graph")
@@ -2815,16 +2944,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2862,9 +3000,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetMigrations != nil { lim, rem, reset := bkt_get_GetMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetMigrations != nil { _allowed, _snap := bkt_get_GetMigrations.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetMigrations(w, r, &req)
@@ -2904,16 +3045,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2951,9 +3101,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostMigrations != nil { lim, rem, reset := bkt_post_PostMigrations.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrations.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostMigrations != nil { _allowed, _snap := bkt_post_PostMigrations.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.MigrationCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -2994,16 +3147,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3041,9 +3203,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostMigrationsRun != nil { lim, rem, reset := bkt_post_PostMigrationsRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostMigrationsRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostMigrationsRun != nil { _allowed, _snap := bkt_post_PostMigrationsRun.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3084,16 +3249,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3131,9 +3305,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_MigrationUpload != nil { lim, rem, reset := bkt_post_MigrationUpload.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_MigrationUpload.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_MigrationUpload != nil { _allowed, _snap := bkt_post_MigrationUpload.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		defer func() {
 			if r.MultipartForm != nil { _ = r.MultipartForm.RemoveAll() }
@@ -3186,16 +3363,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3233,9 +3419,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Sign != nil { lim, rem, reset := bkt_post_Sign.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Sign.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Sign != nil { _allowed, _snap := bkt_post_Sign.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.MigrationParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Name = r.PathValue("name")
@@ -3277,16 +3466,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3324,9 +3522,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetPolicies != nil { lim, rem, reset := bkt_get_GetPolicies.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetPolicies.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetPolicies != nil { _allowed, _snap := bkt_get_GetPolicies.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetPolicies(w, r, &req)
@@ -3366,16 +3567,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3413,9 +3623,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostPolicies != nil { lim, rem, reset := bkt_post_PostPolicies.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostPolicies.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostPolicies != nil { _allowed, _snap := bkt_post_PostPolicies.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3456,16 +3669,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3503,9 +3725,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteName != nil { lim, rem, reset := bkt_delete_DeleteName.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteName.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteName != nil { _allowed, _snap := bkt_delete_DeleteName.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyParam
 		req.Name = r.URL.Query().Get("name")
 		req.Name = r.PathValue("name")
@@ -3547,16 +3772,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3594,9 +3828,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetName != nil { lim, rem, reset := bkt_get_GetName.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetName.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetName != nil { _allowed, _snap := bkt_get_GetName.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PolicyParam
 		req.Name = r.URL.Query().Get("name")
 		req.Name = r.PathValue("name")
@@ -3640,9 +3877,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetProfiles != nil { lim, rem, reset := bkt_get_GetProfiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetProfiles != nil { _allowed, _snap := bkt_get_GetProfiles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetProfiles(w, r, &req)
@@ -3684,9 +3924,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostProfiles != nil { lim, rem, reset := bkt_post_PostProfiles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostProfiles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostProfiles != nil { _allowed, _snap := bkt_post_PostProfiles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.CreateProfileReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3719,9 +3962,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Public != nil { lim, rem, reset := bkt_get_Public.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Public.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Public != nil { _allowed, _snap := bkt_get_Public.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Public(w, r, &req)
@@ -3763,9 +4009,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteProfileid != nil { lim, rem, reset := bkt_delete_DeleteProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteProfileid != nil { _allowed, _snap := bkt_delete_DeleteProfileid.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
 		req.ProfileID = r.URL.Query().Get("profile_id")
 		req.ProfileID = r.PathValue("profileId")
@@ -3809,9 +4058,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetProfileid != nil { lim, rem, reset := bkt_get_GetProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetProfileid != nil { _allowed, _snap := bkt_get_GetProfileid.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.ProfileIDPath
 		req.ProfileID = r.URL.Query().Get("profile_id")
 		req.ProfileID = r.PathValue("profileId")
@@ -3855,9 +4107,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_patch_PatchProfileid != nil { lim, rem, reset := bkt_patch_PatchProfileid.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchProfileid.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_patch_PatchProfileid != nil { _allowed, _snap := bkt_patch_PatchProfileid.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UpdateProfileReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.ProfileID = r.PathValue("profileId")
@@ -3901,9 +4156,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Query != nil { lim, rem, reset := bkt_post_Query.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Query.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Query != nil { _allowed, _snap := bkt_post_Query.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.QueryReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -3947,16 +4205,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3994,9 +4261,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Restore != nil { lim, rem, reset := bkt_post_Restore.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Restore.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Restore != nil { _allowed, _snap := bkt_post_Restore.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RestoreReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4037,16 +4307,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4084,9 +4363,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetRoles != nil { lim, rem, reset := bkt_get_GetRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetRoles != nil { _allowed, _snap := bkt_get_GetRoles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetRoles(w, r, &req)
@@ -4126,16 +4408,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4173,9 +4464,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostApiRoles != nil { lim, rem, reset := bkt_post_PostApiRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostApiRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostApiRoles != nil { _allowed, _snap := bkt_post_PostApiRoles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4216,16 +4510,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4263,9 +4566,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteRole != nil { lim, rem, reset := bkt_delete_DeleteRole.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteRole.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteRole != nil { _allowed, _snap := bkt_delete_DeleteRole.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleParam
 		req.Role = r.URL.Query().Get("role")
 		req.Role = r.PathValue("role")
@@ -4307,16 +4613,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4354,9 +4669,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetRole != nil { lim, rem, reset := bkt_get_GetRole.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetRole.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetRole != nil { _allowed, _snap := bkt_get_GetRole.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.RoleParam
 		req.Role = r.URL.Query().Get("role")
 		req.Role = r.PathValue("role")
@@ -4400,9 +4718,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Tx != nil { lim, rem, reset := bkt_post_Tx.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Tx.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Tx != nil { _allowed, _snap := bkt_post_Tx.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxBeginReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4445,9 +4766,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Commit != nil { lim, rem, reset := bkt_post_Commit.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Commit.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Commit != nil { _allowed, _snap := bkt_post_Commit.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxIDParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Txid = r.PathValue("txid")
@@ -4491,9 +4815,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Rollback != nil { lim, rem, reset := bkt_post_Rollback.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Rollback.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Rollback != nil { _allowed, _snap := bkt_post_Rollback.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxIDParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Txid = r.PathValue("txid")
@@ -4537,9 +4864,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostTxidRun != nil { lim, rem, reset := bkt_post_PostTxidRun.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostTxidRun.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostTxidRun != nil { _allowed, _snap := bkt_post_PostTxidRun.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.TxRunReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Txid = r.PathValue("txid")
@@ -4581,16 +4911,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4628,9 +4967,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetUsers != nil { lim, rem, reset := bkt_get_GetUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetUsers != nil { _allowed, _snap := bkt_get_GetUsers.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.GetUsers(w, r, &req)
@@ -4670,16 +5012,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4717,9 +5068,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostUsers != nil { lim, rem, reset := bkt_post_PostUsers.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsers.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostUsers != nil { _allowed, _snap := bkt_post_PostUsers.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UserCreateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
@@ -4760,16 +5114,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4807,9 +5170,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteUsername != nil { lim, rem, reset := bkt_delete_DeleteUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_delete_DeleteUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_delete_DeleteUsername != nil { _allowed, _snap := bkt_delete_DeleteUsername.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
 		req.Username = r.PathValue("username")
@@ -4851,16 +5217,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4898,9 +5273,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetUsername != nil { lim, rem, reset := bkt_get_GetUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_GetUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_GetUsername != nil { _allowed, _snap := bkt_get_GetUsername.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
 		req.Username = r.PathValue("username")
@@ -4942,16 +5320,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4989,9 +5376,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_patch_PatchUsername != nil { lim, rem, reset := bkt_patch_PatchUsername.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_patch_PatchUsername.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_patch_PatchUsername != nil { _allowed, _snap := bkt_patch_PatchUsername.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UserUpdateReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Username = r.PathValue("username")
@@ -5033,16 +5423,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5080,9 +5479,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Disable != nil { lim, rem, reset := bkt_post_Disable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Disable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Disable != nil { _allowed, _snap := bkt_post_Disable.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Username = r.PathValue("username")
@@ -5124,16 +5526,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5171,9 +5582,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Enable != nil { lim, rem, reset := bkt_post_Enable.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Enable.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Enable != nil { _allowed, _snap := bkt_post_Enable.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Username = r.PathValue("username")
@@ -5217,9 +5631,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Password != nil { lim, rem, reset := bkt_post_Password.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_Password.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_Password != nil { _allowed, _snap := bkt_post_Password.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.PasswordChangeReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Username = r.PathValue("username")
@@ -5261,16 +5678,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5308,9 +5734,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Permissions != nil { lim, rem, reset := bkt_get_Permissions.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Permissions.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Permissions != nil { _allowed, _snap := bkt_get_Permissions.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.UsernameParam
 		req.Username = r.URL.Query().Get("username")
 		req.Username = r.PathValue("username")
@@ -5352,16 +5781,25 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
 		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		authParts := strings.Fields(authHeader)
-		if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
-		}
-		claims, err := securex.ParseClaims(authParts[1])
-		if err != nil {
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-			return
+		// S-NEW-3: prefer claims stashed in r.Context() by the
+		// APIOptions.AuthJWT verifier (or any earlier middleware that
+		// already validated the bearer). Falls back to re-parsing
+		// Authorization: Bearer when the context is empty so callers
+		// that haven't migrated their verifier still authorize.
+		claims, ok := securex.ClaimsFromContext(r.Context())
+		if !ok {
+			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
+			authParts := strings.Fields(authHeader)
+			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			parsed, err := securex.ParseClaims(authParts[1])
+			if err != nil {
+				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+				return
+			}
+			claims = parsed
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5399,9 +5837,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		}
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostUsernameRoles != nil { lim, rem, reset := bkt_post_PostUsernameRoles.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_post_PostUsernameRoles.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_post_PostUsernameRoles != nil { _allowed, _snap := bkt_post_PostUsernameRoles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.AssignRoleReq
 		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		req.Username = r.PathValue("username")
@@ -5435,9 +5876,12 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
-		// success, by design. On an aggregate reject the headers reflect pre-deduction state.
-		if globalRateBkt != nil { lim, rem, reset := globalRateBkt.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !globalRateBkt.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Healthz != nil { lim, rem, reset := bkt_get_Healthz.Snapshot(); securex.SetRateHeaders(w, lim, rem, reset); if !bkt_get_Healthz.Allow() { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
+		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
+		// reflects exactly the state at admit-time (no torn read between the two
+		// lock cycles).
+		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if bkt_get_Healthz != nil { _allowed, _snap := bkt_get_Healthz.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
 		var req types.Empty
 		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
 		resp, err := srv.Healthz(w, r, &req)
