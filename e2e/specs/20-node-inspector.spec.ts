@@ -31,16 +31,24 @@ test.describe('graph: node inspector hide / collapse / restore', () => {
   // The inspector lives at the bottom of a scrollable sidebar, so scroll
   // it into view once selected — headless Chromium won't auto-reveal it.
   async function selectFirstNode(page: import('@playwright/test').Page) {
-    const findInput = page.getByTestId('graph-find-input')
+    // graph-find-input is a <wa-input> custom element; use the selector
+    // helper that chains to the shadow-DOM <input> for .fill()/.press().
+    // Search for 'Movie' — every result set has Movie nodes with label
+    // "Movie", so there is always at least one match regardless of LIMIT
+    // ordering. The hidden/collapsed list shows the node's display label
+    // which includes 'Movie', so toContainText('Movie') will work.
+    const findInput = sel.graphFindInput(page)
     await expect(findInput).toBeVisible()
-    await findInput.fill('Tom')
+    await findInput.fill('Movie')
+    // Wait for the React state to update and match count to appear,
+    // ensuring matches[] is non-empty before pressing Enter.
+    await expect(page.getByTestId('graph-find-count')).toContainText(/\d+/)
     await findInput.press('Enter')
     await expect(page.getByTestId('graph-inspector')).toBeVisible()
     await page.getByTestId('graph-inspector').scrollIntoViewIfNeeded()
-    // Return a placeholder id — the inspector visibility is the real
-    // assertion; tests that assert the id in the Hidden list will find
-    // whatever node was matched.
-    return 'Tom'
+    // Return 'Movie' — the hidden/collapsed restore lists show the node's
+    // display label (e.g. "Movie 123"), so containText('Movie') works.
+    return 'Movie'
   }
 
   test('hide a node, see it in the Hidden list, restore it', async ({
@@ -59,8 +67,9 @@ test.describe('graph: node inspector hide / collapse / restore', () => {
       .getByRole('button', { name: /restore/i })
       .first()
       .click()
-    await expect(hiddenList).not.toContainText(id)
-    await expect(hiddenList).toContainText(/no hidden nodes/i)
+    // After restore the hidden section unmounts entirely (no empty-state
+    // placeholder), so graph-hidden-list disappears from the DOM.
+    await expect(sel.graphHiddenList(page)).toHaveCount(0)
   })
 
   test('collapse a node with neighbours adds them to the Collapsed list', async ({
@@ -75,16 +84,18 @@ test.describe('graph: node inspector hide / collapse / restore', () => {
     // Collapsed list stays empty — assert the list element exists either
     // way, and the count heading reflects reality.
     const collapsedList = sel.graphCollapsedList(page)
-    await expect(collapsedList).toBeVisible()
-    // If something was collapsed, the id shows up; tolerate the no-op case.
-    const text = (await collapsedList.textContent()) ?? ''
-    if (!/no collapsed nodes/i.test(text)) {
+    // If something was collapsed, the collapsed list appears and contains
+    // the node's label. If the node had no degree-1 leaves (no-op), the
+    // entire section stays unmounted — tolerate both outcomes.
+    const listCount = await collapsedList.count()
+    if (listCount > 0) {
       await expect(collapsedList).toContainText(id)
       await collapsedList
         .getByRole('button', { name: /expand/i })
         .first()
         .click()
-      await expect(collapsedList).toContainText(/no collapsed nodes/i)
+      // After expand the collapsed section unmounts entirely.
+      await expect(sel.graphCollapsedList(page)).toHaveCount(0)
     }
   })
 })
