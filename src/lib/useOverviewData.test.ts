@@ -10,7 +10,23 @@ jest.mock('../api/client', () => ({
     query: (...a: unknown[]) => queryMock(...a),
   },
 }))
-import { useOverviewData } from './useOverviewData'
+// useActiveConnection is the cache key source for PERF #237; a static
+// mock provides a stable connectionId so cache lookups are deterministic.
+const useActiveConnectionMock = jest.fn(() => ({
+  connectionId: 'test-conn-1',
+  profileName: 'test-profile',
+  token: 'tok',
+  expiresAt: Date.now() + 60_000,
+}))
+jest.mock('../api/connections', () => ({
+  useActiveConnection: () => useActiveConnectionMock(),
+}))
+import {
+  useOverviewData,
+  testOnlyResetGraphStatsCache,
+  testOnlySetGraphStatsCacheTTL,
+  testOnlyGetGraphStatsCacheTTL,
+} from './useOverviewData'
 
 // fetchCapabilities (src/api/capabilities.ts) internally calls
 // client.getCapabilities({}) and normalises the raw {geode_version,
@@ -31,6 +47,13 @@ describe('useOverviewData', () => {
     graphsMock.mockReset()
     capsMock.mockReset()
     queryMock.mockReset()
+    testOnlyResetGraphStatsCache()
+    useActiveConnectionMock.mockImplementation(() => ({
+      connectionId: 'test-conn-1',
+      profileName: 'test-profile',
+      token: 'tok',
+      expiresAt: Date.now() + 60_000,
+    }))
   })
 
   it('loads graphs + capabilities on mount', async () => {
@@ -91,5 +114,185 @@ describe('useOverviewData', () => {
     await waitFor(() => expect(result.current.statsLoading).toBe(false))
     expect(result.current.statsError).toMatch(/stats boom/)
     expect(result.current.defaultGraphStats).toBeNull()
+  })
+
+  // PERF #237 acceptance: the second loadStats call for the same
+  // (connectionId, graph) within the TTL window MUST NOT issue another
+  // query. The pre-cache implementation fired two count queries on
+  // every call regardless of recency.
+  it('loadStats serves from the module cache within the TTL window', async () => {
+    graphsMock.mockResolvedValue({ graphs: ['default'] })
+    capsMock.mockResolvedValue(rawCaps)
+    queryMock
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[42]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[99]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+    const { result } = renderHook(() => useOverviewData())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => result.current.loadStats('default'))
+    await waitFor(() => expect(result.current.statsLoading).toBe(false))
+    expect(result.current.defaultGraphStats).toEqual({ nodes: 42, edges: 99 })
+    expect(queryMock).toHaveBeenCalledTimes(2)
+
+    // Second call: cache hit -> no new queries, stats served sync.
+    queryMock.mockClear()
+    act(() => result.current.loadStats('default'))
+    await waitFor(() =>
+      expect(result.current.defaultGraphStats).toEqual({ nodes: 42, edges: 99 })
+    )
+    expect(queryMock).toHaveBeenCalledTimes(0)
+  })
+
+  it('loadStats cache survives unmount/remount within TTL', async () => {
+    graphsMock.mockResolvedValue({ graphs: ['default'] })
+    capsMock.mockResolvedValue(rawCaps)
+    queryMock
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[7]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[3]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+    const r1 = renderHook(() => useOverviewData())
+    await waitFor(() => expect(r1.result.current.loading).toBe(false))
+    act(() => r1.result.current.loadStats('default'))
+    await waitFor(() => expect(r1.result.current.statsLoading).toBe(false))
+    expect(queryMock).toHaveBeenCalledTimes(2)
+    r1.unmount()
+
+    // Remount: a fresh hook instance MUST still hit the cache.
+    queryMock.mockClear()
+    const r2 = renderHook(() => useOverviewData())
+    await waitFor(() => expect(r2.result.current.loading).toBe(false))
+    act(() => r2.result.current.loadStats('default'))
+    await waitFor(() =>
+      expect(r2.result.current.defaultGraphStats).toEqual({
+        nodes: 7,
+        edges: 3,
+      })
+    )
+    expect(queryMock).toHaveBeenCalledTimes(0)
+  })
+
+  it('loadStats cache is keyed on (connectionId, graph)', async () => {
+    graphsMock.mockResolvedValue({ graphs: ['default'] })
+    capsMock.mockResolvedValue(rawCaps)
+    queryMock
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[10]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[20]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+    const r1 = renderHook(() => useOverviewData())
+    await waitFor(() => expect(r1.result.current.loading).toBe(false))
+    act(() => r1.result.current.loadStats('default'))
+    await waitFor(() => expect(r1.result.current.statsLoading).toBe(false))
+    expect(queryMock).toHaveBeenCalledTimes(2)
+    r1.unmount()
+
+    // Switch active connection: must MISS the cache and re-issue.
+    useActiveConnectionMock.mockImplementation(() => ({
+      connectionId: 'other-conn-2',
+      profileName: 'other-profile',
+      token: 'tok2',
+      expiresAt: Date.now() + 60_000,
+    }))
+    queryMock.mockClear()
+    queryMock
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[1000]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[2000]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+    const r2 = renderHook(() => useOverviewData())
+    await waitFor(() => expect(r2.result.current.loading).toBe(false))
+    act(() => r2.result.current.loadStats('default'))
+    await waitFor(() => expect(r2.result.current.statsLoading).toBe(false))
+    expect(queryMock).toHaveBeenCalledTimes(2)
+    expect(r2.result.current.defaultGraphStats).toEqual({
+      nodes: 1000,
+      edges: 2000,
+    })
+  })
+
+  it('loadStats cache entry expires after the TTL', async () => {
+    graphsMock.mockResolvedValue({ graphs: ['default'] })
+    capsMock.mockResolvedValue(rawCaps)
+    const originalTTL = testOnlyGetGraphStatsCacheTTL()
+    testOnlySetGraphStatsCacheTTL(10) // 10ms for fast test
+    try {
+      queryMock
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[5]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[9]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+      const { result } = renderHook(() => useOverviewData())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      act(() => result.current.loadStats('default'))
+      await waitFor(() => expect(result.current.statsLoading).toBe(false))
+      expect(queryMock).toHaveBeenCalledTimes(2)
+
+      // Wait past the TTL.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 30)
+      })
+      queryMock.mockClear()
+      queryMock
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[55]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[77]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+      act(() => result.current.loadStats('default'))
+      await waitFor(() => expect(result.current.statsLoading).toBe(false))
+      expect(queryMock).toHaveBeenCalledTimes(2)
+      expect(result.current.defaultGraphStats).toEqual({ nodes: 55, edges: 77 })
+    } finally {
+      testOnlySetGraphStatsCacheTTL(originalTTL)
+    }
   })
 })
