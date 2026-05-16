@@ -115,6 +115,20 @@ repos:
     pass_filenames: false
     files: ^(internal/server/errorcodes\.go|src/api/serverErrorCodes\.ts)$
 
+      # Go toolchain version guard (QUALITY-rank-1 / #148, SEC
+      # GO-2026-4918 / #212): every place the Go toolchain is pinned
+      # (go.mod, .goreleaser.yaml, Makefile, .gitlab-ci.yml, README.md)
+      # must agree on the single source of truth declared in
+      # scripts/check-go-toolchain.sh. Catches the drift that left
+      # release/docs paths routing through Go 1.26.2 long after the
+      # 1.26.3 CVE fix shipped.
+  - id: check-go-toolchain
+    name: check-go-toolchain
+    entry: scripts/check-go-toolchain.sh
+    language: system
+    pass_filenames: false
+    files: ^(go\.mod|\.goreleaser\.yaml|Makefile|\.gitlab-ci\.yml|README\.md|scripts/check-go-toolchain\.sh)$
+
   - id: gofmt-check
     name: gofmt
     entry: scripts/check-gofmt.sh

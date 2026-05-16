@@ -1,6 +1,6 @@
 module geodedb.com/geode-ui
 
-go 1.26.2
+go 1.26.3
 
 replace geodedb.com/geode => ../geode-client-go
 
