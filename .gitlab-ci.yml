@@ -322,8 +322,26 @@ pages:
     GOEXPERIMENT: jsonv2
     GOTOOLCHAIN: go1.26.3
     CGO_ENABLED: "0"
+    # QUALITY #175: stash the module download cache so the test/lint
+    # jobs don't pull every dep from proxy.golang.org on every pipeline.
+    # GOMODCACHE points at a workspace-relative path so GitLab's cache
+    # mechanism can archive + restore the directory across jobs.
+    GOMODCACHE: $CI_PROJECT_DIR/.go-mod-cache
+    GOCACHE: $CI_PROJECT_DIR/.go-build-cache
   before_script: []
-  cache: []
+  cache:
+    # QUALITY #175: cache key bound to `go.sum` so a dependency change
+    # invalidates the cache (otherwise we'd reuse a stale module set
+    # that doesn't match the lockfile). The build cache rides along
+    # because it's keyed on the same input set and tracks together.
+    key:
+      files:
+        - go.sum
+      prefix: go-cache-v1
+    paths:
+      - .go-mod-cache
+      - .go-build-cache
+    policy: pull-push
 
 go:lint:
   <<: *go_defaults
