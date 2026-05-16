@@ -153,6 +153,83 @@ func init() {
 	sql.Register("fakeparseexec", &fakeParseExecDriver{})
 }
 
+// BenchmarkPoolDBContention measures Pool.DB() throughput under concurrent
+// cache-hit load. This is the regression gate for PERF #165: before the
+// sync.Mutex -> sync.RWMutex swap, every cache-hit lookup serialised on a
+// single global lock, so adding goroutines did NOT speed the workload up.
+// After the swap, concurrent readers take the read lock in parallel and the
+// per-op cost scales with available CPU.
+//
+// We seed the pool by resolving every profile once (cold-open path takes
+// the write lock), then enter the parallel benchmark loop where every call
+// is a cache hit. With sync.RWMutex the per-op cost on a 4+ CPU host should
+// be within ~3x of a single-threaded baseline; with sync.Mutex it sits at
+// roughly N x the single-threaded cost (full serialisation under contention).
+func BenchmarkPoolDBContention(b *testing.B) {
+	const profileCount = 8
+	profiles := make([]Profile, profileCount)
+	for i := 0; i < profileCount; i++ {
+		profiles[i] = Profile{
+			Name: "p" + string(rune('0'+i)),
+			DSN:  "stub://localhost",
+		}
+	}
+	p, err := NewPool(profiles)
+	if err != nil {
+		b.Fatalf("NewPool: %v", err)
+	}
+	p.dbOpener = stubOpener
+	b.Cleanup(func() { _ = p.Close() })
+
+	// Seed: resolve every profile once so the parallel loop is pure cache
+	// hits (the cold-open path under write lock is uninteresting here).
+	for _, prof := range profiles {
+		if _, err := p.DB(prof.Name); err != nil {
+			b.Fatalf("seed DB(%q): %v", prof.Name, err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Each goroutine cycles through every profile name so the contention
+		// is on the shared map (not on a single key's bucket).
+		i := 0
+		for pb.Next() {
+			name := profiles[i%profileCount].Name
+			if _, err := p.DB(name); err != nil {
+				b.Fatalf("DB: %v", err)
+			}
+			i++
+		}
+	})
+}
+
+// BenchmarkPoolDBSerial is the single-goroutine baseline that
+// BenchmarkPoolDBContention is compared against; the parallel/serial cost
+// ratio is the headline number for PERF #165. RWMutex should keep that
+// ratio bounded (3x or less on a 4-CPU host); Mutex multiplies it with N.
+func BenchmarkPoolDBSerial(b *testing.B) {
+	p, err := NewPool([]Profile{{Name: "p0", DSN: "stub://localhost"}})
+	if err != nil {
+		b.Fatalf("NewPool: %v", err)
+	}
+	p.dbOpener = stubOpener
+	b.Cleanup(func() { _ = p.Close() })
+
+	if _, err := p.DB("p0"); err != nil {
+		b.Fatalf("seed DB: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := p.DB("p0"); err != nil {
+			b.Fatalf("DB: %v", err)
+		}
+	}
+}
+
 const benchQuery = "MATCH (n:Person) WHERE n.tenant = ? AND n.active = ? RETURN n.id, n.name LIMIT 100"
 
 func benchOpenDB(b *testing.B) *sql.DB {

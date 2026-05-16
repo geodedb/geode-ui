@@ -87,12 +87,19 @@ func WithConnMaxIdleTime(d time.Duration) PoolOption {
 // cached for subsequent callers.
 //
 // Pool is safe for concurrent use.
+//
+// PERF #165: DB() is overwhelmingly a read-mostly path — after the first
+// resolve every subsequent call returns a cached *sql.DB and never
+// mutates the dbs map. We use a sync.RWMutex so concurrent cache hits
+// take RLock() (re-entrant for readers) instead of contending on a
+// single Mutex. Only the cold open path (cache miss) and Close / Reload
+// take the write lock.
 type Pool struct {
 	cfg      *PoolConfig
 	profiles map[string]Profile
 	dbOpener func(driver, dsn string) (*sql.DB, error)
 
-	mu  sync.Mutex
+	mu  sync.RWMutex
 	dbs map[string]*sql.DB
 }
 
@@ -162,12 +169,33 @@ func (p *Pool) Names() []string {
 //
 // Note: sql.Open is non-blocking and does not verify connectivity.
 // Use Ping to actually contact the upstream.
+//
+// PERF #165: the hot path (cached hit) takes only RLock — concurrent
+// readers no longer serialise on a single Mutex. The cold-open path
+// re-checks the map under the write lock to avoid a double-open race
+// when two goroutines miss the cache simultaneously.
 func (p *Pool) DB(name string) (*sql.DB, error) {
 	prof, err := p.Lookup(name)
 	if err != nil {
 		return nil, err
 	}
 
+	// Fast path: read-only lookup. Almost every call after the first
+	// per-profile resolve hits here, so taking only RLock removes the
+	// global serialisation point on the hot path.
+	p.mu.RLock()
+	if p.dbs == nil {
+		p.mu.RUnlock()
+		return nil, fmt.Errorf("conn: pool is closed")
+	}
+	if db, ok := p.dbs[name]; ok {
+		p.mu.RUnlock()
+		return db, nil
+	}
+	p.mu.RUnlock()
+
+	// Slow path: cache miss. Take the write lock and re-check — a peer
+	// may have opened the same profile between our RUnlock and Lock.
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
