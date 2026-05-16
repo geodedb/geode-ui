@@ -2,10 +2,10 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '../../auth/AuthProvider'
-import { fetchPublicProfiles, PublicProfile } from '../../api/auth'
 import { listProfiles, ProfileView } from '../../api/profiles'
 import { Button, Field, Input, Modal } from '../ui'
-import { getStoredPassword, isElectron } from '../../api/electron-bridge'
+import { isElectron } from '../../api/electron-bridge'
+import { usePublicProfilesWithStoredPasswords } from '../../lib/usePublicProfilesWithStoredPasswords'
 
 export interface Props {
   open: boolean
@@ -25,7 +25,16 @@ function pwCacheKey(profile: string, username: string): string {
 export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   const { t } = useTranslation()
   const { connectMore } = useAuth()
-  const [profiles, setProfiles] = useState<PublicProfile[] | null>(null)
+  // GAP-021 / #102: the public-profiles fetch + the saved-password
+  // lookup now live behind a shared hook (LoginPage uses the same
+  // hook). The hook's `enabled: open` knob preserves the modal-open
+  // gating that PSR-F13 introduced; the cancellation seam is owned
+  // by the hook so the modal no longer threads its own cancelled
+  // boolean for that fetch.
+  const { profilesState, lookupStoredPassword, resetProfilesState } =
+    usePublicProfilesWithStoredPasswords({ enabled: open })
+  const profiles = profilesState.profiles
+  const publicProfilesErr = profilesState.loadErr
   const [profile, setProfile] = useState('default')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -34,18 +43,27 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   const [busy, setBusy] = useState(false)
   const [authedProfiles, setAuthedProfiles] = useState<ProfileView[]>([])
   // PSR-G04 (#81) / PSR-G10 (#87): the open-time effect previously
-  // swallowed errors from both fetchPublicProfiles + listProfiles, so a
-  // failed bootstrap left the user with no feedback (the modal opened
-  // looking healthy but with no profile dropdown / no saved-username
-  // fill). These flags surface each failure independently so the form
-  // stays usable while telling the user what degraded.
-  const [publicProfilesErr, setPublicProfilesErr] = useState(false)
+  // swallowed errors from listProfiles, so a failed bootstrap left
+  // the user with no feedback (the saved-username dropdown silently
+  // disappeared). This flag surfaces the failure independently so the
+  // form stays usable while telling the user what degraded. The
+  // public-profiles equivalent now lives in `profilesState.loadErr`
+  // returned by the shared hook.
   const [authedProfilesErr, setAuthedProfilesErr] = useState(false)
   // PSR-F14 — explicit opt-in for the saved-password lookup. Pre-fix
   // every keystroke fired getStoredPassword whether or not the user
   // actually wanted to reuse a saved credential, paying the
   // safeStorage.decrypt cost on the modal's hot path.
   const [useSavedPw, setUseSavedPw] = useState(false)
+
+  // Apply the discovered default profile name in a separate effect so
+  // the public-profiles fetcher's single-state-update invariant stays
+  // clean (matches LoginPage's pattern).
+  useEffect(() => {
+    if (profilesState.initialProfileName) {
+      setProfile(profilesState.initialProfileName)
+    }
+  }, [profilesState.initialProfileName])
 
   // Renderer-local cache for decrypted passwords keyed by
   // (profile, username). Cleared on close so the cache never outlives a
@@ -56,48 +74,30 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
   // username/profile change so the latest tuple always wins the race.
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // PSR-F13 (#110): collapse the four open-time effects into a single
-  // batched effect. fetchPublicProfiles + listProfiles are independent
-  // network requests but share the modal-open lifecycle, so issuing
-  // them via Promise.all lets us write both pieces of state in one
-  // render cycle (and gives us a single cancellation seam).
+  // listProfiles still runs in its own open-gated effect: it's an
+  // independent network request from the shared hook's public-profile
+  // fetch (different endpoint, different auth requirement) and the
+  // authed-profile dropdown is modal-only. Cancellation is local to
+  // this effect.
   useEffect(() => {
     if (!open) return undefined
     let cancelled = false
-    // Reset the per-open error flags so a previous failure doesn't
-    // bleed across modal open/close cycles.
-    setPublicProfilesErr(false)
     setAuthedProfilesErr(false)
-    // PSR-G04: capture each promise's outcome individually so the UI
-    // can surface "the public profile picker failed to load" and "the
-    // saved-profile dropdown failed to load" with separate copy. Using
-    // allSettled (rather than per-promise .catch) keeps both branches
-    // observable so we can distinguish "loaded zero profiles" from
-    // "load failed and has no entries to show".
-    Promise.allSettled([fetchPublicProfiles(), listProfiles()])
-      .then(([publicResult, authedResult]) => {
+    resetProfilesState()
+    listProfiles()
+      .then((list) => {
         if (cancelled) return
-        if (publicResult.status === 'fulfilled') {
-          const publicList = publicResult.value
-          setProfiles(publicList)
-          const first = publicList[0]
-          if (first) setProfile(first.name)
-        } else {
-          setProfiles([])
-          setPublicProfilesErr(true)
-        }
-        if (authedResult.status === 'fulfilled') {
-          setAuthedProfiles(authedResult.value)
-        } else {
-          setAuthedProfiles([])
-          setAuthedProfilesErr(true)
-        }
+        setAuthedProfiles(list)
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (cancelled) return
+        setAuthedProfiles([])
+        setAuthedProfilesErr(true)
+      })
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, resetProfilesState])
 
   // Saved-username sync stays as a pure state-derivation effect — it
   // never triggers IPC, so it doesn't share the F14 debounce concern.
@@ -133,7 +133,7 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
 
     let cancelled = false
     debounceRef.current = setTimeout(() => {
-      getStoredPassword(profile, username)
+      lookupStoredPassword(profile, username)
         .then((pw) => {
           if (cancelled) return
           // Cache the result (including null) so a subsequent re-type
@@ -151,7 +151,7 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
         debounceRef.current = null
       }
     }
-  }, [open, useSavedPw, profile, username])
+  }, [open, useSavedPw, profile, username, lookupStoredPassword])
 
   // PSR-F14: reset the modal's secret-bearing state when the user
   // closes it. The password cache and the useSavedPw toggle both leak

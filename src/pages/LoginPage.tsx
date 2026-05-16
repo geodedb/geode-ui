@@ -9,8 +9,8 @@ import {
   Input as WaInput,
   Checkbox as WaCheckbox,
 } from '../services/webawesome/components'
-import { fetchPublicProfiles, PublicProfile } from '../api/auth'
-import { getStoredPassword, isElectron } from '../api/electron-bridge'
+import { isElectron } from '../api/electron-bridge'
+import { usePublicProfilesWithStoredPasswords } from '../lib/usePublicProfilesWithStoredPasswords'
 
 const Form = styled.form`
   max-width: 380px;
@@ -78,23 +78,14 @@ export const LoginPage: React.FC = () => {
   const { t } = useTranslation()
   const nav = useNavigate()
 
-  // QUALITY #227: collapse profiles + loadErr + default profile name
-  // into a single state slot so the public-profile fetch's success and
-  // failure paths each dispatch exactly ONE setState. The original shape
-  // (`setProfiles` + `setProfile` + a separate `setLoadErr`) fired two
-  // or three setStates back-to-back outside any act() block in the
-  // tests, producing the documented `act(...)` warning. Collapsing
-  // them into one tuple eliminates the warning without changing UX.
-  type ProfilesState = {
-    profiles: PublicProfile[] | null
-    loadErr: boolean
-    initialProfileName: string | null
-  }
-  const [profilesState, setProfilesState] = useState<ProfilesState>({
-    profiles: null,
-    loadErr: false,
-    initialProfileName: null,
-  })
+  // GAP-021 / #102: the public-profiles fetch + the saved-password
+  // lookup used to inline both effects here AND in
+  // AddConnectionModal.tsx. They now live behind a shared hook
+  // (`usePublicProfilesWithStoredPasswords`) so the cancellation
+  // semantics + the single-state-update invariant (QUALITY #227) stay
+  // identical across call sites.
+  const { profilesState, lookupStoredPassword } =
+    usePublicProfilesWithStoredPasswords()
   const { profiles, loadErr } = profilesState
   const [profile, setProfile] = useState<string>('default')
   const [username, setUsername] = useState('')
@@ -102,31 +93,6 @@ export const LoginPage: React.FC = () => {
   const [savePw, setSavePw] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchPublicProfiles()
-      .then((list) => {
-        if (cancelled) return
-        const initial = list.length > 0 && list[0] ? list[0].name : null
-        setProfilesState({
-          profiles: list,
-          loadErr: false,
-          initialProfileName: initial,
-        })
-      })
-      .catch(() => {
-        if (cancelled) return
-        setProfilesState({
-          profiles: null,
-          loadErr: true,
-          initialProfileName: null,
-        })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   // Apply the discovered default profile name in a separate effect so
   // the fetcher's single-state-update invariant stays clean. The effect
@@ -141,14 +107,14 @@ export const LoginPage: React.FC = () => {
   useEffect(() => {
     if (!username || !profile) return undefined
     let cancelled = false
-    getStoredPassword(profile, username).then((pw) => {
+    lookupStoredPassword(profile, username).then((pw) => {
       if (cancelled) return
       if (pw) setPassword(pw)
     })
     return () => {
       cancelled = true
     }
-  }, [profile, username])
+  }, [profile, username, lookupStoredPassword])
 
   // Read the live username + password values from the <wa-input> host
   // properties at submit time, falling back to React state. Chrome's

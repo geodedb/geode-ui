@@ -51,7 +51,10 @@ function installResizeObserverMock(): ResizeObserverCtorMock {
 
 function uninstallResizeObserver(): void {
   const g = globalThis as GlobalWithRO
-  delete g.ResizeObserver
+  // `delete` on a non-optional property is a TS2790; coerce to a
+  // record so the runtime delete still hits the global. The runtime
+  // behavior is unchanged.
+  delete (g as Record<string, unknown>).ResizeObserver
 }
 
 describe('useTableBodySize', () => {
