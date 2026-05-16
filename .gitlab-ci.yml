@@ -334,10 +334,20 @@ go:generate-verify:
 go:test:
   <<: *go_defaults
   stage: test
+  # QUALITY #229: reuse the SPA bundle the `build` job already produced
+  # instead of re-running `npm ci` + `npm run build` here (a ~99s
+  # webpack rebuild on every pipeline). The build job archives
+  # `internal/ui/dist/` for 7 days; we pull it in via `needs.artifacts`
+  # and the Go embed sees the prebuilt dist directly. Keeps the
+  # double-install / double-build cost out of CI.
+  needs:
+    - job: build
+      artifacts: true
   script:
-    - apk add --no-cache git make nodejs npm
-    - npm ci
-    - npm run build
+    - apk add --no-cache git make
+    # Sanity: the build artifact must be present at the embed path the
+    # Go server's `//go:embed internal/ui/dist` directive expects.
+    - test -f internal/ui/dist/index.html
     # QUALITY #174: scope Go enumeration to project-owned trees so
     # `./...` doesn't walk into `node_modules/flatted/golang/`.
     - go test -race -cover -failfast ./cmd/... ./gen/... ./internal/...
