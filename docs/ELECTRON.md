@@ -99,19 +99,19 @@ const openExternal = (url: string) => {
 
 ```bash
 # 1. Install electron + electron-builder (devDependencies — see below)
-pnpm add -D electron electron-builder
+npm install --save-dev electron electron-builder
 
 # 2. Build the SPA bundle (produces internal/ui/dist/)
-pnpm build
+npm run build
 
 # 3. Compile the electron main + preload to internal/ui/electron-dist/
-pnpm electron:tsc
+npm run electron:tsc
 
 # 4. Combined build (SPA + main + preload) and launch a dev window
-pnpm electron:dev
+npm run electron:dev
 
 # 5. Produce a distributable .dmg / .AppImage / .exe under release/
-pnpm electron:package
+npm run electron:package
 ```
 
 The Electron CLI is intentionally **not** added to `dependencies` /
@@ -121,10 +121,10 @@ release engineer to pull in when they're ready to publish a desktop
 build. To enable locally:
 
 ```bash
-pnpm add -D electron@^32 electron-builder@^25 @types/node
+npm install --save-dev electron@^32 electron-builder@^25 @types/node
 ```
 
-After that, all four `pnpm electron:*` scripts in `package.json` work.
+After that, all four `npm run electron:*` scripts in `package.json` work.
 
 ## Content-Security-Policy under the `geode://` origin
 

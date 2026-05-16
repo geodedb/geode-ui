@@ -75,7 +75,7 @@ the new build will silently change behaviour:
 ## Cutting a release
 
 1. Make sure `main` is green (lint + unit + go:test + e2e all passing).
-2. Bump the version per Conventional Commits + `pnpm` workspace if needed.
+2. Bump the version per Conventional Commits + `npm` workspace if needed.
 3. Tag the commit with a SemVer-compatible name and push:
 
    ```bash

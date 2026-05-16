@@ -1,4 +1,4 @@
-# electron-builder config — drives `pnpm electron:package`.
+# electron-builder config — drives `npm run electron:package`.
 #
 # The packaged app bundles the compiled main process (electron-dist/main.js
 # + preload.js) plus the SPA build (internal/ui/dist) under app:// custom

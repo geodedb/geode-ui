@@ -23,7 +23,7 @@ top ten findings now read:
 
 Verification: 102/102 jest tests, tsc clean, eslint + prettier clean,
 production webpack build emits all six brand woff2 assets,
-`pnpm lint:hardcoded-styles` returns zero hits, `pnpm lint:contrast`
+`npm run lint:hardcoded-styles` returns zero hits, `npm run lint:contrast`
 shows all 14 theme pairs ≥ WCAG AA in both modes.
 
 > **TL;DR.** The UI is built on a clean styled-components v6 foundation, but it is **not aligned with either baseline**. Three structural problems dominate: (a) the palette is unrelated to the geodedb.com brand — primary `#1a56db` blue vs. brand `#601ca0` purple; (b) the app contains **zero `@media` queries** and is unusable below ~800 px viewport; (c) styling is duplicated per-page rather than centralized into shared primitives — 19 separate `styled.button` definitions, six `styled.table` re-implementations, ~69 production-code hex literals outside the theme. Light mode does not exist.
@@ -239,7 +239,7 @@ The findings cluster into four shippable workstreams. Each is independently merg
    - `radii`, `shadows`, `transitions`, `zIndex`, `touchTargets: { min:44, comfortable:48, large:56 }`
 2. **Author `theme/light.ts` and `theme/dark.ts`** seeded with the geodedb.com brand palette (`#601ca0` primary, `#f7f2ff` / `#35046b` canvases, `#2a1f3a` text). Wire a toggle into the user menu; default to `prefers-color-scheme`.
 3. **Load Sora + IBM Plex Mono** via `@font-face` rules in the global style block; switch Monaco to a custom theme that consumes brand tokens.
-4. **Delete the 6 dark hex literals in `App.tsx`**; eliminate per-page hex literals via a single `pnpm lint:hardcoded-styles` script (port from `@devnw/components` `guard:hardcoded-styles`).
+4. **Delete the 6 dark hex literals in `App.tsx`**; eliminate per-page hex literals via a single `npm run lint:hardcoded-styles` script (port from `@devnw/components` `guard:hardcoded-styles`).
 
 ### Phase 2 — UI primitives (1–2 PRs, ~2–3 days)
 
