@@ -44,6 +44,18 @@ const ALL = LOWER + UPPER + DIGIT + SYMBOL
 const DEFAULT_LENGTH = 20
 const MAX_USERNAME_RETRIES = 32
 
+/**
+ * RandomSource is the entropy-injection seam (QUAL #262). The
+ * production default is `globalThis.crypto` (a real CSPRNG); tests
+ * that need bit-for-bit reproducibility (and CI runs that cannot
+ * tolerate the long-tail flake of probabilistic assertions) inject a
+ * deterministic stand-in. Exported so test files do not need to
+ * duplicate the structural-typing contract.
+ */
+export interface RandomSource {
+  getRandomValues<T extends ArrayBufferView | null>(array: T): T
+}
+
 export interface GenerateOptions {
   /** Generated password length. Defaults to 20. Values below
    *  MIN_PASSWORD_LENGTH (12) are silently raised to the floor so a
@@ -52,10 +64,10 @@ export interface GenerateOptions {
   /** When provided, the generator retries until the password does
    *  not contain the username substring (case-insensitive). */
   username?: string
-}
-
-interface RandomSource {
-  getRandomValues<T extends ArrayBufferView | null>(array: T): T
+  /** Entropy source for tests / non-browser environments. Defaults
+   *  to globalThis.crypto when omitted. QUAL #262 — never inject a
+   *  weak source in production. */
+  rand?: RandomSource
 }
 
 function getCryptoOrThrow(): RandomSource {
@@ -139,7 +151,10 @@ function buildOnce(rand: RandomSource, length: number): string {
  * generated password is NEVER returned via Math.random.
  */
 export function generatePassword(opts: GenerateOptions = {}): string {
-  const rand = getCryptoOrThrow()
+  // QUAL #262: prefer the explicit caller-supplied RandomSource over
+  // the crypto default. The default path still throws when crypto is
+  // unavailable, preserving the security posture from #244.
+  const rand = opts.rand ?? getCryptoOrThrow()
   const length = Math.max(MIN_PASSWORD_LENGTH, opts.length ?? DEFAULT_LENGTH)
   const username = opts.username
 
