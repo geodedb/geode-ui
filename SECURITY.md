@@ -42,8 +42,15 @@ This project implements:
 - **Dependency Scanning**: Automated security scanning in CI
 - **Secret Detection**: Gitleaks scanning for leaked credentials
 - **SAST**: Static application security testing
-- **DOMPurify**: HTML sanitization via `@devnw/components`
-- **RBAC**: Deny-by-default authorization via `@devnw/components`
+- **DOMPurify**: HTML sanitization is available via the `dompurify@^3.4.0`
+  override pinned in `package.json` (`overrides`) so any transitive
+  consumer (e.g., docs renderers, markdown tooling) resolves to a known
+  patched version. The current UI does not inject untrusted HTML;
+  rendering is React-managed.
+- **RBAC**: Deny-by-default authorization vocabulary defined in-repo at
+  `src/lib/rbacVocab.ts`, hand-maintained to mirror the authoritative
+  upstream enums in `geode_auth_lib.zig` (`Action`, `Resource`,
+  `Permission`).
 - **CSP-ready**: No inline event handlers or unsafe patterns
 
 ## Security Best Practices
