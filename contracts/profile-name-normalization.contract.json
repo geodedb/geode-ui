@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Cross-stack profile-name normalisation contract (QUAL/SEC issue 241). The Go authority (internal/profilestore/normalize.go) and the SPA pre-flight (src/components/profiles/ProfileEditorModal.tsx::nameIsDuplicate's norm()) MUST produce byte-identical output for every vector in this file. A drift in either implementation fails its language's contract test; a vector edit fails BOTH sides so the missed sync surfaces in code review.",
+  "version": 1,
+  "operation": "NFKC + trim + lower",
+  "vectors": [
+    {
+      "description": "passthrough for an already-normalised lowercase name",
+      "input": "production",
+      "expected": "production"
+    },
+    {
+      "description": "case fold",
+      "input": "Production",
+      "expected": "production"
+    },
+    {
+      "description": "leading + trailing whitespace trimmed",
+      "input": "  prod  ",
+      "expected": "prod"
+    },
+    {
+      "description": "composed-é (U+00E9) is the NFKC canonical form for café",
+      "input": "Café",
+      "expected": "café"
+    },
+    {
+      "description": "decomposed e + combining acute (U+0065 U+0301) folds to composed-é under NFKC",
+      "input": "Café",
+      "expected": "café"
+    },
+    {
+      "description": "fullwidth digits fold to ASCII under NFKC compatibility",
+      "input": "prod０１",
+      "expected": "prod01"
+    },
+    {
+      "description": "non-breaking space (U+00A0) folds to plain space under NFKC and is then trimmed",
+      "input": " prod ",
+      "expected": "prod"
+    },
+    {
+      "description": "ligature fi (U+FB01) decomposes to 'fi' under NFKC",
+      "input": "ﬁle",
+      "expected": "file"
+    },
+    {
+      "description": "empty input passes through",
+      "input": "",
+      "expected": ""
+    }
+  ]
+}

@@ -614,6 +614,17 @@ func (s *sqliteStore) Put(ctx context.Context, p conn.Profile) (conn.Profile, er
 	}
 	now := time.Now().UnixNano()
 
+	// QUAL/SEC issue 241: the UNIQUE BINARY constraint on (scope,
+	// owner_user_id, name) does NOT defend against NFKC / case bypass.
+	// Two byte-distinct names that the SPA's nameIsDuplicate would have
+	// rejected as duplicates (composed vs decomposed é, "Production" vs
+	// "production") will pass the BINARY check. Pre-flight a normalised
+	// comparison so a CSRF or direct-API caller cannot bypass the
+	// uniqueness contract the SPA enforces.
+	if err := s.checkNormalizedNameUnique(ctx, p.Scope, p.OwnerUserID, p.Name, ""); err != nil {
+		return conn.Profile{}, err
+	}
+
 	dsnSealed, err := s.sealString(p.DSN)
 	if err != nil {
 		return conn.Profile{}, err
@@ -723,6 +734,16 @@ func (s *sqliteStore) Patch(ctx context.Context, id string, p ProfilePatch) (con
 
 	merged := mergeProfile(cur, p)
 	now := time.Now().UnixNano()
+
+	// QUAL/SEC issue 241: same normalised-uniqueness pre-flight Put
+	// runs, scoped to the row's (scope, owner_user_id) and excluding
+	// the current row id from the comparison so a no-rename PATCH
+	// doesn't conflict with itself.
+	if merged.Name != cur.Name {
+		if err := s.checkNormalizedNameUniqueTx(ctx, tx, merged.Scope, merged.OwnerUserID, merged.Name, id); err != nil {
+			return conn.Profile{}, err
+		}
+	}
 
 	dsnSealed, err := s.sealString(merged.DSN)
 	if err != nil {
