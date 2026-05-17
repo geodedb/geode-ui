@@ -1,7 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import styled from 'styled-components'
+import styled, { DefaultTheme } from 'styled-components'
 
 // AdminPage is a tabbed shell mounted at /admin/* that hosts the
 // administration sub-pages: Users, Roles, Policies, Grants
@@ -9,20 +9,27 @@ import styled from 'styled-components'
 // Backups, Restore, Migrations, Audit (D4/D5). The active tab is
 // derived from pathname rather than React state so deep-linking and
 // the browser back button both work correctly.
+//
+// QUAL-2026-05-17 (#250): tab text colours bind to the canonical
+// `theme.text.primary` / `theme.text.secondary` tokens. The earlier
+// `theme.colors.text` / `theme.colors.textSecondary` pair is a legacy
+// back-compat mirror that the light theme still keeps in sync, but
+// the dark theme has drifted twice in this codebase already — most
+// recently the 27-contrast.spec WCAG bumps adjusted `text.*` without
+// touching the `colors.*` mirror, producing low-contrast tabs in dark
+// mode. Binding directly to `text.*` removes that risk entirely.
 function adminTabColor(props: {
   $active: boolean
-  theme: { colors: { text: string; textSecondary: string } }
+  theme: DefaultTheme
 }): string {
-  return props.$active
-    ? props.theme.colors.text
-    : props.theme.colors.textSecondary
+  return props.$active ? props.theme.text.primary : props.theme.text.secondary
 }
 
 const Tabs = styled.nav`
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
-  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  border-bottom: 1px solid ${({ theme }) => theme.border.default};
   flex-wrap: wrap;
 `
 
@@ -35,7 +42,7 @@ const Tab = styled(Link)<{ $active: boolean }>`
   margin-bottom: -1px;
 
   &:hover {
-    color: ${({ theme }) => theme.colors.text};
+    color: ${({ theme }) => theme.text.primary};
   }
 `
 
