@@ -46,6 +46,22 @@ var wsRowBufPool = sync.Pool{
 	New: func() any { return &bytes.Buffer{} },
 }
 
+// wsPtrsPool reuses []any slabs of pointers-to-row-cells used by
+// rows.Scan. PERF #251: streamRowsOverWS allocates a fresh `ptrs`
+// slab per scanned row. The slab is only live across the single Scan
+// call — after Scan returns, the values are in the (separately
+// allocated, still-retained-by-the-batcher) `row` slab and ptrs is
+// garbage. Pooling drops one make([]any, len(cols)) per row.
+//
+// Lifetime guarantee: ptrs is acquired, populated with &row[i], passed
+// to rows.Scan(ptrs...), and Put back BEFORE the row is handed to
+// batcher.add. The batcher's "rows are referenced until the next
+// flush" contract applies to the row slab, NOT to ptrs — once Scan
+// returns the pointers serve no further purpose.
+var wsPtrsPool = sync.Pool{
+	New: func() any { return &[]any{} },
+}
+
 // frameWriter is the WriteMessage subset of *wsx.Conn that the row
 // batcher exercises. Hoisting it as an interface lets ws_query_test
 // substitute a counter without spinning up a real WS connection.
@@ -375,12 +391,34 @@ func (cr *cancelReader) Exited() <-chan struct{} { return cr.exited }
 func streamRowsOverWS(conn *wsx.Conn, rows *sql.Rows, cols []string, batcher *rowBatcher) (int64, error) {
 	var count int64
 	for rows.Next() {
+		// row carries the scanned values and is retained by the
+		// batcher (see (*rowBatcher).add comment); allocate fresh.
 		row := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
+		// PERF #251: ptrs is a transient slab — only live across
+		// rows.Scan. Acquire from the pool, ensure capacity, slice
+		// to len(cols), populate &row[i], and Put back as soon as
+		// Scan returns. The Put happens BEFORE batcher.add so the
+		// pool reference cannot outlive the batcher's row reference.
+		ptrsP := wsPtrsPool.Get().(*[]any)
+		ptrs := *ptrsP
+		if cap(ptrs) < len(cols) {
+			ptrs = make([]any, len(cols))
+		} else {
+			ptrs = ptrs[:len(cols)]
+		}
 		for i := range row {
 			ptrs[i] = &row[i]
 		}
-		if err := rows.Scan(ptrs...); err != nil {
+		err := rows.Scan(ptrs...)
+		// Clear pointers before Put so we don't pin the row slab via
+		// the pooled slab — the GC needs row[i] to be reachable only
+		// through the batcher's b.buf.
+		for i := range ptrs {
+			ptrs[i] = nil
+		}
+		*ptrsP = ptrs[:0]
+		wsPtrsPool.Put(ptrsP)
+		if err != nil {
 			// Drain any pending batch so partial progress reaches
 			// the client before the error frame.
 			_ = batcher.flush()
