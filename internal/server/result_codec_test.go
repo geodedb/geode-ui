@@ -5,8 +5,12 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -207,6 +211,108 @@ func mustScan(b *testing.B, fr *fakeRowScanner) GraphSummary {
 // elapsed_ms; not currently used but kept here so future stop-the-world
 // regression tests can pin a deterministic time.Since.
 var referenceTime = time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC) //nolint:unused
+
+// TestStreamQueryResult_EmitsServerTiming pins PERF-N4 (#281):
+// streamQueryResult MUST emit a `Server-Timing` response header with a
+// `db;dur=<ms>` measurement before the first body byte is flushed, and
+// a marshal-stage trailer (via http.TrailerPrefix) by the time the
+// response completes. The header is what DevTools / curl users see;
+// the trailer is the post-body marshal measurement.
+func TestStreamQueryResult_EmitsServerTiming(t *testing.T) {
+	rows := [][]any{
+		{int64(1), "alice"},
+		{int64(2), "bob"},
+	}
+	colNames := []string{"id", "name"}
+	colDescs := make([]jsontext.Value, len(colNames))
+	for i, n := range colNames {
+		raw, err := json.Marshal(struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+		}{Name: n, Type: "TEXT"})
+		if err != nil {
+			t.Fatalf("marshal col desc: %v", err)
+		}
+		colDescs[i] = jsontext.Value(raw)
+	}
+
+	// httptest.ResponseRecorder captures both headers and trailers in
+	// its `HeaderMap`. http.TrailerPrefix entries appear in HeaderMap
+	// without the prefix once the response is finalised; the recorder
+	// retains the prefix until then. Asserting via HasPrefix lookup is
+	// the documented pattern.
+	w := httptest.NewRecorder()
+	rs := &fakeRowScanner{cols: colNames, rows: rows}
+	rowCount, err := streamQueryResult(
+		w, rs, rs.cols, colDescs, time.Now().Add(-3*time.Millisecond),
+	)
+	if err != nil {
+		t.Fatalf("streamQueryResult: %v", err)
+	}
+	if rowCount != int64(len(rows)) {
+		t.Fatalf("rowCount=%d want %d", rowCount, len(rows))
+	}
+
+	// Pre-flush header: `db;dur=<float>`.
+	st := w.Header().Get("Server-Timing")
+	if st == "" {
+		t.Fatalf("Server-Timing header missing; got headers=%v", w.Header())
+	}
+	if !strings.HasPrefix(st, "db;dur=") {
+		t.Fatalf("Server-Timing should start with `db;dur=`; got %q", st)
+	}
+	// Parses to a non-negative float.
+	tail := strings.TrimPrefix(st, "db;dur=")
+	if v, perr := strconv.ParseFloat(tail, 64); perr != nil || v < 0 {
+		t.Fatalf("Server-Timing dur is not a non-negative float: %q (err=%v)", tail, perr)
+	}
+
+	// Pre-flush Trailer header: must declare the marshal trailer key.
+	tr := w.Header().Get("Trailer")
+	if !strings.Contains(tr, "X-Server-Timing-Marshal") {
+		t.Fatalf("Trailer header should announce X-Server-Timing-Marshal; got %q", tr)
+	}
+
+	// Post-flush trailer: httptest.ResponseRecorder surfaces trailers
+	// in HeaderMap with the original key (without TrailerPrefix) once
+	// they've been emitted via WriteHeader and the writer is finalised.
+	// We use Result().Trailer which mirrors the net/http convention.
+	res := w.Result()
+	defer func() { _ = res.Body.Close() }()
+	_, _ = io.Copy(io.Discard, res.Body) // drain so trailers are read
+	marshalLeg := res.Trailer.Get("X-Server-Timing-Marshal")
+	if marshalLeg == "" {
+		// Some recorder versions surface the trailer in HeaderMap
+		// instead of Trailer; fall back to that lookup before failing.
+		marshalLeg = w.Header().Get("X-Server-Timing-Marshal")
+	}
+	if !strings.HasPrefix(marshalLeg, "marshal;dur=") {
+		t.Fatalf("X-Server-Timing-Marshal trailer should start with `marshal;dur=`; "+
+			"got %q (Header()=%v Trailer=%v)", marshalLeg, w.Header(), res.Trailer)
+	}
+}
+
+// TestFormatMillisFloat pins the formatter contract used by the
+// Server-Timing emitter: non-negative durations render as a decimal-
+// millisecond string with one fractional digit (per the
+// Server-Timing spec's `<value>` production).
+func TestFormatMillisFloat(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want string
+	}{
+		{0, "0.0"},
+		{1 * time.Millisecond, "1.0"},
+		{1500 * time.Microsecond, "1.5"},
+		{42 * time.Microsecond, "0.0"}, // rounds toward 0 fractional digit
+	}
+	for _, c := range cases {
+		got := formatMillisFloat(c.in)
+		if got != c.want {
+			t.Fatalf("formatMillisFloat(%v): got %q want %q", c.in, got, c.want)
+		}
+	}
+}
 
 // discardFlushWriter is an http.ResponseWriter that discards the body
 // (so the benchmark measures the codec, not buffer growth) and implements

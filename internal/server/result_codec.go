@@ -429,6 +429,19 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	// PERF-N4 (#281): emit a `Server-Timing` header so DevTools / curl
+	// callers see the per-stage breakdown of /api/v1/query without
+	// needing to crack open the trailer JSON. Pre-headers we set the
+	// composite header containing `db` (driver time up to and
+	// including the rows-iterator return) and a placeholder `marshal`
+	// (filled in by the final flush via http.TrailerPrefix). Splitting
+	// these into a single Set means recipients see one canonical
+	// header per response without depending on trailer support in
+	// every HTTP intermediary.
+	dbMs := formatMillisFloat(time.Since(start))
+	w.Header().Set("Trailer", "X-Server-Timing-Marshal")
+	w.Header().Set("Server-Timing", "db;dur="+dbMs)
+	scanStart := time.Now()
 	// 200 is implied on the first Write; set it explicitly so the
 	// status is unambiguous even for an empty result set.
 	w.WriteHeader(http.StatusOK)
@@ -495,8 +508,32 @@ func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []strin
 	if ew.err != nil {
 		return midStreamAbort("write trailer", rowCount, ew.err)
 	}
+	// PERF-N4 (#281): emit the scan+marshal Server-Timing leg as an
+	// HTTP trailer named X-Server-Timing-Marshal (a sibling key so
+	// the parent Server-Timing header set pre-flush stays unambiguous
+	// in caches and proxies). Recipients that care about the marshal
+	// time read the trailer; those that only inspect the response
+	// headers still see `db;dur=...`. We do NOT attempt to split scan
+	// vs marshal further: jsontext.NewEncoder writes directly into
+	// the buffered writer, so the two stages are inseparable on the
+	// hot path. The trailer-prefix convention is the net/http way to
+	// emit a trailer post-body.
+	w.Header().Set(
+		http.TrailerPrefix+"X-Server-Timing-Marshal",
+		"marshal;dur="+formatMillisFloat(time.Since(scanStart)),
+	)
 	flush()
 	return rowCount, nil
+}
+
+// formatMillisFloat returns `d` formatted as a decimal-millisecond
+// string suitable for a `dur=` field in a Server-Timing header. The
+// Server-Timing spec accepts millisecond values as a non-negative
+// floating-point number with optional fractional digits.
+func formatMillisFloat(d time.Duration) string {
+	const div = 1_000_000.0 // nanoseconds per millisecond
+	ms := float64(d.Nanoseconds()) / div
+	return strconv.FormatFloat(ms, 'f', 1, 64)
 }
 
 // writeTrailer appends the `],"row_count":N,"elapsed_ms":M,"graph_summary":{...}}`
