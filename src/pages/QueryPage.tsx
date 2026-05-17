@@ -50,6 +50,22 @@ const Err = styled.span`
   color: ${({ theme }) => theme.text.danger};
 `
 
+// PERF-2026-05-17-03 (#240): banner shown when the stream retention cap
+// was hit. The reducer drops further server-sent rows on the floor;
+// the banner tells the user how many rows were truncated and points
+// them at server-side export as the path to the full result. role=status
+// + aria-live=polite keeps it announced to assistive tech without
+// stealing focus.
+const StreamOverflowBanner = styled.div`
+  margin-top: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.bg.subtle};
+  border-left: 3px solid ${({ theme }) => theme.colors.warning};
+  color: ${({ theme }) => theme.text.primary};
+  border-radius: ${({ theme }) => theme.radii.md};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+`
+
 // Suspense fallback shown while the lazy Monaco editor chunk downloads
 // (F10 / #54). Sized to roughly the editor's default height so the
 // layout doesn't jump when the real component resolves. role=status
@@ -495,6 +511,18 @@ export const QueryPage: React.FC = () => {
         )}
         {activeErr && <Err>{activeErr}</Err>}
       </Bar>
+      {streamMode && stream.rowsTruncated > 0 && (
+        <StreamOverflowBanner
+          role="status"
+          aria-live="polite"
+          data-testid="stream-overflow-banner"
+        >
+          {t('query.streamRetentionBanner', {
+            truncated: stream.rowsTruncated,
+            cap: stream.rowRetentionCap,
+          })}
+        </StreamOverflowBanner>
+      )}
       {inlineResultRegion}
       {overlayResultRegion}
     </PageRoot>

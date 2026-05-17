@@ -96,6 +96,8 @@ export const en = {
     maximizeResults: 'Maximize results',
     exitFullscreen: 'Exit fullscreen',
     optionsLabel: 'Options',
+    streamRetentionBanner:
+      '{{truncated}} more streamed rows were not retained (in-memory cap {{cap}}). Re-run with server-side export to get the full result.',
   },
 
   graph: {
