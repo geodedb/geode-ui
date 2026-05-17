@@ -215,6 +215,18 @@ repos:
     files: \.(ts|tsx)$
     exclude: ^(node_modules/|gen/|electron/)
 
+      # QUAL #253: workspace doc residue gate. The /workspace route +
+      # WorkspacePage component were deleted; live docs must not
+      # resurrect those references. Historical surfaces (resolved
+      # gap log, superseded plans, gap-tracking columns) are
+      # allow-listed inside the script.
+  - id: check-doc-routes
+    name: check:doc-routes
+    entry: node scripts/check-doc-routes.mjs
+    language: system
+    pass_filenames: false
+    files: \.md$
+
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
       # QUALITY #174: explicit GO_PKGS list so neither golangci-lint nor
       # go test walks `node_modules/flatted/golang/`. Mirrors the
@@ -290,6 +302,7 @@ ci:
   - verify-translations
   - detect-hardcoded-strings
   - check-html-renderers
+  - check-doc-routes
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck

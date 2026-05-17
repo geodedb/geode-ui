@@ -40,7 +40,7 @@ Outbound, the server fans out to one or more Geode servers via the
 `geodedb.com/geode` driver, multiplexed through a profile-aware connection
 pool (`internal/conn`).
 
-The SPA exposes three top-level routes: `/` (single-pane query editor), `/workspace` (multi-pane query workspace — 1–4 tiled editor+result panes, each with its own WebSocket stream), and `/dashboard` (overview cards for graphs, recent queries, connection status, and on-demand graph stats). The result panel on every editor surface offers a Table / JSON / Graph / **Matrix** tab switcher; the Matrix view renders scalar-projection results (e.g. `RETURN n.name, n.age`) as a sortable matrix. A persisted FIFO **query history** (capped at 20 entries, stored in `localStorage` via `useQueryHistory`) backs the dashboard's "recent queries" card and lets users prefill the editor by clicking a past statement.
+The SPA exposes two top-level routes: `/` (single-pane query editor) and `/dashboard` (overview cards for graphs, recent queries, connection status, and on-demand graph stats). The result panel on every editor surface offers a Table / JSON / Graph / **Matrix** tab switcher; the Matrix view renders scalar-projection results (e.g. `RETURN n.name, n.age`) as a sortable matrix. A persisted FIFO **query history** (capped at 20 entries, stored in `localStorage` via `useQueryHistory`) backs the dashboard's "recent queries" card and lets users prefill the editor by clicking a past statement.
 
 ## Configuration
 

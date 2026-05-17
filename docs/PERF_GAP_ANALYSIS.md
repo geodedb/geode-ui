@@ -116,7 +116,7 @@ GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 timeout 5m go test -bench=. -benchmem -
 
 ### Closed in 2026-05-16 cohort (see GAP_ANALYSIS_RESOLVED.md)
 
-- App/UI: #234, #236, #216, #237, #222, #224 (and #213, removed 2026-05-17 due to workspace deletion).
+- App/UI: #234, #236, #216, #237, #222, #224 (and #213, marked no-longer-applicable on 2026-05-17 after the multi-pane editor surface was deleted).
 - Backend: #217, #218, #225, #165, #219, #221.
 - Needs-genapi: #238, #171, #167, #169, #163.
 - CI/Release: #235.
