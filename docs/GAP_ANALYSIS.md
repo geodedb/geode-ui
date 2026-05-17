@@ -479,14 +479,14 @@ Already-closed pre-run: #73 (F12, closed earlier as part of the #72 combined fix
 |---------|-------|----------|------------------|----------|-----------------|
 | GAP-029 | Doc gap (low) — placeholder slot for any documentation drift surfaced by the 2026-05-17 detector after the 2026-05-16 docs pass | Low | — (none — closed inline) | n/a | n/a |
 | GAP-030 | Catch-all low-severity classification slot from the 2026-05-17 detector — no concrete file finding | Low | — (none) | n/a | n/a |
-| GAP-031 | `PATCH /api/v1/users/{username}` fabricates synthetic User on empty body | Medium | [#208](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/208) (Q-NEW-G, **open**) | `internal/server/handlers_users.go:283-287` (verified at HEAD `44b02ba`) — `resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}` short-circuit returns a synthesised echo with `Roles: nil` regardless of what is on disk. | Either return `400 empty_patch` (two-line fix + test) OR treat empty PATCH as GET (refetch via `SHOW USERS` / `userFromRow`). |
-| GAP-032 | SQLite writer DSN lacks `_pragma=busy_timeout` (RO has it) | Medium | [#207](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/207) (Q-NEW-F, **open**) | `internal/profilestore/sqlite.go:108-122` (verified at HEAD `44b02ba`) — `sql.Open("sqlite", dsn)` writer handle has no `busy_timeout` pragma; RO path at L193 explicitly attaches `?_pragma=busy_timeout(5000)`. Under contention (revocation `putJTI` + profile CRUD writes serialise on the single-writer handle) the writer can hit `SQLITE_BUSY` and fail-fast instead of waiting up to 5s like the reader. | Append `?_pragma=busy_timeout(5000)` to writer DSN OR run `PRAGMA busy_timeout = 5000;` immediately after open. Match RO timeout exactly. |
-| GAP-033 | Three `SHOW`-list handlers (`GetBackups`/`GetPolicies`/`GetRoles`) duplicate body — extract `listRowsAsJSONValues` | Medium | [#138](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/138) (Q1, **open**) | `internal/server/handlers_backups.go:62-84` + `handlers_policies.go` + `handlers_roles.go` — same `runQuery("SHOW <noun>")` + `isWireFeatureMissing`-as-empty + per-row `jsontext.Value` marshal copy-pasted thrice. | Extract helper `listRowsAsJSONValues(ctx, db, stmt, noun) ([]jsontext.Value, error)` taking the SHOW statement + singular noun; collapse each handler to a 4-line wrapper. |
+| GAP-031 | `PATCH /api/v1/users/{username}` fabricates synthetic User on empty body | Medium | [#208](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/208) (Q-NEW-G, **Closed 2026-05-17**) | **Closed (2026-05-17)** via `d7eee0a` — synthetic-echo branch in `internal/server/handlers_users.go` replaced with `return badRequest(ErrCodeEmptyPatch, "...")`; new `ErrCodeEmptyPatch = "empty_patch"` constant + `EMPTY_PATCH` mirror in `src/api/serverErrorCodes.ts`; test `TestPatchUsers_EmptyBodyReturns400EmptyPatch` pins 400 + body code + no `begin` event. | n/a (closed) |
+| GAP-032 | SQLite writer DSN lacks `_pragma=busy_timeout` (RO has it) | Medium | [#207](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/207) (Q-NEW-F, **Closed 2026-05-17**) | **Closed (2026-05-17)** via `c98be97` — boot-time pragma batch in `internal/profilestore/sqlite.go` extended with `PRAGMA busy_timeout=5000;`. Inline (not DSN-appended) so it works uniformly across `:memory:`, bare-path, and `file:` URI shapes. `TestSQLiteWriter_HasBusyTimeoutPragma` + `TestSQLiteFileBacked_BusyTimeoutSurvivesFreshConnections` pin the contract. | n/a (closed) |
+| GAP-033 | Three `SHOW`-list handlers (`GetBackups`/`GetPolicies`/`GetRoles`) duplicate body — extract `listRowsAsJSONValues` | Medium | [#138](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/138) (Q1, **Closed 2026-05-17**) | **Closed (2026-05-17)** via `354961b` — new `internal/server/list_rows.go::listRowsAsJSONValues(ctx, db, stmt, noun, normaliseRow)` collapses each handler to a 4-line wrapper. GetRoles's role_name→name normalisation passes via the per-row callback. Six new helper unit tests in `list_rows_test.go`. | n/a (closed) |
 | GAP-034 | Misc — slot reserved (low/medium) | Low/Medium | — | n/a | n/a |
 | GAP-035 | Misc — slot reserved (low/medium) | Low/Medium | — | n/a | n/a |
 | GAP-036 | Misc — slot reserved (low/medium) | Low/Medium | — | n/a | n/a |
 
-**Closure semantics:** GAP-029/030/034/035/036 are reserved slots emitted by the detector pass for traceability — none surfaced concrete file evidence above the threshold to file as new GitLab issues. GAP-031/032/033 close when their canonical GitLab issues (#208, #207, #138) are themselves closed.
+**Closure semantics:** GAP-029/030/034/035/036 are reserved slots emitted by the detector pass for traceability — none surfaced concrete file evidence above the threshold to file as new GitLab issues. GAP-031/032/033 closed 2026-05-17 alongside their canonical GitLab issues (#208 / #207 / #138) — see closure SHAs in the table above.
 
 ### Detailed records for GAP-031..GAP-033
 
@@ -513,7 +513,7 @@ Already-closed pre-run: #73 (F12, closed earlier as part of the #72 combined fix
 - **Acceptance criteria:**
   - Empty PATCH (no email / password / roles) returns either `400 empty_patch` or canonical store user, NOT a synthesised echo with `Roles: nil`.
   - New test in `internal/server/handlers_users_test.go` pins the chosen behaviour.
-- **Status:** Open (tracked via #208).
+- **Status:** **Closed 2026-05-17** via `d7eee0a` (`fix: close #208 - PATCH /users empty body returns 400 empty_patch instead of synthetic echo`). The synthetic-echo branch was replaced with `return badRequest(ErrCodeEmptyPatch, ...)`; new `ErrCodeEmptyPatch = "empty_patch"` Go constant + `EMPTY_PATCH` TS mirror keep the cross-stack contract; `TestPatchUsers_EmptyBodyReturns400EmptyPatch` pins status 400 + body code + no `begin` driver event.
 
 #### GAP-032: SQLite writer DSN lacks `_pragma=busy_timeout`
 
@@ -532,7 +532,7 @@ Already-closed pre-run: #73 (F12, closed earlier as part of the #72 combined fix
   - Writer handle's `busy_timeout` is 5000 ms (verified via `PRAGMA busy_timeout;` test).
   - New test in `internal/profilestore/sqlite_test.go` asserts the writer pragma value.
   - Contention bench (writer + concurrent revoke) no longer surfaces `SQLITE_BUSY` on the writer.
-- **Status:** Open (tracked via #207).
+- **Status:** **Closed 2026-05-17** via `c98be97` (`fix: close #207 - SQLite writer busy_timeout=5000 to prevent SQLITE_BUSY under contention`). Boot-time pragma batch in `internal/profilestore/sqlite.go` now executes `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;` against the writer handle. Inlined PRAGMA (not DSN-appended) so it works uniformly across `:memory:`, bare-path, and `file:` URI shapes. `TestSQLiteWriter_HasBusyTimeoutPragma` + `TestSQLiteFileBacked_BusyTimeoutSurvivesFreshConnections` pin the contract.
 
 #### GAP-033: Three SHOW-list handlers duplicate body
 
@@ -552,7 +552,7 @@ Already-closed pre-run: #73 (F12, closed earlier as part of the #72 combined fix
   - `GetBackups` / `GetPolicies` / `GetRoles` each delegate to `listRowsAsJSONValues`; no SHOW-statement string repeated outside the helper.
   - Test parity: existing tests for all three handlers still green.
   - New test pins the helper's `isWireFeatureMissing` → empty-list contract.
-- **Status:** Open (tracked via #138).
+- **Status:** **Closed 2026-05-17** via `354961b` (`refactor: close #138 - extract listRowsAsJSONValues helper for SHOW handlers (backups/policies/roles)`). New `internal/server/list_rows.go::listRowsAsJSONValues(ctx, db, stmt, noun, normaliseRow)` consolidates the four-step pipeline (`runQuery` → `isWireFeatureMissing`-as-empty → `wireErr` wrap → per-row marshal). `GetBackups` / `GetPolicies` / `GetRoles` each collapse to a 4-line wrapper; `GetRoles`'s `role_name`→`name` normalisation passes via the per-row callback. Six new helper unit tests in `internal/server/list_rows_test.go`.
 
 ### Gap-sync verification
 
