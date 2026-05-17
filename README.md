@@ -189,7 +189,6 @@ output against `docs/GAP_ANALYSIS.md` without spelunking the spec.
 ## Documentation
 
 - [Architecture overview](docs/README.md)
-- [Private registry setup](docs/PRIVATE_REGISTRY.md)
 - [Electron desktop client](docs/ELECTRON.md)
 - [Internationalization (i18n)](docs/I18N.md)
 - [Release engineering](deploy/RELEASE.md) — goreleaser pipeline, EV signing, tag workflow

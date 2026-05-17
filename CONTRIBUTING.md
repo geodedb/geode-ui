@@ -9,7 +9,7 @@ Thank you for your interest in contributing to ui! This document provides guidel
 3. Set up the development environment:
 
 ```bash
-# Configure private registry (see docs/PRIVATE_REGISTRY.md)
+# All dependencies are public on the default npm registry.
 npm install
 make pre-commit-install
 make dev

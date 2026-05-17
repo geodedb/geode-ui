@@ -2,7 +2,9 @@
 
 ## Guides
 
-- [Private Registry Setup](PRIVATE_REGISTRY.md) - How to configure npm for the `@devnw/components` private registry
+- See the per-area documents in this directory (security, architecture,
+  performance, etc.). All dependencies are public on the default npm
+  registry; no private-registry setup is required.
 
 ## External Resources
 

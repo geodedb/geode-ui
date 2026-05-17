@@ -4,7 +4,6 @@
 
 - [README](README.md) - Getting started guide
 - [docs/](docs/) - Detailed documentation
-- [Private Registry Setup](docs/PRIVATE_REGISTRY.md) - Configure npm for private packages
 
 ## External Resources
 
