@@ -19,7 +19,6 @@ import (
 // generic faults.
 type listRowsDriver struct {
 	mu     sync.Mutex
-	wantQ  string
 	cols   []string
 	values [][]driver.Value
 	// failWith, when non-nil, is returned from QueryContext.
@@ -61,9 +60,7 @@ func (r *listRowsRows) Next(dest []driver.Value) error {
 	if r.idx >= len(r.values) {
 		return io.EOF
 	}
-	for i, v := range r.values[r.idx] {
-		dest[i] = v
-	}
+	copy(dest, r.values[r.idx])
 	r.idx++
 	return nil
 }
