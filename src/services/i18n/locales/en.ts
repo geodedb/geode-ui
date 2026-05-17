@@ -273,7 +273,16 @@ export const en = {
     fieldUsername: 'Username',
     fieldEmail: 'Email',
     fieldPassword: 'Password',
-    passwordHint: 'The user can change this on first login.',
+    // Password generator + client-side policy (mirrors
+    // internal/server/password_policy.go). See
+    // src/lib/passwordPolicy.ts for the mapping from policy violation
+    // enum to i18n key.
+    generatePassword: 'Generate',
+    passwordTooShort: 'Password must be at least 12 characters',
+    passwordWeakPattern: 'Password is too predictable',
+    passwordContainsUsername: 'Password must not contain the username',
+    passwordHintRequirements:
+      'At least 12 characters; not all same character or all digits; must not contain the username',
     unsupportedNote:
       'Creating users is not supported on the connected Geode build.',
     unsupportedTooltip:

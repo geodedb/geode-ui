@@ -10,6 +10,11 @@ import {
 } from '../../api/capabilities'
 import { useApiResource } from '../../hooks/useApiResource'
 import { useCapabilities } from '../../hooks/useCapabilities'
+import { generatePassword } from '../../lib/passwordGenerator'
+import {
+  PolicyViolation,
+  validatePassword as validateClientPolicy,
+} from '../../lib/passwordPolicy'
 import {
   Button,
   ConfirmModal,
@@ -243,6 +248,20 @@ export const UsersPage: React.FC = () => {
   )
 }
 
+// PasswordRow lays the password input + Generate button on one row
+// so the operator can hit "Generate" and immediately see the proposed
+// password in the field. Visually it looks like a single control.
+const PasswordRow = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.xs};
+  align-items: stretch;
+
+  & > :first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+`
+
 const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { t } = useTranslation()
   const [username, setUsername] = useState('')
@@ -251,8 +270,59 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // Live client-side policy validation. The Submit button is disabled
+  // whenever the password is non-empty AND violates a rule. An empty
+  // password is allowed through so the operator can create a user
+  // without an initial password (the server still accepts that on
+  // builds where it's enabled); the empty-vs-invalid distinction is
+  // intentional so the hint doesn't scream at the user before they've
+  // typed anything.
+  //
+  // Direct-literal `t('users.password*')` calls are intentional (vs a
+  // table-driven helper) so the verify:translations pre-commit hook
+  // sees every key referenced. Each branch maps a single
+  // PolicyViolation to the matching i18n message.
+  const policy = validateClientPolicy(password, username)
+  const showPolicyErrors = password.length > 0 && !policy.valid
+  const policyMessageFor = (v: PolicyViolation): string => {
+    switch (v) {
+      case 'tooShort':
+        return t('users.passwordTooShort')
+      case 'weakPattern':
+        return t('users.passwordWeakPattern')
+      case 'containsUsername':
+        return t('users.passwordContainsUsername')
+      default:
+        return t('users.passwordHintRequirements')
+    }
+  }
+  const policyErrorText = showPolicyErrors
+    ? policy.errors.map((e) => policyMessageFor(e)).join(' · ')
+    : null
+
+  const onGenerate = (): void => {
+    // The generator never produces a password that contains the
+    // username substring (when the username is set) and is guaranteed
+    // to pass every client-side rule. Default length (20) is well
+    // above the 12-char floor and trivially passes the
+    // weakPattern/all-digits gates.
+    try {
+      setPassword(generatePassword({ username: username || undefined }))
+      setErr(null)
+    } catch (genErr: unknown) {
+      // Almost impossible in browser/jsdom — only fires when
+      // window.crypto.getRandomValues is unavailable, in which case
+      // the operator must type the password by hand.
+      setErr(genErr instanceof Error ? genErr.message : String(genErr))
+    }
+  }
+
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
+    if (showPolicyErrors) {
+      setErr(policyErrorText ?? t('users.passwordHintRequirements'))
+      return
+    }
     setBusy(true)
     setErr(null)
     try {
@@ -276,7 +346,12 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       <Button variant="ghost" onClick={onClose} disabled={busy}>
         {t('common.cancel')}
       </Button>
-      <Button form="create-user-form" type="submit" loading={busy}>
+      <Button
+        form="create-user-form"
+        type="submit"
+        loading={busy}
+        disabled={showPolicyErrors}
+      >
         {t('common.create')}
       </Button>
     </>
@@ -315,15 +390,29 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <Field
           label={t('users.fieldPassword')}
           htmlFor="cu-password"
-          hint={t('users.passwordHint')}
+          hint={t('users.passwordHintRequirements')}
+          error={policyErrorText ?? undefined}
         >
-          <Input
-            id="cu-password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-          />
+          <PasswordRow>
+            <Input
+              id="cu-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              aria-invalid={showPolicyErrors || undefined}
+              data-testid="cu-password"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onGenerate}
+              data-testid="cu-password-generate"
+            >
+              {t('users.generatePassword')}
+            </Button>
+          </PasswordRow>
         </Field>
         {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
       </form>
