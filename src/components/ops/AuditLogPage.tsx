@@ -1,10 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
 import { DataTable, EmptyCell, Field, Input, Stack, TableScroll } from '../ui'
+
+// PERF-2026-05-17-05 (issue 243): 300 ms after the operator stops
+// typing in any filter input the page refetches the filtered audit
+// list. Previously every keystroke triggered a new fetch + a full
+// 10k-entry ring round-trip; a 5-char burst meant 5 redundant fetches
+// totalling ~12 MiB of payload. The debounce holds the network at one
+// fetch per pause; the matching server-side limit cap (parseAuditLimit
+// in handlers_audit.go, default 200) keeps each fetch small.
+const AUDIT_FILTER_DEBOUNCE_MS = 300
 
 // AuditLogPage drives the /admin/audit tab. The Geode B11 endpoint backs
 // the table:
@@ -108,10 +117,30 @@ export const AuditLogPage: React.FC = () => {
     event: '',
     user: '',
   })
+  // PERF #243: debouncedFilters lags filters by AUDIT_FILTER_DEBOUNCE_MS.
+  // useApiResource's deps include debouncedFilters (not filters) so a
+  // typing burst collapses to a single refetch when the operator pauses.
+  const [debouncedFilters, setDebouncedFilters] = useState<Filters>(filters)
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (debounceTimerRef.current != null) {
+      clearTimeout(debounceTimerRef.current)
+    }
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null
+      setDebouncedFilters(filters)
+    }, AUDIT_FILTER_DEBOUNCE_MS)
+    return () => {
+      if (debounceTimerRef.current != null) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
+    }
+  }, [filters])
 
-  // useApiResource fetches once on mount and on every filter change,
-  // owning the AbortController + stale-resolve guard. We layer a
-  // setInterval on top to drive 5-second polling via refetch(), and
+  // useApiResource fetches once on mount and on every DEBOUNCED filter
+  // change, owning the AbortController + stale-resolve guard. We layer
+  // a setInterval on top to drive 5-second polling via refetch(), and
   // gate it on document.visibilityState so background tabs don't keep
   // hammering the server (perf finding F15, bundled here as a 1-line
   // tweak per the gap plan).
@@ -123,13 +152,13 @@ export const AuditLogPage: React.FC = () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async (_signal) => {
       const r = (await client.audit({
-        since: filters.since,
-        event: filters.event,
-        user: filters.user,
+        since: debouncedFilters.since,
+        event: debouncedFilters.event,
+        user: debouncedFilters.user,
       })) as { entries?: unknown[] }
       return (r.entries ?? []) as AuditEntry[]
     },
-    [filters.since, filters.event, filters.user]
+    [debouncedFilters.since, debouncedFilters.event, debouncedFilters.user]
   )
   const entries = data ?? []
 

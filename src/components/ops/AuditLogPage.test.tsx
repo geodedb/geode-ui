@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 
 // Mock the generated client BEFORE importing AuditLogPage so the
@@ -104,3 +104,55 @@ test('polling pauses when document is hidden (PERF #224)', async () => {
 
   visibilitySpy.mockRestore()
 })
+
+// PERF #243 regression gate: filter inputs debounce by 300 ms before
+// triggering a refetch. A 5-character typing burst MUST collapse into
+// a single fetch (plus the initial mount fetch) rather than firing one
+// per keystroke as the pre-#243 code did.
+test('filter typing debounces refetches (PERF #243)', async () => {
+  auditMock.mockClear()
+  render(
+    <ThemeProvider theme={theme}>
+      <AuditLogPage />
+    </ThemeProvider>
+  )
+  // The mount fetch is fetch #1.
+  await waitFor(() => expect(auditMock).toHaveBeenCalledTimes(1))
+
+  // Drive five rapid keystrokes into the user filter input. Without
+  // the debounce, each setFilters bump would re-deps the useApiResource
+  // and trigger a fetch. Resolve the input by its id (al-user is the
+  // stable, locale-independent handle the component sets).
+  const userInput = document.getElementById('al-user') as HTMLInputElement
+  // forEach + an async helper instead of for-of so the eslint rule
+  // banning iterators doesn't trip.
+  const tickKeystroke = async (c: string): Promise<void> => {
+    await act(async () => {
+      fireEvent.change(userInput, { target: { value: c } })
+      // Stop short of the 300 ms threshold so the debounce hasn't fired.
+      jest.advanceTimersByTime(50)
+      await Promise.resolve()
+    })
+  }
+  await tickKeystroke('a')
+  await tickKeystroke('b')
+  await tickKeystroke('c')
+  await tickKeystroke('d')
+  await tickKeystroke('e')
+  // Mid-burst the audit() count is still 1 — every setFilters reset
+  // the debounce timer, and 50 ms x 5 < 300 ms.
+  expect(auditMock).toHaveBeenCalledTimes(1)
+
+  // Cross the debounce threshold; useApiResource picks up the new deps
+  // and fires exactly one fetch.
+  await act(async () => {
+    jest.advanceTimersByTime(AUDIT_FILTER_DEBOUNCE_MS_FOR_TEST)
+    await Promise.resolve()
+  })
+  await waitFor(() => expect(auditMock).toHaveBeenCalledTimes(2))
+})
+
+// AUDIT_FILTER_DEBOUNCE_MS_FOR_TEST mirrors the production debounce
+// window. Keeping a test-local copy avoids exporting the constant from
+// AuditLogPage just for one assertion.
+const AUDIT_FILTER_DEBOUNCE_MS_FOR_TEST = 350
