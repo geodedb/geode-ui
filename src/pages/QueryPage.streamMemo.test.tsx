@@ -156,6 +156,92 @@ async function renderStreamingPage(): Promise<void> {
   await waitFor(() => expect(screen.getByRole('tablist')).toBeInTheDocument())
 }
 
+describe('PERF-2026-05-17-02 (#239): consecutive WS batches inside one animation frame coalesce into a single resp identity change', () => {
+  // rAF queue under test: scripts capture pending rAF callbacks so the
+  // test can fire multiple batches between frames, then flush exactly
+  // one frame and observe one (not N) resp identity changes.
+  let rafQueue: FrameRequestCallback[] = []
+  let rafSpy: jest.SpyInstance | undefined
+  let cancelSpy: jest.SpyInstance | undefined
+  beforeEach(() => {
+    rafQueue = []
+    rafSpy = jest
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((cb) => {
+        rafQueue.push(cb)
+        return rafQueue.length
+      })
+    cancelSpy = jest.spyOn(window, 'cancelAnimationFrame').mockImplementation()
+  })
+  afterEach(() => {
+    rafSpy?.mockRestore()
+    cancelSpy?.mockRestore()
+  })
+
+  async function renderAndStartStream(): Promise<MockWS> {
+    render(
+      <MemoryRouter>
+        <LocalizationProvider>
+          <ThemeProvider theme={theme}>
+            <QueryPage />
+          </ThemeProvider>
+        </LocalizationProvider>
+      </MemoryRouter>
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('monaco-editor-stub')).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByTestId('query-options-stream'))
+    fireEvent.click(screen.getByRole('button', { name: /run/i }))
+    const ws = lastWS!
+    act(() => {
+      ws.fire('open')
+      ws.fire('message', {
+        data: JSON.stringify({
+          kind: 'schema',
+          columns: [{ name: 'n', type: 'STRING' }],
+        }),
+      })
+    })
+    await waitFor(() => expect(screen.getByRole('tablist')).toBeInTheDocument())
+    return ws
+  }
+
+  test('four batches in one frame produce a single coalesced resp identity change', async () => {
+    const ws = await renderAndStartStream()
+    const refsAfterSchema = tableViewRefs.length
+    // Fire FOUR batches WITHOUT flushing the rAF in between. Each batch
+    // bumps stream.rowsVersion synchronously but, with the rAF throttle,
+    // only the pending frame can advance throttledVersion.
+    act(() => {
+      for (let i = 0; i < 4; i += 1) {
+        ws.fire('message', {
+          data: JSON.stringify({
+            kind: 'rows',
+            rows: [[`row-${i}`]],
+          }),
+        })
+      }
+    })
+    // Pre-flush: throttledVersion has not advanced, so the memo deps
+    // are still those from the schema render — no new resp identity.
+    expect(tableViewRefs.length).toBe(refsAfterSchema)
+    // Flush exactly one animation frame. The single rAF callback bumps
+    // throttledVersion to the latest rowsVersion (which is 4), and the
+    // memo recomputes ONCE — one new resp identity, not four.
+    act(() => {
+      const cbs = rafQueue.splice(0)
+      cbs.forEach((cb) => cb(performance.now()))
+    })
+    expect(tableViewRefs.length).toBe(refsAfterSchema + 1)
+    // Cleanup: end the stream so the unmount cleanup path is exercised
+    // without the act-warning gate firing on a late rAF callback.
+    act(() => {
+      ws.fire('message', { data: JSON.stringify({ kind: 'end' }) })
+    })
+  })
+})
+
 describe('PERF-2026-05-11-02 (#130): streamStateToResp identity is stable across unrelated re-renders', () => {
   test('toggling the fullscreen maximize button does NOT hand TableView a new resp reference', async () => {
     await renderStreamingPage()

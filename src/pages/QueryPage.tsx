@@ -315,13 +315,69 @@ export const QueryPage: React.FC = () => {
   // its identity changes ONLY when the underlying data does.
   // `stream.rows` is the stable mutable array reference (see
   // queryStreamReducer); `rowsVersion` is what actually moves on append.
+  //
+  // PERF-2026-05-17-02 (#239): keying the memo directly on
+  // `stream.rowsVersion` busted the memo on EVERY WebSocket batch —
+  // 10k rows / 64-row batches = 156 batches = 156 projectColumns runs +
+  // 156 JSON.stringify runs + 156 useGraphElements 3-Map rebuilds (and
+  // #239 cascades into #249). The fix is an rAF throttle: every batch
+  // still bumps `stream.rowsVersion` synchronously (so the reducer
+  // contract is unchanged and tests reading `state.rows.length`
+  // post-batch still pass), but the downstream-visible `throttledVersion`
+  // only catches up at the next animation frame. Multiple batches that
+  // arrive in the same frame coalesce into ONE downstream resp identity
+  // change. The terminal state.status transition ('running' -> 'done' |
+  // 'error') is in deps independently, so the final resp is always
+  // visible regardless of throttle timing.
+  const [throttledVersion, setThrottledVersion] = useState(0)
+  const rafRef = useRef<number | null>(null)
+  // Read the latest rowsVersion at rAF-callback time, not at effect-
+  // schedule time, so a burst of batches between scheduling and the
+  // frame firing all coalesce into the single setThrottledVersion call.
+  const latestRowsVersionRef = useRef(stream.rowsVersion)
+  latestRowsVersionRef.current = stream.rowsVersion
+  useEffect(() => {
+    if (stream.rowsVersion === throttledVersion) return
+    // Throttling only buys anything while batches are actively arriving.
+    // In every non-'running' state (idle after reset, terminal done /
+    // error) commit synchronously so the final resp settles in a single
+    // render — otherwise the rAF fires AFTER the user sees the 'done'
+    // banner and hands TableView/JsonView an extra resp identity.
+    if (stream.status !== 'running') {
+      if (rafRef.current != null) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+      setThrottledVersion(stream.rowsVersion)
+      return
+    }
+    if (rafRef.current != null) return
+    // Next animation frame (~16 ms at 60 Hz) is the throttle floor.
+    // Multiple batches that arrive before the callback runs collapse
+    // into a single throttledVersion bump.
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = null
+      setThrottledVersion(latestRowsVersionRef.current)
+    })
+  }, [stream.rowsVersion, stream.status, throttledVersion])
+  // Cancel any in-flight rAF on unmount so React doesn't warn about
+  // setState on an unmounted component when the timer fires late.
+  useEffect(
+    () => () => {
+      if (rafRef.current != null) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    },
+    []
+  )
   const streamResp = useMemo<QueryResp | null>(
     () => (stream.status === 'idle' ? null : streamStateToResp(stream)),
     [
       stream.status,
       stream.columns,
       stream.rows,
-      stream.rowsVersion,
+      throttledVersion,
       stream.rowCount,
       stream.elapsedMs,
     ]
