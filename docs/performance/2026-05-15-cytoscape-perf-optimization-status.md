@@ -96,15 +96,20 @@ At `cytoscape, n=10000`:
 
 ### Once both gates pass
 
-Move the current results file to a baseline and re-run the gate script:
+GAP-035 (#276, closed 2026-05-17): `make bench-graph` now writes to a
+date-stamped path under `docs/performance/` by default
+(`docs/performance/$(date +%Y-%m-%d)-perf-smoke.results.json`). The
+override env var is `BENCH_OUT`. The pre-GAP-035 `cp ... results.json
+... baseline.json` workaround is no longer needed — each bench run
+lands at its own path, so the previous run remains an immutable
+baseline:
 
 ```bash
-cp docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json \
-   docs/performance/2026-05-14-cytoscape-vs-reagraph.baseline.json
+# Compare today's bench output against the 2026-05-14 baseline:
 make bench-graph
 npx ts-node scripts/bench-gate.ts \
-  docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json \
-  docs/performance/2026-05-14-cytoscape-vs-reagraph.baseline.json
+  docs/performance/$(date +%Y-%m-%d)-perf-smoke.results.json \
+  docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json
 ```
 
 Then update this file's status section with the new numbers and the

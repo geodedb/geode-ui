@@ -86,8 +86,17 @@ bench-record: bench-baseline
 # on :8080 (or override UI_URL). The SHA is sourced from git rev-parse
 # inside the recipe (Make's $$(...) defers evaluation to recipe time),
 # so the Playwright spec itself stays shell-out free.
+#
+# GAP-035 (#276): BENCH_OUT controls the output path so a repeat run
+# does not silently overwrite a historical baseline. Defaults to
+# docs/performance/$(date +%Y-%m-%d)-perf-smoke.results.json so each
+# day's bench lands at a distinct path. Override at invocation time
+# (e.g. `make bench-graph BENCH_OUT=/tmp/foo.results.json`).
+BENCH_OUT ?= docs/performance/$(shell date +%Y-%m-%d)-perf-smoke.results.json
+
 bench-graph:
-	GIT_COMMIT_SHA=$$(git rev-parse --short=7 HEAD) npx playwright test \
+	BENCH_OUT=$(BENCH_OUT) GIT_COMMIT_SHA=$$(git rev-parse --short=7 HEAD) \
+	  npx playwright test \
 	  --config=e2e/playwright.config.ts \
 	  e2e/specs/19-graph-bench.spec.ts \
 	  --workers=1 --project=chromium
@@ -99,7 +108,7 @@ bench-graph:
 # wiring and tier writeback. Not part of CI; manual / scheduled only.
 perf-smoke: bench-graph
 	@echo "==> perf-smoke: bench output landed at"
-	@echo "    docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json"
+	@echo "    $(BENCH_OUT)"
 	@echo "    Check the layoutMs / firstInteractiveMs / tier fields on each record."
 	@echo "perf-smoke OK"
 

@@ -48,10 +48,24 @@ const COMBOS: { renderer: 'cytoscape' | 'reagraph'; n: number }[] = [
   { renderer: 'reagraph', n: 10000 },
 ]
 
-const RESULTS_PATH = path.resolve(
-  __dirname,
-  '../../docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json'
-)
+// GAP-035 (#276): the bench results file path is configurable so a
+// repeat run does NOT silently overwrite a historical baseline. The
+// canonical recipe in the Makefile passes a date-stamped path; CI /
+// ad-hoc invocations can override via the `BENCH_OUT` env var.
+//
+//   priority 1: BENCH_OUT env var (absolute or repo-relative).
+//   priority 2: legacy fixed path (back-compat fallback so a bare
+//               `npx playwright test ...` still produces an output).
+const RESULTS_PATH = (() => {
+  const envOut = process.env.BENCH_OUT
+  if (envOut && envOut.trim() !== '') {
+    return path.resolve(envOut.trim())
+  }
+  return path.resolve(
+    __dirname,
+    '../../docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json'
+  )
+})()
 
 const SAMPLE_WINDOW_MS = 5000
 
