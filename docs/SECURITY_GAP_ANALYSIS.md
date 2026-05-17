@@ -20,7 +20,7 @@ Adversarial security review of the geode-ui admin SPA + Go server. Covers:
 - Go server: `cmd/server/main.go`, `internal/server/`, `internal/jwt/`, `internal/conn/`, `internal/ui/`
 - Generated server surface: `gen/api/`, `gen/ws/`, `gen/mcp/`, `gen/pkg/{httpx,obsx,gqlx,mcpx}` (read-only — emitted by `~/src/devnw/apps/genapi`)
 - TypeScript SPA: `src/`
-- Build / supply chain: `pnpm-lock.yaml`, `package.json`, `go.mod`/`go.sum`
+- Build / supply chain: `package-lock.json`, `package.json`, `go.mod`/`go.sum`
 
 Excluded: upstream Geode database (separate repo, separate threat model). Tested against Geode `v0.5.11` wire dialect.
 
@@ -49,7 +49,7 @@ geode-ui is an **admin-facing** SPA + thin reverse-proxy/auth-fronting server fo
 | **govulncheck** | Go modules | Clean against current `go.sum`. |
 | **gitleaks** | Git history | F14 — confirmed test/placeholder; informational only (close as won't-do; allowlist comment recommended). |
 | **detect-secrets** | Working tree | F14 (same placeholder, audited safe). |
-| **pnpm audit** | npm transitive | 8 advisories on `dompurify@3.2.7` (F8); HIGH advisory on dev-only `serialize-javascript` via `copy-webpack-plugin` (F12). |
+| **npm audit** | npm transitive | 8 advisories on `dompurify@3.2.7` (F8); HIGH advisory on dev-only `serialize-javascript` via `copy-webpack-plugin` (F12). |
 | **semgrep** | Go + TS | XSS / injection / auth-bypass rule packs ran clean except for the SQL-string composition flagged manually (N1). |
 
 ## Findings — Stack Ranked by Risk Score
@@ -178,7 +178,7 @@ These were flagged by tools or surfaced during manual review but are **confirmed
 - N10 — Constant-time auth-failure path.
 - F5 — Emit Deprecation header on `?access_token=` fallback.
 - ~~F6+N6 — Centralize redaction in `obsx.LogAudit`; expand `sensitiveKeys`.~~ **Closed 2026-05-10** via genapi `e100aed` + `internal/server/audit.go` refactor.
-- ~~F8 — Bump `monaco-editor` or pin via pnpm overrides.~~ **Closed 2026-05-10** via `package.json::overrides.dompurify ^3.4.0`; resolves to `dompurify@3.4.2 overridden`.
+- ~~F8 — Bump `monaco-editor` or pin via npm overrides.~~ **Closed 2026-05-10** via `package.json::overrides.dompurify ^3.4.0`; resolves to `dompurify@3.4.2 overridden`.
 - F12 — Bump or replace `copy-webpack-plugin`.
 
 **Strategic (> 5 days):**
@@ -285,7 +285,7 @@ The PSR cohort is **healthier than the prior F*/N* cohort** by raw count of rele
 | F-AUTH-2 | A01 / CWE-862 | **12** | Medium | **Closed `1ec9889`** (geode-ui) + genapi `30fad5d` — mechanism landed; `query` keeps its no-role policy (matches the `POST /api/v1/query` REST route); **#135 closed** | [#135](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/135) | `gen/pkg/mcpx/engine.go:500-580` | MCP layer has no per-tool role enforcement |
 | F-INPUT-1 | A03 / CWE-89 | **9** | Medium | **Closed `454d0ba`** | [#140](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/140) | `internal/server/quoting.go:61-68` | `quoteString` does not escape backslash — diverges from authoritative GQL escaper |
 | F-SUP-3 | A08 / CWE-829 | **9** | Medium | **Closed `d35d3c7`** (2026-05-12) — 3/4 floating refs pinned to immutable tags (`genapi@v0.3.0`, `golangci-lint@v2.12.2`, `benchstat@…`); the 4th (`codesign-windows-ssl@~latest`) carries a `# ci-pins-allow:` marker + `TODO(#127)` (no tagged ci-catalog release ships it yet — pre-existing); new `scripts/check-ci-pins.sh` guard + `ci-pins-check` job still catches *new* `@latest` regressions; **#153 closed** (codesign pin tracked via the marker + #127's TODO) | [#153](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/153) | `.gitlab-ci.yml`, `scripts/check-ci-pins.sh` (new) | CI components pinned to floating refs |
-| F-SUP-2 | A06 / CWE-1395 | **9** | Medium | **Closed (2026-05-16)** — cross-closed with F12 (#73): `copy-webpack-plugin` bumped 12 → 14, which pulls `serialize-javascript@^7.0.3` (post-advisory). | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `pnpm-lock.yaml` | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin |
+| F-SUP-2 | A06 / CWE-1395 | **9** | Medium | **Closed (2026-05-16)** — cross-closed with F12 (#73): `copy-webpack-plugin` bumped 12 → 14, which pulls `serialize-javascript@^7.0.3` (post-advisory). | [#72](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/72) | `package-lock.json` | serialize-javascript HIGH RCE in dev-only copy-webpack-plugin |
 | F-SUP-4 | A08 / CWE-1357 | **6** | Low | **Closed `f444c70`** | [#160](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/160) | `package.json:31-34` | electron / electron-builder referenced in scripts but missing from devDependencies |
 | F-INPUT-2 | A04 / CWE-665 | **4** | Low | **Closed `ea3f681`** (2026-05-12) — `unsealBytes`'s `cipher == nil` branch now `if IsCiphertext(raw) { return "", fmt.Errorf("profilestore: ciphertext present but no cipher configured") }`; plaintext + empty pass through unchanged; defense-in-depth (production still fail-fasts on missing `GEODE_PROFILESTORE_KEY` at store construction). Test: `sqlite_test.go` +`TestUnsealBytes_FailsLoudWithoutCipher`. `internal/profilestore` cov 80.7%→81.0%; **#143 closed** | [#143](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/143) | `internal/profilestore/sqlite.go` | `unsealBytes` silently passes ciphertext when cipher unconfigured |
 | F-SUP-5 | A07 / CWE-798 | **2** | Low (info) | **Closed (2026-05-16)** — `docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:458,461,1697` literal 32-byte hex replaced with the `<GENERATE_WITH_openssl_rand_hex_32>` placeholder string per the planner's spec. Comment block warns future copy-paste readers. `grep "0123456789abcdef" docs/superpowers/plans/2026-05-06-e2e-testing-stack.md` returns no hits. | [#161](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/161) | `docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:458,461,1697` | Plan doc embeds copyable JWT_SECRET_HEX placeholder |
