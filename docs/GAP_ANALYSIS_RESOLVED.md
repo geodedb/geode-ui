@@ -1,7 +1,8 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-13 (gap-close pipeline run — 8 closures appended: S-NEW-5 #201, Bundle B #220/#223/#103, Bundle C #194/#195/#196, Bundle D #192; audit Phase 4 sync — GAP-028 verified-wired query history moved here from `GAP_ANALYSIS.md`)
+- **Last updated:** 2026-05-17 (audit Phase 4 — gap-sync: the 47 GitLab issues closed locally during the 2026-05-16 50-commit gap-close pass had never been closed on the GitLab tracker; this run posted closure-evidence notes referencing the commit SHAs and ran `glab issue close` on all 47 (#44/#46/#48/#72/#102/#148/#161/#163/#164/#165/#167/#169/#171/#174/#175/#177/#178/#184/#193/#202/#205/#206/#210/#211/#212/#213/#216/#217/#218/#219/#221/#222/#224/#225/#226/#227/#228/#229/#230/#231/#232/#233/#234/#235/#236/#237/#238). 3 newly-detected gaps GAP-031/032/033 were Gap-ID-stamped and cross-referenced to their pre-existing OPEN GitLab equivalents #208 (Q-NEW-G) / #207 (Q-NEW-F) / #138 (Q1); no new GitLab issues filed because the existing issues are authoritative duplicates with verbatim-applicable fixes. Detail in `GAP_ANALYSIS.md` "2026-05-17 audit Phase 4 — gap-sync" section. Audit Phase 4 also (earlier in the same run) — quality sync; the 19 prior quality umbrellas already mirrored here via the 2026-05-16 closure batch are now also removed from the active `QUALITY_GAP_ANALYSIS.md` table; the 15 newly-filed Q-NEW-1..15 issues (#241/#242/#244/#245/#247/#248/#250/#252/#253/#255/#258/#260/#261/#262/#263) are tracked under the active table in `QUALITY_GAP_ANALYSIS.md`. Phase 4 perf-tracker also added: 2026-05-17 follow-up to PERF #213 noting workspace deletion; the 18 PERF closures in the 2026-05-16 batch are referenced from the active `PERF_GAP_ANALYSIS.md` table but the canonical detail remains in this file under "Closure batch 2026-05-16"; the 10 newly-filed PERF-NEW-1..10 issues (#239/#240/#243/#246/#249/#251/#254/#256/#257/#259) are tracked under the active table in `PERF_GAP_ANALYSIS.md`.
+- **Previous update:** 2026-05-13 (gap-close pipeline run — 8 closures appended: S-NEW-5 #201, Bundle B #220/#223/#103, Bundle C #194/#195/#196, Bundle D #192; audit Phase 4 sync — GAP-028 verified-wired query history moved here from `GAP_ANALYSIS.md`)
 - **Sibling docs:** [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) (open requirement gaps), [PERF_GAP_ANALYSIS.md](./PERF_GAP_ANALYSIS.md), [QUALITY_GAP_ANALYSIS.md](./QUALITY_GAP_ANALYSIS.md), [SECURITY_GAP_ANALYSIS.md](./SECURITY_GAP_ANALYSIS.md)
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors closed issues across the perf / quality / security tracking files.
 
@@ -1442,6 +1443,7 @@ Combined commit with SEC GO-2026-4918 / #212 — see Tier A above.
 - **Evidence:** 4 new `usePaneVisibility` cases + 1 `WorkspacePane` integration case.
 - **Sensible default chosen:** dispose Monaco for off-screen panes, keep WS streams alive (revisit if memory pressure dominates).
 - **Resolved date:** 2026-05-16
+- **Follow-up (2026-05-17):** entire `/workspace` route + `src/pages/workspace/*` + `WorkspacePage.tsx` + `21-workspace.spec.ts` subsequently deleted per user request. Closure stands as no-longer-applicable; the IntersectionObserver fix is retained in `usePaneVisibility` for potential future reuse but is currently unwired.
 
 ### Tier D — Quality Medium (13 items, all closed)
 

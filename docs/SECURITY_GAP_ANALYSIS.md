@@ -1,10 +1,12 @@
 # Security Gap Analysis — geode-ui
 
-**Last updated:** 2026-05-13 (audit cohort filed: 7 new findings #201/#202/#205/#206/#209/#210/#211 + GO-2026-4918 toolchain follow-up #212; S3 #116 explicitly upgraded PARTIAL → CLOSED; F2/F4/F7/N2/S3/S5/S8 re-validated as still-closed)
-**Audit:** /codepros:audit Phase 3 → Phase 4 tracking (Audit-2026-05-13 cohort)
+**Last updated:** 2026-05-17 (audit cohort filed: 4 new findings #264/#265/#266/#267 + 4 cross-link comments on existing #241/#242/#71/#233; no new confidential issues; F2/F4/F7/N2/S3/S5/S8 + Audit-2026-05-13 cohort re-validated; #205, #206, #209, #210, #211 confirmed closed in gap-closure run)
+**Audit:** /codepros:audit Phase 3 → Phase 4 tracking (Audit-2026-05-17 cohort)
 **Repository:** `devnw/codepros/geode/geode-ui`
-**Branch reviewed:** `main` @ `d3e5de1`
+**Branch reviewed:** `main` @ `d5c47da`
 
+> **Audit-2026-05-17 cohort jump-link:** see [2026-05-17 audit cohort](#2026-05-17-audit-cohort) for the 4 newly-filed `S-NEW-10..13` findings (issues #264, #265, #266, #267 — all public, no confidential filings) plus 4 cross-link comments on existing issues (#241 Q-NEW-1 NFKC vs BINARY, #242 Q-NEW-2 password-policy drift, #71 SEC-F5 access_token sunset, #233 image-digest pinning). No findings warrant CVE filing.
+>
 > **Audit-2026-05-13 cohort jump-link:** see [2026-05-13 audit cohort](#2026-05-13-audit-cohort) for the 8 newly-filed `S-NEW-*` + `GO-2026-4918` findings (issues #201, #202, #205, #206, #209, #210, #211, #212; three confidential — #201, #202, #205). S3 (#116) is explicitly upgraded from PARTIAL → CLOSED in this pass. F2/F4/F7/N2/S5/S8 re-validated as still-closed.
 >
 > **Audit-2026-05-11 cohort jump-link:** see [Audit-2026-05-11 cohort — full-tree security pass](#audit-2026-05-11-cohort--full-tree-security-pass) for the 7 newly-filed `F-AUTH-*`/`F-INPUT-*`/`F-SUP-*` findings (issues #132, #135, #140, #143, #148, #153, #160, #161) plus the deferred-comment on #72 (F-SUP-2). Earlier cohorts (PSR S01-S10 = #114-#123; `F*`/`N*` = #58-#77) remain the canonical historical record below.
@@ -435,3 +437,65 @@ The cohort is **small and architectural**. One High (S-NEW-5, XFF spoofing → l
 - **Next:** S-NEW-2 (#202) default `-admin-users` to empty; emit startup audit; release-note the change.
 - **Then:** S-NEW-9 (#205) wire `Revocation().Revoke(jti, exp)` into `HandleLogout`.
 - **Lower priority:** S-NEW-6 (#206), S-NEW-7 (#210), S-NEW-8 (#211), S-NEW-3 (#209) — defer to the next operational-hardening sprint.
+
+## 2026-05-17 audit cohort
+
+A targeted security re-sweep on top of HEAD `d5c47da` after the gap-closure pass that landed the Audit-2026-05-13 cohort. **Four new public issues filed (#264, #265, #266, #267)** plus **four cross-link comments** on existing issues already covering the finding from a different angle (#241, #242, #71, #233). **No new confidential issues** — the top finding (#1, NFKC vs BINARY collation) was independently filed by the quality reviewer as public #241 earlier the same day, so a confidential security re-file would not add value.
+
+### 2026-05-17 findings — stack ranked by risk score
+
+| ID | File:Line | OWASP / CWE | Risk (I x L x 4) | Severity | Confidential | Issue | Status |
+|---|---|---|---|---|---|---|---|
+| **S-2026-05-17-01** | `internal/profilestore/schema.go:26` + `sqlite.go:605-657` + `handlers_profiles_crud.go:60-70` + `src/components/profiles/ProfileEditorModal.tsx:70-80` | A04 / CWE-1289 | **48** (3 x 4 x 4) | **High** | NO (already-public on #241) | [#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241) | **CROSS-LINKED** — quality reviewer's Q-NEW-1 already covers this; security cross-link comment posted (note 3355780212) documenting CWE-1289 framing + authentication-adjacent identifier-confusion narrative (Cyrillic-O `Productiоn` vs ASCII `Production`, fullwidth twins, combining marks). Server stores `p.Name` raw with no NFKC normalisation; SQLite UNIQUE constraint uses default BINARY collation. Security score (48) is High; quality score (`severity::critical`) is the higher of the two — track on #241. |
+| **S-2026-05-17-02** | `internal/server/ws_lsp.go:95-108` | A05 / CWE-1385 | **36** (3 x 3 x 4) | **Medium** | NO | [#265](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/265) | **OPEN** — `/ws/lsp` and (per code comment) `/ws/query` set `wsx.UpgradeStrict(..., AllowAnyOrigin: true)`. JWT-gated, so unauthenticated cross-origin attackers are blocked. Residual risk: CSWSH against authenticated victims; `geode-ui-auth` cookie is `SameSite=Strict` which closes the cookie-mode vector today, but a SameSite regression would silently re-open it. Defense-in-depth fix: add `-ws-allowed-origins` flag + default-deny same-origin-only when empty. Coordinate with upstream `genapi` for the `/ws/query` analogous fix. |
+| **S-2026-05-17-03** | `internal/server/auth.go:88-104` | A02 / CWE-598 | **36** (3 x 3 x 4) | **Medium** | NO | [#71](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/71) | **CROSS-LINKED** — existing SEC-F5 issue still open; deprecation headers landed but actual refusal not yet staged. 45 days to sunset (2026-07-01). Comment posted (note 3355780936) recommending `severity::*` bump from `low` → `medium` for the 45-day window until the refusal lands. Operators should review S-NEW-6 (#206) `audit_event=access_token_query` data before 2026-07-01 to confirm zero legitimate traffic remains. |
+| **S-2026-05-17-04** | `src/App.tsx:152-166` + `src/pages/AdminPage.tsx:42-76` + `src/components/layout/Shell.tsx:274,301` | A01 / CWE-285 | **24** (2 x 3 x 4) | **Medium** | NO | [#264](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/264) | **OPEN** — `/admin/*` SPA routes are mounted under `ProtectedShell` (auth-only, not role-gated). Navbar `<NavLink to="/admin">` renders unconditionally. Server-side admin handlers DO enforce `hasRole("admin")` and return 403, so this is **information disclosure / UX gap**, not privilege escalation. Fix: add `RoleGate` wrapper component + hide nav links behind `if (hasRole(claims, 'admin'))`. |
+| **S-2026-05-17-05** | `internal/server/security_headers.go:55-65` | A05 / CWE-1021 | **24** (2 x 3 x 4) | **Medium**\* | NO | [#266](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/266) | **OPEN** — CSP `connect-src 'self' wss:` treats bare `wss:` as wildcard. `'self'` already covers same-origin WebSocket, so the `wss:` token is redundant and only widens attack surface. Defense-in-depth fix: drop `wss:` from the directive. Filed as `security::low` since exploitability requires a future XSS bug, but raw Risk score is 24 (Medium); label-vs-score discrepancy noted intentionally — the score includes both impact and likelihood multipliers while the label reflects today's exploitability. |
+| **S-2026-05-17-06** | `deploy/Dockerfile:53` + `.gitlab-ci.yml:45,320` | A06 / CWE-1395 | **16** (2 x 2 x 4) | **Low** | NO | [#233](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/233) | **CROSS-LINKED** — `golang:1.26-alpine` floating tag, but `GOTOOLCHAIN=go1.26.3` pins the Go compiler version explicitly in both files. Residual risk is base-image apk drift (libc, git, etc.). Comment posted (note 3355781013) confirming security concurrence with the broader quality issue framing and recommending a digest pin (`golang:1.26-alpine@sha256:<digest>`) matching the existing `node:22-alpine` pattern. |
+| **S-2026-05-17-07** | `src/lib/passwordPolicy.ts:33-93` + `internal/server/password_policy.go:80-112` | A04 / CWE-1390 | **16** (2 x 2 x 4) | **Low** | NO | [#242](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/242) | **CROSS-LINKED** — quality reviewer's Q-NEW-2 already covers this. Server is authoritative; client mirror is for UX. Worst case is UI inconsistency. Comment posted (note 3355780308) recommending the contract-test approach include NFKC-twin + CJK-digit + whitespace adversarial corpus to catch future normalisation drift. |
+| **S-2026-05-17-08** | `cmd/server/app_test.go:186,203,217,471` | (test) / CWE-798 (categorical) | **8** (1 x 2 x 4) | **Low** | NO | [#267](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/267) | **OPEN** — four test fixtures still default `adminUsers: "geode"` after S-NEW-2 (#202) flipped the production default to empty. Zero direct exploitability — fixtures are not compiled into the production binary. Risk is meta: copy-paste hazard if a future engineer reuses the literal `"geode"` in a deployment manifest. Fix: rename to `test-admin` (or similar). |
+
+\* `severity::low` label on #266 vs Risk score 24 / Medium — see Status column for the explanation. Both perspectives are valid; treat the score as the long-term roadmap signal and the label as the short-term triage signal.
+
+### Findings that did NOT warrant new issues
+
+| Phase 3 finding | Risk | Reason for no new issue |
+|---|---|---|
+| `/auth/logout` JTI-revoke silently swallows failures, no rate-limit | 8 (Low) | Re-read of `internal/server/handlers_auth.go:202-261` confirms the S-NEW-9 closure (2026-05-16) wires `bestEffortRevokeFromRequest` cleanly and emits `auth_logout` audit. The "silently swallows failures" wording in Phase 3 is correct but **intentional** — see the in-line comments at lines 211-214 explaining the security rationale (no benefit to announcing token-recognition failures). No rate-limit is acceptable for an idempotent POST-only endpoint. **No issue filed; no action.** |
+| No CI `npm ci --frozen-lockfile` enforcement + no SBOM | 8 (Info) | Re-read of `.gitlab-ci.yml` confirms `npm ci` (which IS frozen-lockfile semantics by definition — `npm ci` requires `package-lock.json` and refuses to update it) is used at lines 95, 245, 364, 593, 594, 690, 707, 725. `ci-catalog/sbom-generate@v1.7.1` and `ci-catalog/sbom-scan@v1.7.1` are wired at lines 13-14. Phase 3 wording is incorrect on both counts. **No issue filed; no action.** |
+
+### 2026-05-17 — regression check of previously-closed items
+
+| Closed item | Issue | Spot-check at 2026-05-17 | Verdict |
+|---|---|---|---|
+| F2 — `/auth/login` rate-limit | #58 | `internal/server/loginlimiter.go` still wired, XFF-spoofing closure (S-NEW-5) intact at `clientIP()` | **PASS** |
+| F4 — CSP / COOP / Permissions-Policy | #60 | `internal/server/security_headers.go` still emits CSP+COOP on SPA HTML; `connect-src wss:` widening is the S-2026-05-17-05 follow-up | **PASS** (with the new `wss:` tighten follow-up) |
+| F7 — Cookie-mode JWT + CSRF | #62 | Auth cookie `SameSite=SameSiteStrictMode` still set at `handlers_auth.go:227` | **PASS** |
+| N2 — Durable JWT revocation | #64 | `RevocationSet.AttachSQLite` + JTI emission + revoke-on-password-change + S-NEW-9 logout-side revoke all intact | **PASS** |
+| S5 — Profilestore at-rest encryption | #118 | AES-256-GCM `Cipher` still in `internal/profilestore/crypto.go`; `OpenSQLiteEncrypted` wiring intact | **PASS** |
+| S-NEW-2 — admin-users default | #202 | `cmd/server/app.go:89` flag defaults to `""`; `TestParseFlags_AdminUsersDefaultEmpty` pins it; admin_bootstrap audit emits on every newApp | **PASS** |
+| S-NEW-9 — Logout-side JTI revoke | #205 | `bestEffortRevokeFromRequest` wired into `HandleLogout` at lines 215-220; emits `auth_logout` audit | **PASS** |
+| S-NEW-3 — auth shim removal | #209 | `internal/server/auth.go:60-83` now stashes `*securex.Claims` via `securex.ContextWithClaims`; the legacy header re-set is removed (lines 77-82 document the removal) | **PASS** (closed via genapi v0.3.2 — re-verify when filing said the upstream `genapi#XXX` was the remaining blocker; current code shows the shim is already gone, so #209 itself may be closable — flagging for follow-up) |
+| GO-2026-4918 — Go toolchain bump | #212 | `GOTOOLCHAIN=go1.26.3` in both `deploy/Dockerfile:54` and `.gitlab-ci.yml:323`; `scripts/check-go-toolchain.sh` guard still wired | **PASS** |
+
+### 2026-05-17 — top 5 risk-ranked items (post-cohort)
+
+1. **S-2026-05-17-01 (#241)** — Profile-name NFKC vs SQLite BINARY collation mismatch. Risk 48 / High. Owned by quality (#241) with security cross-link.
+2. **S-2026-05-17-02 (#265)** — `/ws/lsp` (and `/ws/query`) `AllowAnyOrigin: true` — CSWSH defense-in-depth. Risk 36 / Medium. Filed today; needs upstream `genapi` coordination for `/ws/query`.
+3. **S-2026-05-17-03 (#71)** — `?access_token=` query fallback still alive; 45 days to sunset 2026-07-01. Risk 36 / Medium. Refusal logic must be staged before sunset.
+4. **S-2026-05-17-04 (#264)** — SPA `/admin/*` routes lack client-side role gate. Risk 24 / Medium. Defense-in-depth; server-side gates are correct.
+5. **S-2026-05-17-05 (#266)** — CSP `connect-src` bare `wss:` wildcard. Risk 24 / Medium-label-Low. Defense-in-depth; trivial 1-line fix.
+
+### 2026-05-17 — verdict
+
+The cohort is **smaller and lower-impact than the 2026-05-13 cohort**. The dominant new pattern is **defense-in-depth tightening on already-mitigated surfaces** rather than novel vulnerability classes — the team's prior closure cadence (Audit-2026-05-11 and -13 cohorts) has already addressed the obvious attack chains. No active RCE, no leaked production secrets, no privilege-escalation path open. No findings warrant CVE filing.
+
+### 2026-05-17 — immediate actions
+
+- **None requiring secret rotation.** No live credentials surfaced.
+- **None requiring immediate code change for active exploit mitigation.**
+- **Coordinate (within 30 days):** S-2026-05-17-03 (#71) — confirm `?access_token=` refusal logic is staged for 2026-07-01 sunset (45 days from today). Review S-NEW-6 (#206) audit data to confirm zero legitimate traffic remains.
+- **Within 30 days:** S-2026-05-17-01 (#241) — owned by quality; needs cross-stack `normalizeProfileName` helper + migration.
+- **Within 90 days:** S-2026-05-17-02 (#265), S-2026-05-17-04 (#264), S-2026-05-17-05 (#266) — defense-in-depth hardening; coordinate the `/ws/query` half of #265 with upstream `genapi`.
+- **Backlog:** S-2026-05-17-06 (#233 already filed), S-2026-05-17-07 (#242 already filed), S-2026-05-17-08 (#267) — Low / Info; bundle with the next routine hardening sprint.
+- **Follow-up to verify:** S-NEW-3 (#209) — current code shows the shim is already removed; the issue may be eligible for closure. Quick read confirms it's gone; suggest re-validating against the original issue body before closing.

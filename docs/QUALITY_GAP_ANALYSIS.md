@@ -1,6 +1,6 @@
 # Quality Gap Analysis
 
-Last updated: 2026-05-15
+Last updated: 2026-05-17 (audit Phase 4 — quality)
 
 Repo: `devnw/codepros/geode/geode-ui`
 
@@ -8,60 +8,38 @@ Review scope: app code, generated API boundary, Go server, React/TypeScript UI, 
 
 ## Summary
 
-Current pass tracked 19 actionable quality/performance root causes. New issues were created for newly-confirmed gaps, and existing umbrella issues were reopened, retitled, labeled, or commented where the current evidence changed.
+The 2026-05-16 closure batch resolved all 19 prior open quality umbrella issues (#44, #46, #48, #148, #164, #174, #175, #177, #178, #184, #193, #226, #227, #228, #229, #230, #231, #232, #233). Those rows are now mirrored in `docs/GAP_ANALYSIS_RESOLVED.md` and are no longer carried in this active table.
 
-Severity counts:
+This audit pass (2026-05-17) added **15 newly-confirmed gaps** from the quality-reviewer Phase 3 output. Two are Critical (cross-stack contract-mirror failures), one is High (theme-token regression risk), six are Medium, four are Low, and two are architectural follow-ups. Four reviewer items were resolved as Won't-Do or insufficient-evidence (`M3 editorMode default`, `M6 redundant null check`, `M7 zustand selector shape`, `A1 admin nav` — subsumed in Q-NEW-8/#252, `A3 profile-name normalisation authority` — subsumed in Q-NEW-1/#241).
 
-- High: 3
-- Medium: 13
-- Low: 3
+Severity counts (new):
+
+- Critical: 2
+- High: 1
+- Medium: 6
+- Low: 4
+- Info / architectural: 2
 
 Top 5 by PriorityScore and release risk:
 
-1. Go toolchain drift can still route release/docs paths through Go 1.26.2: [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148).
-2. GitLab build/pages artifacts point at `dist/`, but webpack emits `internal/ui/dist`: [#226](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/226).
-3. `cmd/server/app.go:newApp` is still a 347 LOC composition function: [#193](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/193).
-4. npm is canonical, but pnpm scripts/docs still break Electron builds: [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44).
-5. Jest passes with React `act(...)` warnings and a forced worker-exit warning: [#227](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/227).
+1. Profile-name NFKC normalisation client/server mismatch — confirmed bypass of the SQLite UNIQUE invariant: [#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241).
+2. No password-policy drift guard between TS mirror and Go authority: [#242](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/242).
+3. AdminPage uses stale `colors.text` / `colors.textSecondary` theme tokens (dark-on-dark regression risk): [#250](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/250).
+4. Codify cross-stack contract-mirror discipline (ADR + active pair registry): [#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261).
+5. `extractElements` is a 181-LOC multi-concern function: [#247](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/247).
 
 ## Orientation
 
-Commands run:
+Commands run (this pass):
 
-- `git rev-parse --show-toplevel` -> `/data/home/benji/src/gl/gitlab.com/devnw/codepros/geode/geode-ui`
-- `git status --porcelain` showed pre-existing modified/untracked files outside this review, including `docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json`, `e2e/specs/29-extension-noise.spec.ts`, `.scratch/`, and several `docs/superpowers/plans/*` files.
-- `git remote -v` -> `git@gitlab.com:devnw/codepros/geode/geode-ui.git`
-- `git ls-files | wc -l` -> 691 tracked files.
-
-Inventory:
-
-- Languages/frameworks: Go 1.26 with `GOEXPERIMENT=jsonv2`, React 18, TypeScript, Webpack 5, Jest, Playwright, Electron.
-- API contract: `geode.json` is the source of truth; generated Go/TS outputs live under `gen/`, including `gen/client/react`.
-- Main entrypoints: `cmd/server`, `internal/server`, `internal/ui`, `src/index.tsx`, Electron under `electron/`.
-- Deploy/build surfaces: `.gitlab-ci.yml`, `Makefile`, `deploy/Dockerfile*`, `deploy/playwright/Dockerfile.playwright`, `docker-compose.test.yml`, `.goreleaser.yaml`, scripts under `scripts/`.
-- High-churn/risk areas from recent history and file size: graph rendering, i18n, `cmd/server`, `QueryPage`, `geode.json`, generated client/server API, CI pipeline, profile store/server handlers.
+- `git remote get-url origin` -> `git@gitlab.com:devnw/codepros/geode/geode-ui.git`
+- `glab issue list --label quality --per-page 50` confirmed all 19 prior umbrella issues are closed (the 2026-05-16 batch).
+- File-on-disk evidence verified for every Phase-3 reviewer cite (`internal/profilestore/schema.go:26`, `src/components/profiles/ProfileEditorModal.tsx:70-80`, `src/lib/passwordPolicy.ts:32`, `internal/server/password_policy.go:58,146`, `src/lib/passwordGenerator.ts:148-156`, `src/components/results/projectColumns.ts:277-278`, `src/pages/AdminPage.tsx:12-19,37-39`, `src/lib/graphResult.ts:143` -- the original reviewer cite of `src/components/results/graph/extractElements.ts` did not exist on disk).
+- Inventoried existing umbrella `#164` (GraphViewCytoscape decomposition) and `#214` (AdminPage pathname matcher) for dedupe.
 
 ## Quality Contract
 
-Detected repo-standard checks:
-
-| Area | Command | Result |
-|---|---|---|
-| TS typecheck | `npm run test:ts` | PASS |
-| ESLint | `npm run lint` | PASS |
-| Prettier | `npm run prettier:check` | PASS |
-| Electron typecheck | `npm run electron:tsc` | PASS |
-| Web build | `npm run build` | PASS with two Css Minimizer warnings |
-| Jest coverage run | `npm test -- --ci --coverage` | PASS, but emitted React `act(...)` warnings and a forced worker-exit warning |
-| UI ratchets | `lint:hardcoded-styles`, `lint:contrast`, `verify:translations`, `detect:hardcoded-strings`, `check:html-renderers` | PASS |
-| Go format | `scripts/check-gofmt.sh` | PASS |
-| Go vet | `GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 go vet ./...` | PASS |
-| Go tests | `make go-test` | PASS |
-| Go lint | `make go-lint` | FAIL locally because `golangci-lint` is missing and no repo config exists |
-| E2E TS | `npx tsc --project e2e/tsconfig.json --noEmit` | PASS manually, not wired into CI |
-| Electron build script | `npm run electron:build` | FAIL because script still invokes `pnpm` |
-
-Checks not run: full Playwright e2e stack, Docker image builds, and a live GitLab pipeline. Those should be used to verify CI/container remediation after changes.
+The Phase-3 review treated the existing repo-standard checks (TS typecheck, lint, prettier, electron typecheck, Jest coverage, Go vet / test / lint, etc.) as the baseline. This audit pass did not re-run them; the 2026-05-16 closure pipeline left them all green per the closure notes (see `docs/gap-closure-reports/2026-05-16-*.md`).
 
 ## Stack-Ranked Table
 
@@ -69,87 +47,104 @@ Checks not run: full Playwright e2e stack, Docker image builds, and a live GitLa
 
 | Rank | Severity | PriorityScore | Category | Finding | Component | Evidence | GitLab Issue | Fix Summary | Owner | ETA/SLA | Status |
 |---:|---|---:|---|---|---|---|---|---|---|---|---|
-| 1 | High | 48 | deps | Go toolchain pins still drift after the 1.26.3 CVE fix | Go/release | `go.mod:3` `go 1.26.2`; `.goreleaser.yaml:40` `GOTOOLCHAIN=go1.26.2`; README `17` says Go 1.26.2 while `Makefile:3` and CI use 1.26.3 | [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148) | Align all Go version declarations and add a stale-pin grep guard | Platform/server | 7d | **Closed (2026-05-16)** — `go.mod`, `.goreleaser.yaml`, `README.md` all bumped to `1.26.3`. New `scripts/check-go-toolchain.sh` is the single source of truth (`GOTOOLCHAIN_PIN="1.26.3"`); it asserts every audited file pins the same version AND fails on any stale `1.26.x` reference. Wired into pre-commit (`.pre-commit-config.yaml` `check-go-toolchain`). Combined commit with SEC GO-2026-4918 / #212. |
-| 2 | High | 48 | ci-cd | CI artifacts and Pages use the wrong build output path | CI/Web build | `webpack.common.js:123` `internal/ui/dist`; `.gitlab-ci.yml:248` `dist/`; `.gitlab-ci.yml:264` `mv dist public` | [#226](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/226) | Publish `internal/ui/dist` or intentionally copy to root `dist` | CI/frontend | 7d | **Closed (2026-05-16)** — `.gitlab-ci.yml:248` artifact `paths:` updated from `dist/` to `internal/ui/dist/` (webpack's actual emit per `webpack.common.js:123`); `:264` `pages:` script now `mv internal/ui/dist public`. Inline comments at both sites cross-link the gap. |
-| 3 | High | 48 | maintainability/readability | `newApp` remains a large composition god-function | Go server | `cmd/server/app.go:151-497` spans about 347 LOC; registers API at `:267`, WS/MCP/LSP at `:310-332`, CSRF at `:441` | [#193](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/193) | Split issuer/store/routes/limiters/server helpers with direct tests | Server | 1 sprint | **Closed (2026-05-16)** — split into 4 focused files: `app_issuer.go` (126 LOC: JWT key assembly + profile-store cipher load + SEC-NEW-8 rewrap sweep), `app_limiters.go` (51 LOC: login + profile-CRUD limiter wiring), `app_csrf.go` (85 LOC: httpx config + middleware chain), `app_routes.go` (110 LOC: REST/WS/MCP/SPA route registration). `newApp` itself is now an 8-step orchestrator at 121 LOC (down from 347). All existing tests still green; new helpers are exported only at the necessary cmd/server boundary so adjacent tests can target them directly. |
-| 4 | Medium | 48 | deps | npm is canonical, but pnpm scripts/docs remain | Frontend/Electron/docs | `package.json:32-33` uses `pnpm`; `package.json:39` declares `npm@10.9.0`; `.gitlab-ci.yml:159` docs comment still says pnpm | [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44) | Replace pnpm invocations, update docs, optionally add a guard | Frontend/tooling | 7d | **Closed (2026-05-16)** — `electron:build` and `electron:dev` in `package.json:32-33` now use `npm run`; `.gitlab-ci.yml:159`, `electron-builder.yml:1`, `docs/ELECTRON.md`, `docs/I18N.md`, `docs/UI_AUDIT.md`, and `deploy/RELEASE.md:78` rewritten to drop active `pnpm` invocations. `pnpm-lock.yaml` is already in `.gitignore:74` and is not tracked. |
-| 5 | Medium | 48 | tests | Jest accepts React `act(...)` warnings and open-handle leaks | UI tests | `__test_utils__/afterEnv.js:1-7` has no console-warning gate; warnings cite `useApiResource.ts:64-70`, `usePane.ts:85-87`, `LoginPage.tsx:90-100` | [#227](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/227) | Fix async tests, add fail-on-unexpected React warnings, run open-handle diagnostics | Frontend tests | 1 sprint | **Closed (2026-05-16)** — three setState-heavy hooks coalesced into single dispatches (`useApiResource.ts` via `useReducer({data, status, error})`, `LoginPage.tsx` via `setProfilesState({profiles, loadErr, initialProfileName})`, `usePane.ts` busy state derived from `stream.status === 'running'` instead of a parallel useState). Five test files updated to await async resolution (`GrantsPanel.test.tsx`, `App.test.tsx`, `WorkspacePage.test.tsx`, `WorkspacePane.test.tsx`, plus auto-fixed via the new gate). New `__test_utils__/afterEnv.js` console.error trap throws on any `act(...)` / suspended-resource warning so regressions fail jest loudly. Net: 4 jest warnings → 0; 773/773 tests still green. |
-| 6 | Medium | 48 | maintainability/readability | Graph renderer complexity migrated into `GraphViewCytoscape.tsx` | UI graph | `GraphView.tsx` is 29 LOC, but `GraphViewCytoscape.tsx` is 813 LOC and `GraphView.test.tsx` is 1594 LOC | [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164) | Retarget decomposition to Cytoscape renderer and split graph tests | Frontend graph | 1 sprint | **Closed (2026-05-16)** — TWO commits: (a) split `GraphView.test.tsx` (1607 LOC) into `GraphView.lifecycle.test.tsx` (~290 LOC, 8 tests), `GraphView.layout.test.tsx` (~230 LOC, 6 tests), `GraphView.interaction.test.tsx` (~690 LOC, 20 tests) plus shared `test-helpers/graphViewMocks.ts` (291 LOC) factoring out the cytoscape Core stub + lookup helpers. (b) split `GraphViewCytoscape.tsx` (786 LOC) by extracting `useGraphDomNodeRoots` (per-id React-root pool + sig-keyed cleanup, 95 LOC), `useGraphNodeActions` (the seven cxtmenu handlers, 91 LOC), and `useGraphToolbarActions` (zoom/fit/reset/selection/cluster, 99 LOC) into separate hooks under `src/components/results/graph/`. Orchestrator is now 685 LOC (was 786). All 773 jest tests still green; the split tests run identically to the original. |
-| 7 | Medium | 36 | ci-cd | `go list ./...` still traverses `node_modules/flatted` | Go/tooling | `GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 go list ./...` returns `geodedb.com/geode-ui/node_modules/flatted/golang/pkg/flatted` | [#174](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/174) | Stop Go package discovery from walking npm dependencies | Tooling | 1 sprint | **Closed (2026-05-16)** — replaced `./...` with an explicit project-owned package list `./cmd/... ./gen/... ./internal/...` in `Makefile:23,27` (`GO_PKGS` variable) and `.gitlab-ci.yml:337` (`go:test`). Verified: `go list ./cmd/... ./gen/... ./internal/...` returns 23 packages (was 24, with the unwanted `node_modules/flatted/golang/pkg/flatted` dropped). Update the `GO_PKGS` variable in Makefile when a new top-level Go directory is added. |
-| 8 | Medium | 36 | tests | Fast TS gates exclude e2e specs and support scripts | E2E/scripts | `package.json:16` lints only `src/`; `package.json:23` formats only `src`; `tsconfig.json:28-31` excludes `e2e`; `.gitlab-ci.yml:123` only runs `npm run lint` | [#228](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/228) | Add e2e/support script typecheck and lint jobs | Frontend tests | 1 sprint | **Closed (2026-05-16)** — `package.json:14` `test:ts` now runs three typecheck passes in sequence: SPA (`tsc --noEmit`), e2e (`e2e:tsc` via `e2e/tsconfig.json`), support scripts (`scripts:tsc` via the new `scripts/tsconfig.json`). The `.gitlab-ci.yml:110` `typecheck` job picks up the composite via `npm run test:ts` — no separate CI job needed. Six pre-existing type errors in the three trees were fixed at the same time (`GraphLayoutSetter` widened, `usePaneVisibility.ref` typed, `adjacencyMatrix.test.ts` non-null assertion). |
-| 9 | Medium | 36 | perf/ci-cd | CI rebuilds the webpack bundle inside `go:test` | CI performance | `.gitlab-ci.yml:245` runs `npm run build`; `.gitlab-ci.yml:329-331` repeats `npm ci`, `npm run build`, then Go tests; `internal/ui/embed.go:15` embeds `dist` | [#229](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/229) | Reuse a canonical SPA artifact or split Go embed fixture | CI/platform | 1 sprint | **Closed (2026-05-16)** — `go:test` now `needs: [{job: build, artifacts: true}]` and pulls in the pre-existing `internal/ui/dist/` artifact instead of running `npm ci` + `npm run build` from scratch. Sanity check `test -f internal/ui/dist/index.html` fails the job if the artifact is missing or corrupt. Removes ~100s of duplicated webpack work per pipeline. |
-| 10 | Medium | 36 | api-contract | Profile API adapter duplicates generated `Profile` contract | API/client | `src/api/profiles.ts:86-100` hand-writes `WireProfile`; `:245-252` casts `r.profiles` to `unknown[]`; generated `ProfileList` exists at `gen/client/react/client.ts:251-267` | [#231](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/231) | Use generated types directly, retain only narrow legacy normalization | API/frontend | 1 sprint | **Closed (2026-05-16)** — `listProfiles()` now consumes `r.profiles` as `ReadonlyArray<GenProfile>` (the generated `Profile` shape from `gen/client/react/client.ts:251-267`) instead of the legacy `as unknown[]` cast. `fromWireProfile()` still narrows internally via `isWireProfile()` so the parser stays fail-closed against any future schema drift — keeping `WireProfile` as the SPA-side adapter shape is a deliberate decoupling layer the gap evidence allowed for ("retain only narrow legacy normalization"). |
-| 11 | Medium | 36 | maintainability | Go lint target lacks pinned bootstrap/config | Go/tooling | no `.golangci*` files; `Makefile:26-27` runs `golangci-lint`; local `make go-lint` fails with command not found | [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46) | Commit config and pinned install/bootstrap path | Server/tooling | 1 sprint | **Closed (2026-05-16)** — added (a) `.golangci.yml` v2-format config enabling `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`, `gocognit (50)`, `gocyclo (30)`, `nestif (6)`, `dupl (200 tokens)`, and a curated `revive` subset that passes on existing code (Ratchet up in follow-ups once exported-comment and var-naming offenders are addressed); test files + `gen/` excluded from style/dup linters; (b) `scripts/install-tools.sh` (pins `golangci-lint@v2.12.2`, `genapi@v0.3.1`, `goimports@latest`); (c) `Makefile:38` `go-lint` recipe runs the bootstrap script if `golangci-lint` is not on PATH. Verified: `make go-lint` on fresh clone reports "0 issues." Config validated with `golangci-lint config verify`. |
-| 12 | Medium | 32 | deps/ci-cd | CI/container images mostly use mutable tags | Containers/CI | `.gitlab-ci.yml:677` `release-cli:latest`; `deploy/Dockerfile:25` `node:22-alpine`; `:44` `golang:1.26-alpine`; `:63` `alpine:3.20` | [#233](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/233) | Pin runtime/release images by digest and add an image-pin guard | Platform/release | 1 sprint | **Closed (2026-05-16)** — sensible-default chosen per planner spec: instead of pinning every image by SHA256 digest in this commit (which would require an out-of-band verification pass to confirm each digest), added a structured `# image-pin: <YYYY-MM-DD> @ <reason>` comment block above every `FROM` / `image:` line and a `scripts/check-image-pins.sh` guard that fails when an image has no preceding pin comment and warns when one is older than 60 days. New `.gitlab-ci.yml` `image-pins-check` job runs the script in CI on every MR / main push. Covered: `deploy/Dockerfile` (3 stages), `deploy/Dockerfile.release`, `deploy/Dockerfile.release.alpine`, `deploy/geode/Dockerfile.geode`, `deploy/playwright/Dockerfile.playwright`, and the seven `image:` lines in `.gitlab-ci.yml`. Run `IMAGE_PIN_MAX_AGE_DAYS=<n> scripts/check-image-pins.sh` to override the cadence. |
-| 13 | Medium | 32 | tests | Coverage is measured but not enforced | Test policy | `jest.config.cjs:1-58` has no `coverageThreshold`; `make go-test` reports package coverage but no floor | [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48) | Add ratcheting Jest and Go coverage thresholds | Test owners | 1 sprint | **Closed (2026-05-16)** — sensible-default floors per planner spec: current minus 1 pp. **Jest** (`jest.config.cjs` `coverageThreshold`): statements 79 (was 80.32), branches 66 (was 67.80), functions 74 (was 75.60), lines 81 (was 82.48). **Go** (`scripts/check-go-coverage.sh` + `Makefile` `go-cover` target): total floor 79% (cmd + internal, was 80.1%; gen/ excluded as untested-by-convention). Both gates are off the green path today and fail a CI run when coverage erodes more than 1 pp. Refresh the floors in a follow-up commit when a deliberate coverage push lands. Override via `coverageThreshold` overrides in jest.config.cjs and `GO_COVERAGE_FLOOR=<n>` for Go. |
-| 14 | Medium | 32 | ci-cd | Go CI cache is disabled | CI performance | `.gitlab-ci.yml:282-289` `.go_defaults` sets `cache: []` | [#175](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/175) | Cache `GOMODCACHE` keyed on `go.sum` | CI/platform | 1 sprint | **Closed (2026-05-16)** — `.go_defaults` in `.gitlab-ci.yml:315` now declares `GOMODCACHE=$CI_PROJECT_DIR/.go-mod-cache` + `GOCACHE=$CI_PROJECT_DIR/.go-build-cache` and a `cache:` block keyed on `go.sum` (with `prefix: go-cache-v1` so the key can be invalidated by changing the prefix). `policy: pull-push` so each Go job pulls a warm cache and pushes any new entries back. Expect 20-40s saved per Go job once the cache is warm. |
-| 15 | Medium | 32 | perf | `make build` reruns code generation unconditionally | Local build | `Makefile:15-17` always runs `genapi generate` and `go mod tidy`; `Makefile:98` `build: generate go-build` | [#177](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/177) | Add stale-detect sentinel or separate clean CI build target | Tooling | 1 sprint | **Closed (2026-05-16)** — `Makefile:25-50` `generate` target now SHA256-hashes `geode.json` and compares against `gen/.sentinel` (gitignored). When the hash matches the recipe skips both `genapi generate` and `go mod tidy` — saving ~10s on every warm `make build`. Force a re-run with `make generate-force` or by deleting `gen/.sentinel`. CI's `go:generate-verify` job invokes `make generate` directly; the sentinel is workspace-local, so CI's first run pays the cost (the cache then warms for subsequent jobs in the same pipeline). Verified: first `make generate` runs the generator; second invocation prints "skipped (geode.json unchanged since last regen)". |
-| 16 | Medium | 32 | docs/api-contract | Generated API boundary lacks a focused ADR | Docs/API | only `docs/adr/0000-record-architecture-decisions.md` exists; API rules are scattered across `README.md`, `internal/server/README.md`, and architecture docs | [#178](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/178) | Add ADR with source-of-truth, genapi, local adapter exception policy | Architecture | 1 sprint | **Closed (2026-05-16)** — added `docs/adr/0001-generated-api-boundary.md` codifying the six rules of the boundary: `geode.json` is the contract; `gen/` is regenerated output; regen flow goes through `make generate` (sentinel-aware per #177); the SPA consumes the generated client via `@api`; `go:generate-verify` catches drift at MR time; `genapi` version is pinned in `scripts/install-tools.sh`. Cross-linked from `internal/server/README.md` and the top-level `README.md`. |
-| 17 | Low | 24 | deps/ci-cd | `bench-gate.sh` installs `benchstat@latest` outside pin guard | Scripts/perf | `scripts/bench-gate.sh:68-69` installs `benchstat@latest`; `scripts/check-ci-pins.sh:16-33` scans only `.gitlab-ci.yml` | [#230](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/230) | Pin fallback tool install or require preinstalled tool; broaden guard | CI/tooling | 30d | **Closed (2026-05-16)** — `scripts/bench-gate.sh` pins benchstat to `BENCHSTAT_PIN=v0.0.0-20260512194132-3cf34090a3db` (latest pseudo-version from the `golang.org/x/perf` proxy at pin time). `scripts/check-ci-pins.sh` now accepts a multi-path arg list (defaults to `.gitlab-ci.yml` for back-compat); `.pre-commit-config.yaml` invokes `check-ci-pins.sh .gitlab-ci.yml scripts/bench-gate.sh` and triggers when either path moves. Verified: a regression-injecting `sed` that flips the pin back to `@latest` makes the guard fail with a pointer to the offending line; the pinned current state passes. |
-| 18 | Low | 24 | ci-cd | Production webpack build emits Css Minimizer warnings | Web build | `npm run build` reports `postcss-calc` warnings from `@awesome.me/webawesome` CSS; `webpack.common.js:126` sets `stats: { warnings: false }` | [#232](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/232) | Resolve/allowlist upstream warning and make new warnings visible | Frontend build | 30d | **Closed (2026-05-16)** — `webpack.common.js` (a) disables postcss-calc inside `CssMinimizerPlugin({ minimizerOptions: { preset: ['default', { calc: false }] } })` so the cssnano default preset still runs every other minifier, but skips the calc transform that chokes on Web Awesome's `color-mix(in oklab, ...)` modern CSS color syntax, AND (b) flips `stats: { warnings: false }` to `stats: { warnings: true }` so any future build warning is loud rather than scrolling past silently. Verified: `EMBEDDED_BUILD=1 npm run build` now ends `webpack 5.106.2 compiled successfully in 83289 ms` — zero warnings, down from the 2 prior postcss-calc lexical-error warnings. Test: `__tests__/webpack-common-warnings.test.ts` (2 cases) asserts `stats.warnings !== false` AND the CssMinimizerPlugin instance carries `preset[0]='default'` + `preset[1].calc===false` so a future refactor can't silently re-introduce the warnings. |
-| 19 | Low | 24 | maintainability/readability | `TableView.tsx` remains a large multi-concern component | UI table | `src/components/results/TableView.tsx` is 605 LOC | [#184](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/184) | Split table hooks/components and isolate tests | Frontend table | 30d | **Closed (2026-05-16)** — two extractions cut TableView.tsx from 679 to 608 LOC (~10% smaller, focused on rendering + virtualizer config). (1) `src/lib/cellFormat.ts` (108 LOC) holds the pure Cypher-style formatting helpers: `AnyRecord` type, `isNode`/`isEdge`/`isPath` predicates, `summarizeProps`/`formatNode`/`formatEdge`/`formatPath` formatters, and the public `formatCell(v)` dispatch. TableView re-exports `formatCell` so existing imports stay green without churn. (2) `src/components/results/useTableBodySize.ts` (98 LOC) wraps the ResizeObserver-driven container width + body height tracking that the virtualizer needs — including the `getBoundingClientRect` synchronous seed and the no-ResizeObserver fallback for SSR/old jsdom. New tests: `src/lib/cellFormat.test.ts` (21 cases, predicate + formatter + dispatch coverage) and `src/components/results/useTableBodySize.test.ts` (4 cases, floor behavior + observer-tick updates + ResizeObserver-missing fallback). All 29 existing TableView tests still pass. |
+| 1 | Critical | 64 | api-contract | Profile-name NFKC client/server normalisation mismatch -- SQLite UNIQUE BINARY bypass | Profile store / UI | `internal/profilestore/schema.go:26` UNIQUE on `(scope, owner_user_id, name)` BINARY; `src/components/profiles/ProfileEditorModal.tsx:70-80` normalises NFKC+lower+trim | [#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241) | Add server-side `normalizeProfileName`; migrate existing rows; COLLATE NOCASE; cross-stack contract test | Server / Profile store | 1 sprint | confirmed, triage |
+| 2 | Critical | 64 | api-contract | No password-policy drift guard between TS mirror and Go authority | Auth / UI | `src/lib/passwordPolicy.ts:32,38,78-93`; `internal/server/password_policy.go:58,86-112` | [#242](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/242) | Generate contract JSON from Go constants; Jest contract test asserts TS mirror matches | Server / Frontend security | 1 sprint | confirmed, triage |
+| 3 | High | 48 | readability | AdminPage uses stale `colors.text` / `colors.textSecondary` tokens (dark-on-dark risk) | Frontend / admin | `src/pages/AdminPage.tsx:12-19,37-39` | [#250](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/250) | Migrate to `theme.text.primary` / `theme.text.secondary`; visual regression for active-tab contrast | Frontend / theme | 7d | confirmed, triage |
+| 4 | Medium | 36 | architecture | Codify cross-stack contract-mirror discipline (ADR + active pair registry) | Architecture | password-policy pair + profile-name pair both confirmed bypassable; no enforcement mechanism | [#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261) | ADR-0002 + registry table + Jest contract-test pattern + CI guard | Architecture | 1 sprint | confirmed, triage |
+| 5 | Medium | 36 | readability | `extractElements` is a 181-LOC multi-concern function | UI graph | `src/lib/graphResult.ts:143-324` (181 LOC) | [#247](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/247) | Split into 4 pure helpers under `src/lib/graphResult/`; orchestrator becomes ~20 LOC | Frontend graph | 1 sprint | confirmed, triage |
+| 6 | High | 24 | maintainability | passwordGenerator fallback returns unvalidated password when retry budget exhausted | Frontend security | `src/lib/passwordGenerator.ts:148-156` | [#244](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/244) | Re-validate fallback; throw on budget exhaustion | Frontend security | 7d | confirmed, triage |
+| 7 | Medium | 24 | maintainability | `projectColumns` mutates `Plan` via type cast -- replace with immutable copy | UI table | `src/components/results/projectColumns.ts:277-278` | [#248](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/248) | Replace `{...p, keys:p.keys.slice(0,perPlan)}` reassignment | Frontend table | 7d | confirmed, triage |
+| 8 | Medium | 24 | architecture | AdminPage 8-tab flat nav lacks overflow strategy -- pick IA pattern before tab 9 | Frontend / admin | `src/pages/AdminPage.tsx:42-72` | [#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252) | Pick grouped flat nav / two-level nav / sidebar; pair with `#214` matcher fix | Frontend / admin | 1-2 days | confirmed, triage |
+| 9 | Medium | 32 | docs | Workspace doc residue: README + PERF + QUALITY cite removed `/workspace` paths | Tracking docs | `README.md:43`; `docs/PERF_GAP_ANALYSIS.md:60,65`; `docs/QUALITY_GAP_ANALYSIS.md` (closure note refs deleted `WorkspacePage.test.tsx`) | [#253](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/253) | README route list; move PERF row; strip orphan cites; CI doc-link check | Docs / Tracking | 30 min | confirmed, triage |
+| 10 | Low | 24 | docs | CHANGELOG.md is stale -- 50 issue closures since v0.1.0 not recorded | Tracking docs | `CHANGELOG.md:1-40` only v0.1.0 entry | [#258](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/258) | Add Unreleased section; backfill 2026-05-12/13/16 batches; pre-commit gate | Tracking / docs | 1-2h backfill | confirmed, triage |
+| 11 | Low | 16 | deps | `cytoscape-popper` is a dead dependency | Frontend / deps | `package.json:58`; `src/types/cytoscape-popper.d.ts`; no source imports | [#255](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/255) | `npm uninstall cytoscape-popper`; delete typings shim | Frontend / deps | 15 min | confirmed, triage |
+| 12 | Low | 16 | cleanup | `password_policy.go` uses dead `unicode` import-keeper | Server | `internal/server/password_policy.go:13,146` | [#245](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/245) | Remove `unicode` import; replace `_ = unicode.IsDigit` with a comment | Server | 15 min | confirmed, triage |
+| 13 | Low | 8 | ci-cd | `bench-baseline.txt` is 5 days stale -- recent gap-close benches not reflected | CI / perf | `bench-baseline.txt` mtime 2026-05-12 | [#260](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/260) | Regenerate baseline; document cadence; gate closure pipeline | CI / perf | 15 min | confirmed, triage |
+| 14 | Low | 8 | tests | passwordGenerator tests contain probabilistic assertions on real-RNG output | Frontend tests | `src/lib/passwordGenerator.test.ts` | [#262](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/262) | Export `RandomSource`-injected seam; deterministic test cases | Frontend tests | 1-2h | suspected, triage |
+| 15 | Low | 8 | perf | NDJSON export concatenates whole body into one string before Blob | UI table | `src/components/results/TableView.tsx` exportRespAsNdjson | [#263](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/263) | Blob constructor with iterable of parts | Frontend table | 1h | suspected, triage |
+| 16 | Medium | 36 | readability | GraphViewCytoscape.tsx residual orchestrator size (685 LOC after 2026-05-16 split) | UI graph | `src/components/results/GraphViewCytoscape.tsx` 685 LOC | [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164) (existing) | Lifecycle effect hoist + cxtmenu bootstrap helper + tooltip portal sibling | Frontend graph | 1 sprint | re-commented 2026-05-17 |
 
 ## Findings By Category
 
-### CI/CD And Build Performance
+### API contract / cross-stack mirror
 
-- [#226](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/226): Fix artifact path drift between webpack and GitLab Pages. Verify with `npm run build`, artifact inspection, and a GitLab pipeline.
-- [#229](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/229): Remove duplicate webpack rebuilds from `go:test`. Verify with before/after pipeline timings.
-- [#175](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/175): Add Go module cache. Verify by comparing consecutive CI runs.
-- [#232](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/232): Make production webpack warnings actionable. Verify `npm run build` emits zero unexpected warnings.
+- [#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241): Profile-name NFKC mismatch (Critical). Verify with cross-stack contract test driving both `nameIsDuplicate` and server `CreateProfile`.
+- [#242](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/242): Password-policy drift guard (Critical). Verify with deliberate bump on one side -> Jest contract test fails.
+- [#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261): ADR + active-pair registry. Verify the same drift-pump test fails CI for any active pair.
 
-### Dependencies, Toolchains, Containers
+### Maintainability / readability
 
-- [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148): Align all Go toolchain declarations on the patched release version. Verify stale `go1.26.2` greps return none.
-- [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44): Finish npm-canonical migration. Verify `npm run electron:build` and `rg -n "pnpm"` on active docs/configs.
-- [#233](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/233): Pin container/CI image inputs. Verify no `:latest` release path and documented digest policy.
-- [#230](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/230): Pin `benchstat` fallback installs. Verify the pin guard catches `@latest` in scripts.
+- [#247](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/247): `extractElements` decomposition. Verify each helper has its own test file; orchestrator < 40 LOC.
+- [#248](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/248): `projectColumns` Plan immutability. Verify no `as { keys: string[] }` cast remains.
+- [#244](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/244): passwordGenerator fallback re-validation. Verify with mocked `validatePassword` that always rejects.
+- [#250](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/250): AdminPage theme tokens. Verify visual regression for active-tab contrast in dark mode.
+- [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164): GraphViewCytoscape residual decomposition (re-commented). Verify with LOC drop below ~500.
 
-### Tests And Quality Gates
+### Architecture
 
-- [#227](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/227): Eliminate React test warnings and open handles. Verify with `npm test -- --ci --coverage` and a targeted `--detectOpenHandles` run.
-- [#228](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/228): Add fast gates for e2e TypeScript/support code. Verify `npx tsc --project e2e/tsconfig.json --noEmit` is in CI.
-- [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48): Add coverage ratchets. Verify thresholds fail on deliberate coverage erosion.
-- [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46): Make Go lint reproducible. Verify `make go-lint` works on a fresh checkout.
+- [#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252): AdminPage IA decision before tab 9. Verify with viewport-resize Jest case.
+- [#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261): Cross-stack contract-mirror discipline ADR.
 
-### API Contract And Architecture
+### Cleanup / deps
 
-- [#231](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/231): Retire duplicated profile DTO shape. Verify `npm run test:ts` catches generated profile contract drift.
-- [#178](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/178): Add the generated API boundary ADR. Verify contributors can find the `geode.json -> genapi -> gen/` rules in one canonical doc.
-- [#174](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/174): Keep Go package discovery out of npm dependency trees. Verify `go list ./...` has no `node_modules` packages.
+- [#245](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/245): Dead `unicode` import-keeper in `password_policy.go`.
+- [#255](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/255): Dead `cytoscape-popper` dependency.
 
-### Maintainability And Readability
+### Tests
 
-- [#193](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/193): Split `newApp` into focused helpers. Verify `cmd/server` coverage stays at or above the current floor and `newApp` drops under the target LOC.
-- [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164): Finish graph renderer decomposition. Verify graph tests stay green and files split by lifecycle/layout/interaction concerns.
-- [#184](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/184): Split table rendering concerns. Verify `TableView.tsx` drops below the agreed LOC threshold with stable tests.
-- [#177](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/177): Add build stale-detect. Verify warm `make build` does not regenerate when `geode.json` is unchanged.
+- [#262](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/262): passwordGenerator probabilistic test assertions.
+
+### Performance (residual quality-class)
+
+- [#263](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/263): NDJSON export Blob allocation.
+
+### Docs / tracking
+
+- [#253](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/253): Workspace doc residue across README + PERF + QUALITY tables.
+- [#258](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/258): CHANGELOG.md stale by ~50 closures since v0.1.0.
+
+### CI / perf
+
+- [#260](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/260): `bench-baseline.txt` stale.
 
 ## Roadmap
 
-Quick wins:
+Quick wins (< 1 day):
 
-- Fix `.gitlab-ci.yml` artifact path for [#226](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/226).
-- Replace `pnpm` in `package.json` Electron scripts for [#44](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/44).
-- Pin `benchstat` fallback install or remove auto-install for [#230](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/230).
-- Add an e2e typecheck script and wire it to CI for [#228](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/228).
+- Remove `cytoscape-popper` dead dep ([#255](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/255)).
+- Strip `unicode` import-keeper in `password_policy.go` ([#245](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/245)).
+- Regenerate `bench-baseline.txt` ([#260](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/260)).
+- Sweep workspace doc residue ([#253](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/253)).
+- `projectColumns` immutability fix ([#248](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/248)).
+- passwordGenerator fallback re-validation ([#244](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/244)).
 
-Medium:
+Medium (1-5 days):
 
-- Align Go toolchain references and add a stale-pin guard for [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148).
-- Make Jest fail on unexpected React warnings after fixing the known warning sites for [#227](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/227).
-- Reuse the frontend build artifact in Go jobs and add Go module caching for [#229](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/229) and [#175](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/175).
-- Remove the profile API `unknown[]` cast for [#231](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/231).
+- AdminPage theme-token migration ([#250](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/250)).
+- AdminPage IA decision + refactor ([#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252), pair with existing [#214](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/214)).
+- NDJSON export chunking ([#263](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/263)).
+- passwordGenerator test seam ([#262](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/262)).
+- CHANGELOG backfill ([#258](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/258)).
 
-Strategic:
+Strategic (> 5 days):
 
-- Decompose server app construction and graph/table renderer surfaces: [#193](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/193), [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164), [#184](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/184).
-- Standardize reproducibility policy across Go, npm, Docker images, CI images, and generated API contracts: [#148](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/148), [#233](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/233), [#178](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/178).
-- Ratchet quality gates so current green builds stay green without hiding warnings: [#46](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/46), [#48](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/48), [#227](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/227), [#232](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/232).
+- Profile-name NFKC server-side normalisation + migration ([#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241)).
+- Password-policy drift guard ([#242](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/242)).
+- Cross-stack contract-mirror ADR + registry + CI guard ([#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261)).
+- `extractElements` decomposition ([#247](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/247)).
+- GraphViewCytoscape residual decomposition ([#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164)).
 
 ## Unknowns And Follow-Up Verification
 
-- Full Playwright e2e was not run in this pass. Run `npm run e2e` or the CI e2e job after changes touching e2e gates, Electron packaging, graph/table layout, or Docker images.
-- Docker image builds were not run. Run the relevant `docker build` or GitLab Docker jobs after digest pinning or build-output path changes.
-- The CI artifact path issue is confirmed locally by build output paths, but the final proof is a GitLab pipeline where `build` uploads the intended artifact and `pages` consumes it.
-- Open-handle root cause in Jest is confirmed by Jest output, but the exact leaked handle needs a targeted `npm test -- --ci --detectOpenHandles --runInBand` investigation.
+- The cytoscape-popper dep audit relied on `grep` of `src/`; the typings shim survives despite no source import. Confirm during the dep-removal MR that no transitive consumer in `node_modules` actually references it at runtime (`npm ls cytoscape-popper`).
+- The NDJSON-export allocation concern ([#263](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/263)) is marked `confidence::suspected` because the exact lines of the export helper were not re-read during this pass -- the closure note for #234 cites a new `exportRespAsNdjson()` helper. Confirm the concat pattern before fixing.
+- The passwordGenerator probabilistic-test concern ([#262](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/262)) is `confidence::suspected`; run the suite 50x to surface any flake before landing the RNG-injection seam.
+- Won't-do decisions noted in Summary: reviewer items M3 / M6 / M7 / A1 / A3 are either subsumed in filed issues or lack code-level evidence; revisit if a future pass surfaces a concrete cite.
+
+## Reviewer items resolved Won't-Do
+
+- **M3 editorMode default unclear**: `ProfilesPage.tsx:333-334` derives `editorMode` from `editorState.mode === 'edit' ? 'edit' : 'create'`; the default is explicit and the comment block at `:328-332` documents the design. No gap.
+- **M6 Redundant null check**: No specific cite provided; no actionable change.
+- **M7 Zustand selector shape issue**: `src/lib/queryStore.ts` has 2 fields (`stagedStatement`, `setStaged`); per-field selectors are the correct pattern here. No gap.
+- **A1 Admin nav 2-level pattern**: Subsumed by [#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252).
+- **A3 Profile-name normalisation authority**: Subsumed by [#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241) (the authority IS the missing server side; that is the bug being fixed).

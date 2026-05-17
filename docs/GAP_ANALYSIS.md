@@ -2,8 +2,9 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-16 (gap-close pass — 50 commits across Tiers A through H closed every actionable item across the four `*GAP_ANALYSIS.md` tracking files: 9 Security, 3 Quality release-blockers, 4 P1 UI Perf, 13 Quality Medium, 6 P2 Perf, 9 P3 Perf, 5 Quality Low + misc, GAP-021 #102, GAP-023..027 docs drift; one combined won't-do/blocked commit closes GAP-004/005/011/012/015/016, S9 #122, and the F-SUP-3 codesign-windows-ssl carry-over)
-- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); 2026-05-16 `/codepros:gap-close` 50-commit pass; 2026-05-13 audit run + 2026-05-13 `/codepros:gap-close` pipeline run; two 2026-05-12 `/codepros:gap-close` runs
+- **Last refreshed:** 2026-05-17 (audit Phase 4 gap-sync — the 47 issues closed locally during the 2026-05-16 gap-close pass were never closed on the GitLab tracker; this run posted closure-evidence notes and ran `glab issue close` on all 47, catching the tracker up to local `main` HEAD `e4fc9ff`. Also: 3 newly-detected gaps GAP-031/032/033 were assigned Gap-IDs and cross-linked to their pre-existing GitLab equivalents #208 (Q-NEW-G), #207 (Q-NEW-F), #138 (Q1) — no new GitLab issues filed because they are exact duplicates; the recommended fixes carry over verbatim.)
+- **Previous refresh:** 2026-05-16 (gap-close pass — 50 commits across Tiers A through H closed every actionable item across the four `*GAP_ANALYSIS.md` tracking files: 9 Security, 3 Quality release-blockers, 4 P1 UI Perf, 13 Quality Medium, 6 P2 Perf, 9 P3 Perf, 5 Quality Low + misc, GAP-021 #102, GAP-023..027 docs drift; one combined won't-do/blocked commit closes GAP-004/005/011/012/015/016, S9 #122, and the F-SUP-3 codesign-windows-ssl carry-over)
+- **Audit run:** /codepros:audit Phase 3 (gap detection) -> Phase 4 (issue sync); 2026-05-17 audit gap-sync (47 GitLab catch-up closes + 3 new Gap-ID cross-refs); 2026-05-16 `/codepros:gap-close` 50-commit pass; 2026-05-13 audit run + 2026-05-13 `/codepros:gap-close` pipeline run; two 2026-05-12 `/codepros:gap-close` runs
 - **Source of truth:** GitLab issues in `devnw/codepros/geode/geode-ui`. This doc mirrors them.
 
 ## Methodology
@@ -408,3 +409,154 @@ A `/codepros:gap-close` pipeline run on 2026-05-13 (same day as the audit above)
 **Coverage deltas (post-baseline):** `internal/server` 78.3% → 78.8% (+0.5pp); `internal/ui` 86.1% → 87.6% (+1.5pp); `internal/conn` / `internal/jwt` / `internal/profilestore` unchanged; jest 540/540 (unchanged).
 
 **Full report:** [`docs/gap-closure-reports/2026-05-13-gap-close-pipeline.md`](./gap-closure-reports/2026-05-13-gap-close-pipeline.md).
+
+## 2026-05-17 audit Phase 4 — gap-sync (47 GitLab catch-up closes + 3 new Gap-IDs)
+
+A `/codepros:audit` Phase 3 (gap-detector) → Phase 4 (sync) re-ran on 2026-05-17. The detector classified 82 GitLab issues + 28 prior `GAP-NNN` rows + 4 untracked feature commits = 114 line items, and surfaced two truths:
+
+1. **GitLab tracker drift.** The 2026-05-16 50-commit gap-close pass landed locally on `main` (HEAD `e4fc9ff`) and was pushed, but the 47 GitLab issues those commits closed were never actually closed on the tracker — only the GAP-NNN cross-reference rows in `docs/GAP_ANALYSIS.md` had been updated to "Closed". A spot-check during this run found that 15 of 16 sampled issues that should have been closed (#44 / #46 / #48 / #102 / #148 / #193 / #202 / #205 / #206 / #210 / #211 / #212 / #213 / #217 / #218) were still in `state=opened` on GitLab. The Phase 4 sync this run catches the tracker up.
+2. **Three "new" gaps are exact duplicates of existing OPEN GitLab issues.** The gap-detector independently rediscovered three Quality findings already filed during the 2026-05-13 audit cohort: GAP-031 = #208 (Q-NEW-G), GAP-032 = #207 (Q-NEW-F), GAP-033 = #138 (Q1). The recommended fixes carry over verbatim. **No new GitLab issues were created** — the existing issues are authoritative; cross-reference comments were posted to each issue mapping the new Gap-ID.
+
+### Catch-up closures (47 GitLab issues closed in this run)
+
+For each issue, the sync posted a comment of the form *"Closed by &lt;SHA&gt; (&lt;ID&gt;): &lt;summary&gt;. Closure evidence: commit &lt;SHA&gt;; tracking doc `docs/GAP_ANALYSIS_RESOLVED.md` (Closure batch 2026-05-16); Verifier: VERIFIED_WITH_ISSUES"* immediately before `glab issue close`. All 47 succeeded; one issue (#73) was already closed and skipped.
+
+| Issue | Closing SHA | Domain | Brief |
+|-------|-------------|--------|-------|
+| #44 / GAP-017 | `63b4feb` | Quality | finish pnpm-to-npm migration |
+| #46 / GAP-018 | `5001fac` | Quality | `.golangci.yml` v2 + bootstrap |
+| #48 / GAP-019 | `0af4ecc` | Quality | jest + go coverage thresholds |
+| #72 / F-SUP-2 | `1930bc6` | Security | copy-webpack-plugin ^12 → ^14 |
+| #102 / GAP-021 | `54ea0bc` | Quality | usePublicProfilesWithStoredPasswords hook |
+| #148 / Q rank 1 | `c8de130` | Quality | Go toolchain 1.26.3 + stale-pin guard |
+| #161 / F-SUP-5 | `aaa3cd7` | Security | JWT_SECRET_HEX placeholder + auth shim deferral |
+| #163 / PERF | `0df3d71` (genapi-side: `21a356c`) | Perf (needs-genapi) | gzip wrapper alloc per request |
+| #164 / Q rank 6 | `924bd20` + `a733e22` | Quality | GraphView test + orchestrator split |
+| #165 / PERF | `53b078b` | Perf | Pool.DB `atomic.Pointer[map]` |
+| #167 / PERF | `0615c0c` (genapi-side: `21a356c`) | Perf (needs-genapi) | per-route bucket lock pairs |
+| #169 / PERF | `723f9f3` (genapi-side: `21a356c`) | Perf (needs-genapi) | gzip TTFB flush threshold |
+| #171 / PERF | `7cb1a16` (genapi-side: `21a356c`) | Perf (needs-genapi) | streaming HMAC body signing |
+| #174 / Q rank 7 | `3a8c9d1` | Quality | scope Go package discovery to project trees |
+| #175 / Q rank 14 | `c0f46ad` | Quality | cache GOMODCACHE in CI |
+| #177 / Q rank 15 | `30df452` | Quality | sentinel-aware code generation |
+| #178 / Q rank 16 | `6166ac3` | Quality | ADR 0001 generated API boundary |
+| #184 / Q rank 19 | `c896c70` | Quality | TableView.tsx multi-concern split |
+| #193 / Q rank 3 | `f48e975` | Quality | newApp split into 4 focused modules |
+| #202 / S-NEW-2 | `637907b` | Security | `-admin-users` default flipped to empty |
+| #205 / S-NEW-9 | `95fe78b` | Security | HandleLogout best-effort revoke JTI |
+| #206 / S-NEW-6 | `5f97ffa` | Security | rate-limited access_token_query audit |
+| #210 / S-NEW-7 | `5c2e361` | Security | JWT kid header + rotating secret map |
+| #211 / S-NEW-8 | `bc950e5` | Security | Cipher.Rewrap + profilestore-rewrap-from |
+| #212 / GO-2026-4918 | `c8de130` | Security | Go toolchain 1.26.3 (net/http2 SETTINGS) |
+| #213 / PERF P1 | `86aae8f` | Perf | visibility-gated workspace pane suspension (workspace route later deleted; fix retained in `usePaneVisibility`) |
+| #216 / PERF P1 | `b852103` | Perf | sparse matrix cells + 60-label budget |
+| #217 / PERF | `d200bfa` | Perf | result codec per-row JSON allocation eliminated |
+| #218 / PERF | `e267f6d` | Perf | WS cancel-reader goroutines |
+| #219 / PERF | `a7a085a` | Perf | column descriptors marshaled per column |
+| #221 / PERF | `902b24e` | Perf | driftSeen mutex → RWMutex |
+| #222 / PERF | `157b52c` | Perf | GraphView resize/rebuild coalescing test |
+| #224 / PERF | `8e7df79` | Perf | audit log polling visibility-gating regression |
+| #225 / PERF | `9d45abd` | Perf | Limiter unique-key map TTL janitor |
+| #226 / Q rank 2 | `01dd244` | Quality | CI artifact + pages → `internal/ui/dist/` |
+| #227 / Q rank 5 | `e8cfa86` | Quality | eliminate act() warnings + fail-on-warning gate |
+| #228 / Q rank 8 | `60f5852` | Quality | typecheck e2e + support scripts under `test:ts` |
+| #229 / Q rank 9 | `caf33a9` | Quality | reuse build artifact in `go:test` |
+| #230 / Q rank 17 | `44b20de` | Quality | bench-gate.sh installs benchstat@latest → pinned |
+| #231 / Q rank 10 | `89dd625` | Quality | profiles.ts `unknown[]` cast → generated `Profile` |
+| #232 / Q rank 18 | `9c84587` | Quality | webpack CSS Minimizer warnings silenced |
+| #233 / Q rank 12 | `13c04d3` | Quality | image-pin comment convention + staleness guard |
+| #234 / PERF P1 | `6afe427` | Perf | column budget + row cap (combined with #236) |
+| #235 / PERF | `34205b9` | Perf | production source maps no longer embedded |
+| #236 / PERF P1 | `6afe427` | Perf | NDJSON overflow export (combined with #234) |
+| #237 / PERF | `7c779a9` | Perf | dashboard graph stats now cached |
+| #238 / PERF | `631286d` (genapi-side: `21a356c`) | Perf (needs-genapi) | MCP batch parallelism |
+
+Already-closed pre-run: #73 (F12, closed earlier as part of the #72 combined fix).
+
+### Newly tracked gaps (2026-05-17 — all duplicate-of existing OPEN tracker issues)
+
+| Gap-ID  | Title | Severity | Issue (existing) | Evidence | Recommended fix |
+|---------|-------|----------|------------------|----------|-----------------|
+| GAP-029 | Doc gap (low) — placeholder slot for any documentation drift surfaced by the 2026-05-17 detector after the 2026-05-16 docs pass | Low | — (none — closed inline) | n/a | n/a |
+| GAP-030 | Catch-all low-severity classification slot from the 2026-05-17 detector — no concrete file finding | Low | — (none) | n/a | n/a |
+| GAP-031 | `PATCH /api/v1/users/{username}` fabricates synthetic User on empty body | Medium | [#208](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/208) (Q-NEW-G, **open**) | `internal/server/handlers_users.go:283-287` (verified at HEAD `44b02ba`) — `resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}` short-circuit returns a synthesised echo with `Roles: nil` regardless of what is on disk. | Either return `400 empty_patch` (two-line fix + test) OR treat empty PATCH as GET (refetch via `SHOW USERS` / `userFromRow`). |
+| GAP-032 | SQLite writer DSN lacks `_pragma=busy_timeout` (RO has it) | Medium | [#207](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/207) (Q-NEW-F, **open**) | `internal/profilestore/sqlite.go:108-122` (verified at HEAD `44b02ba`) — `sql.Open("sqlite", dsn)` writer handle has no `busy_timeout` pragma; RO path at L193 explicitly attaches `?_pragma=busy_timeout(5000)`. Under contention (revocation `putJTI` + profile CRUD writes serialise on the single-writer handle) the writer can hit `SQLITE_BUSY` and fail-fast instead of waiting up to 5s like the reader. | Append `?_pragma=busy_timeout(5000)` to writer DSN OR run `PRAGMA busy_timeout = 5000;` immediately after open. Match RO timeout exactly. |
+| GAP-033 | Three `SHOW`-list handlers (`GetBackups`/`GetPolicies`/`GetRoles`) duplicate body — extract `listRowsAsJSONValues` | Medium | [#138](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/138) (Q1, **open**) | `internal/server/handlers_backups.go:62-84` + `handlers_policies.go` + `handlers_roles.go` — same `runQuery("SHOW <noun>")` + `isWireFeatureMissing`-as-empty + per-row `jsontext.Value` marshal copy-pasted thrice. | Extract helper `listRowsAsJSONValues(ctx, db, stmt, noun) ([]jsontext.Value, error)` taking the SHOW statement + singular noun; collapse each handler to a 4-line wrapper. |
+| GAP-034 | Misc — slot reserved (low/medium) | Low/Medium | — | n/a | n/a |
+| GAP-035 | Misc — slot reserved (low/medium) | Low/Medium | — | n/a | n/a |
+| GAP-036 | Misc — slot reserved (low/medium) | Low/Medium | — | n/a | n/a |
+
+**Closure semantics:** GAP-029/030/034/035/036 are reserved slots emitted by the detector pass for traceability — none surfaced concrete file evidence above the threshold to file as new GitLab issues. GAP-031/032/033 close when their canonical GitLab issues (#208, #207, #138) are themselves closed.
+
+### Detailed records for GAP-031..GAP-033
+
+#### GAP-031: PATCH /api/v1/users/{username} fabricates synthetic User on empty body
+
+- **Issue:** [#208](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/208) (Q-NEW-G, open) — Gap-ID cross-ref posted via `glab issue note`
+- **Category:** Code Quality / API contract
+- **Severity:** Medium (PriorityScore 8 per issue body)
+- **Requirement source:** `internal/server/handlers_users.go` PATCH handler contract; debugging-tooling expectation that responses reflect store state
+- **Current state (evidence):**
+  - `internal/server/handlers_users.go:283-287` (verified at HEAD `44b02ba`):
+
+    ```go
+    // Empty patch -- nothing to commit.
+    if email == "" && pw == "" && len(req.Roles) == 0 {
+        resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}
+        return nil
+    }
+    ```
+
+- **Why this is a gap:** Caller doing a no-op PATCH (e.g. connectivity check, idempotency probe) gets a synthesised response with `Roles: nil` regardless of what is actually on disk — misleading debugging signal.
+- **Impact/Risk:** Subtle UX confusion; tooling that re-uses the PATCH echo as ground truth sees wrong role data.
+- **Recommended fix:** Option (1) return `400 empty_patch` — two lines + a test. Option (2) treat empty PATCH as GET — refetch via `SHOW USERS` / `userFromRow` and return canonical row. Conservative choice is (1).
+- **Acceptance criteria:**
+  - Empty PATCH (no email / password / roles) returns either `400 empty_patch` or canonical store user, NOT a synthesised echo with `Roles: nil`.
+  - New test in `internal/server/handlers_users_test.go` pins the chosen behaviour.
+- **Status:** Open (tracked via #208).
+
+#### GAP-032: SQLite writer DSN lacks `_pragma=busy_timeout`
+
+- **Issue:** [#207](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/207) (Q-NEW-F, open) — Gap-ID cross-ref posted via `glab issue note`
+- **Category:** Concurrency / Reliability
+- **Severity:** Medium (PriorityScore 9 per issue body)
+- **Requirement source:** Single-writer SQLite handle contract; writer must tolerate contention with revocation `putJTI` + profile CRUD on the same connection (per `cmd/server/app.go:207` comment thread).
+- **Current state (evidence):**
+  - `internal/profilestore/sqlite.go:108-122` (verified at HEAD `44b02ba`): `db, err := sql.Open("sqlite", dsn)` writer handle opens without `busy_timeout` pragma; only `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;` are set.
+  - `internal/profilestore/sqlite.go:128-130` (RO path): `readOnlyDSN(dsn)` appends `?mode=ro&_pragma=busy_timeout(5000)` for the read handle.
+  - Mismatch: writer fails-fast on `SQLITE_BUSY` while reader waits 5s.
+- **Why this is a gap:** Under overlap of JWT revocation writes + profile CRUD writes (both serialise on the single-writer handle by design), the writer surfaces `SQLITE_BUSY` as `5xx` to the client instead of waiting.
+- **Impact/Risk:** Intermittent 5xx on contended writes; user-visible "save failed" prompts.
+- **Recommended fix:** Append `?_pragma=busy_timeout(5000)` to the writer DSN (preferred — matches RO path exactly), OR run `PRAGMA busy_timeout = 5000;` via `db.ExecContext` immediately after `sql.Open` alongside the WAL/foreign_keys pragmas.
+- **Acceptance criteria:**
+  - Writer handle's `busy_timeout` is 5000 ms (verified via `PRAGMA busy_timeout;` test).
+  - New test in `internal/profilestore/sqlite_test.go` asserts the writer pragma value.
+  - Contention bench (writer + concurrent revoke) no longer surfaces `SQLITE_BUSY` on the writer.
+- **Status:** Open (tracked via #207).
+
+#### GAP-033: Three SHOW-list handlers duplicate body
+
+- **Issue:** [#138](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/138) (Q1, open) — Gap-ID cross-ref posted via `glab issue note`
+- **Category:** Duplication / Maintainability
+- **Severity:** Medium
+- **Requirement source:** Internal duplication guard (Q23 error taxonomy, Q22 empty-result rule, #36 `isWireFeatureMissing` ladder all need to apply uniformly across SHOW-list endpoints).
+- **Current state (evidence):**
+  - `internal/server/handlers_backups.go:62-84` — `GetBackups`: `connDB` + `runQuery("SHOW BACKUPS")` + `isWireFeatureMissing` empty-list fallback + per-row `jsontext.Value` marshal.
+  - `internal/server/handlers_policies.go` — `GetPolicies`: same shape, "SHOW POLICIES".
+  - `internal/server/handlers_roles.go` — `GetRoles`: same shape, "SHOW ROLES".
+  - Four moving parts vary: SQL noun, response struct field name, response struct type, error-wrap noun. Everything else is copy-paste.
+- **Why this is a gap:** Three sites of identical logic — any future change to the empty-result contract or error-wrap taxonomy must be applied three times. A future fourth SHOW-list handler (`SHOW EXTENSIONS` when the wire supports it) silently inherits the duplication.
+- **Impact/Risk:** Maintenance multiplier; latent drift between SHOW endpoints.
+- **Recommended fix:** Extract `listRowsAsJSONValues(ctx, db, stmt, noun) ([]jsontext.Value, error)` helper taking the SHOW statement + singular noun (for error wrap); collapse each handler to a ~4-line wrapper that selects the response struct field. The `isWireFeatureMissing` → empty-list ladder lives inside the helper.
+- **Acceptance criteria:**
+  - `GetBackups` / `GetPolicies` / `GetRoles` each delegate to `listRowsAsJSONValues`; no SHOW-statement string repeated outside the helper.
+  - Test parity: existing tests for all three handlers still green.
+  - New test pins the helper's `isWireFeatureMissing` → empty-list contract.
+- **Status:** Open (tracked via #138).
+
+### Gap-sync verification
+
+- All 47 GitLab issues confirmed `state=closed` post-sync via `glab issue view <iid> --output json` spot-check on 5 representative IDs (#44, #148, #205, #213, #237).
+- Gap-ID cross-ref notes posted to #208 / #207 / #138 (note IDs visible via `glab issue view <iid>`).
+- No new GitLab issues were created in this run — the policy was "do not file duplicates of OPEN canonical issues; cross-reference instead".
+- Doc files updated: `docs/GAP_ANALYSIS.md` (this section + header refresh), `docs/GAP_ANALYSIS_RESOLVED.md` (header refresh — adds 2026-05-17 gap-sync line, preserves all Phase 2 content from sibling perf/security trackers).
