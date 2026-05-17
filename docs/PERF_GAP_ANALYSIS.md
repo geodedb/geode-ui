@@ -1,25 +1,31 @@
 # Performance Gap Analysis
 
-Last updated: 2026-05-17
+Last updated: 2026-05-17 (Phase 4 tracking pass — `audit` run)
 
 Scope: app code, generated clients/servers, Go backend, React/Electron UI, CI/CD, Docker/release config, scripts, and performance-relevant docs. This review is non-destructive; product code was not changed.
 
 ## Summary
 
-- Open performance/scalability gaps tracked in this update: 14 (10 newly opened on 2026-05-17 + 4 carried open from 2026-05-15).
-- New GitLab issues created in this pass (2026-05-17): 10 — #239, #240, #243, #246, #249, #251, #254, #256, #257, #259.
-- Carried-open issues: #229, #218 (closed but kept in table for cross-ref), #237 (closed but kept), #238 (closed needs-genapi), and the genapi-blocked closures (#171, #167, #169, #163).
-- Resolved-and-moved-to-RESOLVED.md from the 2026-05-15 pass: #234, #235, #236, #216, #218, #237, #238, #217, #225, #222, #171, #165, #167, #169, #219, #163, #221, #224 (the 2026-05-13/15 closure cohort).
-- Confirmed findings (2026-05-17): 10. Suspected findings needing workload/profiler confirmation: 0.
-- Highest-risk root cause: `streamStateToResp` busts memos on every WS batch (#239), cascading reprojection/JSON.stringify/3-Map-rebuild work even after #234's row-display cap landed.
+- Open performance/scalability gaps tracked in this update: 7 (6 newly opened on 2026-05-17 Phase 4 + 1 from the brotli plan piggy-backed onto existing #259).
+- New GitLab issues created in this Phase 4 pass (2026-05-17): 6 — #275, #278, #281, #284, #285, #286 (cadence IDs `PERF-2026-05-17-11` through `PERF-2026-05-17-16`).
+- Brotli implementation plan was de-duped into a long-form comment on existing #259 (no new issue filed).
+- Phase 3 doc corrections applied:
+  - #229 (CI rebuilds webpack inside `go:test`) was already FIXED via `.gitlab-ci.yml:382-398` (`needs: { job: build, artifacts: true }` reuses the canonical bundle). Row moved to "Resolved 2026-05-17" section; GitLab issue confirmed closed; closure comment posted.
+  - Stale 2026-05-15 baseline paragraph replaced with the 2026-05-17 baseline note (commit `0983456`).
+  - Phase 2 recommendation to add `BenchmarkAudit_EmitDuringSnapshot` redirected: already covered by `BenchmarkAuditRing_ConcurrentAppendSnapshot` at `internal/server/audit_test.go:239`. No new issue.
+  - Phase 2 candidates dropped: D1 (`result_codec.go:537` no-cap make), D2 (queryStreamReducer push-spread), D3 (GraphViewCytoscape orchestrator inline memo), D4 (useOverviewData Promise.all fan-out). Recorded under "Dropped 2026-05-17" subsection below.
+- Confirmed findings (2026-05-17 Phase 4): 5. Suspected findings needing workload/profiler confirmation: 2 (#275 cascade guardrail, #285 bundle-budget tripwire).
+- Highest-risk Phase 4 finding: #285 (3.7 MiB largest async chunk; no CI bundle-budget guardrail). All other Phase 4 findings are P3 observability or test/cache hygiene.
 
-Top 5 by PerfScore (2026-05-17 open set):
+Top 5 by PerfScore (2026-05-17 Phase 4 OPEN set):
 
-1. #239 (PerfScore 100, P0) — `streamStateToResp` allocates fresh `QueryResp` per WS batch; busts TableView, JsonView, and useGraphElements memos on every frame.
-2. #240 (PerfScore 100, P0) — `queryStreamReducer.state.rows` unbounded; 100k-row stream retains all rows even though display cap is 5,000.
-3. #243 (PerfScore 80, P0) — AuditLogPage refetches per keystroke; server returns full 10k-entry ring with no pagination.
-4. #249 (PerfScore 64, P1) — useGraphElements rebuilds 3 Maps per baseEls change (cascades from #239).
-5. #251 (PerfScore 60, P1) — `streamRowsOverWS` allocates row + ptrs slabs per row; pool ptrs.
+1. #275 (PerfScore ~50, P2) — `useGraphElements` rowsVersion rebuild guardrail; cascade win from #239 / #249 is currently unguarded.
+2. #285 (PerfScore ~25, P3) — 3.7 MiB largest async chunk (`4111.*.js`); no CI bundle-budget tripwire.
+3. #259 (PerfScore 32-50, P2 confirmed) — brotli precompression missing; long-form implementation plan now pinned as a comment on this carried-open issue.
+4. #278 (PerfScore ~20, P3) — `net/http/pprof` endpoint not bound; perf debugging requires rebuild.
+5. #281 (PerfScore ~20, P3) — no `Server-Timing` headers; per-stage latency invisible in DevTools.
+
+(All P0/P1 stream-path findings — #239, #240, #243, #246, #249, #251, #254, #256, #257 — closed in the 2026-05-17 round-3 cohort and now live in GAP_ANALYSIS_RESOLVED.md. See "Resolved 2026-05-17" section below.)
 
 ## Performance Context Snapshot
 
@@ -37,24 +43,23 @@ Assumed workload and SLOs:
 - Current assumptions include about 2,000 rps on `POST /api/v1/query`, about 400 concurrent users, p10-p90 result sets of 1-1,000 rows, and a 100k+ row long tail for streamed queries.
 - Real production telemetry, graph cardinality, browser long-task budgets, and MCP batch workloads remain unknown.
 
-Baseline measurements (carried from 2026-05-15 — STALE since 2026-05-12 closure cohort that landed #217/#218/#221/#222/#225/#237):
+Baseline measurements (canonical 2026-05-17 — regenerated by commit `0983456` after round-3 cohort closure):
 
-- Go curated benchmark subset (2026-05-15):
-  - Command: `GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 timeout 5m go test -bench=. -benchmem -run='^$' -benchtime=50ms -count=1 ./internal/conn/ ./internal/server/ ./internal/jwt/ ./gen/pkg/wsx/ ./gen/pkg/oidcx/ ./gen/pkg/securex/ ./gen/pkg/gen/`
-  - Notable result: `BenchmarkStreamQueryResult_PerRowAlloc` 2.948 ms/op, 147,828 B/op, 3,390 allocs/op (pre #217 close; rerun expected to show ~808 allocs/op).
-- Webpack production build (2026-05-15): 96.758s compile, 99.519s shell elapsed.
-- Embedded asset size (2026-05-15): `internal/ui/dist` 65M, source maps 48.78 MiB, stripped binary 85M.
-  - **Post #235 close (2026-05-16):** dist drops to 16M, zero `.map` files.
-- Synthetic frontend hot-path harnesses (2026-05-15):
-  - Streaming reducer + table projection: 500 frames, 32k rows, 13,383.3 ms projection, +89.7 MB heap (pre #234 close).
-  - High-cardinality `projectColumns`: 200 rows x 20 props, 4,001 cols, 309.7 ms (pre #236 close).
+- Go curated benchmark subset (2026-05-17): committed under `bench-baseline.txt`. Regenerated via the standard `make bench-gate` baseline workflow after closing #260. Captures the post-#239/#240/#243/#246/#249/#251/#254/#256/#257 streaming-path closures. The `BenchmarkStreamQueryResult_PerRowAlloc` and `BenchmarkStreamRowsOverWS_AllocsPerRow` baselines now reflect the closed-state alloc-count contracts pinned by their tests.
+- Webpack production build (2026-05-16 post-#235): `internal/ui/dist` ~16M (down from 65M), zero `.map` files when built with `EMBEDDED_BUILD=1`.
+- Embedded bundle composition (2026-05-17, raw bytes from `internal/ui/dist`):
+  - `2749.*.js`: 6,717,982 bytes (~6.4 MiB) — largest async chunk; likely co-bundled lazy targets.
+  - `4111.*.js`: 3,803,806 bytes (~3.7 MiB) — second largest async chunk; likely Monaco language services. Tracked by #285.
+  - `vendors.*.js`: 555,068 bytes (~542 KiB) — sync vendor entrypoint.
+  - `main.*.js`: 228,157 bytes (~223 KiB) — entry shell.
+- Streaming reducer + table projection (post-#234 + #239 + #240 closures): rowDisplayCap=5000 + 25k retention cap + rAF-coalesced streamResp memo. The pre-#234 13.38s/32k-rows baseline is now historical; the closed-state contract is pinned by `queryStreamReducer.test.ts::retention cap` and `QueryPage.streamMemo.test.tsx::PERF-2026-05-17-02`.
 
-**Bench-baseline refresh recommended (2026-05-17):** the 2026-05-15 baseline is now 5 days stale and pre-dates the entire 2026-05-16 closure cohort (#217, #218, #221, #222, #225, #237, #234, #235, #236, #216, #237, #238 needs-genapi, #171 needs-genapi, #165, #167 needs-genapi, #169 needs-genapi, #219, #163 needs-genapi, #224). Recommend re-running the Go bench subset and the streaming harness against the current `main` to capture the post-closure baseline before scoring the 2026-05-17 findings' validation deltas. Suggested command:
+**Bench-baseline cadence rule (2026-05-17):** regenerate the baseline ONCE PER COHORT CLOSE — that is, after each batch of issues with the same cadence ID (`PERF-YYYY-MM-DD-NN`) lands on `main`. The 2026-05-17 baseline supersedes the 2026-05-15 baseline; the prior baseline pre-dated the entire 2026-05-16 closure cohort (#217, #218, #221, #222, #225, #237, #234, #235, #236, #216, #238, #171, #165, #167, #169, #219, #163, #224) and the entire 2026-05-17 round-3 cohort (#239, #240, #243, #246, #249, #251, #254, #256, #257), so a one-shot regeneration after both cohorts landed gave us the canonical "post-closure" anchor. Suggested regeneration command (same as `make bench-gate` baseline path):
 
 ```bash
 GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 timeout 5m go test -bench=. -benchmem -run='^$' -benchtime=100ms -count=3 \
   ./internal/conn/ ./internal/server/ ./internal/jwt/ ./gen/pkg/wsx/ ./gen/pkg/oidcx/ ./gen/pkg/securex/ ./gen/pkg/gen/ \
-  | tee docs/performance/2026-05-17-baseline.bench.txt
+  > bench-baseline.txt
 ```
 
 ## Stack-Ranked Findings
@@ -78,7 +83,7 @@ GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 timeout 5m go test -bench=. -benchmem -
 | 15 | P1 | 36 | LSP reconnect schedule has no jitter; thundering herd on bounce | UI LSP client | `src/lib/lsp/client.ts:28,71-89` | 100 tabs all retry at T+500/2000/6500ms wall-synchronized | [#254](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/254) | Equal-jitter strategy: delay = base/2 + random*base/2 | UI/LSP | Bundle with PERF-EPIC-INFRA | **Closed (2026-05-17)** via `6695e54` — `delay = base/2 + Math.random()*base/2` in `scheduleReconnect`. With Math.random seeded to 0.0 the delay is base/2 (250ms for the first retry); seeded to 1.0 it's the full base. Pinned by new `client.test.ts::reconnect backoff applies equal jitter`. |
 | 16 | P1 | 32 | Lazy imports lack `webpackPrefetch` hints for Monaco/Cytoscape/reagraph | UI bundling | `src/pages/QueryPage.tsx:33-37`; `src/components/results/ResultPanel.tsx:14-18` | First graph tab click: 50-300 ms saved with prefetch | [#256](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/256) | Add `webpackPrefetch: true` + `webpackChunkName` magic comments | UI build/perf | Bundle with PERF-EPIC-INFRA | **Closed (2026-05-17)** via `478bcf6` — `/* webpackPrefetch: true, webpackChunkName: "gql-editor" */` and `"graph-view"` magic comments on the two lazy dynamic imports. webpack emits `<link rel="prefetch">` so chunks warm during browser idle. New `src/__tests__/lazy-prefetch-hints.test.ts` pins the magic-comment contract by source-scan. |
 | 17 | P2 | 60 | Production source maps are embedded and served with the SPA bundle | Release artifact, static server | `webpack.prod.js:24-25`; `internal/ui/embed.go:15-16,28-32,57-64` | Build 99.519s; dist 65M->16M after close; maps 48.78 MiB; binary 85M | [#235](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/235) | Gate `devtool` on `EMBEDDED_BUILD=1` env | Release/platform | n/a | **Closed (2026-05-16)** — see GAP_ANALYSIS_RESOLVED.md |
-| 18 | P2 | 60 | CI rebuilds webpack inside `go:test` instead of reusing canonical artifact | CI/CD | `.gitlab-ci.yml:236-245,324-331` | Current `npm run build` elapsed 99.519s; duplicated in pipeline | [#229](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/229) | Reuse build artifact or stub embedded UI for Go tests | CI/platform | Next CI cleanup | confidence::confirmed, status::triage |
+| 18 | P2 | 60 | CI rebuilds webpack inside `go:test` instead of reusing canonical artifact | CI/CD | `.gitlab-ci.yml:382-398` | Current `go:test` job now declares `needs: { job: build, artifacts: true }` and verifies `internal/ui/dist/index.html` before running Go tests; webpack rebuild removed from test stage critical path | [#229](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/229) | Reused build artifact via `needs.artifacts: true` | CI/platform | n/a | **Closed (2026-05-17)** — verified during Phase 4. See "Resolved 2026-05-17 (Phase 4)" section. |
 | 19 | P1 | 80 | Streaming query table projection recomputes all accumulated rows per WebSocket batch | Query stream, table renderer | `src/pages/queryStreamReducer.ts:89-98`; `src/pages/QueryPage.tsx:325-334`; `src/components/results/TableView.tsx:441-443`; `src/components/results/projectColumns.ts:110-229` | 500 frames / 32k rows -> 13.38s projection, +89.7 MB heap | [#234](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/234) | rowDisplayCap=5000 + columnBudget=64 + NDJSON export | UI performance | n/a | **Closed (2026-05-16)** — see GAP_ANALYSIS_RESOLVED.md; residual rAF-throttle gap (#234b) now tracked by #239. |
 | 20 | P1 | 24 | `refreshCsrfToken()` stampede under concurrent 403s | API client | `src/api/client.ts:73-87` | Burst of 10 concurrent 403s -> 10 concurrent /api/csrf fetches | [#257](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/257) | Singleflight guard around `refreshCsrfToken` | API client | Bundle with PERF-EPIC-INFRA | **Closed (2026-05-17)** via `79b5680` — `inflightRefresh: Promise<string \| null> \| null` shared across concurrent callers; cleared in `.finally()` so the next refresh window after settle does fetch again. Two new jest tests pin (a) fetch called exactly once for 5 concurrent calls and (b) singleflight does not leak across settle. |
 | 21 | P3 | 24 | HMAC body signing is still non-streaming when body limit is raised | Auth/security middleware | `gen/pkg/securex/secure.go:318-359` | 100MB custom-limit path: 908.97 ms/op, 268.46 MB/op; default cap is 1 MiB | [#171](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/171) | True streaming/replayable body strategy | Backend (upstream genapi) | Blocked on genapi | **Closed-as-needs-genapi (2026-05-16)** — see GAP_ANALYSIS_RESOLVED.md |
@@ -91,28 +96,68 @@ GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 timeout 5m go test -bench=. -benchmem -
 | 28 | P3 | 12 | Audit log polling is visibility-gated but lacks regression pin | Ops UI | `src/components/ops/AuditLogPage.tsx:114,156` | No current regression observed | [#224](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/224) | Regression test for visibility-gated polling | UI/ops | n/a | **Closed (2026-05-16)** — see GAP_ANALYSIS_RESOLVED.md |
 | 29 | P2 | 32 | No brotli for SPA bundles; gzip-only | HTTP compression | `internal/ui/embed.go:75-83` | ~30% smaller bundles on modern browsers (~1 MiB saved over the wire on the 16M post-#235 dist) | [#259](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/259) | Brotli precompression at build time + Accept-Encoding preference | Release/platform | Bundle with PERF-EPIC-INFRA | confidence::confirmed, status::triage |
 
+## Resolved 2026-05-17 (Phase 4)
+
+The following row was moved out of the open table because Phase 4 verification confirmed the fix already shipped:
+
+| Issue | Component | Verification | Fix Reference |
+|---|---|---|---|
+| [#229](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/229) — CI rebuilds webpack inside `go:test` | CI/CD | Phase 4 inspection of `.gitlab-ci.yml:382-398` (`go:test` job) confirmed the job declares `needs: { job: build, artifacts: true }`. The script only verifies `test -f internal/ui/dist/index.html` before running `go test -race -cover -failfast ./cmd/... ./gen/... ./internal/...`. No `npm ci` / `npm run build` in the test stage. The job comment explicitly cites `QUALITY #229` as the closure rationale. | `.gitlab-ci.yml:382-398` |
+
+## Phase 4 (2026-05-17) Findings — Newly Opened
+
+Six new GitLab issues filed (cadence IDs `PERF-2026-05-17-11` through `PERF-2026-05-17-16`). One brotli implementation plan piggy-backed on existing #259 (no new issue).
+
+| Cadence ID | Issue | PerfSeverity | PerfScore | Finding | Component | Evidence | Status |
+|---|---|---|---:|---|---|---|---|
+| PERF-2026-05-17-11 | [#275](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/275) | P2 | ~50 | useGraphElements rowsVersion rebuild guardrail (regression pin) | UI graph elements | `src/components/results/graph/useGraphElements.ts:91-158`; `src/components/results/graph/useGraphElements.test.ts` only asserts degree stamping | open, confidence::suspected |
+| PERF-2026-05-17-12 | [#278](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/278) | P3 | ~20 | No `net/http/pprof` endpoint; perf debugging requires a fresh build | Observability/backend | `cmd/server/app.go:11` imports `net/http` only; zero `pprof` imports | open, confidence::confirmed |
+| PERF-2026-05-17-13 | [#281](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/281) | P3 | ~20 | No `Server-Timing` headers; per-stage latency invisible in DevTools | Observability/backend | zero `Server-Timing` emissions in `internal/server/*.go` or `gen/`; suggested middleware over `POST /api/v1/query` | open, confidence::confirmed |
+| PERF-2026-05-17-14 | [#284](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/284) | P3 | ~20 | `perfMarks.ts` only observes `measure`, not `longtask` | UI observability | `src/lib/perfMarks.ts:41-48` `observer.observe({ entryTypes: ['measure'] })` only | open, confidence::confirmed |
+| PERF-2026-05-17-15 | [#285](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/285) | P3 | ~25 | 3.7 MiB largest async chunk; no chunk-budget tripwire in CI | UI build/perf | `internal/ui/dist/4111.5f8253d51707c022176e.js` 3,803,806 bytes; `webpack.prod.js:4-22` excludes async chunks from entrypoint budget | open, confidence::suspected |
+| PERF-2026-05-17-16 | [#286](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/286) | P3 | ~20 | `graphStatsCache` is unbounded Map; entries for never-revisited graphs leak | UI memory | `src/lib/useOverviewData.ts:54-67` — 60s TTL only prunes on read-miss for exact same key | open, confidence::confirmed |
+| (no new issue) | [#259](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/259) | P2 | ~50 | Brotli precompression missing — long-form implementation plan pinned as comment on existing #259 | UI build + static-file negotiation | `internal/ui/embed.go:46-66` (gzip-only); `webpack.prod.js` no `CompressionPlugin`; vendors.js 555 KiB, main.js 228 KiB | open, confidence::confirmed |
+
+### R1 — Phase 2 recommendation already covered
+
+The Phase 2 recommendation to add a `BenchmarkAudit_EmitDuringSnapshot` benchmark is REDIRECTED: it is already covered by `BenchmarkAuditRing_ConcurrentAppendSnapshot` at `internal/server/audit_test.go:239`, which measures append-side throughput under a concurrent snapshot reader — the exact contention shape Phase 2 wanted to pin. No new issue filed; no doc change needed beyond this note.
+
+### Dropped 2026-05-17 (Phase 2 candidates)
+
+The following Phase 2 candidates were considered and dropped during Phase 3 review. They are recorded here so a future reviewer doesn't re-discover them as "new":
+
+- **D1 — `internal/server/result_codec.go:537` no-cap `make`.** Demoted to watchlist only. `scanQueryResult` is COLD path (MCP query + tx Run); user traffic uses `streamQueryResult`. Hint may be worth a code comment; not worth a tracked issue.
+- **D2 — `queryStreamReducer` push-spread `rows.push(...batch)`.** Dropped entirely. 64-batch is 1024x below V8 argv limit; premature optimization.
+- **D3 — `GraphViewCytoscape` orchestrator no inline `useMemo`.** Dropped. Memoization is correctly delegated to extracted hooks per the post-#164 refactor.
+- **D4 — `useOverviewData` `Promise.all` 2-3 fan-out.** Dropped. The 60s TTL cache (#237) plus 30s timeout are already in place; the fan-out is not the contention point.
+
 ## Findings By Area
 
-### App/UI (open)
+### App/UI (open as of 2026-05-17 Phase 4)
 
-- #239 (P0/100): `streamStateToResp` busts memos every WS batch. Dominant remaining streaming cost after the 2026-05-16 closure cohort. This finding alone cascades to TableView, JsonView, and useGraphElements.
-- #240 (P0/100): `queryStreamReducer.state.rows` unbounded; introduces a memory-stability risk on 100k-row Electron streams.
-- #243 (P0/80): AuditLogPage refetch storm on filter keystroke + server full-ring response.
-- #249 (P1/64): useGraphElements 3-Map rebuild (cascade from #239).
-- #254 (P1/36): LSP reconnect missing jitter.
-- #256 (P1/32): webpackPrefetch hints missing on lazy chunks.
-- #257 (P1/24): `refreshCsrfToken()` lacks singleflight.
+- #275 (P2/~50, suspected): `useGraphElements` rowsVersion rebuild guardrail — pin the cascade win from #239/#249 so a future refactor can't silently undo it.
+- #284 (P3/~20): `perfMarks.ts` only observes `measure`, not `longtask` — main-thread blocks are invisible.
+- #285 (P3/~25, suspected): 3.7 MiB largest async chunk; no chunk-budget tripwire in CI.
+- #286 (P3/~20): `graphStatsCache` unbounded Map; entries for never-revisited graphs leak in long-running sessions.
 
-### Backend, DB, Generated Runtime (open)
+### Backend, DB, Generated Runtime (open as of 2026-05-17 Phase 4)
 
-- #251 (P1/60): `streamRowsOverWS` per-row slab+ptr alloc.
-- #246 (P1/48): audit ring Mutex -> RWMutex.
-- #243 (P0/80, cross-listed with UI): server-side audit pagination needed.
+- #278 (P3/~20): No `net/http/pprof` endpoint; perf debugging requires a fresh build with manual instrumentation.
+- #281 (P3/~20): No `Server-Timing` headers; per-stage latency invisible in DevTools.
 
-### CI/CD And Release (open)
+### CI/CD And Release (open as of 2026-05-17 Phase 4)
 
-- #229 (P2/60): CI rebuilds webpack inside `go:test`. Carried open from 2026-05-15; still actionable.
-- #259 (P2/32): brotli precompression for SPA bundles.
+- #259 (P2/~50, with implementation plan now pinned as a comment): brotli precompression for SPA bundles.
+
+### Closed in 2026-05-17 round-3 cohort (see GAP_ANALYSIS_RESOLVED.md)
+
+- Streaming/UI memo + reducer: #239, #240, #249.
+- AuditLogPage + audit ring: #243, #246.
+- Backend WS row slab pool: #251.
+- LSP reconnect jitter: #254.
+- webpackPrefetch hints: #256.
+- CSRF refresh singleflight: #257.
+- Baseline regeneration: #260.
 
 ### Closed in 2026-05-16 cohort (see GAP_ANALYSIS_RESOLVED.md)
 
@@ -121,59 +166,57 @@ GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3 timeout 5m go test -bench=. -benchmem -
 - Needs-genapi: #238, #171, #167, #169, #163.
 - CI/Release: #235.
 
-## Bundling Recommendation
+### Closed in 2026-05-17 Phase 4 verification
 
-Epic 1 — **PERF-EPIC-STREAM** (bundle #239, #249, #240, #251):
+- CI/CD: #229 — verified fixed via `.gitlab-ci.yml:382-398` artifact reuse; row moved out of open table.
 
-- Fix `streamStateToResp` (single useMemo + rowsVersion key) -> cascade-resolves #249.
-- Add reducer retention cap -> #240.
-- Pool `streamRowsOverWS` ptrs -> #251.
-- Validate end-to-end with a 100k-row synthetic stream harness.
+## Bundling Recommendation (2026-05-17 Phase 4)
 
-Epic 2 — **PERF-EPIC-AUDIT** (bundle #243, #246):
+The streaming/audit epics from prior cohorts have all landed. Phase 4 surfaces a smaller observability-and-hygiene bundle:
 
-- Debounce filter inputs + server-side `limit`/`cursor` pagination -> #243.
-- Swap audit ring Mutex to RWMutex -> #246.
-- Bench: emit-during-snapshot contention.
+Epic A — **PERF-EPIC-OBSERVABILITY** (bundle #278, #281, #284):
 
-Epic 3 — **PERF-EPIC-INFRA** (bundle #254, #256, #257, #259):
+- `net/http/pprof` gated on `GEODE_PPROF=1`, loopback-only -> #278.
+- `Server-Timing` middleware on `POST /api/v1/query` -> #281.
+- `perfMarks.ts` adds `longtask` entry type + budget threshold -> #284.
 
-- LSP reconnect jitter -> #254.
-- webpackPrefetch hints -> #256.
-- CSRF refresh singleflight -> #257.
-- Brotli precompression -> #259.
+Epic B — **PERF-EPIC-BUNDLE-HYGIENE** (bundle #259, #285):
+
+- Brotli precompression at build + serving negotiation -> #259 (plan pinned as comment).
+- Async chunk budget tripwire in CI -> #285.
+
+Epic C — **PERF-EPIC-GUARDRAILS** (bundle #275, #286):
+
+- `useGraphElements` rowsVersion rebuild regression test -> #275.
+- `graphStatsCache` LRU cap -> #286.
 
 ## Roadmap
 
 Quick wins (< 1 day):
 
-- #239 — `useMemo` wrap on `streamStateToResp` (5 LOC).
-- #254 — equal-jitter on LSP backoff (5 LOC).
-- #257 — singleflight CSRF refresh (5 LOC).
-- #246 — audit ring `sync.Mutex` -> `sync.RWMutex` (3 LOC + bench).
-- #256 — `webpackPrefetch: true` comments (5 LOC).
+- #275 — `useGraphElements` rebuild-count regression test (~30 LOC test, no source change).
+- #278 — gated pprof loopback server (~20 LOC + docs note).
+- #284 — `perfMarks.ts` add `longtask` observe + budget warn (~15 LOC + test).
+- #286 — `graphStatsCache` LRU cap (~30 LOC LRU class + test).
 
 Medium (1-5 days):
 
-- #240 — reducer retention cap + overflow surface (depends on UX decision for server-spool export).
-- #243 — debounce + server pagination contract (touches API surface).
-- #249 — verify #239 cascade with React profiler bench.
-- #251 — pool `ptrs` (audit batcher row retention contract).
-- #259 — brotli precompression + asset-serving negotiation.
-- #229 — CI: stop rebuilding webpack inside `go:test`.
+- #281 — `Server-Timing` middleware (touches query handler + new middleware file; ~80 LOC + tests).
+- #285 — bundle-budget tripwire (webpack-bundle-analyzer + CI step; investigation of `2749.*.js` first).
+- #259 — brotli precompression (webpack CompressionPlugin + `internal/ui/embed.go` static-file negotiation; ~120 LOC + tests).
 
 Strategic (> 5 days):
 
 - Replace assumed SLOs in `docs/ARCHITECTURE.md` with production telemetry: query p95/p99, result sizes, graph property cardinality, concurrent streams, dashboard stats usage, bundle/image pull sizes.
-- Add browser performance budgets for table/graph/matrix rendering: long tasks, heap delta, and first interactive after result arrival.
+- Add browser performance budgets for table/graph/matrix rendering: long tasks, heap delta, and first interactive after result arrival. (#284 lays the foundation.)
 - Add generated-runtime benchmarks for MCP batch scheduling (#238 needs-genapi), result codec allocation, compression thresholds, and rate-limiter lock paths.
-- Introduce a safe large-result UX contract: pagination, streaming backpressure, row caps, and export/download paths for data too large for interactive rendering.
+- Introduce a safe large-result UX contract: pagination, streaming backpressure, row caps, and export/download paths for data too large for interactive rendering. (#240 + #243 closed the immediate streaming gaps; the contract still needs documenting.)
 
 ## Unknowns And Confirmation Needed
 
 - No production telemetry was available. SLOs, RPS, graph sizes, and result distributions are inherited assumptions from `docs/ARCHITECTURE.md`.
-- 2026-05-15 baseline is stale (pre 2026-05-16 closure cohort); refresh before validating 2026-05-17 finding deltas. Suggested command listed under "Baseline measurements" above.
-- For #243's server pagination: the `AuditQuery` shape may be generated from `geode.json` via `genapi`; confirm whether `limit`/`cursor` additions are upstream changes.
-- For #251's row pool: needs an audit of `batcher.add(row)` to determine whether the row slab is retained past the next iteration.
-- `benchstat` was not used locally for this review. The bounded Go benchmark pass used `-count=1` and `-benchtime=50ms`; use CI's pinned `bench-gate` flow for regression decisions.
+- `2749.*.js` is the largest async chunk at ~6.4 MiB. We have not confirmed whether it is one library (Monaco language services + worker) or two co-bundled lazy targets that should be split. #285's bundle-analyzer artifact is the path to confirm.
+- For #275's regression pin: needs a decision on how to spy on the 3-Map rebuild — sentinel via module-scoped counter, OR rely on Map identity stability between renders. Both work; the test author should pick one.
+- For #284: Safari does not support `longtask` entries; the `observer.observe()` call must be wrapped in try/catch. Confirmed safe via spec but worth verifying in jsdom test env.
+- `benchstat` baseline regenerated at 0983456 (post round-3 cohort close). Cadence rule documented above: regenerate per cohort close.
 - The local Node used for synthetic harnesses was Node v20.19.2 while `package.json` requires Node >=22.14.0. Treat the frontend timings as directional evidence; re-run under the repo Node version before closing issues.

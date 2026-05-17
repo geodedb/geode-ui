@@ -54,7 +54,7 @@ The Phase-3 review treated the existing repo-standard checks (TS typecheck, lint
 | 5 | Medium | 36 | readability | `extractElements` is a 181-LOC multi-concern function | UI graph | `src/lib/graphResult.ts:143-324` (181 LOC) | [#247](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/247) | Split into 4 pure helpers under `src/lib/graphResult/`; orchestrator becomes ~20 LOC | Frontend graph | 1 sprint | **Closed (2026-05-17)** via `f1dc44d` — 181-LOC body decomposed into `collectRealEndpoints` / `applyParsedMatchLabels` / `buildPlaceholderMap` / `pushSynthesisedRows` (+ `pushRealElements`). Orchestrator is 33 LOC; 32 new helper tests + 16 baseline tests all green. |
 | 6 | High | 24 | maintainability | passwordGenerator fallback returns unvalidated password when retry budget exhausted | Frontend security | `src/lib/passwordGenerator.ts:148-156` | [#244](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/244) | Re-validate fallback; throw on budget exhaustion | Frontend security | 7d | **Closed (2026-05-17)** via `cd5be84` — fallback now re-runs validatePassword and throws on exhaustion. Pinned by jest.isolateModules test mocking validatePassword to always reject. |
 | 7 | Medium | 24 | maintainability | `projectColumns` mutates `Plan` via type cast -- replace with immutable copy | UI table | `src/components/results/projectColumns.ts:277-278` | [#248](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/248) | Replace `{...p, keys:p.keys.slice(0,perPlan)}` reassignment | Frontend table | 7d | **Closed (2026-05-17)** via `455f6b1` — column-budget trim now writes a fresh Plan (`{ ...p, keys: p.keys.slice(0, perPlan) }`) into plan[slot]; no type-cast mutation. Pinned by source-scan test + behavioural test. |
-| 8 | Medium | 24 | architecture | AdminPage 8-tab flat nav lacks overflow strategy -- pick IA pattern before tab 9 | Frontend / admin | `src/pages/AdminPage.tsx:42-72` | [#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252) | Pick grouped flat nav / two-level nav / sidebar; pair with `#214` matcher fix | Frontend / admin | 1-2 days | confirmed, triage |
+| 8 | Medium | 24 | architecture | AdminPage 8-tab flat nav lacks overflow strategy -- pick IA pattern before tab 9 | Frontend / admin | `src/pages/AdminPage.tsx:55-77` (line-citation drift fixed 2026-05-17; previous cite `:42-72` predated a later style block insertion) | [#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252) | Pick grouped flat nav / two-level nav / sidebar; pair with `#214` matcher fix | Frontend / admin | 1-2 days | confirmed, triage |
 | 9 | Medium | 32 | docs | Workspace doc residue: README + PERF + QUALITY cite removed `/workspace` paths | Tracking docs | `README.md:43`; `docs/PERF_GAP_ANALYSIS.md:60,65`; `docs/QUALITY_GAP_ANALYSIS.md` (closure note refs deleted `WorkspacePage.test.tsx`) | [#253](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/253) | README route list; move PERF row; strip orphan cites; CI doc-link check | Docs / Tracking | 30 min | **Closed (2026-05-17)** via `e4a4c3c` — README route list trimmed; PERF closure note rephrased; new `scripts/check-doc-routes.mjs` pre-commit gate scans every live `.md` for residue with a documented historical allowlist. |
 | 10 | Low | 24 | docs | CHANGELOG.md is stale -- 50 issue closures since v0.1.0 not recorded | Tracking docs | `CHANGELOG.md:1-40` only v0.1.0 entry | [#258](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/258) | Add Unreleased section; backfill 2026-05-12/13/16 batches; pre-commit gate | Tracking / docs | 1-2h backfill | **Closed (2026-05-17)** via `c1a7c80` — added `## [Unreleased]` section backfilling Added/Changed/Fixed/Removed/Security for the 2026-05-12/13/14/15/16/17 batches; new `scripts/check-changelog.mjs` pre-commit gate asserts presence of the Unreleased heading + every required batch date. |
 | 11 | Low | 16 | deps | `cytoscape-popper` is a dead dependency | Frontend / deps | `package.json:58`; `src/types/cytoscape-popper.d.ts`; no source imports | [#255](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/255) | `npm uninstall cytoscape-popper`; delete typings shim | Frontend / deps | 15 min | **Closed (2026-05-17)** via `7d271a2` — uninstalled cytoscape-popper@2.0.0 and removed `src/types/cytoscape-popper.d.ts`. Verified no transitive consumer. `npm test` (865 tests) + `npm run build` stay green. |
@@ -63,6 +63,10 @@ The Phase-3 review treated the existing repo-standard checks (TS typecheck, lint
 | 14 | Low | 8 | tests | passwordGenerator tests contain probabilistic assertions on real-RNG output | Frontend tests | `src/lib/passwordGenerator.test.ts` | [#262](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/262) | Export `RandomSource`-injected seam; deterministic test cases | Frontend tests | 1-2h | **Closed (2026-05-17)** via `bf94a9a` — exported `RandomSource` interface from `passwordGenerator.ts`, plumbed optional `rand?: RandomSource` through `GenerateOptions`; 4 new deterministic tests pin canonical seed→password, class-mixing, username-substring rejection, and the crypto-default-when-omitted contract. |
 | 15 | Low | 8 | perf | NDJSON export concatenates whole body into one string before Blob | UI table | `src/components/results/TableView.tsx` exportRespAsNdjson | [#263](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/263) | Blob constructor with iterable of parts | Frontend table | 1h | **Closed (2026-05-17)** via `17a6253` — `exportRespAsNdjson` now writes each row + `\n` separator as a distinct entry in a `parts: string[]` array passed straight to `new Blob(parts, ...)`; halves the peak heap footprint of the export step. 3 new tests spy on the Blob ctor. |
 | 16 | Medium | 36 | readability | GraphViewCytoscape.tsx residual orchestrator size (685 LOC after 2026-05-16 split) | UI graph | `src/components/results/GraphViewCytoscape.tsx` 685 LOC | [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164) (existing) | Lifecycle effect hoist + cxtmenu bootstrap helper + tooltip portal sibling | Frontend graph | 1 sprint | **Closed (2026-05-17)** via `5d8a01a` — 685→488 LOC. Hoisted into `useGraphPreferences`, `useGraphSigReset`, `useGraphSelectionActions`, `useGraphLatestRefs`, and `GraphCanvasOverlay` (canvas + overlays sibling). All 38 GraphView tests + 916/916 full Jest suite green. |
+| 17 | Low | 6 | duplication | AdminPage triad (Policies/Roles/Users) shares ~75 LOC scaffold — styled-components + state block + onDelete handler | Frontend / admin | `src/components/admin/PoliciesPage.tsx:46-79,105-118`; `src/components/admin/RolesPage.tsx:62-113,139-152`; `src/components/admin/UsersPage.tsx:45-79,114-127` | [#270](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/270) | Extract `useAdminListPage<T>` hook + `<AdminPageShell>` wrapper; ~50 LOC drop per page | Frontend / admin | 1 day | confirmed, triage |
+| 18 | Low | 5 | docs | Doc drift bundle: local `pnpm-lock.yaml` + wrong-direction remediation in `docs/GAP_ANALYSIS.md:259` + 4 residual `pnpm` cites in `docs/SECURITY_GAP_ANALYSIS.md` | Tracking docs / CI | `pnpm-lock.yaml` mtime 2026-05-10 (gitignored at `.gitignore:74`); `docs/SECURITY_GAP_ANALYSIS.md:23,52,181,288` | [#269](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/269) | Delete local lock; scrub pnpm references in security doc; (b) covered by sibling gap-sync GAP-035 | Docs / Tracking | 30 min | confirmed, triage |
+| 19 | Low | 4 | maintainability | `internal/profilestore/sqlite.go` 859 LOC — only prod file over 800 LOC threshold | Server / profile store | `internal/profilestore/sqlite.go` (859 LOC) | [#268](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/268) | Mechanical 3-file split: `sqlite.go` (~340) + `sqlite_rewrap.go` (~120) + `sqlite_crud.go` (~390); receiver `*sqliteStore` unchanged; no exported symbol moves | Server / profile store | 1 day | confirmed, triage |
+| 20 | Low | 3 | dead-code | `src/components/results/graph/explore.ts:24` `buildExploreStatement` truly dead export — only a backwards-compat comment in `buildExpand.ts:4` survives | Frontend / graph | `src/components/results/graph/explore.ts:24`; `src/components/results/graph/buildExpand.ts:4` | [#271](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/271) | Delete file (or function); update historical comment | Frontend / graph | 5 min | confirmed, triage |
 
 ## Findings By Category
 
@@ -79,6 +83,8 @@ The Phase-3 review treated the existing repo-standard checks (TS typecheck, lint
 - [#244](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/244): passwordGenerator fallback re-validation. Verify with mocked `validatePassword` that always rejects.
 - [#250](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/250): AdminPage theme tokens. Verify visual regression for active-tab contrast in dark mode.
 - [#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164): GraphViewCytoscape residual decomposition (re-commented). Verify with LOC drop below ~500.
+- [#268](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/268) (2026-05-17): `internal/profilestore/sqlite.go` 859 LOC split. Verify three files under 500 LOC each; `go test ./internal/profilestore/...` green.
+- [#270](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/270) (2026-05-17): AdminPage triad scaffold extraction. Verify `useAdminListPage<T>` hook + `<AdminPageShell>` land; ~50 LOC drop per page.
 
 ### Architecture
 
@@ -89,6 +95,7 @@ The Phase-3 review treated the existing repo-standard checks (TS typecheck, lint
 
 - [#245](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/245): Dead `unicode` import-keeper in `password_policy.go`.
 - [#255](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/255): Dead `cytoscape-popper` dependency.
+- [#271](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/271) (2026-05-17): Dead export `buildExploreStatement` in `src/components/results/graph/explore.ts:24`. Only an inactive backwards-compat comment in `buildExpand.ts:4` survives — no callers in `src/`, `e2e/`, `scripts/`.
 
 ### Tests
 
@@ -102,6 +109,7 @@ The Phase-3 review treated the existing repo-standard checks (TS typecheck, lint
 
 - [#253](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/253): Workspace doc residue across README + PERF + QUALITY tables.
 - [#258](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/258): CHANGELOG.md stale by ~50 closures since v0.1.0.
+- [#269](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/269) (2026-05-17): Stale local `pnpm-lock.yaml` + 4 residual `pnpm` cites in `docs/SECURITY_GAP_ANALYSIS.md:23,52,181,288`. Part (b) (wrong-direction remediation on `docs/GAP_ANALYSIS.md:259`) is being closed concurrently by the sibling gap-sync agent (GAP-035).
 
 ### CI / perf
 
@@ -133,6 +141,25 @@ Strategic (> 5 days):
 - Cross-stack contract-mirror ADR + registry + CI guard ([#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261)).
 - `extractElements` decomposition ([#247](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/247)).
 - GraphViewCytoscape residual decomposition ([#164](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/164)).
+
+## 2026-05-17 audit Phase 4 additions
+
+Phase 3 (quality-reviewer) produced four new confirmed findings and one drop. Filed as `[QUALITY-16]` … `[QUALITY-19]` (continuing the Q-numbered cadence after `[QUALITY-15]` in #49):
+
+| ID | Issue | Severity | PriorityScore | Category | Finding |
+|---|---|---|---:|---|---|
+| QUALITY-16 | [#268](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/268) | Low | 4 | maintainability | `internal/profilestore/sqlite.go` 859 LOC → 3-file split (`sqlite.go` + `sqlite_rewrap.go` + `sqlite_crud.go`) |
+| QUALITY-17 | [#269](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/269) | Low | 5 | docs | Local `pnpm-lock.yaml` (gitignored, mtime 2026-05-10) + 4 residual `pnpm` cites in `docs/SECURITY_GAP_ANALYSIS.md:23,52,181,288` |
+| QUALITY-18 | [#270](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/270) | Low | 6 | duplication | AdminPage triad (Policies/Roles/Users) shares ~75 LOC scaffold → `useAdminListPage<T>` hook + `<AdminPageShell>` |
+| QUALITY-19 | [#271](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/271) | Low | 3 | dead-code | `buildExploreStatement` in `src/components/results/graph/explore.ts:24` is a dead export (only inactive backwards-compat comment survives) |
+
+Watchlist drift recorded in-place (no issue filed):
+
+- **WL1 (rank-8 line-citation drift)**: `docs/QUALITY_GAP_ANALYSIS.md:57` previously cited `src/pages/AdminPage.tsx:42-72` for the AdminPage 8-tab flat-nav row (#252); actual tabs span `:55-77`. Fixed in this revision; the new range matches the on-disk file.
+
+Phase-2 candidate dropped (no issue filed):
+
+- **DROP1 (false positive)**: `__buildForTest` / `__writeTierForTest` at `src/components/results/graph/useGraphCytoscape.ts:456,466` were flagged by the unused-export scan but are an internal `__`-prefixed *test seam* documented at line :451 (`// eslint-disable-next-line no-underscore-dangle -- internal __-prefixed test seam`). They are imported via `require('./useGraphCytoscape')` from `useGraphCytoscape.perfMarks.test.ts:10-13` and `useGraphCytoscape.tier.test.ts:13,15,21,23`. The exports stay; no follow-up needed.
 
 ## Unknowns And Follow-Up Verification
 
