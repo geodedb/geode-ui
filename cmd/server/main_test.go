@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,6 +223,78 @@ func TestWSExemptTimeoutHandler_WSPathSurvivesPastRESTBudget(t *testing.T) {
 // write timeout. The deadlines are wired in gen/ws/ws_handlers.gen.go
 // (do not hand-edit); this test guards against a regression that drops
 // them to zero (which would disable the per-frame cleanup).
+// TestWSQueryRejectsCrossOriginUpgrade pins S-NEW-11 (#265): the
+// generated /ws/query handler is wired with CheckOrigin=true +
+// SameOriginOnly=true (see gen/ws/ws_handlers.gen.go::wsOptions[
+// "/ws/query"]). A cross-origin Origin header MUST be refused by
+// wsx.UpgradeStrict before any auth check or frame is exchanged.
+//
+// The defense-in-depth concern is CSWSH: an authenticated victim
+// visiting an attacker page should not be able to have their session
+// hijacked into a /ws/query stream from a third-party origin.
+// SameSite=Strict on the geode-ui-auth cookie blocks the cookie-mode
+// vector at the browser layer; this gate covers the server-side
+// fallback (and the query-token mode used by some clients).
+//
+// The test wires the generated /ws/query handler through a real
+// httptest.Server (so the same-origin computation against r.Host is
+// exercised), forges an upgrade request with a cross-origin Origin
+// header, and asserts the response is non-101.
+func TestWSQueryRejectsCrossOriginUpgrade(t *testing.T) {
+	mux := http.NewServeMux()
+	genws.RegisterGeneratedWS(mux, genws.UnimplementedWSServer{}, genws.WSOptions{
+		// AuthJWT returns nil so an auth failure cannot mask the
+		// origin gate. The genws handler installs the origin policy
+		// before calling AuthJWT for the auth-fail return path, BUT
+		// wsx.UpgradeStrict runs AFTER auth. The contract this pins
+		// is "auth-passes => origin-check still fires" — exactly the
+		// CSWSH defense-in-depth slot. We confirm by asserting the
+		// upgrade does not return 101.
+		AuthJWT: func(*http.Request) error { return nil },
+	})
+	hs := httptest.NewServer(mux)
+	t.Cleanup(hs.Close)
+
+	host := strings.TrimPrefix(hs.URL, "http://")
+	c, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	// Hand-roll an HTTP/1.1 WebSocket upgrade request with a
+	// cross-origin Origin header. Same shape as the LSP cross-origin
+	// test in internal/server/ws_lsp_test.go::TestWsLspRejectsCrossOriginUpgrade.
+	req := "GET /ws/query HTTP/1.1\r\n" +
+		"Host: " + host + "\r\n" +
+		"Origin: https://evil.example.com\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"\r\n"
+	if _, err := io.WriteString(c, req); err != nil {
+		t.Fatalf("write upgrade: %v", err)
+	}
+
+	// 1.5s budget — same as the LSP analogue, well above any healthy
+	// handler latency.
+	_ = c.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+	buf := make([]byte, 256)
+	n, err := c.Read(buf)
+	if err != nil {
+		// Some wsx error paths drop the connection rather than write
+		// a 4xx; in that case the test passes because the upgrade
+		// was clearly not 101.
+		return
+	}
+	statusLine := string(buf[:n])
+	if strings.Contains(statusLine, " 101 ") {
+		t.Fatalf("S-NEW-11 regression: cross-origin upgrade was allowed: %q",
+			strings.TrimRight(statusLine, "\r\n "))
+	}
+}
+
 func TestWSQueryHasPerFrameWriteDeadline(t *testing.T) {
 	mux := http.NewServeMux()
 	// RegisterGeneratedWS installs the per-path wsx.Options. We pass a
