@@ -87,7 +87,8 @@ describe('exportRespAsNdjson (#263 Blob iterable contract)', () => {
   test('passes a multi-part iterable, not a single joined mega-string, for many rows', () => {
     exportRespAsNdjson(makeResp(50))
     expect(blobCalls).toHaveLength(1)
-    const { parts, opts } = blobCalls[0]
+    const call = blobCalls[0]!
+    const { parts, opts } = call
     expect(opts?.type).toBe('application/x-ndjson')
     // The fix's contract: parts.length must be > 1 so the runtime can
     // stream each row into the Blob without ever holding the full
@@ -99,15 +100,16 @@ describe('exportRespAsNdjson (#263 Blob iterable contract)', () => {
 
   test('still emits valid NDJSON (one record per row, joined by single newlines, trailing newline)', () => {
     exportRespAsNdjson(makeResp(3))
-    const { parts } = blobCalls[0]
+    const call = blobCalls[0]!
+    const { parts } = call
     // Reconstruct the joined payload from the iterable to verify
     // semantics are unchanged.
-    const text = parts.map((p) => String(p)).join('')
+    const text = parts.map((p: unknown) => String(p)).join('')
     const lines = text.split('\n')
     // 3 records + one empty trailing field (from the trailing newline).
     expect(lines).toHaveLength(4)
     expect(lines[3]).toBe('')
-    const decoded = lines.slice(0, 3).map((l) => JSON.parse(l))
+    const decoded = lines.slice(0, 3).map((l: string) => JSON.parse(l))
     expect(decoded[0]).toEqual({ idx: 0, label: 'value-0' })
     expect(decoded[1]).toEqual({ idx: 1, label: 'value-1' })
     expect(decoded[2]).toEqual({ idx: 2, label: 'value-2' })
@@ -119,8 +121,9 @@ describe('exportRespAsNdjson (#263 Blob iterable contract)', () => {
       rows: [],
     })
     expect(blobCalls).toHaveLength(1)
-    const { parts } = blobCalls[0]
-    const text = parts.map((p) => String(p)).join('')
+    const call = blobCalls[0]!
+    const { parts } = call
+    const text = parts.map((p: unknown) => String(p)).join('')
     expect(text).toBe('')
   })
 })
