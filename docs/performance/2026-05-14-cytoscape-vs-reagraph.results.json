@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-16T23:57:35.998Z",
+  "generatedAt": "2026-05-17T00:54:58.602Z",
   "commit": "unknown",
   "sampleWindowMs": 5000,
   "records": [
@@ -7,69 +7,64 @@
       "renderer": "cytoscape",
       "n": 500,
       "tier": "small",
-      "firstPaintMs": 3161,
-      "firstInteractiveMs": 1179.0999999046326,
-      "layoutMs": 83.69999980926514,
+      "firstPaintMs": 3156,
+      "firstInteractiveMs": 1347.4000000953674,
+      "layoutMs": 91,
       "samples": [
         {
-          "fps": 64.9,
+          "fps": 61.1,
           "mem": 10000000,
           "elapsed": 0
         },
         {
-          "fps": 3.3,
+          "fps": 3.6,
           "mem": 10000000,
-          "elapsed": 917
+          "elapsed": 1099
         },
         {
-          "fps": 32.3,
-          "mem": 10000000,
-          "elapsed": 1133
-        },
-        {
-          "fps": 55,
+          "fps": 30,
           "mem": 10000000,
           "elapsed": 1333
         },
         {
-          "fps": 60,
+          "fps": 55,
           "mem": 10000000,
-          "elapsed": 1550
+          "elapsed": 1533
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 1750
+          "elapsed": 1733
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 1950
+          "elapsed": 1933
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 2150
+          "elapsed": 2149
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 2350
+          "elapsed": 2366
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 2550
+          "elapsed": 2566
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 2750
+          "elapsed": 2766
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 2950
+          "elapsed": 2966
         },
         {
           "fps": 60,
@@ -84,106 +79,101 @@
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 3600
+          "elapsed": 3599
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 3800
+          "elapsed": 3816
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4016
+          "elapsed": 4033
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4216
+          "elapsed": 4233
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4416
+          "elapsed": 4433
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4616
+          "elapsed": 4649
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4816
+          "elapsed": 4849
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5033
+          "elapsed": 5049
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5233
+          "elapsed": 5249
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5433
+          "elapsed": 5449
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5650
+          "elapsed": 5666
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5850
+          "elapsed": 5883
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6050
+          "elapsed": 6083
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6266
+          "elapsed": 6283
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6466
+          "elapsed": 6499
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6666
+          "elapsed": 6699
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6866
+          "elapsed": 6916
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 7066
+          "elapsed": 7133
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 7266
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 7466
+          "elapsed": 7333
         }
       ],
-      "avgFps": 57.51,
-      "p5Fps": 32.3,
+      "avgFps": 57.18,
+      "p5Fps": 30,
       "peakHeapBytes": 10000000,
       "cacheHitRate": 0,
       "usedWorker": false
@@ -192,294 +182,39 @@
       "renderer": "cytoscape",
       "n": 2000,
       "tier": "mid",
-      "firstPaintMs": 3084,
-      "firstInteractiveMs": 2242.7000002861023,
-      "layoutMs": 306.2999997138977,
+      "firstPaintMs": 3112,
+      "firstInteractiveMs": 2225.7999997138977,
+      "layoutMs": 307.80000019073486,
       "samples": [
         {
-          "fps": 67.1,
+          "fps": 62.3,
           "mem": 10000000,
           "elapsed": 0
         },
         {
-          "fps": 1.4,
+          "fps": 1.5,
           "mem": 10000000,
-          "elapsed": 2766
+          "elapsed": 2700
         },
         {
-          "fps": 15.7,
+          "fps": 17.5,
           "mem": 10000000,
-          "elapsed": 3149
+          "elapsed": 3100
         },
         {
-          "fps": 55,
+          "fps": 55.4,
           "mem": 10000000,
-          "elapsed": 3349
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 3549
+          "elapsed": 3316
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 3749
+          "elapsed": 3516
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 3949
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 4149
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 4349
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 4549
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 4766
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 4966
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 5166
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 5366
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 5566
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 5766
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 5983
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 6183
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 6383
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 6583
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 6783
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 6983
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 7183
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 7383
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 7583
-        }
-      ],
-      "avgFps": 55.97,
-      "p5Fps": 15.7,
-      "peakHeapBytes": 10000000,
-      "cacheHitRate": 0,
-      "usedWorker": false
-    },
-    {
-      "renderer": "cytoscape",
-      "n": 5000,
-      "tier": "large",
-      "firstPaintMs": 3105,
-      "firstInteractiveMs": 4450,
-      "layoutMs": 788.1000003814697,
-      "samples": [
-        {
-          "fps": 66.5,
-          "mem": 10000000,
-          "elapsed": 0
-        },
-        {
-          "fps": 0.6,
-          "mem": 10000000,
-          "elapsed": 6216
-        },
-        {
-          "fps": 7.8,
-          "mem": 10000000,
-          "elapsed": 6983
-        },
-        {
-          "fps": 55,
-          "mem": 10000000,
-          "elapsed": 7183
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 7383
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 7583
-        }
-      ],
-      "avgFps": 41.65,
-      "p5Fps": 0.6,
-      "peakHeapBytes": 10000000,
-      "cacheHitRate": 0,
-      "usedWorker": false
-    },
-    {
-      "renderer": "cytoscape",
-      "n": 10000,
-      "tier": "large",
-      "firstPaintMs": 3109,
-      "firstInteractiveMs": 7887.300000190735,
-      "layoutMs": 1453.1000003814697,
-      "samples": [
-        {
-          "fps": 64.1,
-          "mem": 10000000,
-          "elapsed": 0
-        },
-        {
-          "fps": 0.3,
-          "mem": 10000000,
-          "elapsed": 11849
-        }
-      ],
-      "avgFps": 32.2,
-      "p5Fps": 0.3,
-      "peakHeapBytes": 10000000,
-      "cacheHitRate": 0,
-      "usedWorker": false
-    },
-    {
-      "renderer": "reagraph",
-      "n": 500,
-      "tier": "small",
-      "firstPaintMs": 3110,
-      "firstInteractiveMs": 1143.2999997138977,
-      "layoutMs": 77.7000002861023,
-      "samples": [
-        {
-          "fps": 62,
-          "mem": 10000000,
-          "elapsed": 0
-        },
-        {
-          "fps": 3.8,
-          "mem": 10000000,
-          "elapsed": 1050
-        },
-        {
-          "fps": 32.3,
-          "mem": 10000000,
-          "elapsed": 1266
-        },
-        {
-          "fps": 55,
-          "mem": 10000000,
-          "elapsed": 1466
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 1666
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 1866
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 2066
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 2266
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 2466
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 2666
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 2866
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 3066
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 3266
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 3483
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 3700
+          "elapsed": 3716
         },
         {
           "fps": 60,
@@ -489,7 +224,7 @@
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4116
+          "elapsed": 4133
         },
         {
           "fps": 60,
@@ -514,66 +249,306 @@
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5150
+          "elapsed": 5133
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5366
+          "elapsed": 5333
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5566
+          "elapsed": 5533
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5783
+          "elapsed": 5733
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5983
+          "elapsed": 5950
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6200
+          "elapsed": 6150
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6416
+          "elapsed": 6350
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6616
+          "elapsed": 6550
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6833
+          "elapsed": 6750
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 7050
+          "elapsed": 6950
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 7266
+          "elapsed": 7150
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 7466
+          "elapsed": 7366
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7566
         }
       ],
-      "avgFps": 57.37,
-      "p5Fps": 32.3,
+      "avgFps": 55.87,
+      "p5Fps": 17.5,
+      "peakHeapBytes": 10000000,
+      "cacheHitRate": 0,
+      "usedWorker": false
+    },
+    {
+      "renderer": "cytoscape",
+      "n": 5000,
+      "tier": "large",
+      "firstPaintMs": 3102,
+      "firstInteractiveMs": 4498.099999904633,
+      "layoutMs": 727.2999997138977,
+      "samples": [
+        {
+          "fps": 64.6,
+          "mem": 10000000,
+          "elapsed": 0
+        },
+        {
+          "fps": 0.6,
+          "mem": 10000000,
+          "elapsed": 6583
+        },
+        {
+          "fps": 6.9,
+          "mem": 10000000,
+          "elapsed": 7600
+        }
+      ],
+      "avgFps": 24.03,
+      "p5Fps": 0.6,
+      "peakHeapBytes": 10000000,
+      "cacheHitRate": 0,
+      "usedWorker": false
+    },
+    {
+      "renderer": "cytoscape",
+      "n": 10000,
+      "tier": "large",
+      "firstPaintMs": 3102,
+      "firstInteractiveMs": 8322.400000095367,
+      "layoutMs": 1623.3000001907349,
+      "samples": [
+        {
+          "fps": 63,
+          "mem": 10000000,
+          "elapsed": 0
+        },
+        {
+          "fps": 0.3,
+          "mem": 10000000,
+          "elapsed": 12249
+        }
+      ],
+      "avgFps": 31.65,
+      "p5Fps": 0.3,
+      "peakHeapBytes": 10000000,
+      "cacheHitRate": 0,
+      "usedWorker": false
+    },
+    {
+      "renderer": "reagraph",
+      "n": 500,
+      "tier": "small",
+      "firstPaintMs": 3079,
+      "firstInteractiveMs": 1193.6999998092651,
+      "layoutMs": 77.2000002861023,
+      "samples": [
+        {
+          "fps": 67.7,
+          "mem": 10000000,
+          "elapsed": 0
+        },
+        {
+          "fps": 3.5,
+          "mem": 10000000,
+          "elapsed": 1150
+        },
+        {
+          "fps": 30,
+          "mem": 10000000,
+          "elapsed": 1383
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 1583
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 1783
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 1983
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 2183
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 2383
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 2600
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 2800
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 3000
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 3200
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 3400
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 3600
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 3800
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 4000
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 4200
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 4400
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 4616
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 4816
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 5016
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 5216
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 5416
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 5633
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 5833
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 6050
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 6250
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 6466
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 6683
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 6883
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7083
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7283
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7483
+        }
+      ],
+      "avgFps": 57.61,
+      "p5Fps": 30,
       "peakHeapBytes": 10000000,
       "cacheHitRate": 0,
       "usedWorker": false
@@ -582,109 +557,154 @@
       "renderer": "reagraph",
       "n": 2000,
       "tier": "mid",
-      "firstPaintMs": 3121,
-      "firstInteractiveMs": 2653.2999997138977,
-      "layoutMs": 335.2000002861023,
+      "firstPaintMs": 3110,
+      "firstInteractiveMs": 2625.199999809265,
+      "layoutMs": 308.1000003814697,
       "samples": [
         {
-          "fps": 66.7,
+          "fps": 65.4,
           "mem": 10000000,
           "elapsed": 0
         },
         {
           "fps": 1.3,
           "mem": 10000000,
-          "elapsed": 3117
+          "elapsed": 3050
         },
         {
-          "fps": 16.8,
+          "fps": 15,
           "mem": 10000000,
-          "elapsed": 3533
-        },
-        {
-          "fps": 55.4,
-          "mem": 10000000,
-          "elapsed": 3750
+          "elapsed": 3450
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 3950
+          "elapsed": 3650
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4150
+          "elapsed": 3850
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4350
+          "elapsed": 4050
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4550
+          "elapsed": 4250
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4767
+          "elapsed": 4450
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 4983
+          "elapsed": 4650
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5183
+          "elapsed": 4850
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5400
+          "elapsed": 5050
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5600
+          "elapsed": 5267
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 5817
+          "elapsed": 5467
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6017
+          "elapsed": 5667
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6217
+          "elapsed": 5883
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6433
+          "elapsed": 6083
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6650
+          "elapsed": 6283
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 6850
+          "elapsed": 6500
         },
         {
           "fps": 60,
           "mem": 10000000,
-          "elapsed": 7050
+          "elapsed": 6716
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 6916
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7116
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7316
+        },
+        {
+          "fps": 60,
+          "mem": 10000000,
+          "elapsed": 7516
+        }
+      ],
+      "avgFps": 55.73,
+      "p5Fps": 15,
+      "peakHeapBytes": 10000000,
+      "cacheHitRate": 0,
+      "usedWorker": false
+    },
+    {
+      "renderer": "reagraph",
+      "n": 5000,
+      "tier": "large",
+      "firstPaintMs": 3112,
+      "firstInteractiveMs": 4427.699999809265,
+      "layoutMs": 701.9000000953674,
+      "samples": [
+        {
+          "fps": 61,
+          "mem": 10000000,
+          "elapsed": 0
+        },
+        {
+          "fps": 0.6,
+          "mem": 10000000,
+          "elapsed": 6183
+        },
+        {
+          "fps": 7.1,
+          "mem": 10000000,
+          "elapsed": 7033
         },
         {
           "fps": 60,
@@ -697,48 +717,8 @@
           "elapsed": 7450
         }
       ],
-      "avgFps": 55.46,
-      "p5Fps": 16.8,
-      "peakHeapBytes": 10000000,
-      "cacheHitRate": 0,
-      "usedWorker": false
-    },
-    {
-      "renderer": "reagraph",
-      "n": 5000,
-      "tier": "large",
-      "firstPaintMs": 3107,
-      "firstInteractiveMs": 4387.599999904633,
-      "layoutMs": 706.5,
-      "samples": [
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": 0
-        },
-        {
-          "fps": 64.6,
-          "mem": 10000000,
-          "elapsed": -7643
-        },
-        {
-          "fps": 0.5,
-          "mem": 10000000,
-          "elapsed": -1344
-        },
-        {
-          "fps": 6.2,
-          "mem": 10000000,
-          "elapsed": -377
-        },
-        {
-          "fps": 60,
-          "mem": 10000000,
-          "elapsed": -177
-        }
-      ],
-      "avgFps": 38.26,
-      "p5Fps": 0.5,
+      "avgFps": 37.74,
+      "p5Fps": 0.6,
       "peakHeapBytes": 10000000,
       "cacheHitRate": 0,
       "usedWorker": false
@@ -747,22 +727,22 @@
       "renderer": "reagraph",
       "n": 10000,
       "tier": "large",
-      "firstPaintMs": 3112,
-      "firstInteractiveMs": 7975.699999809265,
-      "layoutMs": 1404.1000003814697,
+      "firstPaintMs": 3114,
+      "firstInteractiveMs": 8554,
+      "layoutMs": 1454.6000003814697,
       "samples": [
         {
-          "fps": 63.1,
+          "fps": 66.4,
           "mem": 10000000,
           "elapsed": 0
         },
         {
           "fps": 0.3,
           "mem": 10000000,
-          "elapsed": 11716
+          "elapsed": 12366
         }
       ],
-      "avgFps": 31.7,
+      "avgFps": 33.35,
       "p5Fps": 0.3,
       "peakHeapBytes": 10000000,
       "cacheHitRate": 0,
