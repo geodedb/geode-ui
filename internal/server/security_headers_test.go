@@ -60,7 +60,7 @@ func TestCSPAppliedToSPAResponses(t *testing.T) {
 		"script-src 'self' 'wasm-unsafe-eval'",
 		"style-src 'self' 'unsafe-inline'",
 		"worker-src 'self' blob:",
-		"connect-src 'self' wss:",
+		"connect-src 'self'",
 		"img-src 'self' data:",
 		"font-src 'self' data:",
 		"frame-ancestors 'none'",
@@ -77,6 +77,38 @@ func TestCSPAppliedToSPAResponses(t *testing.T) {
 	coop := rec.Header().Get("Cross-Origin-Opener-Policy")
 	if coop != "same-origin" {
 		t.Errorf("Cross-Origin-Opener-Policy=%q want %q", coop, "same-origin")
+	}
+}
+
+// TestCSPDirective_ConnectSrcOmitsWildcardWss pins SEC-NEW (#266): the
+// connect-src directive must NOT enumerate the bare "wss:" scheme token,
+// which would allow XHR/fetch/WebSocket connections to *any* origin over
+// wss. Same-origin wss:// is already covered by 'self', so the wildcard
+// scheme is a defense-in-depth regression risk with no functional gain.
+//
+// The test inspects the CSPDirective constant directly rather than going
+// through the wrapper, so a future refactor that splits the directive
+// can't silently re-introduce the wildcard.
+func TestCSPDirective_ConnectSrcOmitsWildcardWss(t *testing.T) {
+	t.Parallel()
+	if !strings.Contains(CSPDirective, "connect-src 'self'") {
+		t.Fatalf("CSPDirective missing connect-src 'self' anchor; got %q", CSPDirective)
+	}
+	// A literal " wss:" or " wss; " (the trailing-delimiter forms used in
+	// the original directive) must not appear in connect-src or any other
+	// directive — there is no production path that needs cross-origin wss.
+	for _, bad := range []string{" wss:;", " wss:\n", " wss: "} {
+		if strings.Contains(CSPDirective+";", bad) {
+			t.Errorf("CSPDirective contains forbidden wildcard wss token %q; got %q",
+				bad, CSPDirective)
+		}
+	}
+	// Belt-and-braces: the connect-src directive specifically must end at
+	// 'self' (followed by directive-terminator `;`) and not enumerate a
+	// scheme wildcard.
+	if !strings.Contains(CSPDirective, "connect-src 'self';") {
+		t.Errorf("connect-src not terminated immediately after 'self'; "+
+			"a non-'self' source has been re-introduced. got %q", CSPDirective)
 	}
 }
 

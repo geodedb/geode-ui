@@ -43,8 +43,11 @@ import (
 //   - worker-src 'self' blob: covers Monaco's web-worker bundle, which
 //     is loaded as a Blob URL.
 //
-//   - connect-src 'self' wss: allows the WebSocket query stream
-//     (cmd/server/main.go wires /ws/query).
+//   - connect-src 'self' covers same-origin XHR/fetch AND same-origin
+//     wss:// connections (e.g. the WebSocket query stream wired in
+//     cmd/server/main.go for /ws/query). The bare "wss:" scheme token
+//     was removed under SEC #266 because it allowed wss:// to *any*
+//     origin — a defense-in-depth regression with no production need.
 //
 //   - img-src/font-src 'self' data: covers inline data: URIs the SPA
 //     emits for icons and metric-tooltip glyphs.
@@ -56,7 +59,7 @@ const CSPDirective = "default-src 'self'; " +
 	"script-src 'self' 'wasm-unsafe-eval'; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"worker-src 'self' blob:; " +
-	"connect-src 'self' wss:; " +
+	"connect-src 'self'; " +
 	"img-src 'self' data:; " +
 	"font-src 'self' data:; " +
 	"frame-ancestors 'none'; " +
