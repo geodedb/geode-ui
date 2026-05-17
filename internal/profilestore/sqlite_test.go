@@ -1543,3 +1543,66 @@ func TestRewrapSensitiveColumns_LeavesPlaintextRowsAlone(t *testing.T) {
 		t.Fatalf("SEC-NEW-8 #211: SkippedPlaintext=0 — sweep did not count the legacy row")
 	}
 }
+
+// TestSQLiteWriter_HasBusyTimeoutPragma pins GAP-032 / #207: the
+// writer handle must run with PRAGMA busy_timeout = 5000 (5 s) so
+// that an adjacent reader holding a brief lock under WAL doesn't
+// instantly trip SQLITE_BUSY on the writer (with the default of 0
+// SQLite reports SQLITE_BUSY immediately on contention rather than
+// retrying for any duration). 5 s is the standard "production-safe"
+// value across the SQLite ecosystem; it matches the contention
+// budget the JWT revocation subsystem (#150) targets.
+func TestSQLiteWriter_HasBusyTimeoutPragma(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	dbp, ok := st.(DBHandleProvider)
+	if !ok {
+		t.Fatal("sqliteStore must implement DBHandleProvider")
+	}
+	var ms int64
+	if err := dbp.DBHandle().QueryRowContext(context.Background(),
+		`PRAGMA busy_timeout`).Scan(&ms); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if ms != 5000 {
+		t.Fatalf("writer busy_timeout = %d ms, want 5000 (GAP-032 / #207)", ms)
+	}
+}
+
+// TestSQLiteFileBacked_BusyTimeoutSurvivesFreshConnections pins the
+// guarantee that the busy_timeout pragma is applied on every writer
+// connection -- not just the first ExecContext call -- so a connection
+// returned to the pool and later reused still observes the 5000 ms
+// retry window. The single-writer handle has SetMaxOpenConns(1) so
+// this is effectively a guarantee that the boot-time pragma applies
+// to that one connection across its full lifetime.
+func TestSQLiteFileBacked_BusyTimeoutSurvivesFreshConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.db")
+	st, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	dbp := st.(DBHandleProvider)
+	rw := dbp.DBHandle()
+	// Force a Put/Get cycle so the connection has been used for real
+	// work between the boot-time PRAGMA and the assertion.
+	if _, err := st.Put(context.Background(), conn.Profile{
+		Scope: conn.ProfileScopeSystem, Name: "warm", DSN: "stub://x",
+	}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	var ms int64
+	if err := rw.QueryRowContext(context.Background(),
+		`PRAGMA busy_timeout`).Scan(&ms); err != nil {
+		t.Fatalf("PRAGMA busy_timeout: %v", err)
+	}
+	if ms != 5000 {
+		t.Fatalf("after warm-up: busy_timeout = %d ms, want 5000", ms)
+	}
+}

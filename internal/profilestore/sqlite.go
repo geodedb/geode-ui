@@ -111,8 +111,13 @@ func openSQLiteWithCipher(dsn string, cipher *Cipher) (Store, error) {
 		return nil, fmt.Errorf("profilestore: open: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+	// GAP-032 / #207: busy_timeout=5000 ms gives the writer a 5-second
+	// retry window when an adjacent reader holds a brief lock under
+	// WAL mode (default is 0, so contention reports SQLITE_BUSY
+	// immediately). Inlined here rather than appended to the DSN so it
+	// works uniformly across :memory:, bare-path, and file: URI shapes.
 	if _, err := db.ExecContext(context.Background(),
-		`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
+		`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("profilestore: pragmas: %w", err)
 	}
