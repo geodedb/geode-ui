@@ -1,11 +1,7 @@
 package server
 
 import (
-	"encoding/json/v2"
-	"fmt"
 	"net/http"
-
-	"encoding/json/jsontext"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
@@ -60,26 +56,17 @@ import (
 // for the SPA's gate.
 
 // GetPolicies implements GET /api/v1/policies (list policies).
+//
+// GAP-033 / #138: delegates SHOW-row marshalling to
+// listRowsAsJSONValues; same pattern as GetBackups / GetRoles.
 func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.PolicyList, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW POLICIES")
-	if err != nil {
-		if isWireFeatureMissing(err) {
-			return &gentypes.PolicyList{Policies: []jsontext.Value{}}, nil
-		}
-		return nil, respondErr(w, wireErr(err))
-	}
-	out := make([]jsontext.Value, 0, len(rows))
-	for _, row := range rows {
-		obj := rowToMap(cols, row)
-		raw, mErr := json.Marshal(obj)
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal policy row: %w", mErr)
-		}
-		out = append(out, jsontext.Value(raw))
+	out, lErr := listRowsAsJSONValues(r.Context(), db, "SHOW POLICIES", "policy", nil)
+	if lErr != nil {
+		return nil, respondErr(w, lErr)
 	}
 	return &gentypes.PolicyList{Policies: out}, nil
 }

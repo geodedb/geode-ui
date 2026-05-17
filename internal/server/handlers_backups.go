@@ -1,13 +1,10 @@
 package server
 
 import (
-	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-
-	"encoding/json/jsontext"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
@@ -59,26 +56,18 @@ import (
 // 400 before reaching the driver.
 
 // GetBackups implements GET /api/v1/backups (list backups).
+//
+// GAP-033 / #138: delegates the SHOW-style row marshalling pipeline
+// to listRowsAsJSONValues. The handler itself only owns the SHOW
+// statement, the response-envelope wrapping, and the err handoff.
 func (s *GraphServer) GetBackups(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.BackupList, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW BACKUPS")
-	if err != nil {
-		if isWireFeatureMissing(err) {
-			return &gentypes.BackupList{Backups: []jsontext.Value{}}, nil
-		}
-		return nil, respondErr(w, wireErr(err))
-	}
-	out := make([]jsontext.Value, 0, len(rows))
-	for _, row := range rows {
-		obj := rowToMap(cols, row)
-		raw, mErr := json.Marshal(obj)
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal backup row: %w", mErr)
-		}
-		out = append(out, jsontext.Value(raw))
+	out, lErr := listRowsAsJSONValues(r.Context(), db, "SHOW BACKUPS", "backup", nil)
+	if lErr != nil {
+		return nil, respondErr(w, lErr)
 	}
 	return &gentypes.BackupList{Backups: out}, nil
 }

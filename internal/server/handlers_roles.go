@@ -1,11 +1,7 @@
 package server
 
 import (
-	"encoding/json/v2"
-	"fmt"
 	"net/http"
-
-	"encoding/json/jsontext"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
@@ -64,30 +60,21 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW ROLES")
-	if err != nil {
-		if isWireFeatureMissing(err) {
-			return &gentypes.RoleList{Roles: []jsontext.Value{}}, nil
-		}
-		return nil, respondErr(w, wireErr(err))
-	}
-	// Normalise the v0.5.15 `role_name` column to the legacy `name`
-	// key so downstream consumers that already read `name` keep
-	// working. The raw column is also retained as `role_name` for any
-	// SPA code that pins the upstream key directly.
-	out := make([]jsontext.Value, 0, len(rows))
-	for _, row := range rows {
-		obj := rowToMap(cols, row)
+	// GAP-033 / #138: delegate SHOW-row marshalling to
+	// listRowsAsJSONValues. The role-specific normalisation -- copy
+	// the v0.5.15 `role_name` column to the legacy `name` key so
+	// downstream consumers reading `name` keep working -- is the
+	// per-row callback. The raw `role_name` is preserved so SPA code
+	// that pins the upstream key directly still resolves.
+	out, lErr := listRowsAsJSONValues(r.Context(), db, "SHOW ROLES", "role", func(obj map[string]any) {
 		if _, hasName := obj["name"]; !hasName {
 			if rn, ok := obj["role_name"]; ok {
 				obj["name"] = rn
 			}
 		}
-		raw, mErr := json.Marshal(obj)
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal role row: %w", mErr)
-		}
-		out = append(out, jsontext.Value(raw))
+	})
+	if lErr != nil {
+		return nil, respondErr(w, lErr)
 	}
 	return &gentypes.RoleList{Roles: out}, nil
 }
