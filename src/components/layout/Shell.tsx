@@ -235,7 +235,7 @@ const Burger: React.FC<{ open: boolean }> = ({ open }) => (
 )
 
 export const Shell: React.FC = () => {
-  const { signOut } = useAuth()
+  const { signOut, isAdmin } = useAuth()
   const { t } = useTranslation()
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -271,7 +271,13 @@ export const Shell: React.FC = () => {
             {t('nav.query')}
           </NavLink>
           <NavLink to="/schema">{t('nav.schema')}</NavLink>
-          <NavLink to="/admin">{t('nav.admin')}</NavLink>
+          {/*
+            SEC issue 264: hide the /admin entry-point for non-admins.
+            The route itself is RoleGate-protected, so a direct nav
+            still redirects; this just stops advertising the link in
+            the chrome.
+          */}
+          {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
           <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
           <Spacer />
           <Button variant="ghost" size="sm" onClick={onLogout}>
@@ -298,7 +304,7 @@ export const Shell: React.FC = () => {
           {t('nav.query')}
         </NavLink>
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
-        <NavLink to="/admin">{t('nav.admin')}</NavLink>
+        {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
         <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
         <Button variant="ghost" size="md" fullWidth onClick={onLogout}>
           {t('nav.logout')}

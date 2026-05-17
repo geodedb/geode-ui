@@ -6,6 +6,7 @@ import { AuthProvider } from './auth/AuthProvider'
 import { ConnectionsProvider } from './api/connections'
 import type { ConnectionState } from './api/connections'
 import { ProtectedRoute } from './auth/ProtectedRoute'
+import { RoleGate } from './auth/RoleGate'
 import { Shell } from './components/layout/Shell'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoginPage } from './pages/LoginPage'
@@ -110,6 +111,16 @@ const ProtectedShell: React.FC = () => (
   </ProtectedRoute>
 )
 
+// SEC issue 264: AdminPage rendered behind the role gate.  Extracted
+// into a named component so the inline Route element prop stays
+// single-line (Prettier wants no wrapping parens around multi-line
+// JSX, ESLint's react/jsx-wrap-multilines insists on them).
+const AdminPageGated: React.FC = () => (
+  <RoleGate requiredRole="admin">
+    <AdminPage />
+  </RoleGate>
+)
+
 interface AppProps {
   initialConnections?: ConnectionState[]
   // PSR-F16 (#113): when true, ConnectionsProvider mounts with an
@@ -153,7 +164,15 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                   <Route index element={<QueryPage />} />
                   <Route path="dashboard" element={<DashboardPage />} />
                   <Route path="schema" element={<SchemaPage />} />
-                  <Route path="admin" element={<AdminPage />}>
+                  {/*
+                    SEC issue 264: /admin/* is wrapped in a client-side
+                    RoleGate so the route itself short-circuits for
+                    non-admins (information-disclosure suppression).
+                    Server-side handlers still enforce hasRole admin
+                    independently; the gate is defense-in-depth, not
+                    the authority.
+                  */}
+                  <Route path="admin" element={<AdminPageGated />}>
                     <Route index element={<Navigate to="users" replace />} />
                     <Route path="users" element={<UsersPage />} />
                     <Route path="roles" element={<RolesPage />} />

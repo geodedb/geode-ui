@@ -7,11 +7,21 @@ import { testTheme as theme } from '../../test-utils/theme'
 import { Shell } from './Shell'
 
 const signOut = jest.fn().mockResolvedValue(undefined)
+let mockIsAdmin = true
 jest.mock('../../auth/AuthProvider', () => ({
   useAuth: () => ({
     signOut,
     user: { username: 'alice' },
     isAuthenticated: true,
+    // SEC issue 264: Shell now conditions the Admin nav link on
+    // `isAdmin` so the chrome doesn't advertise a route the RoleGate
+    // is about to redirect. Default the mock to admin=true so the
+    // pre-existing `aria-current on /admin/users` test still finds
+    // the link; a focused test below flips this to false and asserts
+    // the link disappears.
+    get isAdmin() {
+      return mockIsAdmin
+    },
   }),
 }))
 jest.mock('./ConnectionSwitcher', () => ({
@@ -38,7 +48,10 @@ const renderShell = (initialPath = '/') =>
     </ThemeProvider>
   )
 
-beforeEach(() => signOut.mockClear())
+beforeEach(() => {
+  signOut.mockClear()
+  mockIsAdmin = true
+})
 
 test('exposes a skip-link and labelled primary nav', () => {
   renderShell()
@@ -97,6 +110,20 @@ test('a section nav link stays active on its nested routes', () => {
   screen
     .getAllByRole('link', { name: 'Query' })
     .forEach((l) => expect(l).not.toHaveAttribute('aria-current'))
+})
+
+test('hides the Admin nav link when isAdmin is false (SEC issue 264)', () => {
+  mockIsAdmin = false
+  renderShell()
+  // Admin link is gone from both desktop bar and mobile drawer.
+  expect(screen.queryAllByRole('link', { name: 'Admin' })).toEqual([])
+  // Other nav links still render, so the gate is targeted not broken.
+  expect(screen.getAllByRole('link', { name: 'Query' }).length).toBeGreaterThan(
+    0
+  )
+  expect(
+    screen.getAllByRole('link', { name: 'Schema' }).length
+  ).toBeGreaterThan(0)
 })
 
 test('logout button calls signOut', () => {
