@@ -25,6 +25,11 @@ export interface LspClientHandle {
   dispose: () => Promise<void>
 }
 
+// PERF #254: equal-jitter base delays. The actual scheduled delay is
+// base/2 + rand*base/2 so the lower bound is half the table value and
+// the upper bound is the table value itself. With N clients
+// reconnecting at once (e.g. server reboot) this spreads the herd over
+// a base/2-wide window instead of pinning them all to the same instant.
 const RECONNECT_BACKOFF_MS = [500, 1500, 4500]
 
 export async function startLspClient(
@@ -74,10 +79,16 @@ export async function startLspClient(
       emitState('failed')
       return
     }
-    const delay =
-      RECONNECT_BACKOFF_MS[
-        Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
-      ]
+    // PERF #254 equal-jitter: spread the retry burst over a base/2
+    // window so simultaneous reconnects from many clients don't pin
+    // the server with a thundering herd. base is the table value;
+    // delay = base/2 + rand*base/2. Floor to ms to keep the value
+    // integer for setTimeout.
+    const base = RECONNECT_BACKOFF_MS[
+      Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
+    ] as number
+    const half = base / 2
+    const delay = Math.floor(half + Math.random() * half)
     retryCount += 1
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null

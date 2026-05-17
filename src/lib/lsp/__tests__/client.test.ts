@@ -248,4 +248,108 @@ describe('startLspClient', () => {
     })
     expect(mockCtor.mock.calls.length).toBe(ctorCallsBeforeClose)
   })
+
+  // PERF #254: the reconnect backoff used a fixed [500, 1500, 4500]
+  // schedule. With N clients reconnecting at once (e.g. server reboot)
+  // every client retries at the same instant, producing a thundering
+  // herd. The equal-jitter formula keeps the lower bound at half the
+  // intended delay and randomises the upper half: delay = base/2 +
+  // rand * base/2. Two callers seeded with rand=0.0 and rand=1.0
+  // observe MIN_DELAY (base/2) and MAX_DELAY (base) — different by
+  // base/2 — proving the spread is actually random.
+  test('reconnect backoff applies equal jitter (PERF #254)', async () => {
+    // Intercept setTimeout to capture the scheduled delay without
+    // actually waiting. Other test cases set them on globals; preserve
+    // the originals for restoration.
+    const realSetTimeout = global.setTimeout
+    const capturedDelays: number[] = []
+    const fakeSetTimeout = ((
+      fn: TimerHandler,
+      delay?: number,
+      ...rest: unknown[]
+    ) => {
+      if (typeof delay === 'number') capturedDelays.push(delay)
+      // Forward to the real setTimeout so the test still resolves.
+      return realSetTimeout(fn as () => void, delay, ...rest)
+    }) as typeof setTimeout
+    global.setTimeout = fakeSetTimeout
+
+    // Seed Math.random so the first reconnect uses 0.0 (-> base/2) and
+    // the second uses 1.0 (-> base). Three calls per scheduleReconnect
+    // is the maximum we need to flush.
+    const realRandom = Math.random
+    const seeds = [0.0, 1.0]
+    let seedIdx = 0
+    Math.random = jest.fn(() => {
+      const v = seeds[seedIdx % seeds.length]
+      seedIdx += 1
+      return v as number
+    })
+
+    try {
+      // Force the FailingWs path so each connect schedules a backoff.
+      class FailingWs {
+        url: string
+
+        readyState = 3
+
+        onopen: Listener | null = null
+
+        onmessage: Listener | null = null
+
+        onclose: Listener | null = null
+
+        onerror: Listener | null = null
+
+        send = jest.fn()
+
+        close = jest.fn()
+
+        addEventListener = jest.fn()
+
+        removeEventListener = jest.fn()
+
+        constructor(url: string) {
+          this.url = url
+          trackWs(this)
+          realSetTimeout(() => this.onerror?.({ type: 'error' }), 0)
+        }
+      }
+      // eslint-disable-next-line no-extra-semi -- prettier emits the leading-semicolon protector
+      ;(globalThis as any).WebSocket = FailingWs
+
+      const handle = await startLspClient({
+        monaco: {} as any,
+        url: 'ws://test/ws/lsp',
+        accessToken: 'TKN',
+        graph: 'demo',
+        maxRetries: 2,
+      })
+      // Wait long enough for both backoff windows to schedule.
+      await new Promise((r) => {
+        realSetTimeout(r, 2400)
+      })
+
+      // The scheduleReconnect path calls setTimeout with the jittered
+      // delay. Filter capturedDelays to keep only the values in the
+      // reconnect-backoff range — other internal setTimeout calls
+      // (e.g. start() microtasks, FailingWs's onerror emit) use 0 or
+      // very small values, so we keep delays >= 100.
+      const reconnectDelays = capturedDelays.filter((d) => d >= 100)
+      expect(reconnectDelays.length).toBeGreaterThanOrEqual(2)
+      const first = reconnectDelays[0] as number
+      const second = reconnectDelays[1] as number
+      // With seeds 0.0 then 1.0, the first delay = base[0]/2 = 250, the
+      // second = base[1] = 1500. Without jitter both would be 500/1500
+      // (no spread). The test passes ONLY if the formula is the
+      // equal-jitter shape.
+      expect(first).toBe(250)
+      expect(second).toBe(1500)
+
+      await handle.dispose()
+    } finally {
+      Math.random = realRandom
+      global.setTimeout = realSetTimeout
+    }
+  })
 })
