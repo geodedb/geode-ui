@@ -19,6 +19,7 @@ import {
   createProfile,
   updateProfile,
 } from '../../api/profiles'
+import { isConflictError } from '../../api/capabilities'
 import { useProfileForm } from './useProfileForm'
 import { TLSFieldset } from './TLSFieldset'
 
@@ -53,6 +54,29 @@ export interface Props {
   onSaved: () => void
   isAdmin: boolean
   profile?: ProfileView
+  // Names of every other profile currently on the server. Used for the
+  // client-side uniqueness check that fires before the POST/PATCH is
+  // submitted. The comparison is case-insensitive and the edit-mode
+  // current name is automatically excluded so a no-rename PATCH does
+  // not collide with itself. Optional so legacy callers (tests) can
+  // omit it and fall back to the server's 409 response.
+  existingNames?: ReadonlyArray<string>
+}
+
+// nameIsDuplicate is the shared client-side check that backs both the
+// live "Save" gate and the same predicate that ProfilesPage runs when
+// the editor mounts. Case-insensitive, NFKC-normalised, trims leading
+// and trailing whitespace before comparing.
+export function nameIsDuplicate(
+  candidate: string,
+  existing: ReadonlyArray<string>,
+  currentName?: string
+): boolean {
+  const norm = (s: string): string => s.normalize('NFKC').trim().toLowerCase()
+  const c = norm(candidate)
+  if (c === '') return false
+  if (currentName && norm(currentName) === c) return false
+  return existing.some((n) => norm(n) === c)
 }
 
 export const ProfileEditorModal: React.FC<Props> = ({
@@ -62,6 +86,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
   onSaved,
   isAdmin,
   profile,
+  existingNames,
 }) => {
   const { t } = useTranslation()
   // useProfileForm hydrates from `profile` on edit-mode and re-syncs
@@ -74,8 +99,26 @@ export const ProfileEditorModal: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // Client-side duplicate check. The Save button is disabled and the
+  // inline hint surfaces while this is true; the same predicate guards
+  // the submit() short-circuit below so a programmatic submit cannot
+  // bypass the gate. Falls back to "no collision" when the caller did
+  // not pass existingNames (legacy callers + tests).
+  const duplicateName = nameIsDuplicate(
+    s.name,
+    existingNames ?? [],
+    mode === 'edit' ? profile?.name : undefined
+  )
+  const nameErrorMessage = duplicateName
+    ? t('profiles.editor.error.nameTaken')
+    : null
+
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
+    if (duplicateName) {
+      setErr(t('profiles.editor.error.nameTaken'))
+      return
+    }
     setBusy(true)
     setErr(null)
     try {
@@ -88,9 +131,17 @@ export const ProfileEditorModal: React.FC<Props> = ({
       onClose()
       if (mode === 'create') reset()
     } catch (e2: unknown) {
-      setErr(
-        e2 instanceof Error ? e2.message : t('profiles.editor.error.failed')
-      )
+      // Map the server's 409 -> friendly "name already exists" message
+      // instead of bleeding the raw transport blob to the user. Server
+      // returns ErrCodeConflict for both POST + PATCH name collisions
+      // (see internal/server/handlers_profiles.go storeErrorToHTTP).
+      if (isConflictError(e2)) {
+        setErr(t('profiles.editor.error.nameTaken'))
+      } else {
+        setErr(
+          e2 instanceof Error ? e2.message : t('profiles.editor.error.failed')
+        )
+      }
     } finally {
       setBusy(false)
     }
@@ -128,7 +179,20 @@ export const ProfileEditorModal: React.FC<Props> = ({
             onChange={(e) => setField('name', e.target.value)}
             required
             maxLength={64}
+            aria-invalid={duplicateName || undefined}
+            aria-describedby={
+              nameErrorMessage ? 'profile-name-error' : undefined
+            }
           />
+          {nameErrorMessage ? (
+            <ErrText
+              id="profile-name-error"
+              role="alert"
+              data-testid="profile-name-error"
+            >
+              {nameErrorMessage}
+            </ErrText>
+          ) : null}
         </Field>
         <Field
           label={t('profiles.editor.field.dsn')}
@@ -237,7 +301,7 @@ export const ProfileEditorModal: React.FC<Props> = ({
           <Button type="button" variant="ghost" onClick={onClose}>
             {t('profiles.editor.actions.cancel')}
           </Button>
-          <Button type="submit" loading={busy}>
+          <Button type="submit" loading={busy} disabled={duplicateName}>
             {t('profiles.editor.actions.save')}
           </Button>
         </ButtonRow>

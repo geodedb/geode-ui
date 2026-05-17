@@ -16,3 +16,9 @@
 /** Server returns this (HTTP 501) when the connected Geode build does not
  *  implement the requested DDL over the GQL wire. */
 export const WIRE_FEATURE_MISSING = 'wire_feature_missing' as const
+
+/** Server returns this (HTTP 409) when a profile mutation (POST or PATCH
+ *  /profiles) tries to land a name that already exists in the same scope
+ *  for the same owner. Mapped from `profilestore.ErrConflict` via
+ *  `storeErrorToHTTP` in internal/server/handlers_profiles_errors.go. */
+export const CONFLICT = 'conflict' as const

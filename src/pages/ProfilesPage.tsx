@@ -359,6 +359,7 @@ export const ProfilesPage: React.FC = () => {
         }}
         isAdmin={isAdmin}
         profile={editorTarget}
+        existingNames={(profiles ?? []).map((p) => p.name)}
       />
       {deleteTarget && (
         <DeleteProfileModal

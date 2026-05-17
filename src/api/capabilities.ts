@@ -1,5 +1,5 @@
 import { client } from './client'
-import { WIRE_FEATURE_MISSING } from './serverErrorCodes'
+import { CONFLICT, WIRE_FEATURE_MISSING } from './serverErrorCodes'
 
 // Capabilities mirrors the `GET /api/v1/capabilities` response. The
 // generated client types `admin_writable` as `Record<string, unknown>`
@@ -101,6 +101,26 @@ export function wireFeatureMissingDescription(err: unknown): string | null {
     }
   }
   return null
+}
+
+// isConflictError reports whether a rejected client call looks like the
+// server's HTTP 409 `conflict` response. For the profile CRUD handlers
+// the only producer is `profilestore.ErrConflict` -> `storeErrorToHTTP`
+// -> `ErrCodeConflict`, surfaced when a profile mutation (POST or
+// PATCH) tries to land a name that already exists in the same scope
+// for the same owner. Accepts the same shape envelope as
+// isWireFeatureMissingError.
+export function isConflictError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { status?: unknown; body?: unknown; message?: unknown }
+  if (e.status === 409) return true
+  const body = parseErrBody(e.body)
+  if (body && body.error === CONFLICT) return true
+  if (typeof e.message === 'string') {
+    if (/http status 409\b/i.test(e.message)) return true
+    if (e.message.includes(`"error":"${CONFLICT}"`)) return true
+  }
+  return false
 }
 
 interface ErrBody {

@@ -508,6 +508,7 @@ export const en = {
       },
       error: {
         failed: 'Failed to save profile',
+        nameTaken: 'A profile with this name already exists',
       },
     },
     delete: {

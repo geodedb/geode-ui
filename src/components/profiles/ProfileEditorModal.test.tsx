@@ -270,3 +270,148 @@ test('create — Browse fills CA textarea with file contents (Electron)', async 
   ) as HTMLTextAreaElement
   expect(caTextarea.value).toBe('---PEM---')
 })
+
+// ── Profile name uniqueness ──────────────────────────────────────────
+//
+// The 2026-05-17 uniqueness pass added: (a) a client-side duplicate
+// gate driven by the `existingNames` prop, (b) an inline error hint
+// + disabled Save button while the name collides, and (c) a server
+// 409 -> friendly "name already exists" translation. The three tests
+// below exercise each branch.
+
+const renderCreateWithNames = (existingNames: string[], onClose?: () => void) =>
+  render(
+    <I18nextProvider i18n={i18n}>
+      <ThemeProvider theme={lightTheme}>
+        <ProfileEditorModal
+          mode="create"
+          open
+          onClose={onClose ?? jest.fn()}
+          onSaved={jest.fn()}
+          isAdmin
+          existingNames={existingNames}
+        />
+      </ThemeProvider>
+    </I18nextProvider>
+  )
+
+test('create — typing a duplicate name surfaces the inline error and disables Save', async () => {
+  renderCreateWithNames(['Default', 'Staging'])
+  fireEvent.change(document.getElementById('profile-name')!, {
+    target: { value: 'default' },
+  })
+  // The inline error appears below the name input.
+  expect(await screen.findByTestId('profile-name-error')).toHaveTextContent(
+    /already exists/i
+  )
+  // Save button is disabled (jsdom: the button is the dialog's Save).
+  const save = screen.getByRole('button', { name: /save/i })
+  expect(save).toBeDisabled()
+})
+
+test('create — submitting a duplicate name short-circuits and does NOT call createProfile', async () => {
+  mockCreate.mockReset()
+  renderCreateWithNames(['Default'])
+  fireEvent.change(document.getElementById('profile-name')!, {
+    target: { value: 'Default' },
+  })
+  fireEvent.change(document.getElementById('profile-dsn')!, {
+    target: { value: 'quic://x:1' },
+  })
+  await act(async () => {
+    fireEvent.submit(document.getElementById('profile-name')!.closest('form')!)
+    await Promise.resolve()
+  })
+  expect(mockCreate).not.toHaveBeenCalled()
+})
+
+test('create — server 409 conflict response surfaces the friendly i18n message', async () => {
+  // Defense-in-depth: even when client gating is missing or the
+  // profile list raced, a 409 from the server must produce the same
+  // friendly "name already exists" alert.
+  mockCreate.mockReset()
+  mockCreate.mockRejectedValueOnce(
+    Object.assign(new Error('http status 409: {"error":"conflict"}'), {
+      status: 409,
+      body: { error: 'conflict' },
+    })
+  )
+  renderCreateWithNames([]) // empty list -> client gate doesn't trip
+  fireEvent.change(document.getElementById('profile-name')!, {
+    target: { value: 'p1' },
+  })
+  fireEvent.change(document.getElementById('profile-dsn')!, {
+    target: { value: 'quic://x:1' },
+  })
+  await act(async () => {
+    fireEvent.submit(document.getElementById('profile-name')!.closest('form')!)
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  // The dialog renders multiple `role=alert` elements (inline name
+  // error + footer ErrText). Both should reflect the friendly i18n
+  // string; the footer one (`ErrText role="alert"`) is the one the
+  // submit() catch wrote to.
+  const alerts = await screen.findAllByRole('alert')
+  const text = alerts.map((a) => a.textContent ?? '').join(' | ')
+  expect(text).toMatch(/already exists/i)
+  expect(text).not.toMatch(/http status 409/i)
+})
+
+test('edit — keeping the same name does NOT trip the duplicate gate', async () => {
+  // No-rename PATCH must not collide with itself. existingNames here
+  // includes the current name (the page passes the full list).
+  render(
+    <I18nextProvider i18n={i18n}>
+      <ThemeProvider theme={lightTheme}>
+        <ProfileEditorModal
+          mode="edit"
+          open
+          onClose={jest.fn()}
+          onSaved={jest.fn()}
+          isAdmin
+          profile={editProfile}
+          existingNames={[editProfile.name, 'OtherProfile']}
+        />
+      </ThemeProvider>
+    </I18nextProvider>
+  )
+  await waitFor(() => {
+    expect(
+      (document.getElementById('profile-name') as HTMLInputElement).value
+    ).toBe(editProfile.name)
+  })
+  expect(screen.queryByTestId('profile-name-error')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: /save/i })).not.toBeDisabled()
+})
+
+test('edit — renaming to a peer profile name DOES trip the duplicate gate', async () => {
+  render(
+    <I18nextProvider i18n={i18n}>
+      <ThemeProvider theme={lightTheme}>
+        <ProfileEditorModal
+          mode="edit"
+          open
+          onClose={jest.fn()}
+          onSaved={jest.fn()}
+          isAdmin
+          profile={editProfile}
+          existingNames={[editProfile.name, 'OtherProfile']}
+        />
+      </ThemeProvider>
+    </I18nextProvider>
+  )
+  await waitFor(() => {
+    expect(
+      (document.getElementById('profile-name') as HTMLInputElement).value
+    ).toBe(editProfile.name)
+  })
+  fireEvent.change(document.getElementById('profile-name')!, {
+    target: { value: 'OtherProfile' },
+  })
+  expect(await screen.findByTestId('profile-name-error')).toHaveTextContent(
+    /already exists/i
+  )
+  expect(screen.getByRole('button', { name: /save/i })).toBeDisabled()
+})
