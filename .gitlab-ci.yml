@@ -747,10 +747,13 @@ electron:win:
 
 release:publish:
   stage: publish
-  # image-pin: 2026-05-16 @ release-cli :latest is GitLab's recommended
-  # tag for the release-cli helper; pin the digest at the next 60d
-  # cycle. QUALITY #233 / scripts/check-image-pins.sh enforces cadence.
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  # image-pin: 2026-05-17 @ release-cli v0.24.0 pinned to immutable
+  # digest sha256:3f52d526f4...96dacf (resolved via
+  # `docker buildx imagetools inspect registry.gitlab.com/gitlab-org/release-cli:v0.24.0`).
+  # S-12 (#280) — replaces the prior `:latest` floating tag. Refresh on
+  # the same 60d cadence as the rest of the file. QUALITY #233 /
+  # scripts/check-image-pins.sh enforces cadence.
+  image: registry.gitlab.com/gitlab-org/release-cli:v0.24.0@sha256:3f52d526f48e8d10625c722fa6d6423ee82aadeae1b1aa91f07b62551d96dacf
   needs:
     - job: goreleaser:release
       artifacts: true
