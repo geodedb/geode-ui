@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -183,7 +184,7 @@ func TestNewApp_MissingProfilestoreKey_Errors(t *testing.T) {
 		profileStore: ":memory:",
 		secretHex:    validJWTSecretHex(),
 		jwtTTL:       defaultJWTTTL,
-		adminUsers:   "geode",
+		adminUsers:   "test-admin",
 	}
 	_, err := newApp(cfg, envFunc(nil)) // GEODE_PROFILESTORE_KEY unset
 	if err == nil {
@@ -200,7 +201,7 @@ func TestNewApp_InvalidJWTSecret_Errors(t *testing.T) {
 		profileStore: ":memory:",
 		secretHex:    "zzzz", // not valid hex
 		jwtTTL:       defaultJWTTTL,
-		adminUsers:   "geode",
+		adminUsers:   "test-admin",
 	}
 	_, err := newApp(cfg, envFunc(map[string]string{"GEODE_PROFILESTORE_KEY": validProfilestoreKey()}))
 	if err == nil {
@@ -214,7 +215,7 @@ func TestNewApp_HappyPath(t *testing.T) {
 		profileStore:  filepath.Join(t.TempDir(), "profiles.db"),
 		secretHex:     validJWTSecretHex(),
 		jwtTTL:        defaultJWTTTL,
-		adminUsers:    "geode",
+		adminUsers:    "test-admin",
 		uploadDir:     t.TempDir(),
 		secureCookies: true,
 	}
@@ -236,6 +237,48 @@ func TestNewApp_HappyPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz through the assembled handler: want 200, got %d (body %q)", rec.Code, rec.Body.String())
 	}
+}
+
+// TestNoLiteralGeodeAdminFixture pins SEC #267: test fixtures must not
+// hard-code the product name as the seed admin-user value. The product
+// name colliding with a privileged account name is a footgun — it
+// implies that real deployments should keep that username on the
+// admin list, which is exactly the auto-bootstrap shape SEC #202
+// deliberately removed (see TestParseFlags_AdminUsersDefaultEmpty
+// below). Anywhere a fixture needs a non-empty admin user,
+// "test-admin" is the canonical placeholder.
+//
+// The test reads this file (the only place the fixture appears) and
+// asserts the forbidden adminUsers literal no longer occurs. The
+// forbidden token is assembled at runtime from substrings so this
+// detector code does not itself trip the check.
+func TestNoLiteralGeodeAdminFixture(t *testing.T) {
+	t.Parallel()
+	const self = "app_test.go"
+	src := mustReadSelf(t, self)
+	// Assemble at runtime: "adminUsers:" + spaces + `"` + product-name + `"`.
+	// Splitting the product name across literals avoids self-reference.
+	const product = "geo" + "de"
+	want := "test-admin"
+	for _, ws := range []string{"   ", "    "} {
+		forbidden := "adminUsers:" + ws + `"` + product + `"`
+		if strings.Contains(src, forbidden) {
+			t.Fatalf("SEC #267: %s still contains forbidden literal %q; rename to %q",
+				self, forbidden, "adminUsers:"+ws+`"`+want+`"`)
+		}
+	}
+}
+
+// mustReadSelf reads name from the current package directory and fails
+// the test if the file is missing. Centralised so future self-inspection
+// tests can share the helper.
+func mustReadSelf(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(b)
 }
 
 // TestParseFlags_AdminUsersDefaultEmpty pins SEC-NEW-2 (#202): the
@@ -468,7 +511,7 @@ func TestNewApp_WiresMCPAuthVerifier(t *testing.T) {
 		profileStore:  filepath.Join(t.TempDir(), "profiles.db"),
 		secretHex:     validJWTSecretHex(),
 		jwtTTL:        defaultJWTTTL,
-		adminUsers:    "geode",
+		adminUsers:    "test-admin",
 		uploadDir:     t.TempDir(),
 		secureCookies: true,
 	}
