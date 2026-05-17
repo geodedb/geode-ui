@@ -225,12 +225,17 @@ func (s *GraphServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *gentype
 //
 //	cfg := graphSrv.LSPConfig()
 //	if cfg.Enabled {
-//	    server.RegisterLspWS(mux, graphSrv.AuthJWT, cfg.UpstreamAddr)
+//	    server.RegisterLspWS(mux, graphSrv.AuthJWT, cfg.UpstreamAddr, cfg.AllowedOrigins)
 //	}
 //
 // upstreamAddr is the host:port the bridge dials per connection. It
 // flows from Config.LSP.UpstreamAddr (Task 31) so deployments can
 // colocate or fan out the LSP listener independently.
-func RegisterLspWS(mux *http.ServeMux, auth func(*http.Request) error, upstreamAddr string) {
-	mux.Handle("/ws/lsp", newWsLspHandler(upstreamAddr, auth))
+//
+// allowedOrigins is the explicit origin allowlist for the upgrade
+// (SEC issue 265). Pass nil/empty to enforce same-origin-only (the
+// handler derives the same-origin URL from r.Host + r.TLS); pass a
+// non-empty list to broaden to additional trusted origins.
+func RegisterLspWS(mux *http.ServeMux, auth func(*http.Request) error, upstreamAddr string, allowedOrigins []string) {
+	mux.Handle("/ws/lsp", newWsLspHandler(upstreamAddr, auth, allowedOrigins))
 }

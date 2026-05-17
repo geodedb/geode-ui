@@ -144,7 +144,11 @@ func newTestLspServer(t *testing.T, upstreamAddr string) (*httptest.Server, *Gra
 	iss := newTestIssuer(t)
 	srv := New(Config{JWT: iss})
 	mux := http.NewServeMux()
-	RegisterLspWS(mux, srv.AuthJWT, upstreamAddr)
+	// Tests run against httptest.NewServer which mints a random local
+	// 127.0.0.1:N origin per test. Passing nil allowedOrigins picks the
+	// same-origin default from the handler — exactly what production
+	// uses when no operator override is supplied.
+	RegisterLspWS(mux, srv.AuthJWT, upstreamAddr, nil)
 	hs := httptest.NewServer(mux)
 	return hs, srv
 }
@@ -288,6 +292,96 @@ func TestInjectAuthIntoInitialize_MalformedBypass(t *testing.T) {
 	out := injectAuthIntoInitialize(in, "tok")
 	if string(out) != string(in) {
 		t.Fatalf("expected passthrough for malformed body, got %s", out)
+	}
+}
+
+// TestWsLspRejectsCrossOriginUpgrade pins SEC issue 265: an explicit
+// cross-origin Origin header (one that does NOT match the request Host)
+// MUST be rejected by UpgradeStrict, regardless of whether the request
+// carries a valid JWT. The geode-ui-auth cookie is SameSite=Strict, so
+// the cookie-mode CSWSH vector is already blocked at the cookie layer;
+// this gate adds defense-in-depth against a future SameSite regression
+// + the query-token mode used by the SPA's LSP client.
+func TestWsLspRejectsCrossOriginUpgrade(t *testing.T) {
+	upstream := newFakeLspTcp(t)
+	defer upstream.Close()
+	hs, srv := newTestLspServer(t, upstream.Addr())
+	defer hs.Close()
+	tok := mintTestToken(t, srv, "alice")
+
+	// Forge a cross-origin Origin header. wsx.Dial doesn't expose an
+	// Origin override directly, so we drive the raw HTTP upgrade with
+	// net/http and assert the server returns a 4xx.
+	wsURL := strings.TrimPrefix(hs.URL, "http://")
+	c, err := net.Dial("tcp", wsURL)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	req := "GET /ws/lsp?access_token=" + tok + " HTTP/1.1\r\n" +
+		"Host: " + wsURL + "\r\n" +
+		"Origin: https://evil.example.com\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"\r\n"
+	if _, err := c.Write([]byte(req)); err != nil {
+		t.Fatalf("write upgrade: %v", err)
+	}
+	br := bufio.NewReader(c)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	// A cross-origin Origin must NOT yield a 101 Switching Protocols;
+	// the exact non-101 status is wsx's call (typically 403). What we
+	// care about is that the bridge refused to upgrade.
+	if strings.Contains(statusLine, "101") {
+		t.Fatalf("cross-origin upgrade was allowed: %q", strings.TrimSpace(statusLine))
+	}
+}
+
+// TestWsLspAcceptsSameOriginUpgrade is the positive companion: an
+// Origin header that DOES match the request Host (the same-origin
+// default for the SPA) still succeeds end-to-end. Pins that the new
+// same-origin default isn't over-restrictive against the production
+// SPA shape.
+func TestWsLspAcceptsSameOriginUpgrade(t *testing.T) {
+	upstream := newFakeLspTcp(t)
+	defer upstream.Close()
+	hs, srv := newTestLspServer(t, upstream.Addr())
+	defer hs.Close()
+	tok := mintTestToken(t, srv, "alice")
+
+	host := strings.TrimPrefix(hs.URL, "http://")
+	c, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	// Origin matches the same-origin URL the handler synthesises from
+	// r.Host + (no r.TLS so http://). The handshake key is a valid
+	// 16-byte base64 nonce; the server returns 101 Switching Protocols
+	// on a successful upgrade.
+	req := "GET /ws/lsp?access_token=" + tok + " HTTP/1.1\r\n" +
+		"Host: " + host + "\r\n" +
+		"Origin: http://" + host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"\r\n"
+	if _, err := c.Write([]byte(req)); err != nil {
+		t.Fatalf("write upgrade: %v", err)
+	}
+	br := bufio.NewReader(c)
+	statusLine, err := br.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if !strings.Contains(statusLine, "101") {
+		t.Fatalf("same-origin upgrade rejected: %q", strings.TrimSpace(statusLine))
 	}
 }
 

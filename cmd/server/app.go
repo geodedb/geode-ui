@@ -59,6 +59,10 @@ type appConfig struct {
 	// surface can opt out with -lsp-enabled=false.
 	lspUpstreamAddr string
 	lspEnabled      bool
+	// SEC issue 265: comma-separated absolute origins permitted to
+	// upgrade /ws/lsp. Empty (default) means same-origin only; the
+	// handler synthesises the same-origin URL from r.Host + r.TLS.
+	wsAllowedOrigins string
 }
 
 // parseFlags builds an appConfig from args[1:] using a private FlagSet
@@ -128,6 +132,13 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// schema-aware completion out of the box.
 	fs.StringVar(&cfg.lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener (geode serve --lsp-port)")
 	fs.BoolVar(&cfg.lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP listener")
+	// SEC issue 265: comma-separated absolute origins permitted to
+	// upgrade /ws/lsp. Empty (default) enforces same-origin only — the
+	// handler synthesises the same-origin URL from r.Host + r.TLS so
+	// the route is default-deny against cross-origin attackers. Add
+	// trusted origins here for cross-origin SPA deployments (e.g. a
+	// front-end served from a CDN distinct from the API origin).
+	fs.StringVar(&cfg.wsAllowedOrigins, "ws-allowed-origins", "", "comma-separated absolute origins permitted to upgrade /ws/lsp (e.g. https://app.example.com); empty = same-origin only")
 	if err := fs.Parse(args[1:]); err != nil {
 		return appConfig{}, err
 	}

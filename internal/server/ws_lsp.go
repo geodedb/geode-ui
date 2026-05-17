@@ -59,17 +59,53 @@ const maxLspMessage = 16 * 1024 * 1024
 // the upstream TCP address (typically 127.0.0.1:3142 for a colocated
 // geode serve --lsp-port=3142) and an AuthJWT-shaped callback that
 // returns nil on a valid request.
+//
+// SEC-2026-05-17-02 (issue 265): allowedOrigins is the explicit
+// allowlist enforced by wsx.UpgradeStrict before the WebSocket upgrade.
+// When empty the handler derives a same-origin allowlist from the
+// request's Host + TLS state, so the route is default-deny against
+// cross-origin upgrades. Operators can broaden the allowlist via the
+// -ws-allowed-origins CLI flag (comma-separated absolute origins).
+// Defense-in-depth: the route is still JWT-gated and the geode-ui-auth
+// cookie is SameSite=Strict, so a CSWSH attack against an authenticated
+// victim is already blocked at the cookie layer; this gate covers the
+// "SameSite regression silently re-opens the vector" case.
 type wsLspHandler struct {
-	upstreamAddr string
-	auth         func(*http.Request) error
+	upstreamAddr   string
+	auth           func(*http.Request) error
+	allowedOrigins []string
 }
 
 // newWsLspHandler constructs the bridge handler. The auth callback may
 // be nil in which case the bridge fails closed (every request gets
 // 401) — matching the generated genapi behaviour when AuthJWT is
-// unset.
-func newWsLspHandler(upstreamAddr string, auth func(*http.Request) error) *wsLspHandler {
-	return &wsLspHandler{upstreamAddr: upstreamAddr, auth: auth}
+// unset. allowedOrigins is the explicit origin allowlist; pass nil/empty
+// to enforce same-origin-only (issue 265).
+func newWsLspHandler(upstreamAddr string, auth func(*http.Request) error, allowedOrigins []string) *wsLspHandler {
+	return &wsLspHandler{
+		upstreamAddr:   upstreamAddr,
+		auth:           auth,
+		allowedOrigins: allowedOrigins,
+	}
+}
+
+// resolveAllowedOrigins returns the wsx OriginAllowlist for this request.
+// When the explicit list is non-empty it is returned verbatim; when it
+// is empty the same-origin URL is synthesised from r.TLS + r.Host so
+// the upgrade fails closed against any cross-origin attacker.
+//
+// Same-origin synthesis honours r.TLS (https) and falls back to http
+// for plaintext listeners. The Host header is whatever the proxy /
+// browser supplied; r.Host is the parsed host:port string.
+func (h *wsLspHandler) resolveAllowedOrigins(r *http.Request) []string {
+	if len(h.allowedOrigins) > 0 {
+		return h.allowedOrigins
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return []string{scheme + "://" + r.Host}
 }
 
 // ServeHTTP enforces auth, upgrades to WebSocket, dials the upstream
@@ -92,19 +128,23 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ?access_token= query string fallback.
 	token, _ := extractBearer(r)
 
-	// UpgradeStrict is the fail-closed origin-check entry point introduced
-	// after SEC-0008 — `Upgrade` is now deprecated. The bridge is exposed
-	// on the same origin as the rest of the API, so we set
-	// AllowAnyOrigin=true to match the generated /ws/query behaviour;
-	// when an explicit allowlist lands in config we'll plumb it through
-	// here too.
+	// UpgradeStrict is the fail-closed origin-check entry point
+	// introduced after SEC-0008; `Upgrade` is now deprecated. SEC issue
+	// 265 closes the CSWSH defense-in-depth gap by switching from
+	// AllowAnyOrigin=true to an explicit OriginAllowlist:
+	//   - default (no -ws-allowed-origins flag): same-origin only, synthesised
+	//     from the request's TLS state + Host
+	//   - explicit allowlist via -ws-allowed-origins: matches verbatim
+	// AllowEmptyOrigin is preserved (some browser-internal upgrades omit
+	// the Origin header; the JWT gate above is the actual authority).
 	conn, err := wsx.UpgradeStrict(w, r, wsx.Options{
-		MaxFrame:       maxLspMessage,
-		MaxMessage:     maxLspMessage,
-		ReadTimeout:    0,
-		WriteTimeout:   30 * time.Second,
-		PingInterval:   30 * time.Second,
-		AllowAnyOrigin: true,
+		MaxFrame:         maxLspMessage,
+		MaxMessage:       maxLspMessage,
+		ReadTimeout:      0,
+		WriteTimeout:     30 * time.Second,
+		PingInterval:     30 * time.Second,
+		OriginAllowlist:  h.resolveAllowedOrigins(r),
+		AllowEmptyOrigin: true,
 	})
 	if err != nil {
 		// Upgrade writes its own 4xx response on header validation

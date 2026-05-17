@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	genmcp "geodedb.com/geode-ui/gen/mcp"
@@ -13,6 +14,29 @@ import (
 	"geodedb.com/geode-ui/internal/server"
 	"geodedb.com/geode-ui/internal/ui"
 )
+
+// splitTrim splits s on sep, trims surrounding whitespace from every
+// element, and drops empty entries. Used to convert the
+// -ws-allowed-origins comma-separated CLI string into a slice of
+// absolute origins. Returns nil for an all-empty input so the caller
+// can short-circuit the "no allowlist" branch with a single len() check.
+func splitTrim(s, sep string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // app_routes.go decomposes the routing body of newApp per QUALITY rank
 // 3 / #193. See app_issuer.go for the full split map.
@@ -73,9 +97,16 @@ func registerRoutes(mux *http.ServeMux, cfg appConfig, pool *conn.Pool, issuer *
 	// (geode serve --lsp-port). Conditional on cfg.lspEnabled so
 	// deployments that don't expose LSP through the browser-facing
 	// surface can opt out with -lsp-enabled=false.
+	//
+	// SEC issue 265: empty wsAllowedOrigins is the secure default
+	// (same-origin only). Operators that need cross-origin upgrades
+	// pass -ws-allowed-origins=https://app.example.com,https://….
 	if cfg.lspEnabled {
-		server.RegisterLspWS(mux, srv.AuthJWT, cfg.lspUpstreamAddr)
-		slog.Info("lsp bridge registered", "upstream", cfg.lspUpstreamAddr)
+		origins := splitTrim(cfg.wsAllowedOrigins, ",")
+		server.RegisterLspWS(mux, srv.AuthJWT, cfg.lspUpstreamAddr, origins)
+		slog.Info("lsp bridge registered",
+			"upstream", cfg.lspUpstreamAddr,
+			"allowed_origins", len(origins))
 	}
 
 	// MCP surface — geode.json declares one tool ("query") on the http
