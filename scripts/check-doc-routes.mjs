@@ -30,6 +30,10 @@ const HISTORICAL_ALLOWLIST = [
   // the residue rule.
   /^\.remember\//,
   /^\.scratch\//,
+  // CHANGELOG.md MUST be able to describe the removal of the
+  // /workspace route + WorkspacePage component in its Removed
+  // subsection -- that is, after all, the whole point of a changelog.
+  /^CHANGELOG\.md$/,
   // The gap-tracking row that DESCRIBES this very check is allowed
   // to use the term once in its evidence column. Once #253 is
   // marked Closed the row gets rewritten anyway.

@@ -23,6 +23,7 @@
     "detect:hardcoded-strings": "node scripts/detect-hardcoded-strings.mjs --strict",
     "check:html-renderers": "node scripts/check-html-renderers.mjs",
     "check:doc-routes": "node scripts/check-doc-routes.mjs",
+    "check:changelog": "node scripts/check-changelog.mjs",
     "prettier:check": "prettier --check 'src/**/*.{ts,tsx,json,css}'",
     "prettier:fix": "prettier --write 'src/**/*.{ts,tsx,json,css}'",
     "clean": "rm -rf dist build coverage",
