@@ -102,7 +102,7 @@ const auditBufferCap = 10_000
 
 // auditRing is a fixed-capacity FIFO ring buffer of AuditEntry. Concurrent
 // callers append from request handlers; the /api/v1/audit endpoint reads
-// a snapshot. The mutex is the simplest safe approach — append is O(1)
+// a snapshot. The lock is the simplest safe approach — append is O(1)
 // and snapshot is O(n) over the whole buffer; n is bounded by
 // auditBufferCap so this never grows unbounded.
 //
@@ -112,8 +112,16 @@ const auditBufferCap = 10_000
 // handler AFTER snapshot releases the lock — so a /api/v1/audit poll
 // no longer copies (and encodes) ~10k entries while holding the lock
 // that every hot emitAudit append needs.
+//
+// PERF-2026-05-17-06 (#246): mu is an RWMutex so /api/v1/audit poll
+// snapshots take RLock while emitAudit appends take Lock. A long poll
+// (10k-entry copy + iteration) used to block every concurrent append
+// for the full duration of the snapshot; under RWMutex the snapshot
+// only blocks other appends while it holds the read lock, and a burst
+// of concurrent appends serialise normally against each other without
+// being gated on any in-flight read.
 type auditRing struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex
 	buf   []AuditEntry
 	start int // logical start index in buf (writes wrap)
 	count int // current entries
@@ -167,8 +175,8 @@ func (r *auditRing) append(entry AuditEntry) {
 // individually and pass two re-checks each entry. That keeps the
 // historical "exactly the entries >= since, in ring order" contract.
 func (r *auditRing) snapshot(since time.Time) []AuditEntry {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	// Pass one: count matches without allocating. For a zero `since`
 	// every retained entry matches, so the count is just r.count.
