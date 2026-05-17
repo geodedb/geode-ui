@@ -49,9 +49,20 @@ export const en = {
     query: 'Query',
     schema: 'Schema',
     admin: 'Admin',
-    ops: 'Ops',
     profiles: 'Profiles',
     logout: 'Logout',
+    // Admin sub-tab labels (rendered inside AdminPage's tab strip).
+    // The first four were inline string literals pre-Ops merge; the
+    // last four were the OpsPage tabs before that page was deleted
+    // (2026-05-17) and its sub-routes folded into /admin/*.
+    adminTabUsers: 'Users',
+    adminTabRoles: 'Roles',
+    adminTabPolicies: 'Policies',
+    adminTabGrants: 'Grants',
+    adminTabBackups: 'Backups',
+    adminTabRestore: 'Restore',
+    adminTabMigrations: 'Migrations',
+    adminTabAudit: 'Audit',
   },
 
   auth: {

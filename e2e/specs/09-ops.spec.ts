@@ -1,22 +1,28 @@
 import { test, expect } from '../fixtures'
 import { sel } from '../helpers/selectors'
 
-test.describe('ops', () => {
-  test('default tab is backups', async ({ authedPage: page }) => {
-    await page.goto('/ops')
-    await expect(page).toHaveURL(/\/ops\/backups/)
+// Ops sub-routes were folded into /admin/* on 2026-05-17 (the /ops top-
+// level route and OpsPage were deleted; the same panels now render as
+// the trailing four tabs of AdminPage). The spec was previously
+// `/ops/*`-rooted; pathnames migrated to `/admin/*` to match.
+test.describe('ops (relocated under /admin)', () => {
+  test('admin backups tab loads via /admin/backups', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/admin/backups')
+    await expect(page).toHaveURL(/\/admin\/backups/)
     await expect(sel.newBackupBtn(page)).toBeVisible()
   })
 
   test('migrations tab loads', async ({ authedPage: page }) => {
-    await page.goto('/ops/migrations')
+    await page.goto('/admin/migrations')
     await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible()
   })
 
   test('audit tab polls and renders the table', async ({
     authedPage: page,
   }) => {
-    await page.goto('/ops/audit')
+    await page.goto('/admin/audit')
     await expect(page.getByText(/Audit log/)).toBeVisible()
     await expect(
       page.getByRole('columnheader', { name: 'Event' })
@@ -57,7 +63,7 @@ test.describe('ops', () => {
         timeout_ms: 30000,
       },
     })
-    await page.goto('/ops/audit')
+    await page.goto('/admin/audit')
     await expect(page.getByText('query_executed').first()).toBeVisible({
       timeout: 10_000,
     })
@@ -66,7 +72,7 @@ test.describe('ops', () => {
   test('restore tab pre-fills file from BackupPage navigation', async ({
     authedPage: page,
   }) => {
-    await page.goto('/ops/restore')
+    await page.goto('/admin/restore')
     const fileInput = page.getByPlaceholder(/backup file/i).first()
     await expect(fileInput).toBeVisible()
     expect(await fileInput.inputValue()).toBe('')

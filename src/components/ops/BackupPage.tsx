@@ -17,7 +17,7 @@ import {
   TableScroll,
 } from '../ui'
 
-// BackupPage drives the /ops/backups tab. The Geode B7 endpoints back
+// BackupPage drives the /admin/backups tab. The Geode B7 endpoints back
 // every action:
 //
 //   list   GET    /api/v1/backups          -> client.getBackups
@@ -25,7 +25,7 @@ import {
 //   delete DELETE /api/v1/backups/{file}   -> client.deleteFile
 //
 // The download action stays disabled because the API does not yet
-// expose a streaming download; restore navigates to /ops/restore with
+// expose a streaming download; restore navigates to /admin/restore with
 // the file pre-filled via the location state.
 type Backup = {
   file: string
@@ -115,8 +115,9 @@ export const BackupPage: React.FC = () => {
 
   const onRestore = (file: string): void => {
     // Navigate to the restore tab with the file pre-filled. RestorePage
-    // reads location.state.file in a useEffect.
-    navigate('/ops/restore', { state: { file } })
+    // reads location.state.file in a useEffect. The route lives under
+    // /admin/* since the 2026-05-17 ops-into-admin merge.
+    navigate('/admin/restore', { state: { file } })
   }
 
   return (

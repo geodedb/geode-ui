@@ -17,7 +17,6 @@ import { UsersPage } from './components/admin/UsersPage'
 import { RolesPage } from './components/admin/RolesPage'
 import { PoliciesPage } from './components/admin/PoliciesPage'
 import { GrantsPanel } from './components/admin/GrantsPanel'
-import { OpsPage } from './pages/OpsPage'
 import { ProfilesPage } from './pages/ProfilesPage'
 import { BackupPage } from './components/ops/BackupPage'
 import { RestorePage } from './components/ops/RestorePage'
@@ -160,9 +159,6 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                     <Route path="roles" element={<RolesPage />} />
                     <Route path="policies" element={<PoliciesPage />} />
                     <Route path="grants" element={<GrantsPanel />} />
-                  </Route>
-                  <Route path="ops" element={<OpsPage />}>
-                    <Route index element={<Navigate to="backups" replace />} />
                     <Route path="backups" element={<BackupPage />} />
                     <Route path="restore" element={<RestorePage />} />
                     <Route path="migrations" element={<MigrationsPage />} />

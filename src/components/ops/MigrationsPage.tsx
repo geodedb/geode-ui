@@ -16,7 +16,7 @@ import {
   Textarea,
 } from '../ui'
 
-// MigrationsPage drives the /ops/migrations tab. Geode B8 endpoints:
+// MigrationsPage drives the /admin/migrations tab. Geode B8 endpoints:
 //
 //   list   GET    /api/v1/migrations             -> client.getMigrations
 //   create POST   /api/v1/migrations             -> client.postMigrations

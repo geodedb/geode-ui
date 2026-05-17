@@ -6,7 +6,7 @@ import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
 import { DataTable, EmptyCell, Field, Input, Stack, TableScroll } from '../ui'
 
-// AuditLogPage drives the /ops/audit tab. The Geode B11 endpoint backs
+// AuditLogPage drives the /admin/audit tab. The Geode B11 endpoint backs
 // the table:
 //
 //   query GET /api/v1/audit -> client.audit({ since, event, user })

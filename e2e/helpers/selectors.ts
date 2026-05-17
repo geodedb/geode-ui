@@ -35,7 +35,6 @@ export const sel = {
   navQuery: (p: Page): Locator => p.getByRole('link', { name: 'Query' }),
   navSchema: (p: Page): Locator => p.getByRole('link', { name: 'Schema' }),
   navAdmin: (p: Page): Locator => p.getByRole('link', { name: 'Admin' }),
-  navOps: (p: Page): Locator => p.getByRole('link', { name: 'Ops' }),
   logout: (p: Page): Locator => p.getByRole('button', { name: /logout/i }),
   // Post-Plan-C the connection surface is a button-driven dropdown
   // (ConnectionSwitcher) — NOT a <select>. The trigger displays the

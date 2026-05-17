@@ -40,10 +40,10 @@ const ROUTES_PROTECTED = [
   '/admin/roles',
   '/admin/policies',
   '/admin/grants',
-  '/ops/backups',
-  '/ops/restore',
-  '/ops/migrations',
-  '/ops/audit',
+  '/admin/backups',
+  '/admin/restore',
+  '/admin/migrations',
+  '/admin/audit',
   '/profiles',
 ]
 

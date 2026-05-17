@@ -119,7 +119,6 @@ test.describe('@responsive responsive layout', () => {
     await expect(sel.navQuery(page)).toBeVisible()
     await expect(sel.navSchema(page)).toBeVisible()
     await expect(sel.navAdmin(page)).toBeVisible()
-    await expect(sel.navOps(page)).toBeVisible()
     await expect(sel.logout(page)).toBeVisible()
 
     // The mobile toggle is rendered (so click handlers are wired) but

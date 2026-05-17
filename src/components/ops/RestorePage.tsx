@@ -20,7 +20,7 @@ function bannerColor({ $tone, theme }: ToneArgs): string {
   return $tone === 'err' ? theme.text.danger : theme.text.success
 }
 
-// RestorePage drives the /ops/restore tab. Backed by Geode B7:
+// RestorePage drives the /admin/restore tab. Backed by Geode B7:
 //
 //   restore POST /api/v1/restore -> client.restore({ file, target_time })
 //

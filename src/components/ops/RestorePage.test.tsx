@@ -40,7 +40,7 @@ function renderPage(initialEntries?: unknown[]): void {
     <ThemeProvider theme={theme}>
       <MemoryRouter
         initialEntries={
-          (initialEntries as never[] | undefined) ?? ['/ops/restore']
+          (initialEntries as never[] | undefined) ?? ['/admin/restore']
         }
       >
         <RestorePage />
@@ -69,7 +69,7 @@ test('renders the restore form', () => {
 
 test('pre-fills the File field from router location state (BackupPage deep-link)', async () => {
   renderPage([
-    { pathname: '/ops/restore', state: { file: 'geode-2025-01-01.tar.gz' } },
+    { pathname: '/admin/restore', state: { file: 'geode-2025-01-01.tar.gz' } },
   ])
   await waitFor(() => {
     expect(screen.getByRole('textbox', { name: 'File' })).toHaveValue(
