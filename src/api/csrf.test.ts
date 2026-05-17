@@ -111,3 +111,65 @@ test('clearCsrfToken empties the cache', async () => {
   // we used in beforeEach.)
   expect(getCsrfToken()).toBeNull()
 })
+
+// PERF #257: when the CSRF cookie expires every in-flight mutation
+// gets a 403, and each of those mutations independently calls
+// refreshCsrfToken(). Without dedup that's N concurrent /api/v1/csrf
+// fetches for the same effect (the server mints a new token and the
+// caller only needs one). The fix wraps refreshCsrfToken in a
+// singleflight: concurrent callers share the same in-flight Promise,
+// so the underlying fetch is issued at most once per refresh window.
+test('refreshCsrfToken deduplicates concurrent callers (singleflight)', async () => {
+  let resolveFetch: (value: Response) => void = () => {}
+  const fetchMock = jest.fn(
+    () =>
+      new Promise<Response>((res) => {
+        resolveFetch = res
+      })
+  )
+  global.fetch = fetchMock as unknown as typeof fetch
+
+  // Fire five concurrent refresh requests BEFORE resolving the
+  // pending fetch. All five should share the same in-flight Promise
+  // and the underlying fetch should be invoked exactly once.
+  const refreshes = [
+    refreshCsrfToken(),
+    refreshCsrfToken(),
+    refreshCsrfToken(),
+    refreshCsrfToken(),
+    refreshCsrfToken(),
+  ]
+  // Resolve the singleton fetch.
+  resolveFetch({
+    ok: true,
+    json: () => Promise.resolve({ token: 'singleflight-tok' }),
+  } as unknown as Response)
+  const results = await Promise.all(refreshes)
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  // Every caller observes the same token.
+  results.forEach((tok) => {
+    expect(tok).toBe('singleflight-tok')
+  })
+  expect(getCsrfToken()).toBe('singleflight-tok')
+})
+
+test('refreshCsrfToken singleflight resets after settle (next call re-fetches)', async () => {
+  // First call mints token A.
+  global.fetch = jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ token: 'tok-A' }),
+    } as unknown as Response)
+  ) as unknown as typeof fetch
+  expect(await refreshCsrfToken()).toBe('tok-A')
+
+  // Second call (after the first settled) mints token B — a singleflight
+  // window leaking across settle would still return 'tok-A'.
+  global.fetch = jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ token: 'tok-B' }),
+    } as unknown as Response)
+  ) as unknown as typeof fetch
+  expect(await refreshCsrfToken()).toBe('tok-B')
+})
