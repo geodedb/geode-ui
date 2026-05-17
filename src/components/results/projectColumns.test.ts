@@ -1,3 +1,5 @@
+import * as fs from 'fs'
+import * as path from 'path'
 import { projectColumns } from './projectColumns'
 
 describe('projectColumns', () => {
@@ -327,5 +329,61 @@ describe('projectColumns', () => {
     })
     expect(out.columns.map((c) => c.name)).toEqual(['n._labels', 'e._type'])
     expect(out.rows).toEqual([])
+  })
+
+  // QUAL #248: the column-budget trim path used to mutate the Plan in
+  // place via a `(p as { keys: string[] }).keys = ...` cast — a code
+  // smell that bypasses TypeScript's intentional immutability and
+  // makes the trim path silently dependent on the Plan object being
+  // exclusively owned by projectColumns. The fix replaces the cast
+  // with a fresh `{ ...p, keys: p.keys.slice(0, perPlan) }` value and
+  // reassigns the slot in the plan array.
+  //
+  // The verification line from QUALITY_GAP_ANALYSIS.md (#248) reads
+  // "Verify no `as { keys: string[] }` cast remains." This source-
+  // scan test pins the contract: any reintroduction of the cast (or
+  // a near-cousin like `as { keys: readonly string[] }`) trips the
+  // test.
+  test('source contains no `as { keys: ... }` type-cast mutation', () => {
+    const src = fs.readFileSync(
+      path.join(__dirname, 'projectColumns.ts'),
+      'utf8'
+    )
+    // The forbidden token is built at runtime from a tagged template
+    // so the detector itself does not match.
+    const t = (s: string) => s
+    const forbidden = `${t(' as { keys:')}${t(' string[] }')}`
+    expect(src).not.toContain(forbidden)
+    // Belt-and-braces: the previous `mutable.keys = ...` pattern.
+    expect(src).not.toMatch(/const mutable = p as /)
+  })
+
+  // QUAL #248 behavioural pin: even when the trim path fires (input
+  // has many property keys + a tight column budget), the function
+  // returns a valid ProjResp with overflow.columnsHidden set and the
+  // structural column intact. A regression in the replacement path
+  // (e.g. building a Plan with the original full `keys` slice) would
+  // not surface the overflow — the test exercises the full slim path.
+  test('column-budget trim path returns a fresh trimmed Plan', () => {
+    const mkNode = (id: number, props: Record<string, unknown>) => ({
+      id,
+      labels: ['T'],
+      properties: props,
+    })
+    const wideRows: unknown[][] = []
+    for (let i = 0; i < 3; i += 1) {
+      const props: Record<string, unknown> = {}
+      for (let k = 0; k < 8; k += 1) props[`k${i}_${k}`] = k
+      wideRows.push([mkNode(i, props)])
+    }
+    const resp = {
+      columns: [{ name: 'n', type: 'NODE' }],
+      rows: wideRows,
+    }
+    const out = projectColumns(resp, { columnBudget: 4 })
+    expect(out.overflow?.columnsHidden).toBeGreaterThan(0)
+    expect(out.columns[0]?.name).toBe('n._labels')
+    // At most columnBudget columns are emitted (no off-by-one drift).
+    expect(out.columns.length).toBeLessThanOrEqual(4)
   })
 })

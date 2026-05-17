@@ -251,38 +251,51 @@ export function projectColumns(
     let propertyBudget = Math.max(0, columnBudget - reserved)
     // Distribute the property budget round-robin across node/edge
     // plans so a single high-cardinality node doesn't starve the
-    // others.
-    const nodeEdgePlans: Plan[] = []
+    // others. Record each Plan's index in `plan[]` so we can swap a
+    // trimmed copy into the same slot without mutating the original
+    // Plan object (QUAL #248).
+    const nodeEdgeIdxs: number[] = []
     for (let i = 0; i < plan.length; i += 1) {
       const p = plan[i] as Plan
       if (p.kind === 'node' || p.kind === 'edge') {
-        nodeEdgePlans.push(p)
+        nodeEdgeIdxs.push(i)
       }
     }
-    if (nodeEdgePlans.length > 0) {
+    if (nodeEdgeIdxs.length > 0) {
       // Cap each plan's keys at propertyBudget/N (rounded up), but
       // never below 1 so the disclosure UX always shows at least one
       // key (the "+N more" cue is more useful than zero columns).
       const perPlan = Math.max(
         1,
-        Math.ceil(propertyBudget / nodeEdgePlans.length)
+        Math.ceil(propertyBudget / nodeEdgeIdxs.length)
       )
-      for (let i = 0; i < nodeEdgePlans.length; i += 1) {
-        const p = nodeEdgePlans[i] as Plan
+      for (let i = 0; i < nodeEdgeIdxs.length; i += 1) {
+        const slot = nodeEdgeIdxs[i] as number
+        const p = plan[slot] as Plan
         if (
           (p.kind === 'node' || p.kind === 'edge') &&
           p.keys.length > perPlan
         ) {
           columnsHidden += p.keys.length - perPlan
-          const mutable = p as { keys: string[] }
-          mutable.keys = p.keys.slice(0, perPlan)
+          // Immutable update: build a fresh Plan with the trimmed
+          // keys slice and replace the slot. The original Plan
+          // object remains untouched, which preserves referential
+          // safety for any future caller that hands the Plan back.
+          plan[slot] = { ...p, keys: p.keys.slice(0, perPlan) }
         }
       }
-      propertyBudget -= nodeEdgePlans.reduce(
-        (acc, p) =>
-          acc + (p.kind === 'node' || p.kind === 'edge' ? p.keys.length : 0),
-        0
-      )
+      // Recompute the remaining property budget against the (now
+      // possibly trimmed) plan array — `propertyBudget` is informational
+      // only here; the cap is already applied above and reflected in
+      // columnsHidden. Reading from plan[] (not nodeEdgeIdxs of the
+      // pre-trim plan) keeps the accounting consistent post-fix.
+      propertyBudget -= nodeEdgeIdxs.reduce((acc, idx) => {
+        const cur = plan[idx] as Plan
+        return (
+          acc +
+          (cur.kind === 'node' || cur.kind === 'edge' ? cur.keys.length : 0)
+        )
+      }, 0)
       // propertyBudget can go negative when a single plan needed >1
       // column even after rounding — that's the floor we accepted
       // above (always at least one key). columnsHidden already
