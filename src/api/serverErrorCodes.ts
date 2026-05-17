@@ -22,3 +22,9 @@ export const WIRE_FEATURE_MISSING = 'wire_feature_missing' as const
  *  for the same owner. Mapped from `profilestore.ErrConflict` via
  *  `storeErrorToHTTP` in internal/server/handlers_profiles_errors.go. */
 export const CONFLICT = 'conflict' as const
+
+/** Server returns this (HTTP 400) when a PATCH request body has no
+ *  mutating fields (GAP-031 / #208). The SPA branches on this so it
+ *  can render "no changes to save" instead of the raw 400 body --
+ *  callers shouldn't treat empty_patch as a server-side failure. */
+export const EMPTY_PATCH = 'empty_patch' as const

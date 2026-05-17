@@ -280,10 +280,17 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			}
 		}
 
-		// Empty patch -- nothing to commit.
+		// GAP-031 / #208: an empty PATCH (no email, no password, no
+		// roles) used to return 200 with a synthesised User echo of
+		// the URL params. That misrepresented persisted state and
+		// hid client-side bugs (a PATCH that meant to change nothing
+		// was indistinguishable on the wire from one that meant to
+		// change something but lost its body). 400 with the
+		// `empty_patch` code surfaces the no-op explicitly to the
+		// caller.
 		if email == "" && pw == "" && len(req.Roles) == 0 {
-			resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: nil}
-			return nil
+			return badRequest(ErrCodeEmptyPatch,
+				"PATCH request body must change at least one of email, password, or roles")
 		}
 
 		tx, txErr := db.BeginTx(r.Context(), nil)

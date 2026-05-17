@@ -206,6 +206,13 @@ const (
 	// ErrCodeInvalidTargetTime: a restore target timestamp failed
 	// validation (400).
 	ErrCodeInvalidTargetTime = "invalid_target_time"
+	// ErrCodeEmptyPatch: a PATCH request carried no mutating fields
+	// (GAP-031 / #208). Distinct from invalid_params (which means a
+	// malformed payload); empty_patch means "the payload was well-
+	// formed but specified no change". The previous synthetic echo
+	// path silently returned 200 with a fake User row; that misled
+	// callers about server-side state.
+	ErrCodeEmptyPatch = "empty_patch"
 
 	// --- WebSocket query-stream error frames (queryStreamMsg.Code).
 	//     These travel on the WS surface, not the JSON body envelope. ---
@@ -287,6 +294,7 @@ var allErrorCodes = []string{
 	ErrCodeInvalidOutput,
 	ErrCodeInvalidFile,
 	ErrCodeInvalidTargetTime,
+	ErrCodeEmptyPatch,
 	ErrCodeWSInternal,
 	ErrCodeWSBadRequest,
 	ErrCodeWSScan,

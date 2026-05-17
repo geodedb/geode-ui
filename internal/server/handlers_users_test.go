@@ -885,3 +885,59 @@ func TestUsers_QueryFailureSurfacesAs422(t *testing.T) {
 		t.Fatalf("body=%s want user_admin_error", rec.Body.String())
 	}
 }
+
+// TestPatchUsers_EmptyBodyReturns400EmptyPatch pins GAP-031 / #208.
+//
+// Before this fix, PATCH /api/v1/users/{username} with an empty
+// request body (no email, no password, no roles) returned 200 OK and
+// a synthesised User echo of the URL params, not a representation of
+// what is actually persisted in the store. That broke the
+// PATCH-is-idempotent / PATCH-returns-store-state HTTP semantic and
+// hid client bugs that send an empty body by mistake.
+//
+// The correct behaviour is to surface the empty-payload condition
+// explicitly to the client: 400 with the structured `empty_patch`
+// code. Clients can then either fix the payload or surface the
+// no-op to the user; either way the wire contract no longer encodes
+// the synthetic echo.
+//
+// The test asserts:
+//   - HTTP status is 400 (not 200).
+//   - JSON body contains `"code":"empty_patch"`.
+//   - The driver never sees a BeginTx (i.e. no DB work is done).
+func TestPatchUsers_EmptyBodyReturns400EmptyPatch(t *testing.T) {
+	d := &userTxDriver{}
+	if _, loaded := registerOnce.LoadOrStore("users_patch_empty", struct{}{}); !loaded {
+		sql.Register("users_patch_empty", d)
+	}
+	db, err := sql.Open("users_patch_empty", "")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := New(Config{Version: "test", Pool: &stubPool{db: db}})
+
+	rec := httptest.NewRecorder()
+	resp, hErr := s.PatchUsername(
+		rec,
+		httptest.NewRequest(http.MethodPatch, "/api/v1/users/alice", nil),
+		&gentypes.UserUpdateReq{Username: "alice"},
+	)
+	if hErr != nil {
+		t.Fatalf("PatchUsername returned err %v; want nil with inline body", hErr)
+	}
+	if resp != nil {
+		t.Fatalf("resp=%#v; want nil (handler should NOT synthesise a User echo on empty PATCH)", resp)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"error":"empty_patch"`) {
+		t.Fatalf("body=%s want error=empty_patch", rec.Body.String())
+	}
+	for _, ev := range d.seen() {
+		if ev == "begin" {
+			t.Fatalf("driver recorded a BeginTx; want none (empty PATCH must not open a transaction). events=%v", d.seen())
+		}
+	}
+}
