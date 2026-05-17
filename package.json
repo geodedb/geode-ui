@@ -25,6 +25,7 @@
     "check:doc-routes": "node scripts/check-doc-routes.mjs",
     "check:changelog": "node scripts/check-changelog.mjs",
     "check:security-md": "node scripts/check-security-md.mjs",
+    "check:chunk-budget": "node scripts/check-chunk-budget.mjs",
     "prettier:check": "prettier --check 'src/**/*.{ts,tsx,json,css}'",
     "prettier:fix": "prettier --write 'src/**/*.{ts,tsx,json,css}'",
     "clean": "rm -rf dist build coverage",

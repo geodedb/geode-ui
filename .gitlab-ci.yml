@@ -285,6 +285,30 @@ build:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
+# PERF-N6 (#285): chunk-budget tripwire. Walks internal/ui/dist after
+# the build and fails if any single .js chunk exceeds the configured
+# budget. Starts at allow_failure: true so the first regression
+# surfaces as a warning rather than a pipeline failure; flip to
+# false once the budget has been tuned against the slow-device
+# baseline. Override the budget via the `BUDGET` env var.
+chunk-budget:
+  stage: build
+  needs:
+    - job: install
+    - job: build
+      artifacts: true
+  # image-pin: 2026-05-17 @ same NODE_VERSION as the install job.
+  # The chunk-budget script is pure Node stdlib + readdirSync so it
+  # needs no additional deps; the node_modules artifact is implied
+  # by `needs: [install]`.
+  image: node:${NODE_VERSION}
+  script:
+    - node scripts/check-chunk-budget.mjs ${BUDGET:+--budget $BUDGET}
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # ============================================================================
 # PAGES STAGE - Deploy to GitLab Pages
 # ============================================================================
