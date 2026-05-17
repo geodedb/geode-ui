@@ -154,6 +154,14 @@ audit-ratchets:
     - npm run lint:contrast
     - npm run verify:translations
     - npm run detect:hardcoded-strings
+    # GAP-034 (#273): mirror the doc-routes + changelog + security-md
+    # gates that ran locally via .pre-commit-config.yaml:224,235.
+    # Without this mirror a contributor who skips pre-commit can land
+    # a stale CHANGELOG.md or a doc-route regression on main with no
+    # CI signal — the same hole closed for the four ratchets above.
+    - npm run check:doc-routes
+    - npm run check:changelog
+    - npm run check:security-md
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
