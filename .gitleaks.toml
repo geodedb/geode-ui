@@ -14,4 +14,10 @@ paths = [
     '''build''',
     '''\.git''',
     '''coverage''',
+    # S-09 (#272): local audit scratch space — gitignored, contains
+    # gosec/gitleaks/govulncheck/semgrep/npm-audit raw output that may
+    # surface fake placeholder secrets from test fixtures. Never
+    # committed; allowlisting it here keeps `make pre-commit` /
+    # gitleaks scans quiet.
+    '''\.scratch''',
 ]

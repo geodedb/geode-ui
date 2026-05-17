@@ -69,6 +69,12 @@ coverage.txt
 # Claude Code per-project config / memory
 /.claude/
 
+# Audit scratch space (gosec / gitleaks / govulncheck / semgrep / npm-audit
+# raw output + triage notes). S-09 (#272) — never to be committed. The
+# `.gitleaks.toml` allowlist also exempts this prefix so a local
+# gitleaks scan does not flag the cached artefacts.
+/.scratch/
+
 # Stray build artifacts (a `go build` without -o bin/, an accidental pnpm install)
 /server
 /pnpm-lock.yaml
