@@ -162,22 +162,21 @@ describe('perfMarks longtask observer (PERF-N5 / #284)', () => {
     // attempted. A factory + closure pattern keeps the fake as a
     // function-shaped constructor without tripping ESLint's class
     // hygiene rules.
-    const observed: Array<PerformanceObserverInit | { entryTypes: string[] }> =
-      []
+    const observed: Array<{ type?: string; entryTypes?: string[] }> = []
     const original = global.PerformanceObserver
     const FakePerformanceObserver = function FakePerformanceObserver(
       this: { observe: (o: unknown) => void; disconnect: () => void },
       _cb: PerformanceObserverCallback
     ): void {
-      // _cb intentionally unused — we are stubbing the observer's
-      // constructor signature, not its delivery loop.
-      const _ = _cb
-      if (_) {
-        /* satisfy `no-unused-vars` without using `void` */
-      }
-      this.observe = (
-        opts: PerformanceObserverInit | { entryTypes: string[] }
-      ): void => {
+      // _cb is intentionally accepted but unused — we are stubbing
+      // the observer's constructor signature, not its delivery loop.
+      // Suppress lint by stamping a no-op tag onto `this` keyed by
+      // the parameter; the operation is type-safe and free of any
+      // unused-var hazards.
+      const selfBag = this as Record<string, unknown>
+      selfBag._unusedCb = typeof _cb
+      this.observe = (o: unknown): void => {
+        const opts = o as { type?: string; entryTypes?: string[] }
         observed.push(opts)
       }
       this.disconnect = (): void => {
@@ -190,8 +189,8 @@ describe('perfMarks longtask observer (PERF-N5 / #284)', () => {
       // First call configures `measure`. Second call configures `longtask`.
       const longtaskCall = observed.find(
         (o) =>
-          ('type' in o && o.type === 'longtask') ||
-          ('entryTypes' in o && o.entryTypes.includes('longtask'))
+          o.type === 'longtask' ||
+          (o.entryTypes !== undefined && o.entryTypes.includes('longtask'))
       )
       expect(longtaskCall).toBeDefined()
       expect(perfMarks.__hasLongTaskObserverForTest()).toBe(true)
@@ -225,18 +224,22 @@ describe('perfMarks longtask observer (PERF-N5 / #284)', () => {
       this: { observe: (o: unknown) => void; disconnect: () => void },
       _cb: PerformanceObserverCallback
     ): void {
-      // _cb intentionally unused — we are stubbing the observer's
-      // constructor signature, not its delivery loop.
-      const _ = _cb
-      if (_) {
-        /* satisfy `no-unused-vars` without using `void` */
-      }
-      this.observe = (
-        opts: PerformanceObserverInit | { entryTypes: string[] }
-      ): void => {
+      // _cb is intentionally accepted but unused — we are stubbing
+      // the observer's constructor signature, not its delivery loop.
+      // Suppress lint by stamping a no-op tag onto `this` keyed by
+      // the parameter; the operation is type-safe and free of any
+      // unused-var hazards.
+      const selfBag = this as Record<string, unknown>
+      selfBag._unusedCb = typeof _cb
+      this.observe = (o: unknown): void => {
+        const opts = o as {
+          type?: string
+          entryTypes?: string[]
+        }
         if (
-          ('type' in opts && opts.type === 'longtask') ||
-          ('entryTypes' in opts && opts.entryTypes.includes('longtask'))
+          opts.type === 'longtask' ||
+          (opts.entryTypes !== undefined &&
+            opts.entryTypes.includes('longtask'))
         ) {
           throw new TypeError('longtask is not supported')
         }

@@ -149,12 +149,24 @@ describe('useGraphElements — rowsVersion rebuild guardrail (PERF-N1 / #275)', 
 
     // Bump 1: spread-construct a fresh resp object with a NEW edge.
     // This mirrors what streamStateToResp emits when rowsVersion bumps.
+    // QueryRespLike.graph_summary is a union — narrow via cast to the
+    // shaped sibling so the spread compiles cleanly.
+    const baseGS = baseResp.graph_summary as {
+      nodes?: Array<{ id: number; labels: string[]; properties: object }>
+      edges?: Array<{
+        id: number
+        start_node: number
+        end_node: number
+        type: string
+        properties: object
+      }>
+    }
     const bumpedResp: QueryRespLike & { row_count?: number } = {
       ...baseResp,
       graph_summary: {
-        nodes: [...(baseResp.graph_summary?.nodes ?? [])],
+        nodes: [...(baseGS.nodes ?? [])],
         edges: [
-          ...(baseResp.graph_summary?.edges ?? []),
+          ...(baseGS.edges ?? []),
           {
             id: 11,
             start_node: 2,
