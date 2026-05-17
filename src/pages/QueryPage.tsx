@@ -30,8 +30,17 @@ import {
 // separate async chunks that are only fetched when the query editor /
 // graph tab mounts. The monaco-bootstrap side-effect rides inside the
 // GqlEditor module, so it falls into the lazy editor chunk too.
+//
+// PERF #256: the magic comments below emit `<link rel="prefetch">` for
+// the chunk during browser idle time so the editor is warm in the
+// HTTP cache by the time the user lands on /query. The chunkName makes
+// the prefetched asset diagnosable in DevTools (otherwise it would
+// show as `<hash>.js`).
 const GqlEditor = React.lazy(() =>
-  import('../components/editor/GqlEditor').then((m) => ({
+  import(
+    /* webpackPrefetch: true, webpackChunkName: "gql-editor" */
+    '../components/editor/GqlEditor'
+  ).then((m) => ({
     default: m.GqlEditor,
   }))
 )

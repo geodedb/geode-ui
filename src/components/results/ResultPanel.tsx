@@ -11,8 +11,16 @@ import { TabGroup, Tab, TabPanel } from '../../services/webawesome/components'
 // F10 (#54): Cytoscape (~hundreds of KiB) is React.lazy'd so webpack
 // emits it as a separate async chunk that is only fetched when the
 // graph tab mounts.
+//
+// PERF #256: webpackPrefetch hint emits `<link rel="prefetch">` for
+// the graph chunk during browser idle time so by the time the user
+// clicks the graph tab the chunk is already in the HTTP cache. The
+// chunkName makes the prefetched asset diagnosable in DevTools.
 const GraphView = React.lazy(() =>
-  import('./GraphView').then((m) => ({
+  import(
+    /* webpackPrefetch: true, webpackChunkName: "graph-view" */
+    './GraphView'
+  ).then((m) => ({
     default: m.GraphView,
   }))
 )

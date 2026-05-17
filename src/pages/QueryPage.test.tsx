@@ -162,8 +162,12 @@ describe('F10: monaco-bootstrap is not a static import of QueryPage', () => {
       /^\s*import\s+\{\s*GraphView\s*\}\s+from\s+'\.\.\/components\/results\/GraphView'/m
     )
     // The editor is React.lazy'd via a dynamic import() from QueryPage.
+    // The optional `/* webpackPrefetch ... */` magic-comment chunk added
+    // in PERF #256 may sit between import( and the path literal — the
+    // regex tolerates either form so the contract survives the perf
+    // hint.
     expect(src).toMatch(
-      /React\.lazy\([\s\S]*import\(['"]\.\.\/components\/editor\/GqlEditor['"]\)/
+      /React\.lazy\([\s\S]*import\(\s*(?:\/\*[\s\S]*?\*\/\s*)?['"]\.\.\/components\/editor\/GqlEditor['"]/
     )
     // The Cytoscape-backed GraphView now lives behind ResultPanel (the
     // shared tab switcher extracted in A0); it must be React.lazy'd
@@ -176,7 +180,7 @@ describe('F10: monaco-bootstrap is not a static import of QueryPage', () => {
       /^\s*import\s+\{\s*GraphView\s*\}\s+from\s+'\.\/GraphView'/m
     )
     expect(panelSrc).toMatch(
-      /React\.lazy\([\s\S]*import\(['"]\.\/GraphView['"]\)/
+      /React\.lazy\([\s\S]*import\(\s*(?:\/\*[\s\S]*?\*\/\s*)?['"]\.\/GraphView['"]/
     )
   })
 })
