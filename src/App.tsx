@@ -11,7 +11,6 @@ import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoginPage } from './pages/LoginPage'
 import { QueryPage } from './pages/QueryPage'
 import { DashboardPage } from './pages/DashboardPage'
-import { WorkspacePage } from './pages/WorkspacePage'
 import { SchemaPage } from './pages/SchemaPage'
 import { AdminPage } from './pages/AdminPage'
 import { UsersPage } from './components/admin/UsersPage'
@@ -154,7 +153,6 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                 <Route element={<ProtectedShell />}>
                   <Route index element={<QueryPage />} />
                   <Route path="dashboard" element={<DashboardPage />} />
-                  <Route path="workspace" element={<WorkspacePage />} />
                   <Route path="schema" element={<SchemaPage />} />
                   <Route path="admin" element={<AdminPage />}>
                     <Route index element={<Navigate to="users" replace />} />

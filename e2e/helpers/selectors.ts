@@ -127,18 +127,6 @@ export const sel = {
   graphFindInput: (p: Page): Locator =>
     p.getByTestId('graph-find-input').locator('input'),
 
-  // Workspace (21-workspace.spec.ts) — multi-pane query surface mounted
-  // at /workspace. The "+ Add pane" button is disabled at MAX_PANES (4);
-  // each WorkspacePane's <section> carries workspace-pane, and inside it a
-  // Run button (pane-run-btn) and a close × (pane-close-btn, disabled when
-  // only one pane remains). Pane-scoped assertions narrow via
-  // `sel.workspacePane(p).nth(i)` then `.locator('.monaco-editor')` /
-  // `.getByTestId('pane-run-btn')`.
-  workspaceAddPane: (p: Page): Locator => p.getByTestId('workspace-add-pane'),
-  workspacePane: (p: Page): Locator => p.getByTestId('workspace-pane'),
-  paneRunBtn: (p: Page): Locator => p.getByTestId('pane-run-btn'),
-  paneCloseBtn: (p: Page): Locator => p.getByTestId('pane-close-btn'),
-
   // Overview dashboard (22-dashboard.spec.ts) — mounted at /dashboard. An
   // <h1> "Overview" plus a grid of 4 cards: GraphsCard
   // (dashboard-graphs-card, a <ul> of graph names), RecentQueriesCard

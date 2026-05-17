@@ -270,7 +270,6 @@ export const Shell: React.FC = () => {
           <NavLink to="/" end>
             {t('nav.query')}
           </NavLink>
-          <NavLink to="/workspace">{t('nav.workspace')}</NavLink>
           <NavLink to="/schema">{t('nav.schema')}</NavLink>
           <NavLink to="/admin">{t('nav.admin')}</NavLink>
           <NavLink to="/ops">{t('nav.ops')}</NavLink>
@@ -299,7 +298,6 @@ export const Shell: React.FC = () => {
         <NavLink to="/" end>
           {t('nav.query')}
         </NavLink>
-        <NavLink to="/workspace">{t('nav.workspace')}</NavLink>
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
         <NavLink to="/admin">{t('nav.admin')}</NavLink>
         <NavLink to="/ops">{t('nav.ops')}</NavLink>

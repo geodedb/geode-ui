@@ -1,8 +1,8 @@
 // useQueryHistory — a small localStorage-backed log of recently-run
 // queries.
 //
-// Both the Query page (sync + stream paths) and each workspace pane call
-// `record(...)` when a run completes (success or failure). The store
+// The Query page (sync + stream paths) calls `record(...)` when a run
+// completes (success or failure). The store
 // keeps the newest entry first, coalesces a re-run of the immediately
 // preceding statement (same statement text + same ok/fail outcome) into
 // a single entry instead of stacking duplicates, and caps the log at

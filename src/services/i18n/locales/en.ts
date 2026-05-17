@@ -47,7 +47,6 @@ export const en = {
     primaryMobile: 'Primary mobile',
     dashboard: 'Dashboard',
     query: 'Query',
-    workspace: 'Workspace',
     schema: 'Schema',
     admin: 'Admin',
     ops: 'Ops',
@@ -86,17 +85,6 @@ export const en = {
     maximizeResults: 'Maximize results',
     exitFullscreen: 'Exit fullscreen',
     optionsLabel: 'Options',
-  },
-
-  workspace: {
-    title: 'Workspace',
-    addPane: '+ Add pane',
-    panesFull: 'Maximum of 4 panes',
-    paneRun: 'Run',
-    paneCancel: 'Cancel',
-    closePane: 'Close pane',
-    paneEmpty: 'Run a query to see results.',
-    paneSuspended: 'Editor suspended (scroll to re-enable).',
   },
 
   graph: {

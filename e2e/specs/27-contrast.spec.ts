@@ -28,7 +28,6 @@ const ROUTES_PUBLIC = ['/login']
 const ROUTES_PROTECTED = [
   '/',
   '/dashboard',
-  '/workspace',
   '/schema',
   '/admin/users',
   '/admin/roles',
