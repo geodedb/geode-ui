@@ -498,7 +498,8 @@
       "ping_interval_ms": 30000,
       "max_frame_bytes": 65536,
       "max_message_bytes": 1048576,
-      "allow_any_origin": true
+      "same_origin_only": true,
+      "allow_empty_origin": true
     },
     {
       "path": "/ws/query",
@@ -508,7 +509,8 @@
       "ping_interval_ms": 15000,
       "max_frame_bytes": 1048576,
       "max_message_bytes": 16777216,
-      "allow_any_origin": true
+      "same_origin_only": true,
+      "allow_empty_origin": true
     }
   ],
   "mcp": {

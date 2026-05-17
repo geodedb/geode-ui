@@ -35,6 +35,17 @@ type Options struct {
 	// header set. Useful for non-browser callers under UpgradeStrict
 	// that nevertheless want a strict allowlist for browsers. SEC-0008.
 	AllowEmptyOrigin bool
+	// SameOriginOnly tells UpgradeStrict to synthesise a same-origin
+	// entry at request time from r.TLS + r.Host and treat it as part of
+	// the effective allowlist. The synthesised origin is "https://r.Host"
+	// when r.TLS != nil and "http://r.Host" otherwise — matching the
+	// Origin header the browser computes for a same-origin upgrade. The
+	// flag composes additively with OriginAllowlist: an SPA hosted on
+	// the same origin as the API always works without configuration, AND
+	// an operator can broaden via OriginAllowlist for cross-origin
+	// deployments (CDN front-end on a separate host from the API). The
+	// CSWSH defense-in-depth pattern from geode-ui SEC issue 265.
+	SameOriginOnly   bool
 	Protocols        []string // allowed subprotocols; first match is selected
 	MaxFrame         int      // max single frame payload
 	MaxMessage       int      // max reassembled message
@@ -151,10 +162,14 @@ originOK:
 // Origin policy:
 //
 //   - opts.AllowAnyOrigin == true       : every Origin (including absent) is OK.
+//   - opts.SameOriginOnly == true       : the same-origin URL (synthesised from
+//     r.TLS + r.Host) is added to the effective allowlist. Composes additively
+//     with OriginAllowlist so an operator can broaden to cross-origin trusted
+//     deployments without losing the same-origin default.
 //   - len(opts.OriginAllowlist) > 0     : Origin must match the list (case-insensitive)
 //     or be "*". Empty Origin is permitted only
 //     when opts.AllowEmptyOrigin is true.
-//   - both unset                        : ErrOriginNotAllowed (HTTP 403).
+//   - all unset                         : ErrOriginNotAllowed (HTTP 403).
 //
 // Privileged surfaces (MCP WS, REST WS, GraphQL WS) MUST use
 // UpgradeStrict. The legacy Upgrade is retained for backward
@@ -164,7 +179,19 @@ func UpgradeStrict(w http.ResponseWriter, r *http.Request, opts Options) (*Conn,
 		return nil, err
 	}
 	if !opts.AllowAnyOrigin {
-		if len(opts.OriginAllowlist) == 0 {
+		// Compute the effective allowlist for this request. When
+		// SameOriginOnly is set, prepend the synthesised same-origin
+		// entry so the explicit OriginAllowlist is composed additively
+		// (an SPA on the API origin always works; the operator's list
+		// adds extra trusted origins without overriding the default).
+		// We allocate a fresh slice only when SameOriginOnly is set so
+		// the common-case fast path is one bounded-cost map lookup
+		// against the caller-supplied list.
+		allowlist := opts.OriginAllowlist
+		if opts.SameOriginOnly {
+			allowlist = append([]string{sameOriginURL(r)}, opts.OriginAllowlist...)
+		}
+		if len(allowlist) == 0 {
 			http.Error(w, ErrOriginNotAllowed.Error(), http.StatusForbidden)
 			return nil, ErrOriginNotAllowed
 		}
@@ -176,7 +203,7 @@ func UpgradeStrict(w http.ResponseWriter, r *http.Request, opts Options) (*Conn,
 			}
 		} else {
 			ok := false
-			for _, o := range opts.OriginAllowlist {
+			for _, o := range allowlist {
 				if o == "*" || strings.EqualFold(o, orig) {
 					ok = true
 					break
@@ -189,6 +216,19 @@ func UpgradeStrict(w http.ResponseWriter, r *http.Request, opts Options) (*Conn,
 		}
 	}
 	return finishUpgrade(w, r, opts)
+}
+
+// sameOriginURL synthesises the Origin header value a browser would
+// send for a same-origin upgrade against r: scheme is "https" iff
+// r.TLS is non-nil and "http" otherwise; host is r.Host as parsed by
+// net/http. Matches what fetch / WebSocket constructors compute, so
+// SameOriginOnly-flagged routes always accept the SPA's own upgrade.
+func sameOriginURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
 }
 
 // upgradeHandshakeHeaders validates the static RFC 6455 request

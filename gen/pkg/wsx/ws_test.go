@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -262,6 +263,90 @@ func TestUpgradeStrict_BadHandshakeHeadersStillRejected(t *testing.T) {
 	}
 	if errors.Is(err, ErrOriginNotAllowed) {
 		t.Fatalf("missing-headers error should not be ErrOriginNotAllowed; got %v", err)
+	}
+}
+
+// SEC-0008b / CSWSH defense-in-depth (geode-ui issue 265): SameOriginOnly
+// synthesises a same-origin allowlist from r.TLS + r.Host so a route is
+// default-deny against cross-origin upgrades without the operator having
+// to enumerate every possible deploy host. Composes additively with
+// OriginAllowlist so cross-origin SPA deployments still work via an
+// explicit allowlist.
+
+func TestUpgradeStrict_SameOriginOnly_AcceptsSameOrigin(t *testing.T) {
+	req := newStrictUpgradeReq("http://example.com")
+	rec := httptest.NewRecorder()
+	// req.Host is "example.com" via httptest.NewRequest; r.TLS is nil
+	// because the test request is plain HTTP, so the synthesised
+	// allowlist is ["http://example.com"]. The Origin header matches.
+	// As elsewhere, the hijack failure proves the origin gate accepted
+	// the request — ErrOriginNotAllowed would NOT be returned.
+	_, err := UpgradeStrict(rec, req, Options{SameOriginOnly: true})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("SameOriginOnly must accept the synthesised same-origin entry; got %v", err)
+	}
+	if err == nil {
+		t.Fatal("expected hijack error from httptest.NewRecorder; got nil")
+	}
+}
+
+func TestUpgradeStrict_SameOriginOnly_RejectsCrossOrigin(t *testing.T) {
+	req := newStrictUpgradeReq("https://evil.example")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{SameOriginOnly: true})
+	if !errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("SameOriginOnly must reject cross-origin upgrades; got %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected HTTP 403; got %d", rec.Code)
+	}
+}
+
+func TestUpgradeStrict_SameOriginOnly_ComposesWithExplicitAllowlist(t *testing.T) {
+	// SameOriginOnly + an explicit allowlist composes additively: the
+	// same-origin entry is added on top of the operator's list, so an
+	// SPA on a separate trusted host (CDN front-end on app.example.com,
+	// API on api.example.com) still works without anyone having to
+	// hand-enumerate the API origin too.
+	req := newStrictUpgradeReq("https://app.example.com")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{
+		SameOriginOnly:  true,
+		OriginAllowlist: []string{"https://app.example.com"},
+	})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("explicit allowlist must compose additively with SameOriginOnly; got %v", err)
+	}
+	if err == nil {
+		t.Fatal("expected hijack error from httptest.NewRecorder; got nil")
+	}
+}
+
+func TestUpgradeStrict_SameOriginOnly_HTTPSSchemeFromTLS(t *testing.T) {
+	// When r.TLS is non-nil the synthesised origin is scheme=https.
+	// Match the "https://example.com" Origin and expect acceptance.
+	req := newStrictUpgradeReq("https://example.com")
+	req.TLS = &tls.ConnectionState{} // synthetic — only existence matters
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{SameOriginOnly: true})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("SameOriginOnly under TLS must synthesise https scheme; got %v", err)
+	}
+}
+
+func TestUpgradeStrict_SameOriginOnly_AllowEmptyOriginCarvesOut(t *testing.T) {
+	// AllowEmptyOrigin still works in concert with SameOriginOnly so
+	// non-browser callers (CLIs that drop the Origin header) keep
+	// upgrading. Cross-origin attackers can't forge an empty Origin
+	// from a browser, so this carveout is safe.
+	req := newStrictUpgradeReq("")
+	rec := httptest.NewRecorder()
+	_, err := UpgradeStrict(rec, req, Options{
+		SameOriginOnly:   true,
+		AllowEmptyOrigin: true,
+	})
+	if errors.Is(err, ErrOriginNotAllowed) {
+		t.Fatalf("SameOriginOnly + AllowEmptyOrigin must permit absent Origin; got %v", err)
 	}
 }
 
