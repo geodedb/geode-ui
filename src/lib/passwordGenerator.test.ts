@@ -76,3 +76,47 @@ describe('generatePassword', () => {
     }
   })
 })
+
+// QUAL #244: when the username-substring retry budget is exhausted, the
+// previous fallback path returned a longer candidate *without* running
+// validatePassword on it. If a pathological policy rejects every
+// possible candidate (real cases: HIBP says yes, length floor not met,
+// etc. in the generator's seam world), the caller would receive a
+// password that the server then rejects with a 400 — silently.
+//
+// The fix re-validates the fallback and throws when the budget is
+// truly exhausted. The test mocks the validatePassword export so it
+// always returns invalid, exercises the fallback, and asserts the
+// generator throws rather than returning an unvalidated candidate.
+describe('generatePassword fallback re-validation (QUAL #244)', () => {
+  // Mock the module so every validatePassword call returns invalid.
+  // jest.isolateModules lets us re-load the generator against the
+  // mock without polluting the other tests in this file.
+  it('throws when validatePassword can never accept a candidate', () => {
+    jest.isolateModules(() => {
+      jest.doMock('./passwordPolicy', () => {
+        const actual =
+          jest.requireActual<typeof import('./passwordPolicy')>(
+            './passwordPolicy'
+          )
+        return {
+          ...actual,
+          validatePassword: (): { valid: false; errors: string[] } => ({
+            valid: false,
+            errors: ['containsUsername'],
+          }),
+        }
+      })
+      // Pull the generator AFTER the mock is installed so it captures
+      // the mocked validatePassword binding. The synchronous require()
+      // is required by jest.isolateModules — dynamic import() would
+      // bypass the isolation scope.
+      const { generatePassword: gen } =
+        // eslint-disable-next-line global-require
+        require('./passwordGenerator') as typeof import('./passwordGenerator')
+      expect(() => gen({ username: 'alice' })).toThrow(
+        /passwordGenerator: exhausted retry budget/i
+      )
+    })
+  })
+})

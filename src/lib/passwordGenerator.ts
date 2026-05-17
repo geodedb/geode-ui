@@ -150,8 +150,20 @@ export function generatePassword(opts: GenerateOptions = {}): string {
     const result = validatePassword(pw, username)
     if (result.valid) return pw
   }
-  // Fall through: bump the length and try once without the username
-  // collision check (would imply a degenerate username). This keeps
-  // the function total — never returns an empty string.
-  return buildOnce(rand, length + 8)
+  // Fall through: bump the length and retry once. The fallback MUST
+  // be re-validated against the same policy (QUAL #244) — returning
+  // an unvalidated candidate would cause the server to 400 the
+  // subsequent create/reset request silently, which is worse UX than
+  // throwing here and letting the caller surface the failure.
+  const fallback = buildOnce(rand, length + 8)
+  const fallbackResult = validatePassword(fallback, username)
+  if (fallbackResult.valid) return fallback
+  throw new Error(
+    'passwordGenerator: exhausted retry budget; ' +
+      'no candidate passed validatePassword. ' +
+      'This implies a degenerate policy (username matches every random ' +
+      'symbol slice, or a mocked validator that always rejects). ' +
+      'Reasons: ' +
+      fallbackResult.errors.join(',')
+  )
 }
