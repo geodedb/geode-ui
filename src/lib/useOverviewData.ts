@@ -41,16 +41,33 @@ function scalarCount(resp: { rows?: unknown[][] }): number {
 // enough that quick remount/route flicker doesn't refire the count
 // queries." Override at test time via `setGraphStatsCacheTTL(ms)`.
 //
-// Storage shape: a flat Map<string, CacheEntry>. The composite key
-// guarantees per-connection isolation (e.g. swapping from a dev DB to
-// prod must NOT serve dev's counts). A null connectionId yields the
-// literal "null" key, which is fine because the dashboard does not
-// render stats without an active connection.
+// Storage shape: a flat Map<string, CacheEntry> bounded to
+// `GRAPH_STATS_CACHE_MAX` entries via insertion-ordered LRU eviction
+// (the JS Map iteration contract). The composite key guarantees per-
+// connection isolation (e.g. swapping from a dev DB to prod must NOT
+// serve dev's counts). A null connectionId yields the literal "null"
+// key, which is fine because the dashboard does not render stats
+// without an active connection.
+//
+// PERF-N7 (#286): a long-lived tab that browses through many graphs
+// (each with a unique `(connectionId, graphName)` key) would
+// otherwise leak entries — the 60s TTL only fires lazily on a
+// matching-key read, so unread entries sit forever. The 32-entry cap
+// keeps the memory footprint bounded to ~32 * (key + 3 numbers) =
+// O(KB) regardless of browsing pattern, while preserving the
+// dashboard back-button hot path (which typically reuses 1-3 keys).
 interface GraphStatsCacheEntry {
   nodes: number
   edges: number
   expiresAt: number
 }
+
+// Bound chosen per PERF-N7 (#286). Picked to be:
+//   - Larger than any plausible "graphs the user actively browses in
+//     a single session" window (3-5 in practice).
+//   - Small enough that the eviction sweep is O(1) amortised.
+//   - Aligned with the next-power-of-two heuristic for memory hints.
+const GRAPH_STATS_CACHE_MAX = 32
 
 const graphStatsCache = new Map<string, GraphStatsCacheEntry>()
 let graphStatsCacheTTL = 60_000 // ms
@@ -85,12 +102,49 @@ function writeGraphStatsCache(
   value: { nodes: number; edges: number },
   now: number = Date.now()
 ): void {
-  graphStatsCache.set(graphStatsCacheKey(connectionId, graph), {
+  const key = graphStatsCacheKey(connectionId, graph)
+  // PERF-N7 (#286): delete-before-set so an existing key is reinserted
+  // at the end of the iteration order. The JS Map contract preserves
+  // insertion order, so the oldest entry sits at `keys().next().value`
+  // and is the LRU victim when the cap is exceeded.
+  if (graphStatsCache.has(key)) {
+    graphStatsCache.delete(key)
+  }
+  graphStatsCache.set(key, {
     nodes: value.nodes,
     edges: value.edges,
     expiresAt: now + graphStatsCacheTTL,
   })
+  // Bound the cache size. With insertion-ordered iteration the FIRST
+  // key in the Map is the oldest (least-recently-set) entry. Eviction
+  // is amortised O(1) per write; the loop only iterates when a fresh
+  // insertion overshoots the cap.
+  while (graphStatsCache.size > GRAPH_STATS_CACHE_MAX) {
+    const oldest = graphStatsCache.keys().next().value
+    if (oldest === undefined) break
+    graphStatsCache.delete(oldest)
+  }
 }
+
+// testOnlyGraphStatsCacheSize returns the current entry count so tests
+// can assert the cap eviction without going through the public hook
+// surface. NOT for production use.
+export function testOnlyGraphStatsCacheSize(): number {
+  return graphStatsCache.size
+}
+
+// testOnlyGraphStatsCacheHas returns true when the given (connectionId,
+// graph) tuple is currently cached. NOT for production use.
+export function testOnlyGraphStatsCacheHas(
+  connectionId: string | null,
+  graph: string
+): boolean {
+  return graphStatsCache.has(graphStatsCacheKey(connectionId, graph))
+}
+
+// graphStatsCacheMax exposes the eviction cap as a read-only constant
+// so tests can derive assertions against it without hard-coding 32.
+export const graphStatsCacheMax: number = GRAPH_STATS_CACHE_MAX
 
 // testOnlyResetGraphStatsCache clears the module-level cache so each
 // test starts from a known state. NOT for production use.

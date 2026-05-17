@@ -26,6 +26,9 @@ import {
   testOnlyResetGraphStatsCache,
   testOnlySetGraphStatsCacheTTL,
   testOnlyGetGraphStatsCacheTTL,
+  testOnlyGraphStatsCacheSize,
+  testOnlyGraphStatsCacheHas,
+  graphStatsCacheMax,
 } from './useOverviewData'
 
 // fetchCapabilities (src/api/capabilities.ts) internally calls
@@ -242,6 +245,180 @@ describe('useOverviewData', () => {
       nodes: 1000,
       edges: 2000,
     })
+  })
+
+  // PERF-N7 (#286): the module-level graphStatsCache MUST be LRU-
+  // bounded so a long-lived tab that browses through many graphs
+  // doesn't leak entries. The 60s TTL evicts only on a matching-key
+  // read, so without a cap unread entries sit forever.
+  it('loadStats LRU eviction: oldest entry drops past the cap', async () => {
+    graphsMock.mockResolvedValue({ graphs: ['default'] })
+    capsMock.mockResolvedValue(rawCaps)
+    const { result } = renderHook(() => useOverviewData())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    // Fill the cache to capacity. Each graph name gets its own
+    // (nodes=i, edges=i+1) tuple so we can assert which entries
+    // survived.
+    for (let i = 0; i < graphStatsCacheMax; i += 1) {
+      queryMock
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[i]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[i + 1]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+      act(() => result.current.loadStats(`g${i}`))
+      // eslint-disable-next-line no-await-in-loop
+      await waitFor(() => expect(result.current.statsLoading).toBe(false))
+    }
+    expect(testOnlyGraphStatsCacheSize()).toBe(graphStatsCacheMax)
+    expect(testOnlyGraphStatsCacheHas('test-conn-1', 'g0')).toBe(true)
+    expect(
+      testOnlyGraphStatsCacheHas('test-conn-1', `g${graphStatsCacheMax - 1}`)
+    ).toBe(true)
+
+    // Insert one more entry. The cap should evict the OLDEST (g0).
+    queryMock
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[9001]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+      .mockResolvedValueOnce({
+        columns: [{ name: 'c', type: 'INT' }],
+        rows: [[9002]],
+        row_count: 1,
+        elapsed_ms: 1,
+      })
+    act(() => result.current.loadStats('g-overflow'))
+    await waitFor(() => expect(result.current.statsLoading).toBe(false))
+
+    expect(testOnlyGraphStatsCacheSize()).toBe(graphStatsCacheMax)
+    expect(testOnlyGraphStatsCacheHas('test-conn-1', 'g0')).toBe(false)
+    // The next-oldest survives (g1) and the new entry is present.
+    expect(testOnlyGraphStatsCacheHas('test-conn-1', 'g1')).toBe(true)
+    expect(testOnlyGraphStatsCacheHas('test-conn-1', 'g-overflow')).toBe(true)
+  })
+
+  // PERF-N7 (#286) refresh contract: re-writing the SAME key should
+  // refresh its LRU position. We seed k1..k(cap-1) first, then
+  // (twice) write k0 so its second write moves it to the END of the
+  // iteration order. Inserting one more entry then evicts k1 (the
+  // oldest), proving k0's re-write moved it past k1.
+  it('loadStats LRU refresh: re-writing a key moves it to the head', async () => {
+    graphsMock.mockResolvedValue({ graphs: ['default'] })
+    capsMock.mockResolvedValue(rawCaps)
+    const originalTTL = testOnlyGetGraphStatsCacheTTL()
+    // Use a short TTL only around the refresh-write so a re-write
+    // actually fires (skipping the cache). The rest of the fill uses
+    // a long TTL so entries do not lazily expire mid-test.
+    testOnlySetGraphStatsCacheTTL(20)
+    try {
+      const { result } = renderHook(() => useOverviewData())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      // Seed k0 with a short-TTL entry.
+      queryMock
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[1]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[2]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+      act(() => result.current.loadStats('k0'))
+      await waitFor(() => expect(result.current.statsLoading).toBe(false))
+
+      // Bump TTL up so the next cold-fill entries do not lazily expire.
+      testOnlySetGraphStatsCacheTTL(60_000)
+      // Fill k1..k(cap-1). After this loop the iteration order is:
+      // k0, k1, ..., k(cap-1).
+      for (let i = 1; i < graphStatsCacheMax; i += 1) {
+        queryMock
+          .mockResolvedValueOnce({
+            columns: [{ name: 'c', type: 'INT' }],
+            rows: [[100 + i]],
+            row_count: 1,
+            elapsed_ms: 1,
+          })
+          .mockResolvedValueOnce({
+            columns: [{ name: 'c', type: 'INT' }],
+            rows: [[200 + i]],
+            row_count: 1,
+            elapsed_ms: 1,
+          })
+        act(() => result.current.loadStats(`k${i}`))
+        // eslint-disable-next-line no-await-in-loop
+        await waitFor(() => expect(result.current.statsLoading).toBe(false))
+      }
+      expect(testOnlyGraphStatsCacheSize()).toBe(graphStatsCacheMax)
+      expect(testOnlyGraphStatsCacheHas('test-conn-1', 'k0')).toBe(true)
+
+      // Wait past the short TTL k0 was seeded with so the next
+      // loadStats('k0') re-issues the count queries and re-writes
+      // the entry (the refresh moves k0 to the end of iteration
+      // order).
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 40)
+      })
+      queryMock.mockClear()
+      queryMock
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[3]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[4]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+      act(() => result.current.loadStats('k0'))
+      await waitFor(() => expect(result.current.statsLoading).toBe(false))
+
+      // After the refresh the iteration order is:
+      //   k1, k2, ..., k(cap-1), k0   (k0 last because it was just
+      //   re-written; k1 is the OLDEST).
+      // Inserting `overflow` evicts the OLDEST entry, which is k1
+      // -- NOT k0. This is the load-bearing assertion: k0's re-write
+      // moved it past k1.
+      queryMock
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[9001]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[9002]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+      act(() => result.current.loadStats('overflow'))
+      await waitFor(() => expect(result.current.statsLoading).toBe(false))
+
+      expect(testOnlyGraphStatsCacheHas('test-conn-1', 'k0')).toBe(true)
+      expect(testOnlyGraphStatsCacheHas('test-conn-1', 'k1')).toBe(false)
+      expect(testOnlyGraphStatsCacheHas('test-conn-1', 'overflow')).toBe(true)
+    } finally {
+      testOnlySetGraphStatsCacheTTL(originalTTL)
+    }
   })
 
   it('loadStats cache entry expires after the TTL', async () => {
