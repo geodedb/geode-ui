@@ -52,6 +52,13 @@ This project implements:
   upstream enums in `geode_auth_lib.zig` (`Action`, `Resource`,
   `Permission`).
 - **CSP-ready**: No inline event handlers or unsafe patterns
+- **Profile-store at-rest encryption**: Sensitive columns (`dsn`,
+  `tls_ca_pem`, `tls_cert_pem`, `tls_key_pem`) are sealed with
+  AES-256-GCM under a single-tier env-keyed DEK
+  (`GEODE_PROFILESTORE_KEY`). Rotation is via the
+  `-profilestore-rewrap-from <hex>` startup sweep. Full trust model
+  and migration shape are recorded in
+  [ADR 0002](docs/adr/0002-profile-store-dek-trust-model.md).
 
 ## Security Best Practices
 
