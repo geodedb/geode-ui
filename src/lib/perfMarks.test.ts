@@ -144,3 +144,115 @@ describe('perfMarks buffered upload', () => {
     await expect(perfMarks.flush()).resolves.toBeUndefined()
   })
 })
+
+// PERF-N5 (#284): longtask observation extends the existing
+// PerformanceObserver setup. The new behaviour lives behind two
+// internal seams (`__longTaskCountForTest`, `__reportLongTaskForTest`)
+// so tests do not depend on jsdom shipping longtask support and do
+// not depend on console.warn (other tests routinely silence it).
+describe('perfMarks longtask observer (PERF-N5 / #284)', () => {
+  afterEach(() => {
+    perfMarks.__resetForTest()
+  })
+
+  it('startObserver attempts to install a longtask PerformanceObserver', () => {
+    // Capture every observer-construction call so we can assert one of
+    // them targets `longtask`. We do not assume the install succeeds
+    // (jsdom does not support longtask), only that the registration is
+    // attempted. A factory + closure pattern keeps the fake as a
+    // function-shaped constructor without tripping ESLint's class
+    // hygiene rules.
+    const observed: Array<PerformanceObserverInit | { entryTypes: string[] }> =
+      []
+    const original = global.PerformanceObserver
+    const FakePerformanceObserver = function FakePerformanceObserver(
+      this: { observe: (o: unknown) => void; disconnect: () => void },
+      _cb: PerformanceObserverCallback
+    ): void {
+      // _cb intentionally unused — we are stubbing the observer's
+      // constructor signature, not its delivery loop.
+      const _ = _cb
+      if (_) {
+        /* satisfy `no-unused-vars` without using `void` */
+      }
+      this.observe = (
+        opts: PerformanceObserverInit | { entryTypes: string[] }
+      ): void => {
+        observed.push(opts)
+      }
+      this.disconnect = (): void => {
+        /* no-op */
+      }
+    } as unknown as typeof PerformanceObserver
+    global.PerformanceObserver = FakePerformanceObserver
+    try {
+      perfMarks.__startObserver('http://otel.local/v1/metrics')
+      // First call configures `measure`. Second call configures `longtask`.
+      const longtaskCall = observed.find(
+        (o) =>
+          ('type' in o && o.type === 'longtask') ||
+          ('entryTypes' in o && o.entryTypes.includes('longtask'))
+      )
+      expect(longtaskCall).toBeDefined()
+      expect(perfMarks.__hasLongTaskObserverForTest()).toBe(true)
+    } finally {
+      global.PerformanceObserver = original
+    }
+  })
+
+  it('reportLongTask increments the counter and console.warns in dev', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    const before = perfMarks.__longTaskCountForTest()
+    perfMarks.__reportLongTaskForTest({
+      name: 'self',
+      entryType: 'longtask',
+      startTime: 12.3,
+      duration: 123.4,
+      toJSON: () => ({}),
+    } as PerformanceEntry)
+    expect(perfMarks.__longTaskCountForTest()).toBe(before + 1)
+    // jest runs with NODE_ENV=test (not 'production'), so the gate
+    // permits the dev warning. The warn is the development surface;
+    // its argument list documents the dispatcher seam.
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/\[perfMarks\] longtask/)
+    warnSpy.mockRestore()
+  })
+
+  it('longtask observer install failure is silent', () => {
+    const original = global.PerformanceObserver
+    const FlakyPerformanceObserver = function FlakyPerformanceObserver(
+      this: { observe: (o: unknown) => void; disconnect: () => void },
+      _cb: PerformanceObserverCallback
+    ): void {
+      // _cb intentionally unused — we are stubbing the observer's
+      // constructor signature, not its delivery loop.
+      const _ = _cb
+      if (_) {
+        /* satisfy `no-unused-vars` without using `void` */
+      }
+      this.observe = (
+        opts: PerformanceObserverInit | { entryTypes: string[] }
+      ): void => {
+        if (
+          ('type' in opts && opts.type === 'longtask') ||
+          ('entryTypes' in opts && opts.entryTypes.includes('longtask'))
+        ) {
+          throw new TypeError('longtask is not supported')
+        }
+      }
+      this.disconnect = (): void => {
+        /* no-op */
+      }
+    } as unknown as typeof PerformanceObserver
+    global.PerformanceObserver = FlakyPerformanceObserver
+    try {
+      expect(() =>
+        perfMarks.__startObserver('http://otel.local/v1/metrics')
+      ).not.toThrow()
+      expect(perfMarks.__hasLongTaskObserverForTest()).toBe(false)
+    } finally {
+      global.PerformanceObserver = original
+    }
+  })
+})
