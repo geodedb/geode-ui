@@ -401,6 +401,22 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	}
 	defer a.close()
 
+	// PERF-N3 (#278): opt-in pprof endpoint on a separate loopback-only
+	// listener. No-op when GEODE_PPROF != "1". The shutdown closure is
+	// invoked unconditionally; when disabled it is a no-op returning nil.
+	pprofShutdown, err := startPprofServer(getenv)
+	if err != nil {
+		slog.Error("pprof startup", "err", err)
+		obsx.FlushLogs()
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer func() {
+		if perr := pprofShutdown(context.Background()); perr != nil {
+			slog.Warn("pprof shutdown", "err", perr)
+		}
+	}()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
