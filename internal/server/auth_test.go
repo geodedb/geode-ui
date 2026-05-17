@@ -68,6 +68,83 @@ func TestAuthJWT_QueryParamFallback(t *testing.T) {
 	}
 }
 
+// withClockOverride pushes a fixed time onto the accessTokenAuditNow
+// atomic.Pointer for the test body, then restores. Mirrors the override
+// pattern in security_headers_test.go for the audit-emission limiter.
+func withClockOverride(t *testing.T, now time.Time) {
+	t.Helper()
+	fn := func() time.Time { return now }
+	prev := accessTokenAuditNow.Swap(&fn)
+	t.Cleanup(func() { accessTokenAuditNow.Store(prev) })
+}
+
+// TestAuthJWT_QueryParamRefusedPostSunset pins SEC issue 71: after
+// AccessTokenSunsetTime has passed, the ?access_token= fallback is
+// REFUSED on non-WS endpoints. The Authorization header path stays
+// valid (header > cookie > query priority order).
+func TestAuthJWT_QueryParamRefusedPostSunset(t *testing.T) {
+	iss := newTestIssuer(t)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	srv := New(Config{JWT: iss})
+
+	// One second past the sunset — refusal must engage on a REST endpoint.
+	withClockOverride(t, AccessTokenSunsetTime.Add(time.Second))
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs?access_token="+tok, nil)
+	err = srv.AuthJWT(r)
+	if err == nil {
+		t.Fatalf("expected post-sunset refusal on REST endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "sunset") {
+		t.Fatalf("expected sunset error, got %v", err)
+	}
+}
+
+// TestAuthJWT_QueryParamPermittedPostSunsetForWS pins the carveout:
+// /ws/* upgrades MUST keep accepting the query fallback even after
+// sunset because browsers cannot attach the Authorization header to
+// the WebSocket upgrade request.
+func TestAuthJWT_QueryParamPermittedPostSunsetForWS(t *testing.T) {
+	iss := newTestIssuer(t)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	srv := New(Config{JWT: iss})
+
+	withClockOverride(t, AccessTokenSunsetTime.Add(365*24*time.Hour))
+
+	for _, path := range []string{"/ws/query", "/ws/lsp"} {
+		r := httptest.NewRequest(http.MethodGet, path+"?access_token="+tok, nil)
+		if err := srv.AuthJWT(r); err != nil {
+			t.Fatalf("%s: post-sunset WS upgrade rejected: %v", path, err)
+		}
+	}
+}
+
+// TestAuthJWT_QueryParamPermittedPreSunset pins the pre-sunset
+// behaviour: the fallback works on every endpoint, and the deprecation
+// middleware's advisory headers are the only signal. The accessTokenAuditNow
+// override is set to one second BEFORE sunset.
+func TestAuthJWT_QueryParamPermittedPreSunset(t *testing.T) {
+	iss := newTestIssuer(t)
+	tok, _, err := iss.Issue("alice", "default", nil, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	srv := New(Config{JWT: iss})
+
+	withClockOverride(t, AccessTokenSunsetTime.Add(-time.Second))
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/graphs?access_token="+tok, nil)
+	if err := srv.AuthJWT(r); err != nil {
+		t.Fatalf("pre-sunset REST query fallback rejected: %v", err)
+	}
+}
+
 // TestAuthJWT_MalformedHeader rejects schemes other than Bearer and
 // headers with the wrong number of whitespace-separated fields.
 func TestAuthJWT_MalformedHeader(t *testing.T) {

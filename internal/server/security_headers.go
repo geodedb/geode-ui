@@ -96,8 +96,28 @@ func WithPermissionsPolicy(next http.Handler) http.Handler {
 // `geode-ui-auth` cookie (Secure, HttpOnly, SameSite=Lax) plus the
 // `X-CSRF-Token` double-submit pattern wired in SEC-F7 (#62). When this
 // date passes, the extractToken() fallback at internal/server/auth.go:88
-// should be deleted.
+// is REFUSED for non-WS endpoints (the WS surface is exempt because
+// browsers cannot attach the Authorization header to the upgrade
+// request); see accessTokenQuerySunsetReached in auth.go.
 const AccessTokenSunsetDate = "Wed, 01 Jul 2026 00:00:00 GMT"
+
+// AccessTokenSunsetTime is AccessTokenSunsetDate parsed once at init so
+// the post-sunset refusal check in extractToken (auth.go) doesn't have
+// to parse the string on every request. The two constants MUST stay in
+// sync; init() validates the parse and panics on a typo so a future
+// edit can't silently desync them.
+var AccessTokenSunsetTime time.Time
+
+func init() {
+	t, err := time.Parse(time.RFC1123, AccessTokenSunsetDate)
+	if err != nil {
+		// A bad constant at package init means the binary is broken
+		// before any request hits the wire; panicking is the only
+		// signal that surfaces in a production deploy.
+		panic("server: AccessTokenSunsetDate is not a valid RFC1123 date: " + err.Error())
+	}
+	AccessTokenSunsetTime = t
+}
 
 // accessTokenQueryCounter is the SEC-NEW-6 (#206) expvar-backed counter
 // for every request that arrives with the deprecated `?access_token=`

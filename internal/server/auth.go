@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"geodedb.com/geode-ui/gen/pkg/securex"
 )
@@ -90,6 +91,16 @@ func (s *GraphServer) AuthJWT(r *http.Request) error {
 // Bearer schemes or malformed shapes return an error rather than falling
 // through, so a buggy client doesn't silently get authenticated by a
 // stale cookie or pinned URL token.
+//
+// SEC-F5 / SEC issue 71: post-sunset (AccessTokenSunsetTime), the
+// ?access_token= fallback is refused on non-WS endpoints. The WS
+// surface (/ws/*) is exempt because browsers cannot set the
+// Authorization header on the upgrade request, and the canonical
+// replacement (geode-ui-auth cookie + CSRF) doesn't apply to a fresh
+// cross-document WebSocket. Pre-sunset the fallback works for every
+// endpoint and the WithAccessTokenDeprecation middleware emits the
+// advisory Deprecation/Sunset/Link headers documented in
+// security_headers.go.
 func extractToken(r *http.Request) (string, error) {
 	if h := r.Header.Get("Authorization"); h != "" {
 		return extractBearer(r)
@@ -98,9 +109,45 @@ func extractToken(r *http.Request) (string, error) {
 		return c.Value, nil
 	}
 	if q := r.URL.Query().Get("access_token"); q != "" {
+		if accessTokenQuerySunsetReached(r) {
+			return "", errAccessTokenQuerySunset
+		}
 		return q, nil
 	}
 	return "", errors.New("auth: missing Authorization header")
+}
+
+// errAccessTokenQuerySunset is returned by extractToken when a request
+// arrives with a `?access_token=` query fallback after the
+// AccessTokenSunsetTime has passed AND the route is not a WS upgrade.
+// Surfaced as a 401 by the genapi-emitted AuthJWT path. The error
+// message is intentionally short and machine-parseable so log/SIEM
+// scrapers can recognise the post-sunset refusal vs a generic 401.
+var errAccessTokenQuerySunset = errors.New("auth: ?access_token= query fallback removed at sunset (2026-07-01); use Authorization header or geode-ui-auth cookie")
+
+// accessTokenQuerySunsetReached reports whether the deprecated
+// ?access_token= query fallback should be REFUSED for r at this
+// instant. The check is two-pronged:
+//
+//   - WS upgrades (/ws/*) are always permitted — browsers cannot attach
+//     the Authorization header to the cross-document upgrade request,
+//     so the query-token transport is the ONLY way the SPA's LSP +
+//     query streams can authenticate.
+//   - Every other endpoint flips to refused once time.Now() crosses
+//     AccessTokenSunsetTime.
+//
+// Settable for tests via accessTokenNowFn (the same atomic.Pointer the
+// WithAccessTokenDeprecation rate-limit ledger uses) so the sunset
+// transition can be exercised without waiting for wall-clock 2026-07-01.
+func accessTokenQuerySunsetReached(r *http.Request) bool {
+	if r.URL != nil && strings.HasPrefix(r.URL.Path, "/ws/") {
+		return false
+	}
+	nowFn := time.Now
+	if p := accessTokenAuditNow.Load(); p != nil {
+		nowFn = *p
+	}
+	return !nowFn().Before(AccessTokenSunsetTime)
 }
 
 // extractBearer pulls the Bearer token off the Authorization header.
