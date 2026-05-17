@@ -1,10 +1,10 @@
 // Configurable builder for the 1-hop "expand neighbours" GQL statement.
 //
-// The simple form `buildExpandStatement({ id })` produces the same
-// undirected statement the original `buildExploreStatement` emitted, so
-// existing callers keep their byte-for-byte behavior. Additional
-// options (direction, labelFilter, limit) drive the expand-popover UX
-// added in Phase 3.
+// The simple form `buildExpandStatement({ id })` produces an undirected
+// match, no label filter, default limit of 100 — what callers like
+// `useGraphActions.onExploreNeighbours` rely on. Additional options
+// (direction, labelFilter, limit) drive the expand-popover UX added in
+// Phase 3.
 //
 // Inputs are validated defensively: ids must be numeric (Geode's `id()`
 // predicate expects integers) and the optional label filter must be a

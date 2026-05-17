@@ -8,21 +8,11 @@
 // scalar-only RETURN don't have one, so the inspector disables the
 // action for them.
 
-import { buildExpandStatement } from './buildExpand'
-
 // True when `id` looks like a real Geode node id (a non-negative
 // integer in string form, which is what extractElements emits for
 // graph_summary nodes and edge-endpoint placeholders).
 export function isRealNodeId(id: string): boolean {
   return /^\d+$/.test(id)
-}
-
-// Build the 1-hop subgraph statement for a real node id. Back-compat
-// delegate around `buildExpandStatement` so existing callers (notably
-// `useGraphActions.onExploreNeighbours`) keep their original behavior:
-// undirected match, no label filter, default limit of 100.
-export function buildExploreStatement(nodeId: string): string {
-  return buildExpandStatement({ id: nodeId })
 }
 
 // Pull the graph name out of a leading `USE GRAPH <name>;` so the
