@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
@@ -8,8 +8,6 @@ import {
   isWireFeatureMissingError,
   wireFeatureMissingDescription,
 } from '../../api/capabilities'
-import { useApiResource } from '../../hooks/useApiResource'
-import { useCapabilities } from '../../hooks/useCapabilities'
 import { generatePassword } from '../../lib/passwordGenerator'
 import {
   PolicyViolation,
@@ -23,9 +21,10 @@ import {
   Field,
   Input,
   Modal,
-  Stack,
   TableScroll,
 } from '../ui'
+import { AdminPageShell, ErrorBanner } from './AdminPageShell'
+import { useAdminListPage } from './useAdminListPage'
 
 // UsersPage drives the /admin/users tab. The Geode B4 endpoints back
 // every action:
@@ -42,129 +41,72 @@ import {
 // `User` from `@api` instead of re-declaring a structural shadow and
 // casting `Array<unknown>`.
 
-const ToolBar = styled.header`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.md};
-  align-items: center;
-  flex-wrap: wrap;
-
-  h2 {
-    flex: 1 1 auto;
-    font-family: ${({ theme }) => theme.font.family.display};
-    font-size: ${({ theme }) => theme.font.sizes.xl};
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-    color: ${({ theme }) => theme.text.primary};
-    margin: 0;
-  }
-`
-
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
 const RowActions = styled.div`
   display: inline-flex;
   gap: ${({ theme }) => theme.spacing.xs};
 `
 
-const UnsupportedNote = styled.span`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
-`
-
 export const UsersPage: React.FC = () => {
   const { t } = useTranslation()
-  const { adminWritable, loaded: capsLoaded } = useCapabilities()
-  // Render the CTA enabled until the /capabilities probe confirms the
-  // connected Geode build lacks the wire DDL — only then disable it and
-  // surface the inline note, so the button never flashes disabled-then-
-  // enabled on a build that does support it.
-  const gateCreate = capsLoaded && !adminWritable.users
-  const [actionErr, setActionErr] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-
-  // useApiResource owns the AbortController + mounted/aborted guards.
-  // The fetcher receives a signal which is forwarded to the typed
-  // client; the genapi-emitted client doesn't yet expose a per-call
-  // signal, so the hook still gates state updates correctly even if
-  // the underlying fetch isn't aborted. The signal is passed for when
-  // genapi grows passthrough in a future MR (see #29 commit body).
-  const {
-    data,
-    error: loadErr,
-    refetch,
-  } = useApiResource(
+  // QUALITY-18 (#270): list scaffold (state, capabilities probe, list
+  // fetch, delete handler) lives in useAdminListPage. UsersPage adds
+  // two extra handlers (onDisable / onEnable) that don't fit the
+  // generic shape; they stay inline below.
+  const page = useAdminListPage<User>({
+    resource: 'users',
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async (_signal): Promise<User[]> => {
+    fetcher: async (_signal): Promise<User[]> => {
       const r = await client.getUsers({})
       return r.users ?? []
     },
-    []
+    deleter: (username) =>
+      client.deleteUsername({ username }).then(() => undefined),
+  })
+  const users = page.rows
+  const [extraErr, setExtraErr] = useState<string | null>(null)
+  const err = page.err ?? extraErr
+  const { refetch } = page
+
+  const onDisable = useCallback(
+    async (username: string): Promise<void> => {
+      try {
+        await client.disable({ username })
+        setExtraErr(null)
+        refetch()
+      } catch (e: unknown) {
+        setExtraErr(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [refetch]
   )
-  const users = data ?? []
-  const err = actionErr ?? loadErr
 
-  const onDelete = async (): Promise<void> => {
-    if (!confirmDelete) return
-    setDeleting(true)
-    try {
-      await client.deleteUsername({ username: confirmDelete })
-      setActionErr(null)
-      setConfirmDelete(null)
-      refetch()
-    } catch (e: unknown) {
-      setActionErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  const onDisable = async (username: string): Promise<void> => {
-    try {
-      await client.disable({ username })
-      setActionErr(null)
-      refetch()
-    } catch (e: unknown) {
-      setActionErr(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  const onEnable = async (username: string): Promise<void> => {
-    try {
-      await client.enable({ username })
-      setActionErr(null)
-      refetch()
-    } catch (e: unknown) {
-      setActionErr(e instanceof Error ? e.message : String(e))
-    }
-  }
+  const onEnable = useCallback(
+    async (username: string): Promise<void> => {
+      try {
+        await client.enable({ username })
+        setExtraErr(null)
+        refetch()
+      } catch (e: unknown) {
+        setExtraErr(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [refetch]
+  )
 
   return (
-    <Stack $gap="md">
-      <ToolBar>
-        <h2>{t('users.title', { count: users.length })}</h2>
-        {gateCreate && (
-          <UnsupportedNote data-testid="admin-users-unsupported">
-            {t('users.unsupportedNote')}
-          </UnsupportedNote>
-        )}
-        <Button
-          data-testid="admin-new-user-btn"
-          onClick={() => setShowCreate(true)}
-          disabled={gateCreate}
-          title={gateCreate ? t('users.unsupportedTooltip') : undefined}
-        >
-          {t('users.newButton')}
-        </Button>
-      </ToolBar>
-      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+    <AdminPageShell
+      title={t('users.title', { count: users.length })}
+      unsupportedNote={t('users.unsupportedNote')}
+      unsupportedTooltip={t('users.unsupportedTooltip')}
+      newButtonLabel={t('users.newButton')}
+      gateCreate={page.gateCreate}
+      onCreate={page.openCreate}
+      err={err}
+      testIds={{
+        unsupportedNote: 'admin-users-unsupported',
+        newButton: 'admin-new-user-btn',
+      }}
+    >
       <TableScroll>
         <DataTable>
           <thead>
@@ -214,7 +156,7 @@ export const UsersPage: React.FC = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setConfirmDelete(u.username)}
+                        onClick={() => page.openConfirm(u.username)}
                       >
                         {t('common.delete')}
                       </Button>
@@ -226,25 +168,18 @@ export const UsersPage: React.FC = () => {
           </tbody>
         </DataTable>
       </TableScroll>
-      {showCreate && (
-        <CreateUserModal
-          onClose={() => {
-            setShowCreate(false)
-            refetch()
-          }}
-        />
-      )}
+      {page.showCreate && <CreateUserModal onClose={page.closeCreate} />}
       <ConfirmModal
-        open={confirmDelete !== null}
-        title={t('users.deleteTitle', { name: confirmDelete ?? '' })}
+        open={page.confirmDelete !== null}
+        title={t('users.deleteTitle', { name: page.confirmDelete ?? '' })}
         body={t('common.cannotBeUndone')}
         destructive
-        loading={deleting}
+        loading={page.deleting}
         confirmLabel={t('users.deleteConfirm')}
-        onConfirm={onDelete}
-        onClose={() => setConfirmDelete(null)}
+        onConfirm={page.onDelete}
+        onClose={page.closeConfirm}
       />
-    </Stack>
+    </AdminPageShell>
   )
 }
 

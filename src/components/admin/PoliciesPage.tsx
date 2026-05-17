@@ -7,8 +7,6 @@ import {
   isWireFeatureMissingError,
   wireFeatureMissingDescription,
 } from '../../api/capabilities'
-import { useApiResource } from '../../hooks/useApiResource'
-import { useCapabilities } from '../../hooks/useCapabilities'
 import {
   RBAC_RESOURCES,
   RLS_OPERATIONS,
@@ -23,10 +21,11 @@ import {
   Input,
   Modal,
   Select,
-  Stack,
   TableScroll,
   Textarea,
 } from '../ui'
+import { AdminPageShell, ErrorBanner } from './AdminPageShell'
+import { useAdminListPage } from './useAdminListPage'
 
 // PoliciesPage drives the /admin/policies tab (Geode B6 endpoints):
 //
@@ -43,99 +42,42 @@ type Policy = {
   resource?: string
 }
 
-const ToolBar = styled.header`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.md};
-  align-items: center;
-  flex-wrap: wrap;
-
-  h2 {
-    flex: 1 1 auto;
-    font-family: ${({ theme }) => theme.font.family.display};
-    font-size: ${({ theme }) => theme.font.sizes.xl};
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-    color: ${({ theme }) => theme.text.primary};
-    margin: 0;
-  }
-`
-
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
 const Code = styled.code`
   font-family: ${({ theme }) => theme.font.family.mono};
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const UnsupportedNote = styled.span`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
-`
-
 export const PoliciesPage: React.FC = () => {
   const { t } = useTranslation()
-  const { adminWritable, loaded: capsLoaded } = useCapabilities()
-  const gateCreate = capsLoaded && !adminWritable.policies
-  const [actionErr, setActionErr] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-
-  const {
-    data,
-    error: loadErr,
-    refetch,
-  } = useApiResource(
+  // QUALITY-18 (#270): scaffold (state, capabilities probe, list
+  // fetch, delete handler) lives in useAdminListPage. The page only
+  // declares the resource-specific shape: the AdminWritable key, the
+  // typed fetcher, and the per-id delete call.
+  const page = useAdminListPage<Policy>({
+    resource: 'policies',
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async (_signal) => {
+    fetcher: async (_signal) => {
       const r = await client.getPolicies({})
       return ((r.policies ?? []) as Policy[]) ?? []
     },
-    []
-  )
-  const policies = data ?? []
-  const err = actionErr ?? loadErr
-
-  const onDelete = async (): Promise<void> => {
-    if (!confirmDelete) return
-    setDeleting(true)
-    try {
-      await client.deleteName({ name: confirmDelete })
-      setActionErr(null)
-      setConfirmDelete(null)
-      refetch()
-    } catch (e: unknown) {
-      setActionErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setDeleting(false)
-    }
-  }
+    deleter: (name) => client.deleteName({ name }).then(() => undefined),
+  })
+  const policies = page.rows
 
   return (
-    <Stack $gap="md">
-      <ToolBar>
-        <h2>{t('policies.title', { count: policies.length })}</h2>
-        {gateCreate && (
-          <UnsupportedNote data-testid="admin-policies-unsupported">
-            {t('policies.unsupportedNote')}
-          </UnsupportedNote>
-        )}
-        <Button
-          data-testid="admin-new-policy-btn"
-          onClick={() => setShowCreate(true)}
-          disabled={gateCreate}
-          title={gateCreate ? t('policies.unsupportedTooltip') : undefined}
-        >
-          {t('policies.newButton')}
-        </Button>
-      </ToolBar>
-      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+    <AdminPageShell
+      title={t('policies.title', { count: policies.length })}
+      unsupportedNote={t('policies.unsupportedNote')}
+      unsupportedTooltip={t('policies.unsupportedTooltip')}
+      newButtonLabel={t('policies.newButton')}
+      gateCreate={page.gateCreate}
+      onCreate={page.openCreate}
+      err={page.err}
+      testIds={{
+        unsupportedNote: 'admin-policies-unsupported',
+        newButton: 'admin-new-policy-btn',
+      }}
+    >
       <TableScroll>
         <DataTable>
           <thead>
@@ -163,7 +105,7 @@ export const PoliciesPage: React.FC = () => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setConfirmDelete(p.name)}
+                      onClick={() => page.openConfirm(p.name)}
                     >
                       {t('common.delete')}
                     </Button>
@@ -174,25 +116,18 @@ export const PoliciesPage: React.FC = () => {
           </tbody>
         </DataTable>
       </TableScroll>
-      {showCreate && (
-        <CreatePolicyModal
-          onClose={() => {
-            setShowCreate(false)
-            refetch()
-          }}
-        />
-      )}
+      {page.showCreate && <CreatePolicyModal onClose={page.closeCreate} />}
       <ConfirmModal
-        open={confirmDelete !== null}
-        title={t('policies.deleteTitle', { name: confirmDelete ?? '' })}
+        open={page.confirmDelete !== null}
+        title={t('policies.deleteTitle', { name: page.confirmDelete ?? '' })}
         body={t('common.cannotBeUndone')}
         destructive
-        loading={deleting}
+        loading={page.deleting}
         confirmLabel={t('policies.deleteConfirm')}
-        onConfirm={onDelete}
-        onClose={() => setConfirmDelete(null)}
+        onConfirm={page.onDelete}
+        onClose={page.closeConfirm}
       />
-    </Stack>
+    </AdminPageShell>
   )
 }
 

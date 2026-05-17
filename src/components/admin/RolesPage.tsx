@@ -7,8 +7,6 @@ import {
   isWireFeatureMissingError,
   wireFeatureMissingDescription,
 } from '../../api/capabilities'
-import { useApiResource } from '../../hooks/useApiResource'
-import { useCapabilities } from '../../hooks/useCapabilities'
 import { permissionSuggestions } from '../../lib/rbacVocab'
 import {
   Button,
@@ -18,9 +16,10 @@ import {
   Field,
   Input,
   Modal,
-  Stack,
   TableScroll,
 } from '../ui'
+import { AdminPageShell, ErrorBanner } from './AdminPageShell'
+import { useAdminListPage } from './useAdminListPage'
 
 // Inlined chip/tag input for the role Permissions field — small enough
 // not to warrant a shared primitive. Backed by a native <datalist> so
@@ -82,94 +81,35 @@ type Role = {
   permissions?: string[]
 }
 
-const ToolBar = styled.header`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.md};
-  align-items: center;
-  flex-wrap: wrap;
-
-  h2 {
-    flex: 1 1 auto;
-    font-family: ${({ theme }) => theme.font.family.display};
-    font-size: ${({ theme }) => theme.font.sizes.xl};
-    font-weight: ${({ theme }) => theme.font.weights.semibold};
-    color: ${({ theme }) => theme.text.primary};
-    margin: 0;
-  }
-`
-
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
-const UnsupportedNote = styled.span`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
-`
-
 export const RolesPage: React.FC = () => {
   const { t } = useTranslation()
-  const { adminWritable, loaded: capsLoaded } = useCapabilities()
-  const gateCreate = capsLoaded && !adminWritable.roles
-  const [actionErr, setActionErr] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-
-  const {
-    data,
-    error: loadErr,
-    refetch,
-  } = useApiResource(
+  // QUALITY-18 (#270): scaffold lives in useAdminListPage. See
+  // PoliciesPage for the design rationale.
+  const page = useAdminListPage<Role>({
+    resource: 'roles',
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    async (_signal) => {
+    fetcher: async (_signal) => {
       const r = await client.getRoles({})
       return ((r.roles ?? []) as Role[]) ?? []
     },
-    []
-  )
-  const roles = data ?? []
-  const err = actionErr ?? loadErr
-
-  const onDelete = async (): Promise<void> => {
-    if (!confirmDelete) return
-    setDeleting(true)
-    try {
-      await client.deleteRole({ role: confirmDelete })
-      setActionErr(null)
-      setConfirmDelete(null)
-      refetch()
-    } catch (e: unknown) {
-      setActionErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setDeleting(false)
-    }
-  }
+    deleter: (role) => client.deleteRole({ role }).then(() => undefined),
+  })
+  const roles = page.rows
 
   return (
-    <Stack $gap="md">
-      <ToolBar>
-        <h2>{t('roles.title', { count: roles.length })}</h2>
-        {gateCreate && (
-          <UnsupportedNote data-testid="admin-roles-unsupported">
-            {t('roles.unsupportedNote')}
-          </UnsupportedNote>
-        )}
-        <Button
-          data-testid="admin-new-role-btn"
-          onClick={() => setShowCreate(true)}
-          disabled={gateCreate}
-          title={gateCreate ? t('roles.unsupportedTooltip') : undefined}
-        >
-          {t('roles.newButton')}
-        </Button>
-      </ToolBar>
-      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+    <AdminPageShell
+      title={t('roles.title', { count: roles.length })}
+      unsupportedNote={t('roles.unsupportedNote')}
+      unsupportedTooltip={t('roles.unsupportedTooltip')}
+      newButtonLabel={t('roles.newButton')}
+      gateCreate={page.gateCreate}
+      onCreate={page.openCreate}
+      err={page.err}
+      testIds={{
+        unsupportedNote: 'admin-roles-unsupported',
+        newButton: 'admin-new-role-btn',
+      }}
+    >
       <TableScroll>
         <DataTable>
           <thead>
@@ -195,7 +135,7 @@ export const RolesPage: React.FC = () => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setConfirmDelete(r.name)}
+                      onClick={() => page.openConfirm(r.name)}
                     >
                       {t('common.delete')}
                     </Button>
@@ -206,25 +146,18 @@ export const RolesPage: React.FC = () => {
           </tbody>
         </DataTable>
       </TableScroll>
-      {showCreate && (
-        <CreateRoleModal
-          onClose={() => {
-            setShowCreate(false)
-            refetch()
-          }}
-        />
-      )}
+      {page.showCreate && <CreateRoleModal onClose={page.closeCreate} />}
       <ConfirmModal
-        open={confirmDelete !== null}
-        title={t('roles.deleteTitle', { name: confirmDelete ?? '' })}
+        open={page.confirmDelete !== null}
+        title={t('roles.deleteTitle', { name: page.confirmDelete ?? '' })}
         body={t('common.cannotBeUndone')}
         destructive
-        loading={deleting}
+        loading={page.deleting}
         confirmLabel={t('roles.deleteConfirm')}
-        onConfirm={onDelete}
-        onClose={() => setConfirmDelete(null)}
+        onConfirm={page.onDelete}
+        onClose={page.closeConfirm}
       />
-    </Stack>
+    </AdminPageShell>
   )
 }
 
