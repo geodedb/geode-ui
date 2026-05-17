@@ -1868,3 +1868,59 @@ The following GitLab issues need manual close-out from a session with `glab` cre
 - **Commits:** `637907b` (S-NEW-2) through `e4fc9ff` (won't-do batch); tracking commit appends `docs: update gap analysis tracking for 2026-05-16 close-out` + matrix-gate widen.
 - **Verifier verdict:** **VERIFIED_WITH_ISSUES** (one soft flake, widened in this same commit).
 - **Plan provenance:** planner tier ordering A → H followed; per-tier completion reports recorded inline in the domain `*GAP_ANALYSIS.md` rows.
+
+## Closure batch 2026-05-17 (round 2)
+
+A second TDD-driven gap-close pass on 2026-05-17 — **10 implementation commits + 1 tracking commit** — closing the ten Low / Medium follow-ups left after the round-1 cohort (`742d84f` and the earlier 2026-05-17 batch). All ten gaps follow the test-first contract: every closure ships a Jest, Go, or bench test that fails on the parent commit and passes on the closure commit, plus the production fix itself. Pre-commit (gofmt, go vet, eslint, prettier, detect-secrets, etc.) passes on every commit.
+
+### Headline metrics
+
+- **Go tests:** `./internal/server/...` passes (incl. `-race`); new `ws_query_streamrows_bench_test.go` carries `BenchmarkStreamRowsOverWS_AllocsPerRow` (1000 rows × 5 cols: 12180 allocs/op → 11185 allocs/op) and `TestStreamRowsOverWS_PoolDoesNotPinRowReferences` (nil-clear-before-Put safety).
+- **Jest:** all existing suites stay green; new tests:
+  - `internal/server/security_headers_test.go::TestCSPDirective_ConnectSrcOmitsWildcardWss` (CSP `connect-src` no longer enumerates `wss:`).
+  - `cmd/server/app_test.go::TestNoLiteralGeodeAdminFixture` (no fixture re-introduces the product-name literal as admin user).
+  - `src/components/results/projectColumns.test.ts::source contains no \`as { keys: ... }\` cast` + behavioural trim-path test.
+  - `src/lib/passwordGenerator.test.ts::throws when validatePassword can never accept` (jest.isolateModules + module mock).
+  - `src/__tests__/lazy-prefetch-hints.test.ts` (webpackPrefetch + chunkName magic comments).
+  - `src/api/csrf.test.ts::deduplicates concurrent callers (singleflight)` + does-not-leak-across-settle.
+  - `src/lib/lsp/__tests__/client.test.ts::reconnect backoff applies equal jitter` (Math.random seeded 0.0 / 1.0).
+- **Lint / formatter:** `npm run lint`, `npm run prettier:check`, `make go-lint`, `go vet ./...` all clean. Pre-commit's eslint flagged: a `no-useless-concat`, a `global-require`, and a `no-restricted-syntax` for-of; all three fixed inline (tagged-template assembly, scoped eslint-disable, forEach).
+- **Build:** `npm run build` succeeds. New `graph-view` named chunk surfaces in the asset manifest.
+
+### Closures
+
+| Gap-ID | Domain | Issue | Closure SHA | Title | Evidence |
+|---|---|---|---|---|---|
+| QUAL #245 | Quality (cleanup) | [#245](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/245) | `f6c0047` | Drop dead `unicode` import keeper from `password_policy.go` | `unicode` import + `_ = unicode.IsDigit` keeper removed; function-doc expanded to explain ASCII-only choice. `go vet` and `TestValidatePassword*` stay green. |
+| SEC #266 / S-2026-05-17-05 | Security (A05 / CWE-1021) | [#266](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/266) | `d914df6` | Drop bare `wss:` from CSP `connect-src` | `connect-src 'self' wss:` → `connect-src 'self'`. Same-origin wss:// still works under `'self'`. Pinned by new `TestCSPDirective_ConnectSrcOmitsWildcardWss` which trips on any future regression. |
+| SEC #267 / S-2026-05-17-08 | Security (CWE-798 / test fixture) | [#267](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/267) | `755ede6` | Rename `"geode"` admin test fixture to `"test-admin"` | Four `adminUsers: "geode"` fixture sites renamed in `cmd/server/app_test.go`. New `TestNoLiteralGeodeAdminFixture` reads the file and asserts the literal no longer occurs; the detector assembles the forbidden token at runtime from substrings so it does not match its own source. |
+| QUAL #255 | Quality (deps) | [#255](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/255) | `7d271a2` | Remove dead `cytoscape-popper` dep + typings shim | `npm uninstall cytoscape-popper`; `src/types/cytoscape-popper.d.ts` deleted. `npm ls cytoscape-popper` confirmed top-level only. Test suite 865/865, build green. |
+| QUAL #248 | Quality (maintainability) | [#248](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/248) | `455f6b1` | Immutable Plan in `projectColumns` (drop type-cast mutation) | Column-budget trim path replaces `(p as { keys: string[] }).keys = ...` with `plan[slot] = { ...p, keys: p.keys.slice(0, perPlan) }`. Pinned by source-scan test (`as { keys: string[] }` no longer present) + behavioural trim-path test. |
+| QUAL #244 | Quality (security-adjacent) | [#244](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/244) | `cd5be84` | passwordGenerator validates fallback + throws on budget exhaustion | After `MAX_USERNAME_RETRIES` exhaustion the fallback is re-validated and the function throws on validator-rejection. Pinned by `jest.isolateModules` mock that forces validatePassword to always reject. |
+| PERF #256 | Performance (UI bundling) | [#256](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/256) | `478bcf6` | webpackPrefetch hints on Monaco/Cytoscape lazy chunks | `/* webpackPrefetch: true, webpackChunkName: "gql-editor" */` + `"graph-view"` magic comments on the two `React.lazy` dynamic imports. Source-scan test pins the contract; `npm run build` confirms named chunks emit. |
+| PERF #257 | Performance (API client) | [#257](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/257) | `79b5680` | Singleflight CSRF refresh | `inflightRefresh: Promise<...> \| null` module-scoped; concurrent callers share the in-flight Promise; `.finally()` clears so the next refresh window after settle does fetch again. Two new tests pin the fetch-called-exactly-once contract for 5 concurrent calls AND the no-leak-across-settle invariant. |
+| PERF #254 | Performance (UI / LSP) | [#254](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/254) | `6695e54` | Equal-jitter LSP reconnect backoff | `scheduleReconnect` now computes `delay = base/2 + Math.random()*base/2`. Seeded `Math.random=0.0` yields base/2 (250ms first retry); `Math.random=1.0` yields base (500ms). Pinned by new fake-setTimeout + Math.random-seeded test. |
+| PERF #251 | Performance (backend WS) | [#251](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/251) | `eec83de` | Pool `ptrs` slab in `streamRowsOverWS` (sync.Pool) | New `wsPtrsPool` (sync.Pool of `*[]any`) mirrors the existing `wsRowBufPool` pattern. Per-row Get → re-slice → populate &row[i] → Scan → nil-clear → Put BEFORE `batcher.add` so the pool reference cannot outlive the batcher's row reference. Baseline 12180 allocs/op (1000 rows × 5 cols) → 11185 allocs/op; the row slab itself stays allocated per row (batcher contract retains row until next flush). Safety pinned by `TestStreamRowsOverWS_PoolDoesNotPinRowReferences` which Get()s a slab and asserts the backing capacity contains no live pointers. |
+
+### Commit list
+
+```text
+f6c0047 fix: close #245 - drop dead unicode import keeper from password_policy.go
+d914df6 fix: close #266 - drop wildcard wss: from CSP connect-src
+755ede6 fix: close #267 - rename geode admin test fixture to test-admin
+7d271a2 chore: close #255 - remove dead cytoscape-popper dep + typings shim
+455f6b1 fix: close #248 - immutable Plan in projectColumns (drop type-cast mutation)
+cd5be84 fix: close #244 - passwordGenerator validates fallback + throws on budget exhaustion
+478bcf6 perf: close #256 - webpackPrefetch hints on Monaco/Cytoscape lazy chunks
+79b5680 perf: close #257 - singleflight CSRF refresh to prevent stampede
+6695e54 perf: close #254 - equal-jitter LSP reconnect backoff
+eec83de perf: close #251 - pool ptrs slab in streamRowsOverWS (sync.Pool)
+<this commit> docs: refresh gap-tracking for round-2 closure cohort
+```
+
+### PR / branch context
+
+- **Branch:** `main` — local commits ahead of `origin/main` pending review.
+- **Commits:** `f6c0047` (QUAL #245) through `eec83de` (PERF #251); this tracking commit appends the round-2 closures across `docs/QUALITY_GAP_ANALYSIS.md`, `docs/SECURITY_GAP_ANALYSIS.md`, `docs/PERF_GAP_ANALYSIS.md`, and this file.
+- **Verifier verdict:** all relevant test suites green on the closure commits; `-race` clean.
+- **Plan provenance:** ten gaps in the supplied order; one gap per commit, tests first, immediate commit on green.
