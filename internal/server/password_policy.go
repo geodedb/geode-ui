@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // GAP-N4 (#72): server-side password policy.
@@ -134,16 +133,17 @@ func isAllSameChar(s string) bool {
 }
 
 // isAllDigits reports whether s is non-empty and consists entirely
-// of decimal digits. unicode.IsDigit accepts non-ASCII digit code
-// points (e.g. Arabic-Indic digits); we use the strict ASCII range
-// here on purpose so a password of CJK digits is NOT flagged.
+// of decimal digits. We deliberately use the strict ASCII range
+// ['0'..'9'] rather than unicode.IsDigit, because unicode.IsDigit
+// accepts non-ASCII digit code points (e.g. Arabic-Indic digits,
+// CJK fullwidth digits) which would broaden the "all digits"
+// rejection beyond the operator's likely intent.
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false
 	}
 	for _, r := range s {
 		if r < '0' || r > '9' {
-			_ = unicode.IsDigit // keep import referenced; we intentionally don't use it
 			return false
 		}
 	}
