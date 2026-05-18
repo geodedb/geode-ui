@@ -146,6 +146,10 @@ const GraphBtn = styled.button<{ $active: boolean }>`
   }
 `
 
+// Pre keeps a styled-component: the mono font family + scroll cap
+// (overflow: auto, max-height: 200px) and the 12px (xs) font-size
+// don't compose cleanly out of Bootstrap utilities — `text-monospace`
+// resolves to a different family and there's no max-height utility.
 const Pre = styled.pre`
   background: ${({ theme }) => theme.bg.canvas};
   border: 1px solid ${({ theme }) => theme.border.subtle};
@@ -156,15 +160,6 @@ const Pre = styled.pre`
   overflow: auto;
   max-height: 200px;
   color: ${({ theme }) => theme.text.primary};
-`
-
-const Empty = styled.p`
-  color: ${({ theme }) => theme.text.muted};
-  font-style: italic;
-`
-
-const ErrText = styled.p`
-  color: ${({ theme }) => theme.text.danger};
 `
 
 // SchemaExplorerProps lets tests inject a fresh cache instance per
@@ -293,8 +288,12 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
     <Layout>
       <Pane>
         <h3>{t('schema.graphsTitle')}</h3>
-        {err && <ErrText>{err}</ErrText>}
-        {graphs.length === 0 && !err && <Empty>{t('schema.noGraphs')}</Empty>}
+        {err && <p className="text-danger">{err}</p>}
+        {graphs.length === 0 && !err && (
+          <p className="text-body-tertiary fst-italic">
+            {t('schema.noGraphs')}
+          </p>
+        )}
         <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
           {graphs.map((g) => (
             <li key={g}>
@@ -314,7 +313,9 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
         {active ? (
           <LabelList graph={active} />
         ) : (
-          <Empty>{t('schema.selectGraph')}</Empty>
+          <p className="text-body-tertiary fst-italic">
+            {t('schema.selectGraph')}
+          </p>
         )}
       </Pane>
       <Pane>
@@ -326,7 +327,9 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
         {active ? (
           <EdgeTypeList graph={active} />
         ) : (
-          <Empty>{t('schema.selectGraph')}</Empty>
+          <p className="text-body-tertiary fst-italic">
+            {t('schema.selectGraph')}
+          </p>
         )}
         {active && (
           <>
@@ -334,13 +337,17 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
             {indexes.length > 0 ? (
               <Pre>{JSON.stringify(indexes, null, 2)}</Pre>
             ) : (
-              <Empty>{t('schema.noIndexes')}</Empty>
+              <p className="text-body-tertiary fst-italic">
+                {t('schema.noIndexes')}
+              </p>
             )}
             <h4>{t('schema.constraints')}</h4>
             {constraints.length > 0 ? (
               <Pre>{JSON.stringify(constraints, null, 2)}</Pre>
             ) : (
-              <Empty>{t('schema.noConstraints')}</Empty>
+              <p className="text-body-tertiary fst-italic">
+                {t('schema.noConstraints')}
+              </p>
             )}
           </>
         )}

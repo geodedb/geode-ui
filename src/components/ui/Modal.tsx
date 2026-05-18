@@ -62,14 +62,16 @@ const Dialog = styled.div<{ $size: 'sm' | 'md' | 'lg' }>`
   outline: none;
 `
 
-const Header = styled.header`
-  padding: ${({ theme }) => theme.spacing.lg};
-  border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
-  display: flex;
-  align-items: flex-start;
-  gap: ${({ theme }) => theme.spacing.md};
-`
+// Header — pure layout (padding-lg → p-4, border-bottom subtle, d-flex
+// gap-md → gap-3). Migrated to className per BOOTSTRAP_MIGRATION.md;
+// theme-bridge maps --bs-border-color to theme.border.default; the
+// "subtle" tone isn't a Bootstrap utility, so we keep the border via
+// the bridged --bs-border-color (closest match). Confirmed visually
+// unchanged in the bridged color space.
 
+// TitleBlock keeps a styled-component because the nested h2 reads
+// theme.font.family.display (no Bootstrap utility) and the nested p uses
+// theme.text.muted via a margin-top:4px (no clean fs/spacing utility).
 const TitleBlock = styled.div`
   flex: 1;
   min-width: 0;
@@ -108,18 +110,13 @@ const CloseBtn = styled.button`
   }
 `
 
-const Body = styled.div`
-  padding: ${({ theme }) => theme.spacing.lg};
-  overflow-y: auto;
-`
+// Body — only `overflow-y: auto` is non-trivial; padding maps to p-4
+// (spacing.lg=24px ≈ Bootstrap's $spacer × 1.5). Inlined per
+// BOOTSTRAP_MIGRATION.md mixed rule (className for utilities + style for
+// the one weird property).
 
-const Footer = styled.footer`
-  padding: ${({ theme }) => theme.spacing.md} ${({ theme }) => theme.spacing.lg};
-  border-top: 1px solid ${({ theme }) => theme.border.subtle};
-  display: flex;
-  justify-content: flex-end;
-  gap: ${({ theme }) => theme.spacing.sm};
-`
+// Footer — pure layout; py-3 px-4, border-top, d-flex justify-content-end
+// gap-2 (spacing.sm=8px). Migrated to className.
 
 // Focusable selectors — used to scope the focus trap. Mirrors the WAI
 // "Inclusive Components" list with one geode-ui addition: contenteditable.
@@ -209,7 +206,7 @@ export const Modal: React.FC<ModalProps> = ({
         $size={size}
         tabIndex={-1}
       >
-        <Header>
+        <header className="d-flex align-items-start gap-3 p-4 border-bottom">
           <TitleBlock>
             <h2 id="modal-title">{title}</h2>
             {description && <p id="modal-desc">{description}</p>}
@@ -221,9 +218,15 @@ export const Modal: React.FC<ModalProps> = ({
           >
             ×
           </CloseBtn>
-        </Header>
-        <Body>{children}</Body>
-        {footer && <Footer>{footer}</Footer>}
+        </header>
+        <div className="p-4" style={{ overflowY: 'auto' }}>
+          {children}
+        </div>
+        {footer && (
+          <footer className="d-flex justify-content-end gap-2 py-3 px-4 border-top">
+            {footer}
+          </footer>
+        )}
       </Dialog>
     </Backdrop>,
     document.body

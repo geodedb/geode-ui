@@ -6,7 +6,6 @@
 
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import styled from 'styled-components'
 
 import { useOverviewData } from '../lib/useOverviewData'
 import { useQueryHistory } from '../lib/useQueryHistory'
@@ -15,12 +14,15 @@ import { RecentQueriesCard } from '../components/dashboard/RecentQueriesCard'
 import { ConnectionCard } from '../components/dashboard/ConnectionCard'
 import { GraphStatsCard } from '../components/dashboard/GraphStatsCard'
 
-const Grid = styled.div`
-  display: grid;
-  gap: ${({ theme }) => theme.spacing.md};
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  margin-top: ${({ theme }) => theme.spacing.md};
-`
+// Grid — Bootstrap-migrated to a plain <div>. The auto-fill grid track
+// expression has no Bootstrap utility equivalent so it stays inline,
+// but the gap and margin-top come from the `gap-3 mt-3` classes (each
+// = 1rem = 16 px, matching the previous theme.spacing.md token).
+// docs/BOOTSTRAP_MIGRATION.md.
+const gridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+}
 
 // The graph whose stats the GraphStatsCard offers to load: prefer a
 // graph literally named 'default', else the first graph, else nothing.
@@ -39,7 +41,7 @@ export const DashboardPage: React.FC = () => {
   return (
     <div>
       <h1>{t('dashboard.title')}</h1>
-      <Grid>
+      <div className="gap-3 mt-3" style={gridStyle}>
         <GraphsCard
           graphs={ov.graphs}
           loading={ov.loading}
@@ -61,7 +63,7 @@ export const DashboardPage: React.FC = () => {
             if (defaultGraph) ov.loadStats(defaultGraph)
           }}
         />
-      </Grid>
+      </div>
     </div>
   )
 }

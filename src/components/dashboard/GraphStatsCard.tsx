@@ -10,23 +10,25 @@ import { Card } from './Card'
 // clicks "Load stats" the card shows only the button (disabled when
 // there is no default graph to count). Wired to useOverviewData's
 // `defaultGraphStats` / `statsLoading` / `statsError` / `loadStats`.
-const Stats = styled.dl`
-  margin: 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: ${({ theme }) => theme.spacing.xxs} ${({ theme }) => theme.spacing.sm};
-
-  dt {
-    color: ${({ theme }) => theme.text.muted};
-    font-size: ${({ theme }) => theme.font.sizes.sm};
-  }
-
-  dd {
-    margin: 0;
-    color: ${({ theme }) => theme.text.primary};
-    font-family: ${({ theme }) => theme.font.family.mono};
-  }
-`
+//
+// Bootstrap-migrated (docs/BOOTSTRAP_MIGRATION.md):
+//   - Stats: the `auto 1fr` grid track expression has no Bootstrap
+//     utility equivalent, but the nested dt/dd customisations are
+//     simple enough to lift onto the elements themselves. Inline
+//     style covers the grid track + 2 px row gap.
+//   - LoadButton: KEPT — `&:hover:not(:disabled)` and `&:focus-visible`
+//     pseudo-classes with theme-token CSS overrides are exactly the
+//     "nested selectors" case the migration guide reserves for
+//     styled-components.
+//   - Status, ErrorText: collapsed to `<p className="m-0 text-body-
+//     secondary / text-danger">` — `--bs-body-color` and `--bs-danger`
+//     are wired through the theme bridge.
+const statsGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'auto 1fr',
+  rowGap: '2px',
+  columnGap: '8px',
+}
 
 const LoadButton = styled.button`
   background: ${({ theme }) => theme.bg.surface};
@@ -55,16 +57,6 @@ const LoadButton = styled.button`
   }
 `
 
-const Status = styled.p`
-  color: ${({ theme }) => theme.text.secondary};
-  margin: 0;
-`
-
-const ErrorText = styled.p`
-  color: ${({ theme }) => theme.text.danger};
-  margin: 0;
-`
-
 export interface GraphStatsCardProps {
   defaultGraph: string | null
   stats: { nodes: number; edges: number } | null
@@ -84,19 +76,31 @@ export const GraphStatsCard: React.FC<GraphStatsCardProps> = ({
 
   const renderBody = (): React.ReactNode => {
     if (loading) {
-      return <Status role="status">{t('dashboard.loading')}</Status>
+      return (
+        <p className="m-0 text-body-secondary" role="status">
+          {t('dashboard.loading')}
+        </p>
+      )
     }
     if (error) {
-      return <ErrorText role="alert">{error}</ErrorText>
+      return (
+        <p className="m-0 text-danger" role="alert">
+          {error}
+        </p>
+      )
     }
     if (stats) {
       return (
-        <Stats>
-          <dt>{t('dashboard.statsNodes')}</dt>
-          <dd>{stats.nodes}</dd>
-          <dt>{t('dashboard.statsEdges')}</dt>
-          <dd>{stats.edges}</dd>
-        </Stats>
+        <dl className="m-0" style={statsGridStyle}>
+          <dt className="text-body-tertiary" style={{ fontSize: '13px' }}>
+            {t('dashboard.statsNodes')}
+          </dt>
+          <dd className="m-0 text-body font-monospace">{stats.nodes}</dd>
+          <dt className="text-body-tertiary" style={{ fontSize: '13px' }}>
+            {t('dashboard.statsEdges')}
+          </dt>
+          <dd className="m-0 text-body font-monospace">{stats.edges}</dd>
+        </dl>
       )
     }
     return (

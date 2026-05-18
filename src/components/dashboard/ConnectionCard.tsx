@@ -11,29 +11,22 @@ import type { AdminWritable } from '../../api/capabilities'
 // grants}`). Against every released build today all four are `false`;
 // when the server-side wire-RBAC work lands the badges flip to enabled
 // with no SPA change.
-const Version = styled.p`
-  color: ${({ theme }) => theme.text.primary};
-  font-family: ${({ theme }) => theme.font.family.mono};
-  margin: 0 0 ${({ theme }) => theme.spacing.sm};
-`
-
-const Caps = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.xxs};
-
-  li {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    color: ${({ theme }) => theme.text.secondary};
-    font-size: ${({ theme }) => theme.font.sizes.sm};
-  }
-`
-
+//
+// Bootstrap-migrated (docs/BOOTSTRAP_MIGRATION.md):
+//   - Version, Status, ErrorText: all single-block text styles with
+//     theme tokens that resolve through the `--bs-*` bridge. Replaced
+//     with `<p className=...>` using `text-body / text-body-secondary /
+//     text-danger / font-monospace / m-0` etc.
+//   - Caps: outer flex-column list is Bootstrap (`list-unstyled m-0 p-0
+//     d-flex flex-column`); the 2 px gap and 13 px font-size have no
+//     exact utility so they stay as inline style.
+//   - Badge: KEPT as styled-component. Dynamic theme-token branching on
+//     the $on prop (theme.colors.success vs theme.bg.subtle for bg, and
+//     theme.text.onSuccess vs theme.text.muted for fg) doesn't map to
+//     a single Bootstrap utility class because `text-on-success` /
+//     `text-muted-on-subtle` aren't part of the framework — the bridge
+//     would have to add per-on-success tokens to `--bs-*` and we don't
+//     have those yet.
 const Badge = styled.span<{ $on: boolean }>`
   border-radius: ${({ theme }) => theme.radii.sm};
   font-size: ${({ theme }) => theme.font.sizes.xs};
@@ -49,16 +42,6 @@ const Badge = styled.span<{ $on: boolean }>`
     // 27-contrast.spec.ts.
     return $on ? theme.text.onSuccess : theme.text.muted
   }};
-`
-
-const Status = styled.p`
-  color: ${({ theme }) => theme.text.secondary};
-  margin: 0;
-`
-
-const ErrorText = styled.p`
-  color: ${({ theme }) => theme.text.danger};
-  margin: 0;
 `
 
 export interface ConnectionCardProps {
@@ -87,21 +70,36 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
 
   const renderBody = (): React.ReactNode => {
     if (loading) {
-      return <Status role="status">{t('dashboard.loading')}</Status>
+      return (
+        <p className="m-0 text-body-secondary" role="status">
+          {t('dashboard.loading')}
+        </p>
+      )
     }
     if (error) {
-      return <ErrorText role="alert">{error}</ErrorText>
+      return (
+        <p className="m-0 text-danger" role="alert">
+          {error}
+        </p>
+      )
     }
     return (
       <>
-        <Version>
+        <p className="text-body font-monospace m-0 mb-2">
           {t('dashboard.version', { version: geodeVersion ?? '—' })}
-        </Version>
-        <Caps>
+        </p>
+        <ul
+          className="list-unstyled m-0 p-0 d-flex flex-column"
+          style={{ gap: '2px' }}
+        >
           {caps.map(([key, label]) => {
             const on = !!adminWritable?.[key]
             return (
-              <li key={key}>
+              <li
+                key={key}
+                className="d-flex align-items-center justify-content-between text-body-secondary"
+                style={{ fontSize: '13px' }}
+              >
                 <span>{label}</span>
                 <Badge $on={on}>
                   {on ? t('dashboard.capYes') : t('dashboard.capNo')}
@@ -109,7 +107,7 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
               </li>
             )
           })}
-        </Caps>
+        </ul>
       </>
     )
   }

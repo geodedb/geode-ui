@@ -37,6 +37,9 @@ type Backup = {
   edge_count?: number
 }
 
+// ToolBar keeps a styled-component: heading uses the brand display
+// font + 20px xl size + semibold weight, none of which map cleanly
+// onto Bootstrap's fs-* scale. Nested `h2` selector.
 const ToolBar = styled.header`
   display: flex;
   gap: ${({ theme }) => theme.spacing.md};
@@ -51,15 +54,6 @@ const ToolBar = styled.header`
     color: ${({ theme }) => theme.text.primary};
     margin: 0;
   }
-`
-
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 const fmtBytes = (n?: number): string => {
@@ -123,7 +117,15 @@ export const BackupPage: React.FC = () => {
           {t('backups.newButton')}
         </Button>
       </ToolBar>
-      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      {err && (
+        <div
+          className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-danger)' }}
+          role="alert"
+        >
+          {err}
+        </div>
+      )}
       <TableScroll>
         <DataTable>
           <thead>
@@ -275,7 +277,15 @@ const CreateBackupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             onChange={(e) => setOutput(e.target.value)}
           />
         </Field>
-        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+        {err && (
+          <div
+            className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+            style={{ borderLeft: '3px solid var(--bs-danger)' }}
+            role="alert"
+          >
+            {err}
+          </div>
+        )}
       </form>
     </Modal>
   )

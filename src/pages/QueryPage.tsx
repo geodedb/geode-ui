@@ -66,9 +66,9 @@ const Bar = styled.div`
   }
 `
 
-const Err = styled.span`
-  color: ${({ theme }) => theme.text.danger};
-`
+// Err — Bootstrap-migrated to `<span className="text-danger">`.
+// `--bs-danger` is wired through the theme bridge so the dark theme
+// still gets the contrast-bumped danger token. docs/BOOTSTRAP_MIGRATION.md.
 
 // PERF-2026-05-17-03 (#240): banner shown when the stream retention cap
 // was hit. The reducer drops further server-sent rows on the floor;
@@ -589,7 +589,7 @@ export const QueryPage: React.FC = () => {
             {t('common.elapsed', { ms: activeResp.elapsed_ms })}
           </span>
         )}
-        {activeErr && <Err>{activeErr}</Err>}
+        {activeErr && <span className="text-danger">{activeErr}</span>}
       </Bar>
       {streamMode && stream.rowsTruncated > 0 && (
         <StreamOverflowBanner

@@ -27,6 +27,11 @@ import { defaultSchemaCache, type SchemaCacheLike } from './schemaCache'
 // they own theme.bg.*, theme.text.*, theme.border.*, theme.radii.*, and
 // theme.shadows.focus tokens.
 
+// Btn keeps a styled-component: `:hover` swaps both background and
+// border tokens, and `:focus-visible` paints `theme.shadows.focus` —
+// neither is expressible in Bootstrap utilities (focus-ring-* and
+// hover-bg-* don't compose to the same effect against our surface
+// tokens).
 const Btn = styled.button`
   text-align: left;
   padding: 8px 12px;
@@ -48,11 +53,6 @@ const Btn = styled.button`
     outline: none;
     box-shadow: ${({ theme }) => theme.shadows.focus};
   }
-`
-
-const Empty = styled.p`
-  color: ${({ theme }) => theme.text.muted};
-  font-style: italic;
 `
 
 export const EdgeTypeList: React.FC<{
@@ -111,7 +111,9 @@ export const EdgeTypeList: React.FC<{
   }, [graph, effectiveCache])
 
   if (loaded && types.length === 0) {
-    return <Empty>{t('schema.noEdgeTypes')}</Empty>
+    return (
+      <p className="text-body-tertiary fst-italic">{t('schema.noEdgeTypes')}</p>
+    )
   }
 
   return (

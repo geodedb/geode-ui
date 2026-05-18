@@ -32,6 +32,8 @@ type Migration = {
   description?: string
 }
 
+// ToolBar keeps a styled-component: heading carries the display font
+// + xl (20px) size that doesn't match fs-*. Nested `h2` selector.
 const ToolBar = styled.header`
   display: flex;
   gap: ${({ theme }) => theme.spacing.md};
@@ -48,6 +50,9 @@ const ToolBar = styled.header`
   }
 `
 
+// Section keeps a styled-component: the nested `h3` selector applies
+// text-transform: uppercase + letter-spacing: 0.04em which have no
+// Bootstrap utility equivalent.
 const Section = styled.section`
   display: flex;
   flex-direction: column;
@@ -61,24 +66,6 @@ const Section = styled.section`
     letter-spacing: 0.04em;
     margin: 0;
   }
-`
-
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
-const OkBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.success};
-  color: ${({ theme }) => theme.text.success};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 type MigrationsView = {
@@ -154,8 +141,24 @@ export const MigrationsPage: React.FC = () => {
           {t('migrations.runPending', { count: pending.length })}
         </Button>
       </ToolBar>
-      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
-      {okMsg && <OkBanner role="status">{okMsg}</OkBanner>}
+      {err && (
+        <div
+          className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-danger)' }}
+          role="alert"
+        >
+          {err}
+        </div>
+      )}
+      {okMsg && (
+        <div
+          className="bg-body-tertiary text-success rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-success)' }}
+          role="status"
+        >
+          {okMsg}
+        </div>
+      )}
       <Section>
         <h3>{t('migrations.pendingHeading', { count: pending.length })}</h3>
         <TableScroll>
@@ -373,7 +376,15 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
             rows={3}
           />
         </Field>
-        {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+        {err && (
+          <div
+            className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+            style={{ borderLeft: '3px solid var(--bs-danger)' }}
+            role="alert"
+          >
+            {err}
+          </div>
+        )}
       </form>
     </Modal>
   )

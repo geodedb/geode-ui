@@ -25,13 +25,11 @@ function adminTabColor(props: {
   return props.$active ? props.theme.text.primary : props.theme.text.secondary
 }
 
-const Tabs = styled.nav`
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid ${({ theme }) => theme.border.default};
-  flex-wrap: wrap;
-`
+// Tabs — Bootstrap-migrated to a plain <nav className=...>. The 12 px
+// gap is the only token not present in Bootstrap's 4 px scale (gap-2 = 8 px,
+// gap-3 = 16 px), kept as an inline style. border-bottom comes from the
+// `--bs-border-color` bridge so the Bootstrap `.border-bottom` utility
+// resolves to theme.border.default at runtime. docs/BOOTSTRAP_MIGRATION.md.
 
 const Tab = styled(Link)<{ $active: boolean }>`
   padding: 8px 12px;
@@ -51,7 +49,10 @@ export const AdminPage: React.FC = () => {
   const { pathname } = useLocation()
   return (
     <>
-      <Tabs>
+      <nav
+        className="d-flex flex-wrap mb-3 border-bottom"
+        style={{ gap: '12px' }}
+      >
         <Tab to="users" $active={pathname.endsWith('/users')}>
           {t('nav.adminTabUsers')}
         </Tab>
@@ -76,7 +77,7 @@ export const AdminPage: React.FC = () => {
         <Tab to="audit" $active={pathname.endsWith('/audit')}>
           {t('nav.adminTabAudit')}
         </Tab>
-      </Tabs>
+      </nav>
       <Outlet />
     </>
   )

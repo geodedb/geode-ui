@@ -38,33 +38,27 @@ import { ProfileEditorModal } from '../components/profiles/ProfileEditorModal'
 import { DeleteProfileModal } from '../components/profiles/DeleteProfileModal'
 import { useAuth } from '../auth/AuthProvider'
 
-const Page = styled.section`
-  width: 100%;
-  max-width: 1024px;
-  margin: 0 auto;
-  padding: ${({ theme }) => theme.spacing.lg};
-`
+// Page outer shell — Bootstrap-migrated to a plain <section>. The
+// 1024 px content width clamp has no Bootstrap utility equivalent
+// (max-width utilities only go to .mw-100), so it stays inline; the
+// rest is plain `w-100 mx-auto p-4` (4 = 1.5 rem = 24 px = the prior
+// theme.spacing.lg token). docs/BOOTSTRAP_MIGRATION.md.
 // Header — Bootstrap-migrated to a plain <div className=...>. Pure
 // layout (flex row, baseline alignment, space-between, mb-3 spacing
 // matches the prior theme.spacing.md = 16px token). docs/BOOTSTRAP_MIGRATION.md.
+//
+// Title KEPT: theme.font.family.display ("Sora, ...") has no Bootstrap
+// utility, and theme.font.sizes.xxl = 24 px is a pixel size not in the
+// `fs-*` rem-based scale (the closest fs-3 = 1.75 rem at the default
+// 16 px base = 28 px). Pre-existing semantics + size are load-bearing
+// for the page heading.
 const Title = styled.h1`
   font-family: ${({ theme }) => theme.font.family.display};
   font-size: ${({ theme }) => theme.font.sizes.xxl};
   margin: 0;
 `
-const Description = styled.p`
-  color: ${({ theme }) => theme.text.secondary};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  margin: 4px 0 0 0;
-`
-const Status = styled.p`
-  color: ${({ theme }) => theme.text.secondary};
-  margin-top: ${({ theme }) => theme.spacing.lg};
-`
-const ErrorText = styled.p`
-  color: ${({ theme }) => theme.text.danger};
-  margin-top: ${({ theme }) => theme.spacing.lg};
-`
+// Status / ErrorText / Description / Page outer container collapsed
+// into utility classes; see call site for the resulting className.
 const Table = styled.table`
   width: 100%;
   border-collapse: collapse;
@@ -226,13 +220,17 @@ export const ProfilesPage: React.FC = () => {
   // newly-empty view still surfaces.
   const renderBody = (): React.ReactNode => {
     if (profiles === null) {
-      return <Status>{t('profiles.loading')}</Status>
+      return (
+        <p className="m-0 mt-4 text-body-secondary">{t('profiles.loading')}</p>
+      )
     }
     if (err) {
-      return <ErrorText>{t('profiles.error')}</ErrorText>
+      return <p className="m-0 mt-4 text-danger">{t('profiles.error')}</p>
     }
     if (profiles.length === 0) {
-      return <Status>{t('profiles.empty')}</Status>
+      return (
+        <p className="m-0 mt-4 text-body-secondary">{t('profiles.empty')}</p>
+      )
     }
     // TableScroll wrapper keeps the table on its own horizontal scroll
     // axis at narrow viewports — without it the page itself horizontally
@@ -333,18 +331,27 @@ export const ProfilesPage: React.FC = () => {
     editorState.mode === 'edit' ? editorState.target : undefined
 
   return (
-    <Page>
+    <section className="w-100 mx-auto p-4" style={{ maxWidth: '1024px' }}>
       <div className="d-flex align-items-baseline justify-content-between mb-3">
         <div>
           <Title>{t('profiles.title')}</Title>
-          <Description>{t('profiles.description')}</Description>
+          <p
+            className="m-0 mt-1 text-body-secondary"
+            style={{ fontSize: '13px' }}
+          >
+            {t('profiles.description')}
+          </p>
         </div>
         <Button onClick={openCreate}>{t('profiles.actions.create')}</Button>
       </div>
       {setDefaultErr && (
-        <ErrorText role="alert" data-testid="profiles-set-default-error">
+        <p
+          className="m-0 mt-4 text-danger"
+          role="alert"
+          data-testid="profiles-set-default-error"
+        >
           {setDefaultErr}
-        </ErrorText>
+        </p>
       )}
       {renderBody()}
       <ProfileEditorModal
@@ -368,6 +375,6 @@ export const ProfilesPage: React.FC = () => {
           profile={deleteTarget}
         />
       )}
-    </Page>
+    </section>
   )
 }

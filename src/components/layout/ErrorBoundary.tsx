@@ -44,10 +44,8 @@ const Title = styled.h1`
   margin: 0;
 `
 
-const Message = styled.p`
-  color: ${({ theme }) => theme.text.secondary};
-  margin: 0;
-`
+// Message — `text.secondary` maps to text-body-secondary via the
+// theme-bridge; margin:0 is `m-0`. Inlined per BOOTSTRAP_MIGRATION.md.
 
 const Detail = styled.pre`
   font-family: ${({ theme }) => theme.font.family.mono};
@@ -133,10 +131,10 @@ export class ErrorBoundary extends React.Component<Props, State> {
     return (
       <Wrap role="alert" aria-live="assertive" data-testid="app-error-boundary">
         <Title>Something went wrong</Title>
-        <Message>
+        <p className="text-body-secondary m-0">
           The page hit an unrecoverable error. Reload to retry — your unsaved
           query text in the editor is preserved by the browser.
-        </Message>
+        </p>
         <Detail>{error.message}</Detail>
         <div className="d-flex gap-2">
           <ReloadButton type="button" onClick={this.handleReload}>

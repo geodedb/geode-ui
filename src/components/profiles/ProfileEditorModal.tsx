@@ -10,7 +10,6 @@
 
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import styled from 'styled-components'
 
 import { Button, Field, Input, Select, Modal } from '../ui'
 import {
@@ -23,28 +22,17 @@ import { isConflictError } from '../../api/capabilities'
 import { useProfileForm } from './useProfileForm'
 import { TLSFieldset } from './TLSFieldset'
 
-const Section = styled.section`
-  margin-top: ${({ theme }) => theme.spacing.md};
-  border-top: 1px solid ${({ theme }) => theme.border.default};
-  padding-top: ${({ theme }) => theme.spacing.md};
-`
-const SectionTitle = styled.h3`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  margin: 0 0 ${({ theme }) => theme.spacing.sm};
-`
-const Row = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: ${({ theme }) => theme.spacing.sm};
-`
-// ButtonRow was a pure-layout flex row (`d-flex gap-2 justify-content-end
-// mt-4` in Bootstrap utilities) — migrated inline per
-// BOOTSTRAP_MIGRATION.md. theme.spacing.sm=8px maps to gap-2 and
-// theme.spacing.lg=24px maps to mt-4.
-const ErrText = styled.p`
-  color: ${({ theme }) => theme.text.danger};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
+// Section, SectionTitle, Row, and ErrText migrated to Bootstrap utility
+// classes per BOOTSTRAP_MIGRATION.md:
+//
+//   - Section -> `mt-3 pt-3 border-top` (theme.spacing.md=16px → mt-3/pt-3,
+//     `border-top` reads --bs-border-color from theme.border.default).
+//   - SectionTitle -> `h3 small mb-2 mt-0` (theme.font.sizes.sm=13px →
+//     `.small` ≈ 0.875em, theme.spacing.sm=8px → mb-2).
+//   - Row -> two-column CSS grid; Bootstrap has no `grid-cols-2` utility
+//     so the column template stays inline. gap-2 maps to theme.spacing.sm.
+//   - ErrText -> `text-danger small m-0`.
+// ButtonRow was already inline (`d-flex gap-2 justify-content-end mt-4`).
 export interface Props {
   mode: 'create' | 'edit'
   open: boolean
@@ -183,13 +171,14 @@ export const ProfileEditorModal: React.FC<Props> = ({
             }
           />
           {nameErrorMessage ? (
-            <ErrText
+            <p
               id="profile-name-error"
               role="alert"
               data-testid="profile-name-error"
+              className="text-danger small m-0"
             >
               {nameErrorMessage}
-            </ErrText>
+            </p>
           ) : null}
         </Field>
         <Field
@@ -241,9 +230,14 @@ export const ProfileEditorModal: React.FC<Props> = ({
 
         <TLSFieldset state={s} setField={setField} />
 
-        <Section>
-          <SectionTitle>{t('profiles.editor.section.pool')}</SectionTitle>
-          <Row>
+        <section className="mt-3 pt-3 border-top">
+          <h3 className="small mb-2 mt-0">
+            {t('profiles.editor.section.pool')}
+          </h3>
+          <div
+            className="d-grid gap-2"
+            style={{ gridTemplateColumns: '1fr 1fr' }}
+          >
             <Field
               label={t('profiles.editor.field.maxOpenConns')}
               htmlFor="profile-maxOpenConns"
@@ -292,8 +286,8 @@ export const ProfileEditorModal: React.FC<Props> = ({
                 min={0}
               />
             </Field>
-          </Row>
-        </Section>
+          </div>
+        </section>
 
         <div className="d-flex gap-2 justify-content-end mt-4">
           <Button type="button" variant="ghost" onClick={onClose}>
@@ -303,7 +297,11 @@ export const ProfileEditorModal: React.FC<Props> = ({
             {t('profiles.editor.actions.save')}
           </Button>
         </div>
-        {err ? <ErrText role="alert">{err}</ErrText> : null}
+        {err ? (
+          <p role="alert" className="text-danger small m-0">
+            {err}
+          </p>
+        ) : null}
       </form>
     </Modal>
   )

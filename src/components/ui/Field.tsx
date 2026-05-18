@@ -1,5 +1,4 @@
 import React from 'react'
-import styled from 'styled-components'
 
 export interface FieldProps {
   label: React.ReactNode
@@ -10,37 +9,23 @@ export interface FieldProps {
   children: React.ReactNode
 }
 
-const Wrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-`
-
-const LabelText = styled.label`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  font-weight: ${({ theme }) => theme.font.weights.medium};
-  color: ${({ theme }) => theme.text.primary};
-`
-
-const Required = styled.span`
-  color: ${({ theme }) => theme.colors.danger};
-  margin-left: 2px;
-`
-
-const Hint = styled.div`
-  font-size: ${({ theme }) => theme.font.sizes.xs};
-  color: ${({ theme }) => theme.text.muted};
-`
-
-const ErrorText = styled.div`
-  font-size: ${({ theme }) => theme.font.sizes.xs};
-  color: ${({ theme }) => theme.text.danger};
-`
-
 // Field — wraps a control with its label, hint, and error text. The
 // `htmlFor` prop binds the label to the underlying control via id;
 // when omitted, the label still labels the visible control via DOM
 // proximity but assistive tech may need an explicit linkage.
+//
+// Migrated to Bootstrap utilities per BOOTSTRAP_MIGRATION.md.
+// theme-bridge.ts emits `--bs-*` variables sourced from the active
+// theme, so `text-body`, `text-body-tertiary`, `text-danger`, and
+// `small` track theme tokens through the bridge.
+//
+// theme token → Bootstrap class:
+//   spacing 6px gap         → gap-1 (4px; close enough — was 6px ad hoc)
+//   text.primary + weight   → text-body fw-medium
+//   text.muted              → text-body-tertiary
+//   text.danger             → text-danger
+//   font.sizes.sm           → small
+//   font.sizes.xs           → small (Bootstrap's `.small` is 0.875em; xs is 12px)
 export const Field: React.FC<FieldProps> = ({
   label,
   htmlFor,
@@ -77,18 +62,26 @@ export const Field: React.FC<FieldProps> = ({
   }
 
   return (
-    <Wrap>
-      <LabelText htmlFor={htmlFor}>
+    <div className="d-flex flex-column gap-1">
+      <label htmlFor={htmlFor} className="small fw-medium text-body">
         {label}
-        {required && <Required aria-hidden="true">*</Required>}
-      </LabelText>
+        {required && (
+          <span aria-hidden="true" className="text-danger ms-1">
+            *
+          </span>
+        )}
+      </label>
       {control}
-      {hint && !error && <Hint id={hintId}>{hint}</Hint>}
-      {error && (
-        <ErrorText id={errorId} role="alert">
-          {error}
-        </ErrorText>
+      {hint && !error && (
+        <div id={hintId} className="small text-body-tertiary">
+          {hint}
+        </div>
       )}
-    </Wrap>
+      {error && (
+        <div id={errorId} role="alert" className="small text-danger">
+          {error}
+        </div>
+      )}
+    </div>
   )
 }

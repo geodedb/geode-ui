@@ -4,21 +4,7 @@ import { useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
-import type { Theme } from '../../theme'
 import { Button, Field, Input, Stack } from '../ui'
-
-interface ToneArgs {
-  theme: Theme
-  $tone: 'ok' | 'err'
-}
-
-function bannerBorder({ $tone, theme }: ToneArgs): string {
-  return $tone === 'err' ? theme.colors.danger : theme.colors.success
-}
-
-function bannerColor({ $tone, theme }: ToneArgs): string {
-  return $tone === 'err' ? theme.text.danger : theme.text.success
-}
 
 // RestorePage drives the /admin/restore tab. Backed by Geode B7:
 //
@@ -27,21 +13,15 @@ function bannerColor({ $tone, theme }: ToneArgs): string {
 // The page accepts a `file` value via router location state when a
 // user clicks "Restore" on a row in BackupPage; otherwise users type
 // the filename in by hand.
+
+// Heading keeps a styled-component: the brand display font + 20px xl
+// size + semibold weight don't map onto Bootstrap's fs-* scale.
 const Heading = styled.h2`
   font-family: ${({ theme }) => theme.font.family.display};
   font-size: ${({ theme }) => theme.font.sizes.xl};
   font-weight: ${({ theme }) => theme.font.weights.semibold};
   color: ${({ theme }) => theme.text.primary};
   margin: 0;
-`
-
-const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${bannerBorder};
-  color: ${bannerColor};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
 export const RestorePage: React.FC = () => {
@@ -157,14 +137,22 @@ export const RestorePage: React.FC = () => {
         </Button>
       </form>
       {err && (
-        <Banner $tone="err" role="alert">
+        <div
+          className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-danger)' }}
+          role="alert"
+        >
           {err}
-        </Banner>
+        </div>
       )}
       {okMsg && (
-        <Banner $tone="ok" role="status">
+        <div
+          className="bg-body-tertiary text-success rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-success)' }}
+          role="status"
+        >
           {okMsg}
-        </Banner>
+        </div>
       )}
     </Stack>
   )

@@ -12,6 +12,12 @@ import {
   type MatrixCell,
 } from '../../lib/adjacencyMatrix'
 
+// Wrap is the matrix's flex-column container that fills its parent's
+// content box. Kept as a styled-component because the `flex: 1 1 0` +
+// `min-height: 0` viewport-fill chain isn't expressible via a single
+// Bootstrap utility, and unit tests assert on getComputedStyle (which
+// jsdom won't satisfy from Bootstrap class rules — only inline CSS or
+// styled-components' injected stylesheet land).
 const Wrap = styled.div`
   display: flex;
   flex-direction: column;
@@ -50,35 +56,9 @@ const Td = styled.td<{ $intensity: number }>`
   color: ${({ theme, $intensity }) => cellTextColor(theme, $intensity)};
 `
 
-const Empty = styled.p`
-  color: ${({ theme }) => theme.text.secondary};
-  padding: ${({ theme }) => theme.spacing.md};
-`
-
-// Overflow disclosure shown above the table when applyMatrixBudget
-// drops one or more label rows/cols. The chip surface mirrors
-// TableView's "+N more" banner so the two over-budget UIs share a
-// visual language. See PERF #216.
-//
-// Layout (flex, flex-wrap, gap, margin-bottom) is supplied via
-// Bootstrap utility classes at the call site (`d-flex flex-wrap gap-1
-// mb-2`); the styled-component keeps the theme-driven font-size + color
-// so dark mode tracks correctly. Per BOOTSTRAP_MIGRATION.md mixed rule.
-const OverflowBar = styled.div`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
-`
-
-const OverflowChip = styled.span`
-  display: inline-flex;
-  align-items: center;
-  gap: ${({ theme }) => theme.spacing.xs};
-  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
-  border-radius: ${({ theme }) => theme.radii.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  color: ${({ theme }) => theme.text.primary};
-  font-weight: ${({ theme }) => theme.font.weights.medium};
-`
+// Empty/OverflowBar/OverflowChip migrated to className-driven elements
+// per BOOTSTRAP_MIGRATION.md. The bridge maps --bs-body-color etc. so
+// `text-body-secondary` and `bg-body-tertiary` track theme tokens.
 
 // Map a 0..1 intensity to a ColorScale step in the 200..800 range
 // (intensity 0 → fully transparent, so an empty cell reads as "no edges"
@@ -183,7 +163,11 @@ export const MatrixView: React.FC<MatrixViewProps> = ({
   }, [matrix])
 
   if (matrix.labels.length === 0 || max === 0) {
-    return <Empty role="note">{t('matrix.empty')}</Empty>
+    return (
+      <p className="text-body-secondary p-3" role="note">
+        {t('matrix.empty')}
+      </p>
+    )
   }
 
   const visibleLabels = budgetResult.labels
@@ -192,8 +176,8 @@ export const MatrixView: React.FC<MatrixViewProps> = ({
   return (
     <Wrap>
       {hiddenCount > 0 && (
-        <OverflowBar
-          className="d-flex flex-wrap gap-1 mb-2"
+        <div
+          className="d-flex flex-wrap gap-1 mb-2 small text-body-secondary"
           role="note"
           data-testid="matrix-overflow"
           aria-label={t('matrix.overflow', {
@@ -202,14 +186,14 @@ export const MatrixView: React.FC<MatrixViewProps> = ({
             edges: budgetResult.hiddenEdges,
           })}
         >
-          <OverflowChip>
+          <span className="d-inline-flex align-items-center gap-1 px-2 py-1 bg-body-tertiary text-body rounded fw-medium">
             {t('matrix.overflow', {
               hidden: hiddenCount,
               shown: visibleLabels.length,
               edges: budgetResult.hiddenEdges,
             })}
-          </OverflowChip>
-        </OverflowBar>
+          </span>
+        </div>
       )}
       <Table role="table" aria-label={t('matrix.tableLabel')}>
         <thead>

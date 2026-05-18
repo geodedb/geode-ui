@@ -32,6 +32,9 @@ import { defaultSchemaCache, type SchemaCacheLike } from './schemaCache'
 // they own theme.bg.*, theme.text.*, theme.border.*, theme.radii.*, and
 // theme.shadows.focus tokens.
 
+// Btn keeps a styled-component: `:hover` swaps both background and
+// border tokens, and `:focus-visible` paints `theme.shadows.focus` —
+// neither composes cleanly out of Bootstrap utilities.
 const Btn = styled.button`
   text-align: left;
   padding: 8px 12px;
@@ -53,11 +56,6 @@ const Btn = styled.button`
     outline: none;
     box-shadow: ${({ theme }) => theme.shadows.focus};
   }
-`
-
-const Empty = styled.p`
-  color: ${({ theme }) => theme.text.muted};
-  font-style: italic;
 `
 
 export const LabelList: React.FC<{
@@ -121,7 +119,9 @@ export const LabelList: React.FC<{
   }, [graph, effectiveCache])
 
   if (loaded && labels.length === 0) {
-    return <Empty>{t('schema.noLabels')}</Empty>
+    return (
+      <p className="text-body-tertiary fst-italic">{t('schema.noLabels')}</p>
+    )
   }
 
   return (

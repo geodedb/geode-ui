@@ -14,21 +14,7 @@ import {
   permissionSuggestions,
   type RbacGranteeKind,
 } from '../../lib/rbacVocab'
-import type { Theme } from '../../theme'
 import { Button, Field, Inline, Input, Select, Stack } from '../ui'
-
-interface ToneArgs {
-  theme: Theme
-  $tone: 'ok' | 'err'
-}
-
-function bannerBorder({ $tone, theme }: ToneArgs): string {
-  return $tone === 'err' ? theme.colors.danger : theme.colors.success
-}
-
-function bannerColor({ $tone, theme }: ToneArgs): string {
-  return $tone === 'err' ? theme.text.danger : theme.text.success
-}
 
 // GrantsPanel drives the /admin/grants tab. The Geode B6 endpoints back
 // every action:
@@ -38,26 +24,15 @@ function bannerColor({ $tone, theme }: ToneArgs): string {
 //
 // There is no SHOW-GRANTS endpoint in the API spec, so this panel is a
 // pure form -- it emits new grants but does not list existing ones.
+
+// Heading keeps a styled-component: theme.font.family.display (Sora) +
+// theme.font.sizes.xl (20px) + semibold don't map onto Bootstrap's fs-*
+// scale, and `h2` already carries margin reset semantics here.
 const Heading = styled.h2`
   font-family: ${({ theme }) => theme.font.family.display};
   font-size: ${({ theme }) => theme.font.sizes.xl};
   font-weight: ${({ theme }) => theme.font.weights.semibold};
   color: ${({ theme }) => theme.text.primary};
-  margin: 0;
-`
-
-const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${bannerBorder};
-  color: ${bannerColor};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
-const UnsupportedNote = styled.p`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
   margin: 0;
 `
 
@@ -177,9 +152,12 @@ export const GrantsPanel: React.FC = () => {
           </Select>
         </Field>
         {gateWrite && (
-          <UnsupportedNote data-testid="admin-grants-unsupported">
+          <p
+            data-testid="admin-grants-unsupported"
+            className="small text-body-secondary m-0"
+          >
             {t('grants.unsupportedNote')}
-          </UnsupportedNote>
+          </p>
         )}
         <Inline $gap="sm">
           <Button
@@ -204,14 +182,22 @@ export const GrantsPanel: React.FC = () => {
         </Inline>
       </div>
       {err && (
-        <Banner $tone="err" role="alert">
+        <div
+          className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-danger)' }}
+          role="alert"
+        >
           {err}
-        </Banner>
+        </div>
       )}
       {okMsg && (
-        <Banner $tone="ok" role="status">
+        <div
+          className="bg-body-tertiary text-success rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-success)' }}
+          role="status"
+        >
           {okMsg}
-        </Banner>
+        </div>
       )}
     </Stack>
   )

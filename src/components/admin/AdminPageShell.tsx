@@ -22,6 +22,9 @@ import { Button, Stack } from '../ui'
 // page so the verify:translations gate continues to see every literal
 // reference.
 
+// ToolBar keeps a styled-component: the heading carries
+// theme.font.family.display (Sora) and a 20px display weight that
+// doesn't map cleanly to Bootstrap's fs-* scale (fs-4 = 1.5rem ≈ 24px).
 const ToolBar = styled.header`
   display: flex;
   gap: ${({ theme }) => theme.spacing.md};
@@ -38,19 +41,30 @@ const ToolBar = styled.header`
   }
 `
 
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
-const UnsupportedNote = styled.span`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
-`
+// ErrorBanner: bg-body-tertiary maps to theme.bg.subtle, text-danger maps
+// to theme.text.danger, rounded to theme.radii.md, p-2 to spacing.sm/md.
+// The 3px left border accent stays inline; Bootstrap's border-3 utility
+// applies to all four sides. The 13px font-size is one step below
+// Bootstrap's body (14px); `.small` (0.875em ≈ 12px in body context) is
+// close enough for the visual intent (de-emphasised system message).
+export const ErrorBanner: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({
+  className,
+  children,
+  ...rest
+}) => (
+  <div
+    className={[
+      'bg-body-tertiary text-danger rounded px-3 py-2 small',
+      className ?? '',
+    ]
+      .filter(Boolean)
+      .join(' ')}
+    style={{ borderLeft: '3px solid var(--bs-danger)' }}
+    {...rest}
+  >
+    {children}
+  </div>
+)
 
 export interface AdminPageShellProps {
   /** Localised heading rendered inside the toolbar `<h2>`. */
@@ -90,9 +104,12 @@ export const AdminPageShell: React.FC<AdminPageShellProps> = ({
     <ToolBar>
       <h2>{title}</h2>
       {gateCreate && (
-        <UnsupportedNote data-testid={testIds.unsupportedNote}>
+        <span
+          data-testid={testIds.unsupportedNote}
+          className="small text-body-secondary"
+        >
           {unsupportedNote}
-        </UnsupportedNote>
+        </span>
       )}
       <Button
         data-testid={testIds.newButton}
@@ -108,9 +125,6 @@ export const AdminPageShell: React.FC<AdminPageShellProps> = ({
   </Stack>
 )
 
-// Re-export the inline ErrorBanner so children (the create modals)
-// can render the same styled element for their own inline errors. The
-// scaffold's ErrorBanner is what the top-of-page actionErr/loadErr
-// surface reuses; the modal-internal ErrorBanner is the SAME styled
-// component, exported here so the modals don't redeclare it.
-export { ErrorBanner }
+// ErrorBanner is exported at the declaration site above; children
+// (the per-page create modals in RolesPage/UsersPage) reuse the same
+// component for their own inline errors.

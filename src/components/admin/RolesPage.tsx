@@ -25,18 +25,14 @@ import { useAdminListPage } from './useAdminListPage'
 // not to warrant a shared primitive. Backed by a native <datalist> so
 // the browser autocompletes from `permissionSuggestions()`; free text is
 // still accepted (Geode persists the string verbatim).
-const Chip = styled.li`
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 8px;
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  background: ${({ theme }) => theme.bg.subtle};
-  border: 1px solid ${({ theme }) => theme.border.default};
-  border-radius: ${({ theme }) => theme.radii.md};
-  color: ${({ theme }) => theme.text.primary};
-`
-
+//
+// Chip migrates to Bootstrap utilities: d-inline-flex align-items-center
+// gap-1, bg-body-tertiary text-body border rounded small. The asymmetric
+// padding (2px top/bottom, 8px left, 4px right) doesn't map onto
+// Bootstrap's p-{n} scale so it stays inline.
+//
+// ChipRemove keeps a styled-component for the `:hover:not(:disabled)`
+// nested selector that swaps the icon color to theme.text.danger.
 const ChipRemove = styled.button`
   display: inline-flex;
   align-items: center;
@@ -259,7 +255,11 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               style={{ gap: '6px', marginBottom: '6px' }}
             >
               {permissions.map((p) => (
-                <Chip key={p}>
+                <li
+                  key={p}
+                  className="d-inline-flex align-items-center gap-1 bg-body-tertiary text-body border rounded small"
+                  style={{ padding: '2px 4px 2px 8px' }}
+                >
                   <span>{p}</span>
                   <ChipRemove
                     type="button"
@@ -268,7 +268,7 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   >
                     ×
                   </ChipRemove>
-                </Chip>
+                </li>
               ))}
             </ul>
           )}

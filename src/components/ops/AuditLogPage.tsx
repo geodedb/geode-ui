@@ -41,6 +41,9 @@ type Filters = {
   user: string
 }
 
+// Heading: display font (Sora) + 20px xl size + semibold weight stay
+// in styled-components — Bootstrap's fs-* scale doesn't have an exact
+// match and `theme.font.family.display` is the brand display face.
 const Heading = styled.h2`
   font-family: ${({ theme }) => theme.font.family.display};
   font-size: ${({ theme }) => theme.font.sizes.xl};
@@ -49,6 +52,8 @@ const Heading = styled.h2`
   margin: 0;
 `
 
+// FilterBar uses an auto-fit grid with a 180px minmax that no Bootstrap
+// utility can express (Bootstrap's grid is fixed 12-column). Keep.
 const FilterBar = styled.form`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -56,15 +61,9 @@ const FilterBar = styled.form`
   align-items: end;
 `
 
-const ErrorBanner = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.bg.subtle};
-  border-left: 3px solid ${({ theme }) => theme.colors.danger};
-  color: ${({ theme }) => theme.text.danger};
-  border-radius: ${({ theme }) => theme.radii.md};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
+// Snippet renders an inline code-style snippet of arbitrary JSON. The
+// monospace family + pre-wrap + word-break behaviours and the 480px
+// max-width don't map onto Bootstrap utilities; keep the styled-component.
 const Snippet = styled.code`
   display: block;
   font-family: ${({ theme }) => theme.font.family.mono};
@@ -245,7 +244,15 @@ export const AuditLogPage: React.FC = () => {
           />
         </Field>
       </FilterBar>
-      {err && <ErrorBanner role="alert">{err}</ErrorBanner>}
+      {err && (
+        <div
+          className="bg-body-tertiary text-danger rounded px-3 py-2 small"
+          style={{ borderLeft: '3px solid var(--bs-danger)' }}
+          role="alert"
+        >
+          {err}
+        </div>
+      )}
       <TableScroll>
         <DataTable>
           <thead>
