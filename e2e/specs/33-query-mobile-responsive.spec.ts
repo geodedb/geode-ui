@@ -152,7 +152,11 @@ test.describe('@mobile @responsive QueryPage mobile responsive bugs', () => {
         const cy = Reflect.get(window, '__GEODE_E2E_CY__') as
           | {
               nodes: () => {
-                forEach: (fn: (n: { renderedPosition: () => { x: number; y: number } }) => void) => void
+                forEach: (
+                  fn: (n: {
+                    renderedPosition: () => { x: number; y: number }
+                  }) => void
+                ) => void
                 length: number
               }
             }
@@ -163,12 +167,7 @@ test.describe('@mobile @responsive QueryPage mobile responsive bugs', () => {
           nodes.forEach((n) => {
             const p = n.renderedPosition()
             // Rendered position is in canvas-local coords.
-            if (
-              p.x < 0 ||
-              p.y < 0 ||
-              p.x > cb.width ||
-              p.y > cb.height
-            ) {
+            if (p.x < 0 || p.y < 0 || p.x > cb.width || p.y > cb.height) {
               anyOutside = true
             }
           })
