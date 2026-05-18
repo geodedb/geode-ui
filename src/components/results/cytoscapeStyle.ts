@@ -78,12 +78,33 @@ export function createCytoscapeStyle(
   const selectedBorder = theme.colors.primary
   const fadedOpacity = 0.18
 
+  // Resolve the immutable color seed for a node/edge. The data.label /
+  // data.type fields are MUTATED by cyHelpers.applyLabels whenever the
+  // user picks a different "Display Field" — using them as the color
+  // hash caused the canvas color to drift with the display preference.
+  // data.nodeType (set in pushRealNodes/pushPlaceholderNodes/push
+  // SynthesisedRows) holds the first label permanently; data.edgeType
+  // holds the relationship type. We fall back to the older fields so
+  // any element that predates the field (e.g. cached snapshots from
+  // older builds) still gets A color rather than the empty-string
+  // palette slot.
+  const nodeColorSeed = (e: cytoscape.NodeSingular): string => {
+    const t = e.data('nodeType')
+    if (typeof t === 'string' && t) return t
+    return (e.data('label') as string) || ''
+  }
+  const edgeColorSeed = (e: cytoscape.EdgeSingular): string => {
+    const t = e.data('edgeType')
+    if (typeof t === 'string' && t) return t
+    return (e.data('type') as string) || ''
+  }
+
   return [
     {
       selector: 'node',
       style: {
         'background-color': (e: cytoscape.NodeSingular) =>
-          labelToColor((e.data('label') as string) || '', variant),
+          labelToColor(nodeColorSeed(e), variant),
         // Thin border in canvas color so adjacent nodes don't blur into
         // a single blob when the layout packs tightly.
         'border-width': 1.5,
@@ -94,7 +115,7 @@ export function createCytoscapeStyle(
         'text-halign': 'center',
         'text-outline-width': 1.5,
         'text-outline-color': (e: cytoscape.NodeSingular) =>
-          labelToColor((e.data('label') as string) || '', variant),
+          labelToColor(nodeColorSeed(e), variant),
         'font-family': theme.font.family.body,
         'font-size': 12,
         'font-weight': 600,
@@ -114,8 +135,23 @@ export function createCytoscapeStyle(
       style: {
         'curve-style': 'bezier',
         width: 1.5,
-        'line-color': edgeColor,
-        'target-arrow-color': edgeColor,
+        // Color the edge stroke + arrow by relationship type so the
+        // operator can read a multi-type graph at a glance. The seed
+        // is the IMMUTABLE edgeType field (stamped by pushRealEdges /
+        // pushSynthesisedRows) — same stability guarantee as the node
+        // color. cyHelpers.applyLabels rewrites data.type for display
+        // but leaves edgeType alone, so picking a property from the
+        // edge Display Field selector no longer reseeds the palette.
+        // Empty / missing types fall through to the neutral edgeColor
+        // constant so an untyped graph still paints something visible.
+        'line-color': (e: cytoscape.EdgeSingular) => {
+          const seed = edgeColorSeed(e)
+          return seed ? labelToColor(seed, variant) : edgeColor
+        },
+        'target-arrow-color': (e: cytoscape.EdgeSingular) => {
+          const seed = edgeColorSeed(e)
+          return seed ? labelToColor(seed, variant) : edgeColor
+        },
         'target-arrow-shape': 'triangle',
         'arrow-scale': 0.9,
         label: 'data(type)',

@@ -19,6 +19,11 @@ describe('pushRealNodes', () => {
         id: '1',
         label: 'Person',
         labels: ['Person'],
+        // nodeType is the immutable color seed — stamped at extract
+        // time so cyHelpers.applyLabels can mutate `label` for display
+        // without reshuffling the canvas palette. See colorBinding.test
+        // for the contract.
+        nodeType: 'Person',
         props: { name: 'Alice' },
       },
     })
@@ -93,6 +98,9 @@ describe('pushRealEdges', () => {
         target: '2',
         type: 'ACTED_IN',
         label: 'ACTED_IN',
+        // edgeType is the immutable color seed for edges — see
+        // colorBinding.test for the contract.
+        edgeType: 'ACTED_IN',
         props: { role: 'Lead' },
       },
     })

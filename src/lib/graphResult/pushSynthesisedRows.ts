@@ -84,6 +84,12 @@ export function pushSynthesisedRows(
         id: sn.nodeId,
         label: sn.label,
         labels,
+        // Synthesised nodes get a stable nodeType from the MATCH-bound
+        // label when available; otherwise the row-derived display
+        // label is the best identity we have. Keeps the color seed
+        // immutable across applyLabels mutations (see pushRealNodes
+        // for the rationale).
+        nodeType: sn.binding.label ?? sn.label,
         props: sn.props,
         synthesised: true,
       },
@@ -118,6 +124,8 @@ export function pushSynthesisedRows(
           target: toId,
           type: eb.type ?? 'REL',
           label: labelText,
+          // edgeType color-seed mirrors pushRealEdges.
+          edgeType: eb.type ?? 'REL',
           props,
           synthesised: true,
         },

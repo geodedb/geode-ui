@@ -11,12 +11,19 @@ export function pushRealNodes(
 ): void {
   if (!Array.isArray(nodes)) return
   nodes.forEach((n) => {
+    const primaryLabel = (n.labels && n.labels[0]) || 'Node'
     out.push({
       group: 'nodes',
       data: {
         id: String(n.id),
-        label: (n.labels && n.labels[0]) || 'Node',
+        label: primaryLabel,
         labels: n.labels,
+        // nodeType is the IMMUTABLE color seed. cytoscapeStyle.ts hashes
+        // it to pick the node's background palette slot — keeping it
+        // stable across `applyLabels` mutations means the canvas color
+        // stays bound to the graph TYPE (Movie, Person), not whichever
+        // display property the user picked.
+        nodeType: primaryLabel,
         props: n.properties,
       },
     })
@@ -44,6 +51,12 @@ export function pushPlaceholderNodes(
         id: String(id),
         label,
         labels: typeLabel ? [typeLabel] : [],
+        // Placeholders inherit the MATCH-derived type when the parser
+        // could pin it; otherwise fall back to the row-derived label.
+        // Either way the field exists so cytoscapeStyle.ts can hash a
+        // stable color without falling back to e.data('label') (which
+        // applyLabels mutates).
+        nodeType: typeLabel ?? label,
         props: {},
         placeholder: true,
       },
@@ -68,6 +81,12 @@ export function pushRealEdges(
         target: String(e.end_node),
         type: e.type,
         label: e.type,
+        // edgeType is the IMMUTABLE color seed for edges, the analogue
+        // of nodeType. applyLabels mutates `data.type` to whichever
+        // display property the user picked; edgeType stays bound to the
+        // relationship type ('ACTED_IN', 'DIRECTED') so the canvas
+        // color is stable.
+        edgeType: e.type,
         props: e.properties,
       },
     })
