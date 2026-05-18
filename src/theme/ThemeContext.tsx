@@ -96,11 +96,17 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Sync the resolved variant onto <html data-theme=…> so non-styled
   // surfaces (Monaco, Cytoscape, third-party widgets) can react via
-  // attribute selectors. Mirrors the geodedb.com `data-bs-theme`
-  // convention.
+  // attribute selectors. ALSO write `data-bs-theme` so Bootstrap 5.3's
+  // own scoped dark-mode rules (`[data-bs-theme="dark"] .card`,
+  // `[data-bs-theme="dark"] .navbar`, etc.) activate alongside the
+  // theme-bridge's `--bs-*` variable overrides — without this, the
+  // .bg-body-secondary / .text-body-tertiary tints inherit Bootstrap's
+  // light-mode defaults (white background, near-white text) and read
+  // as broken in dark mode.
   React.useEffect(() => {
     if (typeof document === 'undefined') return
     document.documentElement.setAttribute('data-theme', resolved)
+    document.documentElement.setAttribute('data-bs-theme', resolved)
   }, [resolved])
 
   const stateValue = React.useMemo<ThemeState>(

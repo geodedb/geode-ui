@@ -83,12 +83,21 @@ export const BootstrapDropdown = <T extends string>({
   }, [])
 
   // Outside-click + Escape handlers, only mounted while the menu is open.
+  //
+  // Bug fix: the menu is portaled to document.body, so `root.contains(target)`
+  // returns false for clicks on .dropdown-item elements — the previous
+  // implementation closed the menu before the option's onClick handler
+  // had a chance to fire. Inspect BOTH the trigger root AND the
+  // portaled menu, and treat a click on either as "inside".
   useEffect(() => {
     if (!open) return undefined
     const onDocMouse = (e: MouseEvent): void => {
+      if (!(e.target instanceof Node)) return
       const root = rootRef.current
-      if (!root) return
-      if (e.target instanceof Node && !root.contains(e.target)) {
+      const menu = menuRef.current
+      const insideRoot = root?.contains(e.target) ?? false
+      const insideMenu = menu?.contains(e.target) ?? false
+      if (!insideRoot && !insideMenu) {
         setOpen(false)
       }
     }

@@ -13,6 +13,7 @@ import { above, below } from '../../theme'
 import { Button, Logo, Spacer } from '../ui'
 import { AddConnectionModal } from './AddConnectionModal'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
+import { ThemeSelector } from './ThemeSelector'
 
 const SkipLink = styled.a`
   position: absolute;
@@ -280,6 +281,7 @@ export const Shell: React.FC = () => {
           {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
           <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
           <Spacer />
+          <ThemeSelector />
           <Button variant="ghost" size="sm" onClick={onLogout}>
             {t('nav.logout')}
           </Button>
@@ -306,6 +308,7 @@ export const Shell: React.FC = () => {
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
         {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
         <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
+        <ThemeSelector />
         <Button variant="ghost" size="md" fullWidth onClick={onLogout}>
           {t('nav.logout')}
         </Button>

@@ -31,7 +31,13 @@ export const Field: React.FC<FieldProps> = ({
   htmlFor,
   hint,
   error,
-  required,
+  // `required` is retained on the prop type for source-level
+  // compatibility (callers pass it; future non-wa controls might
+  // re-introduce a Field-side asterisk indicator). For now the
+  // visual cue comes from the wa-* control's shadow ::after rule,
+  // so the prop is intentionally unused here.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  required: _required,
   children,
 }) => {
   const errorId = error && htmlFor ? `${htmlFor}-error` : undefined
@@ -63,13 +69,16 @@ export const Field: React.FC<FieldProps> = ({
 
   return (
     <div className="d-flex flex-column gap-1">
+      {/* The asterisk indicator is rendered by the wa-* control's
+          shadow-DOM `[part~='label']::after` rule (Web Awesome's
+          form-control styles) when the control carries the `required`
+          attribute. Field used to also paint an asterisk here, which
+          produced a duplicate "*" next to every required wa-input on
+          the login screen. Drop the local indicator — callers that
+          want the visual cue should pass `required` to the wa-input
+          itself (which we already do). */}
       <label htmlFor={htmlFor} className="small fw-medium text-body">
         {label}
-        {required && (
-          <span aria-hidden="true" className="text-danger ms-1">
-            *
-          </span>
-        )}
       </label>
       {control}
       {hint && !error && (

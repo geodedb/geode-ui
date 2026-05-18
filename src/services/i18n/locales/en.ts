@@ -65,6 +65,13 @@ export const en = {
     adminTabAudit: 'Audit',
   },
 
+  theme: {
+    selectorLabel: 'Theme',
+    light: 'Light',
+    dark: 'Dark',
+    system: 'System',
+  },
+
   auth: {
     signIn: 'Sign in',
     signInButton: 'Sign in',

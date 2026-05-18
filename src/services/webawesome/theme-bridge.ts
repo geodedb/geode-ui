@@ -79,12 +79,25 @@ export function buildWaCssVariables(theme: Theme): string {
     // load-bearing ones with our theme tokens keeps the two frameworks
     // visually coherent.
     `--bs-body-bg: ${theme.bg.canvas};`,
+    `--bs-body-bg-rgb: ${hexToRgbTriplet(theme.bg.canvas)};`,
     `--bs-body-color: ${theme.text.primary};`,
+    `--bs-body-color-rgb: ${hexToRgbTriplet(theme.text.primary)};`,
     `--bs-secondary-bg: ${theme.bg.surface};`,
+    `--bs-secondary-bg-rgb: ${hexToRgbTriplet(theme.bg.surface)};`,
     `--bs-secondary-color: ${theme.text.secondary};`,
+    `--bs-secondary-color-rgb: ${hexToRgbTriplet(theme.text.secondary)};`,
     `--bs-tertiary-bg: ${theme.bg.subtle};`,
+    `--bs-tertiary-bg-rgb: ${hexToRgbTriplet(theme.bg.subtle)};`,
     `--bs-tertiary-color: ${theme.text.muted};`,
+    `--bs-tertiary-color-rgb: ${hexToRgbTriplet(theme.text.muted)};`,
     `--bs-emphasis-color: ${theme.text.primary};`,
+    `--bs-emphasis-color-rgb: ${hexToRgbTriplet(theme.text.primary)};`,
+    /* Light/dark named tokens (Bootstrap utility classes .bg-light,
+       .bg-dark, .text-light, .text-dark). Also need RGB triplets so
+       the utility-class color-with-opacity math works under our
+       active theme. */
+    `--bs-light-rgb: ${hexToRgbTriplet(theme.bg.surface)};`,
+    `--bs-dark-rgb: ${hexToRgbTriplet(theme.text.primary)};`,
     `--bs-border-color: ${theme.border.default};`,
     `--bs-border-color-translucent: ${theme.border.subtle};`,
     `--bs-border-radius: ${theme.radii.md};`,
