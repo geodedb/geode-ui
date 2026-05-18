@@ -63,10 +63,9 @@ const Detail = styled.pre`
   margin: 0;
 `
 
-const Actions = styled.div`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.sm};
-`
+// Actions was a pure-layout flex row (`d-flex gap-2` in Bootstrap
+// utilities) — migrated inline per BOOTSTRAP_MIGRATION.md.
+// theme.spacing.sm=8px maps to gap-2.
 
 const ReloadButton = styled.button`
   background: ${({ theme }) => theme.colors.primary};
@@ -139,11 +138,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
           query text in the editor is preserved by the browser.
         </Message>
         <Detail>{error.message}</Detail>
-        <Actions>
+        <div className="d-flex gap-2">
           <ReloadButton type="button" onClick={this.handleReload}>
             Reload page
           </ReloadButton>
-        </Actions>
+        </div>
       </Wrap>
     )
   }

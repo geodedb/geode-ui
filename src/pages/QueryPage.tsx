@@ -75,10 +75,11 @@ const Err = styled.span`
 // the banner tells the user how many rows were truncated and points
 // them at server-side export as the path to the full result. role=status
 // + aria-live=polite keeps it announced to assistive tech without
-// stealing focus.
+// stealing focus. Bootstrap-migrated: theme-token surface kept here
+// (bg.subtle, colors.warning border accent, text.primary, radii.md,
+// font.sizes.sm); spacing utilities (mt-2 px-3 py-2) live on the
+// className at the call site. docs/BOOTSTRAP_MIGRATION.md.
 const StreamOverflowBanner = styled.div`
-  margin-top: ${({ theme }) => theme.spacing.sm};
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
   background: ${({ theme }) => theme.bg.subtle};
   border-left: 3px solid ${({ theme }) => theme.colors.warning};
   color: ${({ theme }) => theme.text.primary};
@@ -89,11 +90,12 @@ const StreamOverflowBanner = styled.div`
 // Suspense fallback shown while the lazy Monaco editor chunk downloads
 // (F10 / #54). Sized to roughly the editor's default height so the
 // layout doesn't jump when the real component resolves. role=status
-// keeps it announced to assistive tech.
+// keeps it announced to assistive tech. Bootstrap-migrated: theme-
+// token surface kept here (text.secondary, font.sizes.sm, bg.subtle,
+// radii.md); the centered-flex layout is supplied via the className
+// `d-flex align-items-center justify-content-center` at the call site.
+// See docs/BOOTSTRAP_MIGRATION.md.
 const LazyFallback = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
   min-height: 240px;
   color: ${({ theme }) => theme.text.secondary};
   font-size: ${({ theme }) => theme.font.sizes.sm};
@@ -126,6 +128,9 @@ const ResultRegion = styled.div`
 // document.body so it escapes any stacking context, fixed to the
 // viewport, scrollable, padded. zIndex.fullscreen keeps it above app
 // chrome but below `modal`, so a modal opened while maximized wins.
+// Bootstrap-migrated: theme-token surface (z-index, bg.canvas,
+// spacing.lg padding) kept here; the flex-column layout is supplied
+// via className `d-flex flex-column` at the call site.
 const ResultOverlay = styled.div`
   position: fixed;
   inset: 0;
@@ -133,8 +138,6 @@ const ResultOverlay = styled.div`
   background: ${({ theme }) => theme.bg.canvas};
   overflow: auto;
   padding: ${({ theme }) => theme.spacing.lg};
-  display: flex;
-  flex-direction: column;
 `
 
 function streamStateToResp(s: StreamState): QueryResp {
@@ -443,7 +446,12 @@ export const QueryPage: React.FC = () => {
   // as a local so the multiline JSX doesn't run into the airbnb/prettier
   // disagreement on parenthesising JSX in props.
   const editorFallback = (
-    <LazyFallback role="status">{t('query.loadingEditor')}</LazyFallback>
+    <LazyFallback
+      role="status"
+      className="d-flex align-items-center justify-content-center"
+    >
+      {t('query.loadingEditor')}
+    </LazyFallback>
   )
 
   // The result panel — the tabs row (with the maximize toggle) plus the
@@ -466,7 +474,10 @@ export const QueryPage: React.FC = () => {
   // inset:0 overlay so it escapes any stacking context and fills the
   // viewport; otherwise render it inline below the editor toolbar.
   const overlayEl = (
-    <ResultOverlay data-testid="result-fullscreen-overlay">
+    <ResultOverlay
+      data-testid="result-fullscreen-overlay"
+      className="d-flex flex-column"
+    >
       {resultPanel}
     </ResultOverlay>
   )
@@ -585,6 +596,7 @@ export const QueryPage: React.FC = () => {
           role="status"
           aria-live="polite"
           data-testid="stream-overflow-banner"
+          className="mt-2 px-3 py-2"
         >
           {t('query.streamRetentionBanner', {
             truncated: stream.rowsTruncated,

@@ -46,13 +46,6 @@ const Heading = styled.h2`
   margin: 0;
 `
 
-const FormWrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.md};
-  max-width: 480px;
-`
-
 const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
   padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
   background: ${({ theme }) => theme.bg.subtle};
@@ -117,7 +110,7 @@ export const GrantsPanel: React.FC = () => {
   return (
     <Stack $gap="md">
       <Heading>{t('grants.title')}</Heading>
-      <FormWrap>
+      <div className="d-flex flex-column gap-3" style={{ maxWidth: '480px' }}>
         <Field
           label={t('grants.fieldPermission')}
           htmlFor="gp-permission"
@@ -209,7 +202,7 @@ export const GrantsPanel: React.FC = () => {
             {t('common.revoke')}
           </Button>
         </Inline>
-      </FormWrap>
+      </div>
       {err && (
         <Banner $tone="err" role="alert">
           {err}

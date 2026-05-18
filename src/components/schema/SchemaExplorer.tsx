@@ -119,14 +119,9 @@ const Pane = styled.section`
   }
 `
 
-const GraphList = styled.ul`
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.xs};
-  padding: 0;
-  margin: 0;
-`
+// GraphList was a pure-layout `<ul>` (vertical flex with theme.spacing.xs
+// gap) — migrated inline to Bootstrap utilities `list-unstyled m-0 p-0
+// d-flex flex-column gap-1` per BOOTSTRAP_MIGRATION.md.
 
 const GraphBtn = styled.button<{ $active: boolean }>`
   text-align: left;
@@ -300,7 +295,7 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
         <h3>{t('schema.graphsTitle')}</h3>
         {err && <ErrText>{err}</ErrText>}
         {graphs.length === 0 && !err && <Empty>{t('schema.noGraphs')}</Empty>}
-        <GraphList>
+        <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
           {graphs.map((g) => (
             <li key={g}>
               <GraphBtn $active={g === active} onClick={() => setActive(g)}>
@@ -308,7 +303,7 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
               </GraphBtn>
             </li>
           ))}
-        </GraphList>
+        </ul>
       </Pane>
       <Pane>
         <h3>

@@ -25,15 +25,6 @@ import { useAdminListPage } from './useAdminListPage'
 // not to warrant a shared primitive. Backed by a native <datalist> so
 // the browser autocompletes from `permissionSuggestions()`; free text is
 // still accepted (Geode persists the string verbatim).
-const ChipList = styled.ul`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 6px 0;
-  padding: 0;
-  list-style: none;
-`
-
 const Chip = styled.li`
   display: inline-flex;
   align-items: center;
@@ -263,7 +254,10 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           hint={t('roles.permissionsHint')}
         >
           {permissions.length > 0 && (
-            <ChipList>
+            <ul
+              className="list-unstyled m-0 p-0 d-flex flex-wrap"
+              style={{ gap: '6px', marginBottom: '6px' }}
+            >
               {permissions.map((p) => (
                 <Chip key={p}>
                   <span>{p}</span>
@@ -276,7 +270,7 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   </ChipRemove>
                 </Chip>
               ))}
-            </ChipList>
+            </ul>
           )}
           <Input
             id="role-permissions-input"

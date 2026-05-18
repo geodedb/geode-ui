@@ -33,10 +33,12 @@ test.describe('graph viz: layouts, clustering, path mode', () => {
     // Bug-C fix: layout picker is a Bootstrap dropdown (role=listbox
     // sibling, role=option entries) instead of a native <select>.
     await picker.click()
-    await expect(page.getByRole('option', { name: /Force \(fast\)/i }))
-      .toHaveCount(1)
-    await expect(page.getByRole('option', { name: /Layered \(DAG\)/i }))
-      .toHaveCount(1)
+    await expect(
+      page.getByRole('option', { name: /Force \(fast\)/i })
+    ).toHaveCount(1)
+    await expect(
+      page.getByRole('option', { name: /Layered \(DAG\)/i })
+    ).toHaveCount(1)
     // Close + re-open to drive each selection through the public path.
     await page.keyboard.press('Escape')
     await selectGraphLayout(page, 'fcose')

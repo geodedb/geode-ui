@@ -62,11 +62,6 @@ const ErrorBanner = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const RowActions = styled.div`
-  display: inline-flex;
-  gap: ${({ theme }) => theme.spacing.xs};
-`
-
 const fmtBytes = (n?: number): string => {
   if (n === undefined || n === null) return ''
   if (n < 1024) return `${n} B`
@@ -157,7 +152,7 @@ export const BackupPage: React.FC = () => {
                   <td>{b.node_count ?? ''}</td>
                   <td>{b.edge_count ?? ''}</td>
                   <td>
-                    <RowActions>
+                    <div className="d-inline-flex gap-1">
                       <Button
                         variant="ghost"
                         size="sm"
@@ -180,7 +175,7 @@ export const BackupPage: React.FC = () => {
                       >
                         {t('common.delete')}
                       </Button>
-                    </RowActions>
+                    </div>
                   </td>
                 </tr>
               ))

@@ -294,11 +294,7 @@ export const GraphInspector: React.FC<GraphInspectorProps> = ({
             <label
               data-testid="graph-focus-hops"
               htmlFor="graph-focus-hops-input"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
+              className="d-inline-flex align-items-center gap-1"
             >
               {t('graph.focusHops')}
               <input

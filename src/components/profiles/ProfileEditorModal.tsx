@@ -37,12 +37,10 @@ const Row = styled.div`
   grid-template-columns: 1fr 1fr;
   gap: ${({ theme }) => theme.spacing.sm};
 `
-const ButtonRow = styled.div`
-  display: flex;
-  gap: ${({ theme }) => theme.spacing.sm};
-  justify-content: flex-end;
-  margin-top: ${({ theme }) => theme.spacing.lg};
-`
+// ButtonRow was a pure-layout flex row (`d-flex gap-2 justify-content-end
+// mt-4` in Bootstrap utilities) — migrated inline per
+// BOOTSTRAP_MIGRATION.md. theme.spacing.sm=8px maps to gap-2 and
+// theme.spacing.lg=24px maps to mt-4.
 const ErrText = styled.p`
   color: ${({ theme }) => theme.text.danger};
   font-size: ${({ theme }) => theme.font.sizes.sm};
@@ -297,14 +295,14 @@ export const ProfileEditorModal: React.FC<Props> = ({
           </Row>
         </Section>
 
-        <ButtonRow>
+        <div className="d-flex gap-2 justify-content-end mt-4">
           <Button type="button" variant="ghost" onClick={onClose}>
             {t('profiles.editor.actions.cancel')}
           </Button>
           <Button type="submit" loading={busy} disabled={duplicateName}>
             {t('profiles.editor.actions.save')}
           </Button>
-        </ButtonRow>
+        </div>
         {err ? <ErrText role="alert">{err}</ErrText> : null}
       </form>
     </Modal>

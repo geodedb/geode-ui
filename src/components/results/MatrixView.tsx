@@ -59,11 +59,12 @@ const Empty = styled.p`
 // drops one or more label rows/cols. The chip surface mirrors
 // TableView's "+N more" banner so the two over-budget UIs share a
 // visual language. See PERF #216.
+//
+// Layout (flex, flex-wrap, gap, margin-bottom) is supplied via
+// Bootstrap utility classes at the call site (`d-flex flex-wrap gap-1
+// mb-2`); the styled-component keeps the theme-driven font-size + color
+// so dark mode tracks correctly. Per BOOTSTRAP_MIGRATION.md mixed rule.
 const OverflowBar = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: ${({ theme }) => theme.spacing.xs};
-  margin-bottom: ${({ theme }) => theme.spacing.sm};
   font-size: ${({ theme }) => theme.font.sizes.sm};
   color: ${({ theme }) => theme.text.secondary};
 `
@@ -192,6 +193,7 @@ export const MatrixView: React.FC<MatrixViewProps> = ({
     <Wrap>
       {hiddenCount > 0 && (
         <OverflowBar
+          className="d-flex flex-wrap gap-1 mb-2"
           role="note"
           data-testid="matrix-overflow"
           aria-label={t('matrix.overflow', {

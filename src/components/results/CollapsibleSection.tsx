@@ -45,10 +45,8 @@ const Summary = styled.button<{ $open: boolean }>`
   }
 `
 
-const Body = styled.div`
-  padding-bottom: ${({ theme }) => theme.spacing.sm};
-`
-
+// Body — pure layout (padding-bottom: spacing.sm → pb-2). Inlined as
+// `<div className="pb-2">` per BOOTSTRAP_MIGRATION.md replacement rule.
 export type CollapsibleSectionProps = {
   // Visible heading text, also used as the accessible name of the
   // toggle button.
@@ -84,6 +82,6 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
       </span>
       <span>{title}</span>
     </Summary>
-    {open && <Body>{children}</Body>}
+    {open && <div className="pb-2">{children}</div>}
   </Wrap>
 )

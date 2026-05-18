@@ -57,13 +57,8 @@ export const GraphCanvasOverlay: React.FC<GraphCanvasOverlayProps> = ({
   onKeyDown,
 }) => (
   <div
-    style={{
-      position: 'relative',
-      display: 'flex',
-      flexDirection: 'column',
-      flex: '1 1 auto',
-      minHeight: 0,
-    }}
+    className="position-relative d-flex flex-column flex-fill"
+    style={{ minHeight: 0 }}
   >
     <Canvas
       ref={canvasRef}

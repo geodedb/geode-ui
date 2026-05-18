@@ -44,12 +44,9 @@ const Page = styled.section`
   margin: 0 auto;
   padding: ${({ theme }) => theme.spacing.lg};
 `
-const Header = styled.div`
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: ${({ theme }) => theme.spacing.md};
-`
+// Header — Bootstrap-migrated to a plain <div className=...>. Pure
+// layout (flex row, baseline alignment, space-between, mb-3 spacing
+// matches the prior theme.spacing.md = 16px token). docs/BOOTSTRAP_MIGRATION.md.
 const Title = styled.h1`
   font-family: ${({ theme }) => theme.font.family.display};
   font-size: ${({ theme }) => theme.font.sizes.xxl};
@@ -337,13 +334,13 @@ export const ProfilesPage: React.FC = () => {
 
   return (
     <Page>
-      <Header>
+      <div className="d-flex align-items-baseline justify-content-between mb-3">
         <div>
           <Title>{t('profiles.title')}</Title>
           <Description>{t('profiles.description')}</Description>
         </div>
         <Button onClick={openCreate}>{t('profiles.actions.create')}</Button>
-      </Header>
+      </div>
       {setDefaultErr && (
         <ErrorText role="alert" data-testid="profiles-set-default-error">
           {setDefaultErr}

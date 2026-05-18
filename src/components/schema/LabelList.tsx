@@ -25,14 +25,12 @@ import { defaultSchemaCache, type SchemaCacheLike } from './schemaCache'
 // before it lands a setState. The Geode-side read is a full-graph
 // `MATCH (n)` scan; #128 (internal/server/schema_cache.go, 120s TTL) is
 // the cold-miss backstop on the server.
-const List = styled.ul`
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.xs};
-  padding: 0;
-  margin: 0;
-`
+//
+// The outer `<ul>` is pure layout (vertical flex with theme.spacing.xs
+// gap) and renders with Bootstrap utilities: `list-unstyled m-0 p-0
+// d-flex flex-column gap-1`. The buttons stay styled-components because
+// they own theme.bg.*, theme.text.*, theme.border.*, theme.radii.*, and
+// theme.shadows.focus tokens.
 
 const Btn = styled.button`
   text-align: left;
@@ -127,7 +125,7 @@ export const LabelList: React.FC<{
   }
 
   return (
-    <List>
+    <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
       {labels.map((l) => (
         <li key={l}>
           <Btn
@@ -146,6 +144,6 @@ export const LabelList: React.FC<{
           </Btn>
         </li>
       ))}
-    </List>
+    </ul>
   )
 }

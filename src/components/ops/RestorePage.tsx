@@ -44,13 +44,6 @@ const Banner = styled.div<{ $tone: 'ok' | 'err' }>`
   font-size: ${({ theme }) => theme.font.sizes.sm};
 `
 
-const FormWrap = styled.form`
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.md};
-  max-width: 480px;
-`
-
 export const RestorePage: React.FC = () => {
   const { t } = useTranslation()
   const location = useLocation()
@@ -124,7 +117,11 @@ export const RestorePage: React.FC = () => {
   return (
     <Stack $gap="md">
       <Heading>{t('restore.title')}</Heading>
-      <FormWrap onSubmit={submit}>
+      <form
+        className="d-flex flex-column gap-3"
+        style={{ maxWidth: '480px' }}
+        onSubmit={submit}
+      >
         <Field label={t('restore.fieldUpload')} htmlFor="rp-upload">
           <input
             id="rp-upload"
@@ -158,7 +155,7 @@ export const RestorePage: React.FC = () => {
         <Button type="submit" loading={busy} disabled={uploading}>
           {restoreLabel}
         </Button>
-      </FormWrap>
+      </form>
       {err && (
         <Banner $tone="err" role="alert">
           {err}

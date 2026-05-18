@@ -10,15 +10,6 @@ import type { QueryHistoryEntry } from '../../lib/useQueryHistory'
 // the operator ran (from useQueryHistory). Each row deep-links back to
 // the Query page with `?statement=` so a click re-loads the editor with
 // that text. The header action clears the whole log.
-const List = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.xs};
-`
-
 const Row = styled.li`
   display: flex;
   align-items: baseline;
@@ -92,7 +83,7 @@ export const RecentQueriesCard: React.FC<RecentQueriesCardProps> = ({
       data-testid="dashboard-recent-card"
     >
       {entries.length ? (
-        <List>
+        <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
           {entries.map((e) => (
             <Row
               key={`${e.ranAt}:${e.statement}`}
@@ -109,7 +100,7 @@ export const RecentQueriesCard: React.FC<RecentQueriesCardProps> = ({
               </span>
             </Row>
           ))}
-        </List>
+        </ul>
       ) : (
         <Empty role="note">{t('dashboard.recentEmpty')}</Empty>
       )}

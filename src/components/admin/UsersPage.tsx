@@ -41,11 +41,6 @@ import { useAdminListPage } from './useAdminListPage'
 // `User` from `@api` instead of re-declaring a structural shadow and
 // casting `Array<unknown>`.
 
-const RowActions = styled.div`
-  display: inline-flex;
-  gap: ${({ theme }) => theme.spacing.xs};
-`
-
 export const UsersPage: React.FC = () => {
   const { t } = useTranslation()
   // QUALITY-18 (#270): list scaffold (state, capabilities probe, list
@@ -135,7 +130,7 @@ export const UsersPage: React.FC = () => {
                       : t('users.statusActive')}
                   </td>
                   <td>
-                    <RowActions>
+                    <div className="d-inline-flex gap-1">
                       {u.disabled ? (
                         <Button
                           variant="ghost"
@@ -160,7 +155,7 @@ export const UsersPage: React.FC = () => {
                       >
                         {t('common.delete')}
                       </Button>
-                    </RowActions>
+                    </div>
                   </td>
                 </tr>
               ))
