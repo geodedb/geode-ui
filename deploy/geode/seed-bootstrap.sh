@@ -209,7 +209,7 @@ ensure_admin_password() {
     log "admin password rotated"
 }
 
-# Step 3: ensure e2e_admin exists. Geode v0.5.15 supports CREATE USER over
+# Step 3: ensure e2e_admin exists. Geode v0.5.18 supports CREATE USER over
 # the GQL wire per docs/GQL_AUTH_DDL.md grammar:
 #   CREATE USER <name> SET PASSWORD <string> [ EMAIL <string> ] [ ROLE <name> ]
 # The Playwright fixture authenticates as E2E_USER once this succeeds. If
@@ -298,7 +298,7 @@ verify_graph() {
     return 1
 }
 
-# Geode v0.5.15's `geode query -f` duplicates the last statement of
+# Geode v0.5.18's `geode query -f` duplicates the last statement of
 # each ~100-statement batch when ingesting a multi-statement seed
 # file (one extra row per batch boundary; observed empirically at
 # ~110-line intervals in our 1700-statement vulndb.gql). The
@@ -358,7 +358,7 @@ dedupe_graph_label() {
         done
     done
     if [[ "${removed}" -gt 0 ]]; then
-        log "deduped ${removed} duplicate ${label} node(s) in ${graph} (geode v0.5.15 CLI batch artifact)"
+        log "deduped ${removed} duplicate ${label} node(s) in ${graph} (geode v0.5.18 CLI batch artifact)"
     fi
     return 0
 }

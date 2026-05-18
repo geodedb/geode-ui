@@ -1,5 +1,5 @@
 # E2E test stack for geode-ui. Brings up:
-#   - geode        (database, v0.5.15; offline `auth init` writes the
+#   - geode        (database, v0.5.18; offline `auth init` writes the
 #                   bootstrap password to /data/admin-password.txt before
 #                   `geode serve` starts)
 #   - geode-init   (one-shot: rotate the captured bootstrap password,
@@ -21,7 +21,7 @@
 # Required: prior `cd ../geode && zig build -Doptimize=ReleaseSafe` so the
 # geode binary is staged at ../geode/zig-out/bin/geode for the geode image's COPY.
 #
-# Auth wiring (v0.5.15 has no offline 'set known password' flag):
+# Auth wiring (v0.5.18 has no offline 'set known password' flag):
 #   1. geode-entrypoint.sh runs `geode auth init` once on a fresh data
 #      dir, parses the random "Generated password: <hex>" line, and
 #      writes the password to /data/admin-password.txt (mode 0600).
@@ -39,7 +39,7 @@ name: geode-e2e
 
 services:
   geode:
-    image: geode:v0.5.15
+    image: geode:v0.5.18
     build:
       context: ../..
       dockerfile: geode-ui/deploy/geode/Dockerfile.geode
@@ -66,7 +66,7 @@ services:
     # is reachable. This mirrors seed-bootstrap.sh:wait_for_wire().
     #
     # IMPORTANT: probe with a NONEXISTENT username, not the real admin.
-    # Geode v0.5.15 (geode_auth_lib.zig:1466) locks a user account for 5
+    # Geode v0.5.18 (geode_auth_lib.zig:1466) locks a user account for 5
     # minutes after 5 failed-password attempts. The healthcheck fires
     # every 5s, so probing as `-U geode -P x` would lock the admin
     # account inside 25s and break the entire e2e auth chain. An
@@ -85,7 +85,7 @@ services:
       start_period: 10s
 
   geode-init:
-    image: geode:v0.5.15
+    image: geode:v0.5.18
     depends_on:
       geode:
         condition: service_healthy
@@ -147,7 +147,7 @@ services:
     - -profile-crud-burst
     - '200'
       # The seed-bootstrap creates `e2e_admin` via wire-side CREATE USER
-      # with ROLE admin (Geode v0.5.15). The wire dialect surfaces that
+      # with ROLE admin (Geode v0.5.18). The wire dialect surfaces that
       # role via SHOW USERS, but the login endpoint's role discovery still
       # hasn't migrated off the v0.5.11 bootstrap fallback (handlers_auth.
       # go::authenticateUpstream returns roles=nil). Pin both the
@@ -169,11 +169,11 @@ services:
       start_period: 5s
 
   geode-mcp:
-    image: geode:v0.5.15
+    image: geode:v0.5.18
     depends_on:
       geode-init:
         condition: service_completed_successfully
-    # v0.5.15's `geode mcp serve --port` is unusable for compose:
+    # v0.5.18's `geode mcp serve --port` is unusable for compose:
     # (1) the CLI returns immediately after spawning the HTTP listener
     # thread, so the process exits and the thread dies; (2) the
     # listener binds 127.0.0.1, with no `--bind` flag. We bridge the
@@ -211,7 +211,7 @@ services:
       start_period: 5s
 
   geode-lsp:
-    image: geode:v0.5.15
+    image: geode:v0.5.18
     depends_on:
       geode-init:
         condition: service_completed_successfully

@@ -17,6 +17,8 @@ import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryHistory } from '../lib/useQueryHistory'
 import { useQueryStore } from '../lib/queryStore'
+import { useLspSettings } from '../lib/lspSettings'
+import type { GqlEditorHandle } from '../components/editor/GqlEditor'
 import { Dropdown, DropdownItem } from '../services/webawesome/components'
 import {
   StreamState,
@@ -166,6 +168,9 @@ export const QueryPage: React.FC = () => {
   const maximizeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
+  const editorRef = useRef<GqlEditorHandle | null>(null)
+  const autoFormatEnabled = useLspSettings((s) => s.autoFormatEnabled)
+  const setAutoFormatEnabled = useLspSettings((s) => s.setAutoFormatEnabled)
   // The statement that the in-flight stream run actually started with.
   // The `stream` reducer state inside h.done.then(...) is the value at
   // run-time but `stmt` (the editor state) can drift before the run
@@ -210,8 +215,17 @@ export const QueryPage: React.FC = () => {
     if (staged != null) {
       setStmt(staged)
       clearStaged(null)
+      // Queries staged from the schema explorer arrive as a single line
+      // (USE GRAPH x; MATCH (n:Label) RETURN n LIMIT 25) which is hard
+      // to read once the user opens the editor. v0.5.18 LSP exposes
+      // textDocument/formatting; ask the editor to run it once the
+      // transport is open. The user can disable this via the
+      // "Auto-format inserted queries" option.
+      if (autoFormatEnabled) {
+        editorRef.current?.requestFormatWhenReady()
+      }
     }
-  }, [staged, clearStaged])
+  }, [staged, clearStaged, autoFormatEnabled])
 
   // The dashboard's recent-queries card deep-links here with
   // `?statement=<query>` so a click re-loads the editor with that text.
@@ -227,6 +241,12 @@ export const QueryPage: React.FC = () => {
       const next = new URLSearchParams(searchParams)
       next.delete('statement')
       setSearchParams(next, { replace: true })
+      // Same rationale as the staged-statement effect above —
+      // deep-linked queries (history re-runs, share links) arrive
+      // single-line; auto-format unless the user opted out.
+      if (autoFormatEnabled) {
+        editorRef.current?.requestFormatWhenReady()
+      }
     }
     // Intentionally mount-only: see comment above.
   }, [])
@@ -463,7 +483,12 @@ export const QueryPage: React.FC = () => {
   return (
     <PageRoot>
       <Suspense fallback={editorFallback}>
-        <GqlEditor value={stmt} onChange={setStmt} onRun={run} />
+        <GqlEditor
+          ref={editorRef}
+          value={stmt}
+          onChange={setStmt}
+          onRun={run}
+        />
       </Suspense>
       <Bar>
         <wa-button
@@ -489,6 +514,21 @@ export const QueryPage: React.FC = () => {
             {t('query.cancel')}
           </wa-button>
         )}
+        <wa-button
+          appearance="outlined"
+          size="m"
+          role="button"
+          data-testid="query-format-btn"
+          title={t('query.formatHotkey')}
+          aria-label={t('query.formatAriaLabel')}
+          onClick={() => {
+            editorRef.current?.formatDocument().catch(() => {
+              /* formatDocument already swallows internally */
+            })
+          }}
+        >
+          {t('query.formatLabel')}
+        </wa-button>
         <Dropdown placement="bottom-start" data-testid="query-options-dropdown">
           <wa-button slot="trigger" appearance="outlined" size="m">
             {t('query.optionsLabel')}
@@ -519,6 +559,17 @@ export const QueryPage: React.FC = () => {
             onClick={() => setExpand((e) => !e)}
           >
             {t('query.expandGraphCells')}
+          </DropdownItem>
+          <DropdownItem
+            type="checkbox"
+            value="autoFormat"
+            data-testid="query-options-auto-format"
+            checked={autoFormatEnabled || undefined}
+            aria-checked={autoFormatEnabled ? 'true' : 'false'}
+            role="menuitemcheckbox"
+            onClick={() => setAutoFormatEnabled(!autoFormatEnabled)}
+          >
+            {t('query.autoFormatInserted')}
           </DropdownItem>
         </Dropdown>
         {activeResp && (

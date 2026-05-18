@@ -452,3 +452,29 @@ describe('QueryPage options dropdown', () => {
     expect(streamItem).toHaveAttribute('aria-checked', 'true')
   })
 })
+
+describe('QueryPage v0.5.18 LSP formatting affordances', () => {
+  it('renders a first-class Format button in the toolbar', () => {
+    renderPage()
+    const btn = screen.getByTestId('query-format-btn')
+    expect(btn).toBeInTheDocument()
+    expect(btn).toHaveAttribute('aria-label', expect.stringMatching(/format/i))
+  })
+
+  it('renders the Auto-format inserted queries option (default on)', () => {
+    renderPage()
+    const item = screen.getByTestId('query-options-auto-format')
+    expect(item).toBeInTheDocument()
+    // Default state: enabled (the persisted store seeds with true).
+    expect(item).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('clicking the auto-format item flips its aria-checked state', () => {
+    renderPage()
+    const item = screen.getByTestId('query-options-auto-format')
+    fireEvent.click(item)
+    expect(item).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(item)
+    expect(item).toHaveAttribute('aria-checked', 'true')
+  })
+})

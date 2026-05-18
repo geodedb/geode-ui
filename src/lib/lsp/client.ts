@@ -10,12 +10,32 @@ import { createWebSocketTransport, LspTransport } from './websocketTransport'
 
 export type LspState = 'connecting' | 'open' | 'closed' | 'failed'
 
+/**
+ * LSP formatting options as parsed by the Geode v0.5.18 server
+ * (src/cli/lsp/server.zig:600-628). Keys are camelCase to match the
+ * server's JSON parser. Threading these through initializationOptions
+ * lets a client tune the formatter without renegotiating the
+ * connection.
+ */
+export interface LspFormatOptions {
+  indentSize?: number
+  maxLineLength?: number
+  minPropertiesToFold?: number
+  foldPropertyMaps?: boolean
+}
+
 export interface StartOptions {
   monaco: typeof import('monaco-editor')
   url: string
   accessToken: string
   graph: string
   tenant?: string
+  /**
+   * Optional formatting options sent in `initializationOptions.format`.
+   * Geode v0.5.18+ uses them to configure the document formatter.
+   * Older servers ignore the field.
+   */
+  format?: LspFormatOptions
   onStateChange?: (s: LspState) => void
   /** Maximum number of reconnect attempts after a transport close. Default 3. */
   maxRetries?: number
@@ -163,6 +183,10 @@ export async function startLspClient(
             graph: opts.graph,
             tenant: opts.tenant,
           },
+          // The Geode v0.5.18 LSP server parses this `format` key
+          // (server.zig:600-628). Older servers ignore unknown init
+          // options, so the wire is forward- and backward-compatible.
+          ...(opts.format ? { format: opts.format } : {}),
         },
       },
       connectionProvider: {

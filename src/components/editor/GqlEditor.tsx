@@ -1,4 +1,10 @@
-import React, { useEffect, useRef } from 'react'
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react'
 // Side-effect import: wires @monaco-editor/react to the webpack-bundled
 // monaco instance (skips the CDN AMD loader our CSP blocks). This used
 // to live at the top of src/index.tsx, which pulled all of
@@ -7,9 +13,10 @@ import React, { useEffect, useRef } from 'react'
 // the bootstrap *here* keeps monaco inside the lazy editor chunk
 // instead of the entry chunk.
 import '../../monaco-bootstrap'
+import type * as MonacoEditorApi from 'monaco-editor'
 import Editor, { OnMount } from '@monaco-editor/react'
 import { GQL_LANGUAGE_ID, registerGqlLanguage } from './gqlLanguage'
-import type { LspClientHandle } from '../../lib/lsp/client'
+import type { LspClientHandle, LspState } from '../../lib/lsp/client'
 import { useAuth } from '../../auth/AuthProvider'
 // Origin/main moved the access token off `useAuth()` into a module-level
 // latch in api/connections so non-hook call sites can read it. Effect
@@ -17,6 +24,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { getLatestToken } from '../../api/connections'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { breakpoints } from '../../theme/tokens'
+import { useLspSettings } from '../../lib/lspSettings'
 
 // Mobile editor height is capped at 160 px so the editor + Bar + result
 // region all fit within an 812 px portrait viewport without scrolling
@@ -36,14 +44,26 @@ type Props = {
   tenant?: string
 }
 
-export const GqlEditor: React.FC<Props> = ({
-  value,
-  onChange,
-  onRun,
-  height,
-  graph,
-  tenant,
-}) => {
+/**
+ * Imperative handle exposed via React.forwardRef. QueryPage uses it to
+ * (a) ask the editor to run textDocument/formatting on demand
+ * (toolbar button, ⌘⇧F) and (b) request a one-shot format that runs
+ * the next time the LSP becomes ready — used when a query arrives from
+ * outside the editor (schema-explorer click, deep link, history).
+ */
+export interface GqlEditorHandle {
+  formatDocument: () => Promise<void>
+  // requestFormatWhenReady queues exactly one format pass. If the LSP
+  // is already open the format fires immediately; otherwise it fires
+  // on the next 'open' transition. Repeated calls are idempotent —
+  // they collapse to a single pending request.
+  requestFormatWhenReady: () => void
+}
+
+const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
+  { value, onChange, onRun, height, graph, tenant },
+  ref
+) => {
   // When the caller doesn't override height, shrink to a mobile-friendly
   // value at <= md so the editor doesn't eat ~30% of vertical chrome on a
   // 375x812 phone. An explicit `height` prop always wins (callers that
@@ -53,6 +73,19 @@ export const GqlEditor: React.FC<Props> = ({
     height ?? (isMobile ? MOBILE_EDITOR_HEIGHT : DESKTOP_EDITOR_HEIGHT)
   const lspRef = useRef<LspClientHandle | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
+  const editorRef = useRef<MonacoEditorApi.editor.IStandaloneCodeEditor | null>(
+    null
+  )
+  const [lspState, setLspState] = useState<LspState>('closed')
+  // Pending one-shot format. Set by requestFormatWhenReady(); cleared
+  // by the open-state effect after the format dispatches.
+  const formatPendingRef = useRef(false)
+
+  const formatOpts = useLspSettings((s) => s.format)
+  // Snapshot the options so the LSP connect effect only re-runs when
+  // the values actually change, not on unrelated store updates.
+  const formatKey = `${formatOpts.indentSize}:${formatOpts.maxLineLength}:${formatOpts.minPropertiesToFold}:${formatOpts.foldPropertyMaps}`
+
   // useAuth() throws when no AuthProvider is mounted (tests that render
   // GqlEditor in isolation, anonymous SPA boot before sign-in). The
   // editor must still render in those cases; we fall back to "not
@@ -66,16 +99,72 @@ export const GqlEditor: React.FC<Props> = ({
     isAuthed = false
   }
 
+  const runFormatNow = async (): Promise<void> => {
+    const ed = editorRef.current
+    if (!ed) return
+    const action = ed.getAction('editor.action.formatDocument')
+    if (!action) return
+    try {
+      await action.run()
+    } catch {
+      // Format failure is non-fatal — the editor's content is unchanged
+      // and the user can keep typing. Surface a console warning so a
+      // developer can correlate against the LSP transport logs.
+      // eslint-disable-next-line no-console
+      console.warn('LSP formatDocument failed')
+    }
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      formatDocument: runFormatNow,
+      requestFormatWhenReady: () => {
+        formatPendingRef.current = true
+        // If the LSP is already open, fire immediately so the user
+        // sees the formatted text before the next paint. Otherwise
+        // the lsp-open effect picks it up the moment the transport
+        // settles.
+        if (lspState === 'open') {
+          // Use a microtask so the editor has settled the latest
+          // setValue (when called from the consumer right after
+          // updating `value`).
+          queueMicrotask(() => {
+            if (!formatPendingRef.current) return
+            formatPendingRef.current = false
+            runFormatNow().catch(() => {
+              /* swallow — best-effort one-shot format */
+            })
+          })
+        }
+      },
+    }),
+    [lspState]
+  )
+
   const handleMount: OnMount = (editor, monaco) => {
     registerGqlLanguage(monaco)
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun)
+    // Cmd/Ctrl+Shift+F runs the document formatter. Monaco wires this
+    // for many built-in languages but the Geode 'gql' language is
+    // registered dynamically, so we bind it explicitly to guarantee
+    // the same shortcut works regardless of locale / platform.
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+      () => {
+        runFormatNow().catch(() => {
+          /* runFormatNow already swallows errors; keep the action async-safe */
+        })
+      }
+    )
     monacoRef.current = monaco as unknown as typeof import('monaco-editor')
+    editorRef.current = editor
   }
 
-  // Re-create the LSP client whenever the auth token, graph, or tenant
-  // changes. Tearing down + starting fresh is simpler (and matches the
-  // monaco-languageclient lifecycle, which doesn't support reusing a
-  // started client with a new transport).
+  // Re-create the LSP client whenever the auth token, graph, tenant,
+  // or formatting options change. Tearing down + starting fresh is
+  // simpler (and matches the monaco-languageclient lifecycle, which
+  // doesn't support reusing a started client with a new transport).
   useEffect(() => {
     if (!isAuthed || !monacoRef.current) return undefined
     const token = getLatestToken()
@@ -112,7 +201,9 @@ export const GqlEditor: React.FC<Props> = ({
           accessToken: token,
           graph: graph || 'default',
           tenant,
+          format: formatOpts,
           onStateChange: (s) => {
+            setLspState(s)
             // eslint-disable-next-line no-console
             console.debug('[lsp] state =', s)
           },
@@ -133,7 +224,29 @@ export const GqlEditor: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [isAuthed, graph, tenant])
+    // formatKey is the structural identity of formatOpts — comparing
+    // the joined-string identity is what we want here so an unrelated
+    // store update doesn't bounce the LSP transport.
+  }, [isAuthed, graph, tenant, formatKey])
+
+  // When the LSP transitions to 'open' AND a one-shot format was
+  // queued, dispatch it. Monaco's formatDocument action is a no-op
+  // until at least one formatter is registered — that registration is
+  // what monaco-languageclient does when the LSP advertises
+  // documentFormattingProvider. So waiting for 'open' is the correct
+  // gate, not "the moment the editor mounts".
+  useEffect(() => {
+    if (lspState !== 'open') return
+    if (!formatPendingRef.current) return
+    formatPendingRef.current = false
+    // Run on the next tick so any in-flight setValue from the consumer
+    // has settled before the formatter reads the document.
+    queueMicrotask(() => {
+      runFormatNow().catch(() => {
+        /* swallow — best-effort one-shot format */
+      })
+    })
+  }, [lspState])
 
   useEffect(
     () => () => {
@@ -163,3 +276,6 @@ export const GqlEditor: React.FC<Props> = ({
     />
   )
 }
+
+export const GqlEditor = forwardRef<GqlEditorHandle, Props>(GqlEditorImpl)
+GqlEditor.displayName = 'GqlEditor'
