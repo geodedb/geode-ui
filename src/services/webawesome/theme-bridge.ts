@@ -64,6 +64,28 @@ export function buildWaCssVariables(theme: Theme): string {
     `--wa-color-danger-on-loud: ${theme.text.onDanger};`,
     `--wa-color-danger-on-normal: ${theme.text.onDanger};`,
     `--wa-color-neutral-on-loud: ${theme.text.onPrimary};`,
+    // Neutral palette — drives every wa-button / wa-dropdown / wa-tag
+    // with variant="neutral" (the default for most chrome elements
+    // including the ConnectionSwitcher trigger). WA's bundled defaults
+    // pick a fixed gray scale that doesn't track our dark theme, so
+    // the neutral text (--wa-color-neutral-on-quiet) sits near-black
+    // against our dark surface — unreadable. Map fill/border/on-quiet
+    // to theme tokens so contrast holds in both variants.
+    `--wa-color-neutral-fill-loud: ${theme.text.primary};`,
+    `--wa-color-neutral-fill-normal: ${theme.bg.surface};`,
+    `--wa-color-neutral-fill-quiet: ${theme.bg.subtle};`,
+    `--wa-color-neutral-border-loud: ${theme.border.default};`,
+    `--wa-color-neutral-border-normal: ${theme.border.default};`,
+    `--wa-color-neutral-border-quiet: ${theme.border.subtle};`,
+    `--wa-color-neutral-on-normal: ${theme.text.primary};`,
+    `--wa-color-neutral-on-quiet: ${theme.text.primary};`,
+    // Required-field indicator: suppress wa-input's shadow `::after`
+    // asterisk so Field can paint a red `*` next to the input itself
+    // (the user-facing convention is asterisk-on-the-input-row, not
+    // asterisk-after-the-label). The content var is consumed by the
+    // form-control styles' `:host([required]) ::after { content: var(
+    // --wa-form-control-required-content) }` rule.
+    '--wa-form-control-required-content: "";',
     // Border.
     `--wa-border-color-normal: ${theme.border.default};`,
     // Radii.

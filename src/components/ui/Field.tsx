@@ -31,13 +31,7 @@ export const Field: React.FC<FieldProps> = ({
   htmlFor,
   hint,
   error,
-  // `required` is retained on the prop type for source-level
-  // compatibility (callers pass it; future non-wa controls might
-  // re-introduce a Field-side asterisk indicator). For now the
-  // visual cue comes from the wa-* control's shadow ::after rule,
-  // so the prop is intentionally unused here.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  required: _required,
+  required,
   children,
 }) => {
   const errorId = error && htmlFor ? `${htmlFor}-error` : undefined
@@ -69,18 +63,30 @@ export const Field: React.FC<FieldProps> = ({
 
   return (
     <div className="d-flex flex-column gap-1">
-      {/* The asterisk indicator is rendered by the wa-* control's
-          shadow-DOM `[part~='label']::after` rule (Web Awesome's
-          form-control styles) when the control carries the `required`
-          attribute. Field used to also paint an asterisk here, which
-          produced a duplicate "*" next to every required wa-input on
-          the login screen. Drop the local indicator — callers that
-          want the visual cue should pass `required` to the wa-input
-          itself (which we already do). */}
       <label htmlFor={htmlFor} className="small fw-medium text-body">
         {label}
       </label>
-      {control}
+      {/* The required indicator is painted INLINE with the input row
+          (not the label) per the user-facing convention of
+          asterisk-next-to-the-field. wa-input's shadow `::after`
+          asterisk is suppressed via the `--wa-form-control-required-
+          content: ''` override in theme-bridge.ts, so we don't show a
+          duplicate. The Bootstrap utility classes drive layout +
+          color (red) and track theme tokens through the bridge. */}
+      {required ? (
+        <div className="d-flex align-items-center gap-2">
+          <div className="flex-grow-1">{control}</div>
+          <span
+            aria-hidden="true"
+            className="text-danger fw-bold"
+            style={{ fontSize: '1.1em', lineHeight: 1 }}
+          >
+            *
+          </span>
+        </div>
+      ) : (
+        control
+      )}
       {hint && !error && (
         <div id={hintId} className="small text-body-tertiary">
           {hint}

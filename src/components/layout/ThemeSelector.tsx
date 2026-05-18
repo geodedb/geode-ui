@@ -16,10 +16,17 @@ import { BootstrapDropdown } from '../../services/bootstrap/Dropdown'
 
 type Choice = ThemeVariant | 'system'
 
+// Use safer unicode glyphs for the variant icons. The earlier ☀/☾/◑
+// triple produced visible clipping on some fonts because the cusped
+// crescent and half-circle glyphs draw outside their reported em box
+// at small btn-sm padding. The replacements are widely-supported
+// emoji-presentation variants (variation selector U+FE0F suppresses
+// the emoji-style render so they stay monochrome glyph-mode on
+// systems with proper font fallback).
 const ICONS: Record<Choice, string> = {
-  light: '☀',
-  dark: '☾',
-  system: '◑',
+  light: '☀︎',
+  dark: '🌙︎',
+  system: '🖥︎',
 }
 
 export const ThemeSelector: React.FC = () => {
@@ -49,8 +56,22 @@ export const ThemeSelector: React.FC = () => {
   // ConnectionSwitcher off-screen.
   // Extract the JSX into a const so the airbnb/prettier dispute over
   // wrapping multi-line JSX in parens inside a JSX prop doesn't fire.
+  // Box the icon at a fixed line-height + minimum width so the
+  // dropdown-toggle's btn-sm padding can't clip the glyph (Bug:
+  // earlier the trigger showed only a sliver of the icon). The
+  // inline-block + center alignment also keeps the icon visually
+  // centered when the trigger shows the chevron caret.
   const triggerLabel = (
-    <span aria-hidden="true" style={{ fontSize: '1.1em' }}>
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-block',
+        minWidth: '1.25em',
+        textAlign: 'center',
+        lineHeight: 1,
+        fontSize: '1em',
+      }}
+    >
       {ICONS[variant]}
     </span>
   )
