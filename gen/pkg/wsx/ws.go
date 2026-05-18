@@ -45,13 +45,13 @@ type Options struct {
 	// an operator can broaden via OriginAllowlist for cross-origin
 	// deployments (CDN front-end on a separate host from the API). The
 	// CSWSH defense-in-depth pattern from geode-ui SEC issue 265.
-	SameOriginOnly   bool
-	Protocols        []string // allowed subprotocols; first match is selected
-	MaxFrame         int      // max single frame payload
-	MaxMessage       int      // max reassembled message
-	PingInterval     time.Duration
-	ReadTimeout      time.Duration // per-read deadline; 0 = none
-	WriteTimeout     time.Duration // per-write deadline; 0 = none
+	SameOriginOnly bool
+	Protocols      []string // allowed subprotocols; first match is selected
+	MaxFrame       int      // max single frame payload
+	MaxMessage     int      // max reassembled message
+	PingInterval   time.Duration
+	ReadTimeout    time.Duration // per-read deadline; 0 = none
+	WriteTimeout   time.Duration // per-write deadline; 0 = none
 }
 
 // DialOptions controls client-side WebSocket dialing.

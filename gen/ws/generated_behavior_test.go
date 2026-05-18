@@ -4,5 +4,7 @@ package ws
 import "testing"
 
 func Test_WS_Options_Map(t *testing.T) {
-	if len(wsOptions) == 0 { t.Fatal("expected non-empty wsOptions") }
+	if len(wsOptions) == 0 {
+		t.Fatal("expected non-empty wsOptions")
+	}
 }

@@ -46,24 +46,24 @@ type WSOptions struct {
 // wsOptions contains statically generated wsx.Options per path.
 var wsOptions = map[string]wsx.Options{
 	"/ws/ping": {
-		PingInterval: 30000 * time.Millisecond,
-		MaxFrame:     65536,
-		MaxMessage:   1048576,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		CheckOrigin: true,
+		PingInterval:     30000 * time.Millisecond,
+		MaxFrame:         65536,
+		MaxMessage:       1048576,
+		ReadTimeout:      30 * time.Second,
+		WriteTimeout:     30 * time.Second,
+		CheckOrigin:      true,
 		AllowEmptyOrigin: true,
-		SameOriginOnly: true,
+		SameOriginOnly:   true,
 	},
 	"/ws/query": {
-		PingInterval: 15000 * time.Millisecond,
-		MaxFrame:     1048576,
-		MaxMessage:   16777216,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		CheckOrigin: true,
+		PingInterval:     15000 * time.Millisecond,
+		MaxFrame:         1048576,
+		MaxMessage:       16777216,
+		ReadTimeout:      30 * time.Second,
+		WriteTimeout:     30 * time.Second,
+		CheckOrigin:      true,
 		AllowEmptyOrigin: true,
-		SameOriginOnly: true,
+		SameOriginOnly:   true,
 	},
 }
 

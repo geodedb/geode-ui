@@ -4,9 +4,11 @@ package client
 import (
 	"context"
 	"encoding/json/v2"
-	"geodedb.com/geode-ui/gen/types"
+
 	"geodedb.com/geode-ui/gen/pkg/wsx"
+	"geodedb.com/geode-ui/gen/types"
 )
+
 // JSONSocket wraps a typed JSON WebSocket endpoint.
 type JSONSocket[T any] struct {
 	conn *wsx.Conn
@@ -65,8 +67,9 @@ func (s *BinarySocket) Close() error {
 	}
 	return s.conn.Close()
 }
+
 // ConnectPing opens /ws/ping.
-func (c *Client) ConnectPing(ctx context.Context) (	*JSONSocket[types.PingMsg], error) {
+func (c *Client) ConnectPing(ctx context.Context) (*JSONSocket[types.PingMsg], error) {
 	wsURL, err := c.websocketURL("/ws/ping")
 	if err != nil {
 		return nil, err
@@ -85,8 +88,9 @@ func (c *Client) ConnectPing(ctx context.Context) (	*JSONSocket[types.PingMsg], 
 	}
 	return &JSONSocket[types.PingMsg]{conn: conn}, nil
 }
+
 // ConnectQuery opens /ws/query.
-func (c *Client) ConnectQuery(ctx context.Context) (	*JSONSocket[types.QueryStreamMsg], error) {
+func (c *Client) ConnectQuery(ctx context.Context) (*JSONSocket[types.QueryStreamMsg], error) {
 	wsURL, err := c.websocketURL("/ws/query")
 	if err != nil {
 		return nil, err

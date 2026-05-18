@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/gen/pkg/mcpx"
 	"geodedb.com/geode-ui/gen/pkg/obsx"
+	"geodedb.com/geode-ui/gen/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -45,8 +45,12 @@ func NewTools(srv MCPServerInterface) map[string]mcpx.Tool {
 			defer _span.End()
 			_start := time.Now()
 			var req types.QueryReq
-			if err := json.Unmarshal(p, &req); err != nil { return nil, err }
-			if err := req.Valid(); err != nil { return nil, err }
+			if err := json.Unmarshal(p, &req); err != nil {
+				return nil, err
+			}
+			if err := req.Valid(); err != nil {
+				return nil, err
+			}
 			resp, err := srv.Query(ctx, &req)
 			_dur := float64(time.Since(_start).Milliseconds())
 			if err != nil {
@@ -81,12 +85,17 @@ func Register(srv MCPServerInterface) {
 
 // HandleMCPHTTP is an http.Handler for MCP JSON-RPC. Call Register first.
 func HandleMCPHTTP(w http.ResponseWriter, r *http.Request) {
-	if MCPHandler != nil { MCPHandler.ServeHTTP(w, r); return }
+	if MCPHandler != nil {
+		MCPHandler.ServeHTTP(w, r)
+		return
+	}
 	http.Error(w, "mcp not configured: call Register first", 503)
 }
 
 // ServeSTDIO starts the MCP stdio JSON-RPC loop. Call Register first.
 func ServeSTDIO() error {
-	if MCPSTDIOFunc != nil { return MCPSTDIOFunc() }
+	if MCPSTDIOFunc != nil {
+		return MCPSTDIOFunc()
+	}
 	return errors.New("mcp not configured: call Register first")
 }
