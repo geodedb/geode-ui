@@ -37,11 +37,25 @@ import (
 // the JSON keys 1:1 so the test failure messages read clearly when a
 // drift is detected.
 type passwordPolicyContract struct {
-	Version              int               `json:"version"`
-	MinPasswordLength    int               `json:"minPasswordLength"`
-	UsernameSubstringMin int               `json:"usernameSubstringMin"`
-	ViolationCodes       []string          `json:"violationCodes"`
-	I18NKeys             map[string]string `json:"i18nKeys"`
+	Version              int                                     `json:"version"`
+	MinPasswordLength    int                                     `json:"minPasswordLength"`
+	UsernameSubstringMin int                                     `json:"usernameSubstringMin"`
+	ViolationCodes       []string                                `json:"violationCodes"`
+	I18NKeys             map[string]string                       `json:"i18nKeys"`
+	AdversarialVectors   map[string]passwordPolicyAdversarialVec `json:"adversarialVectors"`
+}
+
+// passwordPolicyAdversarialVec is one entry in the
+// `adversarialVectors` map. Each entry documents a Unicode input
+// shape and the policy's DOCUMENTED outcome against it. The contract
+// test verifies that the live validator's behaviour still matches.
+// Fields prefixed with `_` carry documentation only.
+type passwordPolicyAdversarialVec struct {
+	Description      string   `json:"_description"`
+	Password         string   `json:"password"`
+	Username         string   `json:"username"`
+	ExpectViolations []string `json:"expectViolations"`
+	PolicyComment    string   `json:"policyComment"`
 }
 
 // readPasswordPolicyContract loads the JSON contract from the repo
@@ -121,4 +135,89 @@ func sortStrings(s []string) {
 	// local sort helper so the contract tests don't pull in a separate
 	// helper file just for this one call site
 	sort.Strings(s)
+}
+
+// TestPasswordPolicyContract_AdversarialVectors (CO-242, 2026-05-17):
+// the policy is deliberately ASCII-only (see password_policy.go:138-
+// 151 isAllDigits, passwordPolicy.ts:59-66 isAllAsciiDigits). The
+// contract documents the CURRENT behaviour against fullwidth-Latin,
+// CJK-digit, and NBSP inputs; this test asserts the live validator
+// still matches the documented outcomes so a future refactor that
+// silently normalises inputs to NFKC has to revisit the contract.
+//
+// Each vector's `expectViolations` is the policy's documented outcome,
+// NOT the outcome an NFKC-normalising policy would produce. The
+// `policyComment` field on each vector explains why the documented
+// outcome is intentional.
+func TestPasswordPolicyContract_AdversarialVectors(t *testing.T) {
+	c := readPasswordPolicyContract(t)
+	if len(c.AdversarialVectors) == 0 {
+		t.Fatal("contract.adversarialVectors is empty — was the contract " +
+			"file regenerated without the NFKC corpus? See CO-242.")
+	}
+	policy := PasswordPolicy{HIBPCheck: false}
+	for name, vec := range c.AdversarialVectors {
+		t.Run(name, func(t *testing.T) {
+			err := validatePassword(t.Context(), vec.Password, vec.Username, policy)
+			// Map the live validator's sentinel to the contract's
+			// violation-code identifier. Empty `got` means "no violation".
+			var got []string
+			switch {
+			case err == nil:
+				// no violation
+			case isErrToken(err, errPasswordTooShort):
+				got = append(got, "tooShort")
+			case isErrToken(err, errPasswordWeakPattern):
+				got = append(got, "weakPattern")
+			case isErrToken(err, errPasswordContainsUsername):
+				got = append(got, "containsUsername")
+			default:
+				t.Fatalf("unexpected sentinel error %v from validatePassword", err)
+			}
+			if !sameStringSet(got, vec.ExpectViolations) {
+				t.Fatalf("adversarial vector %q: got violations %v, contract "+
+					"expects %v. Either the policy changed (update the "+
+					"contract AND `version`), or the contract drifted "+
+					"(restore the documented behaviour). Vector comment: %s",
+					name, got, vec.ExpectViolations, vec.PolicyComment)
+			}
+		})
+	}
+}
+
+// isErrToken reports whether err is wraps (or equals) target. Avoids
+// pulling errors.Is into the helper file when a single comparison is
+// all this test needs.
+func isErrToken(err, target error) bool {
+	for cur := err; cur != nil; cur = unwrap(cur) {
+		if cur == target {
+			return true
+		}
+	}
+	return false
+}
+
+type unwrapper interface{ Unwrap() error }
+
+func unwrap(err error) error {
+	if u, ok := err.(unwrapper); ok {
+		return u.Unwrap()
+	}
+	return nil
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	ac := append([]string(nil), a...)
+	bc := append([]string(nil), b...)
+	sort.Strings(ac)
+	sort.Strings(bc)
+	for i := range ac {
+		if ac[i] != bc[i] {
+			return false
+		}
+	}
+	return true
 }

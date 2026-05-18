@@ -19,7 +19,16 @@ import {
   USERNAME_SUBSTRING_MIN,
   messageKeyFor,
   PolicyViolation,
+  validatePassword,
 } from './passwordPolicy'
+
+type AdversarialVector = {
+  _description: string
+  password: string
+  username: string
+  expectViolations: PolicyViolation[]
+  policyComment: string
+}
 
 type PasswordPolicyContract = {
   version: number
@@ -27,6 +36,7 @@ type PasswordPolicyContract = {
   usernameSubstringMin: number
   violationCodes: PolicyViolation[]
   i18nKeys: Record<PolicyViolation, string>
+  adversarialVectors?: Record<string, AdversarialVector>
 }
 
 const CONTRACT_PATH = path.resolve(
@@ -68,5 +78,37 @@ describe('password-policy cross-stack contract (QUAL issue 242)', () => {
     const tsCodes = Object.keys(contract.i18nKeys).sort()
     const contractCodes = [...contract.violationCodes].sort()
     expect(tsCodes).toEqual(contractCodes)
+  })
+
+  // CO-242 (2026-05-17): adversarial Unicode-vector corpus. The TS
+  // validator is deliberately ASCII-only (passwordPolicy.ts:59-66
+  // isAllAsciiDigits, strict 0x30..0x39 check). The contract
+  // documents that intentional behaviour by pinning the expected
+  // violations for each fullwidth-Latin, CJK-digit, and NBSP input.
+  // Both the Go side (password_policy_contract_test.go) and this side
+  // assert the documented outcomes still match, so an unintended
+  // future NFKC-normalisation regression trips BOTH suites.
+  describe('adversarial Unicode vectors (CO-242)', () => {
+    const vectors = contract.adversarialVectors ?? {}
+    if (Object.keys(vectors).length === 0) {
+      // Inline test that surfaces the empty-corpus case as a failure
+      // rather than silently skipping when someone regenerates the
+      // contract without the corpus.
+      test('contract.adversarialVectors is non-empty', () => {
+        throw new Error(
+          'contract.adversarialVectors is empty — was the contract ' +
+            'file regenerated without the NFKC corpus? See CO-242.'
+        )
+      })
+      return
+    }
+    Object.entries(vectors).forEach(([name, vec]) => {
+      test(`${name}: matches contract.expectViolations`, () => {
+        const r = validatePassword(vec.password, vec.username || undefined)
+        const got = [...r.errors].sort()
+        const expected = [...vec.expectViolations].sort()
+        expect(got).toEqual(expected)
+      })
+    })
   })
 })
