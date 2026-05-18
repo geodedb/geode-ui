@@ -10,12 +10,23 @@ export const Wrap = styled.div<{ $sidebarCollapsed: boolean }>`
   grid-template-columns: ${({ $sidebarCollapsed }) => {
     return $sidebarCollapsed ? '1fr' : '1fr 300px'
   }};
+  /* Single row at minmax(0,1fr) so the canvas row claims its parent's
+     full height without ever inflating beyond it. The implicit auto
+     row sizes to intrinsic content, which lets the Cytoscape canvas
+     overflow the parent on mobile (the bottom edge ends up below the
+     viewport). minmax(0, 1fr) bounds the row to its parent's
+     available height. */
+  grid-template-rows: minmax(0, 1fr);
   gap: ${({ theme }) => theme.spacing.sm};
   flex: 1 1 0;
   min-height: 0;
 
   @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
     grid-template-columns: 1fr;
+    /* Mobile: canvas + (optional) sidebar stack. Canvas row claims the
+       remaining height after the sidebar's intrinsic size; auto for
+       the sidebar row keeps its 320 px max-height (GraphSidebar). */
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 `
 
@@ -60,20 +71,17 @@ export const Canvas = styled.div`
   background: ${({ theme }) => theme.bg.graphCanvas};
 
   @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
-    /* Fallback for browsers without dvh support (< Safari 15.4). */
-    min-height: 240px;
-    /* dvh-aware clamp: never taller than viewport minus the editor +
-       Bar chrome above us, never shorter than the 240 px floor (max())
-       so the graph stays usable even on a 568 px tall portrait viewport
-       where calc(100dvh - 360px) = 208 px. */
-    min-height: max(240px, min(60dvh, calc(100dvh - 360px)));
-    /* Cap the canvas at the same dvh budget so the wa-tab-panel /
-       wa-tab-group flex chain (which now propagates the full result
-       region height into the panel — see ResultPanel.tsx) cannot grow
-       the canvas past the visible viewport. Bug 2 regression on
-       375×812 mobile: without max-height the canvas inherits ~700 px
-       of available flex space and pushes its lower edge off-screen. */
-    max-height: max(240px, calc(100dvh - 360px));
+    /* Mobile fill: now that the wa-tab-group::part(body) +
+       wa-tab-panel::part(base) flex chain propagates the result
+       region's height into the panel (see ResultPanel.tsx), the
+       canvas's flex:1 1 auto naturally claims the remaining space
+       under the editor + Bar + graph toolbar. Keep a modest min-height
+       floor so the canvas doesn't collapse to zero if the chain ever
+       reports zero positive space, and cap max-height to the visible
+       viewport so the canvas can't push its lower edge off-screen
+       even if the parent reports more height than the document has. */
+    min-height: 200px;
+    max-height: 100dvh;
   }
 `
 

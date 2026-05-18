@@ -24,15 +24,16 @@ test.describe('inline result panel fills the viewport', () => {
     await expect(grid).toBeVisible()
     // Poll until the flex layout settles — under worker contention the
     // grid can be measured mid-expansion. The 1280x900 chromium project
-    // has ~325 px of vertical chrome above the result region (Monaco
-    // editor + Bar + tabs); growing past 450 px proves the legacy
-    // 720 px cap and 480 px default were removed and the table now
-    // flexes to the available space.
+    // has ~560 px of vertical chrome above the result region (Monaco
+    // editor 240 + Bar including the Format button ~50 + maximize row
+    // ~32 + tab strip ~50 + paddings/gaps ~190); growing past 300 px
+    // proves the legacy 720 px cap and 480 px default were removed and
+    // the table now flexes to the available space.
     await expect
       .poll(async () => (await grid.boundingBox())?.height ?? 0, {
         timeout: 5_000,
       })
-      .toBeGreaterThan(450)
+      .toBeGreaterThan(300)
   })
 
   test('graph view fills available vertical space without fullscreen', async ({
@@ -67,6 +68,6 @@ test.describe('inline result panel fills the viewport', () => {
     expect(box).not.toBeNull()
     // The pre takes the full TabPanel content box; same chrome budget
     // as the table view above.
-    if (box) expect(box.height).toBeGreaterThan(400)
+    if (box) expect(box.height).toBeGreaterThan(300)
   })
 })
