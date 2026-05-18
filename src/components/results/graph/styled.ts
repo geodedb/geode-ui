@@ -67,6 +67,13 @@ export const Canvas = styled.div`
        so the graph stays usable even on a 568 px tall portrait viewport
        where calc(100dvh - 360px) = 208 px. */
     min-height: max(240px, min(60dvh, calc(100dvh - 360px)));
+    /* Cap the canvas at the same dvh budget so the wa-tab-panel /
+       wa-tab-group flex chain (which now propagates the full result
+       region height into the panel — see ResultPanel.tsx) cannot grow
+       the canvas past the visible viewport. Bug 2 regression on
+       375×812 mobile: without max-height the canvas inherits ~700 px
+       of available flex space and pushes its lower edge off-screen. */
+    max-height: max(240px, calc(100dvh - 360px));
   }
 `
 

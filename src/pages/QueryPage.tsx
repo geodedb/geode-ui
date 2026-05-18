@@ -525,9 +525,14 @@ export const QueryPage: React.FC = () => {
             {t('query.cancel')}
           </wa-button>
         )}
+        {/* Format button uses size=s on narrow viewports (Bootstrap
+            `d-none d-sm-inline-flex` would hide it on phones; instead
+            keep it visible everywhere but at a smaller size so the Bar
+            wraps within the 80 px mobile budget). The keyboard shortcut
+            ⌘⇧F continues to work regardless of button size. */}
         <wa-button
           appearance="outlined"
-          size="m"
+          size="s"
           role="button"
           data-testid="query-format-btn"
           title={t('query.formatHotkey')}

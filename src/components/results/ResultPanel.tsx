@@ -61,6 +61,30 @@ const TabsRow = styled.div`
     flex-direction: column;
   }
 
+  /* tab-group shadow DOM contains <div part="base" class="tab-group">
+     wrapping <div part="nav"> + <div part="body">. The .tab-group is
+     display:flex (column when placement="top") but its OWN flex prop
+     is the default 0 1 auto, so inside our display:flex host it never
+     grows beyond intrinsic. Force it to claim the host's height.
+     Bug A — without this the panel chain has no positive parent
+     height to fill. */
+  wa-tab-group::part(base) {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+  }
+  /* The body element is where the active panel slot lives. Its default
+     is display:block + intrinsic height, so even when the .tab-group
+     is tall the body collapses to the panel's intrinsic content. Force
+     it to a flex column claiming the remaining height after the nav.
+     Bug A — propagates the chain into the panel host. */
+  wa-tab-group::part(body) {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
   /* WA mounts active panels as the slot consumer; force the wrapper
      to expand. The light-DOM <wa-tab-panel> elements participate in
      the flex chain through ::part(body) only on browsers; in jsdom

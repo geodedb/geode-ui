@@ -48,6 +48,31 @@ export const test = base.extend<Fixtures>({
     //   correctly.
     await ctx.addInitScript((token: string) => {
       sessionStorage.setItem('geode-ui.session-hint', '1')
+      // RoleGate (#264 — src/auth/RoleGate.tsx, landed 2026-05-17) gates
+      // every /admin/* route on `roles.includes('admin')`. AuthProvider
+      // reads the role list from sessionStorage on mount; signIn flow
+      // populates it from the freshly-issued JWT but the e2e fixture
+      // skips signIn (cookie-based authedContext). Decode the roles
+      // claim from the JWT here so /admin specs land on the page rather
+      // than redirecting through ProtectedShell. The fallback ['admin']
+      // matches the docker-compose seed where geode + e2e_admin are
+      // both pinned via `-admin-users geode,e2e_admin`.
+      try {
+        const parts = token.split('.')
+        if (parts.length >= 2 && parts[1]) {
+          // base64url → utf8 JSON. atob() doesn't accept '-' / '_' so
+          // restore the standard alphabet before decoding.
+          const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+          const padded = b64 + '==='.slice((b64.length + 3) % 4)
+          const claims = JSON.parse(atob(padded))
+          const r = Array.isArray(claims.roles) ? claims.roles : ['admin']
+          sessionStorage.setItem('geode-ui.session-roles', JSON.stringify(r))
+        } else {
+          sessionStorage.setItem('geode-ui.session-roles', '["admin"]')
+        }
+      } catch {
+        sessionStorage.setItem('geode-ui.session-roles', '["admin"]')
+      }
       localStorage.setItem('geode-ui.profile', 'default')
       // Bracket access avoids the no-underscore-dangle lint and signals
       // that this is a test-only sentinel global. src/index.tsx reads
