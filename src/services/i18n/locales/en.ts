@@ -198,6 +198,8 @@ export const en = {
     findCount_other: '{{count}} matches',
     moreLabel: 'More…',
     toggleSidebarFromMore: 'Show inspector sidebar',
+    toggleSidebarShow: 'Show inspector sidebar',
+    toggleSidebarHide: 'Hide inspector sidebar',
     viewGroupLabel: 'View',
     filtersGroupLabel: 'Filters',
     analysisGroupLabel: 'Analysis',

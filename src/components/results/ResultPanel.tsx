@@ -75,6 +75,22 @@ const TabsRow = styled.div`
     display: flex;
     flex-direction: column;
   }
+
+  /* At <= md (and especially at 320 px / SE-1st gen) the four tab
+     labels overflow the host width; the WA shadow-DOM nav then exposes
+     left/right chevron scroll controls that most touch users don't
+     discover. Reach into the shadow nav via ::part(nav) and let it wrap
+     instead of scroll. The CSS is a no-op in jsdom (parts only apply
+     in real shadow trees) — unit tests are unaffected. */
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    wa-tab-group::part(nav) {
+      flex-wrap: wrap;
+      overflow-x: visible;
+    }
+    wa-tab-group::part(scroll-button) {
+      display: none;
+    }
+  }
 `
 
 // MaximizeBtnRow is a separate row that floats the toggle to the

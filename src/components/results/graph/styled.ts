@@ -40,12 +40,18 @@ export const CanvasArea = styled.div`
 // its CanvasArea parent; the cytoscape ResizeObserver re-fits the graph
 // on container resize. At mobile widths the Wrap collapses to a single
 // grid column (CanvasArea stacks above Sidebar with auto rows), so the
-// flex chain loses its positive parent height — without a hard mobile
+// flex chain loses its positive parent height — without a mobile
 // min-height the canvas would collapse to 0 px and the graph would be
-// invisible behind the toolbar. The min-height: 60vh floor keeps the
-// canvas usable at mobile widths and reverts to pure flex-fill above
-// the md breakpoint where the side-by-side grid provides height
-// through its parent flex chain.
+// invisible behind the toolbar.
+//
+// The min-height is clamped to `min(60dvh, calc(100dvh - 360px))` so the
+// canvas never grows taller than the viewport minus the editor + toolbar
+// chrome above it (~360 px after Fix #1 shrinks the editor). `dvh`
+// accounts for the iOS Safari URL bar; the absolute 240 px floor keeps
+// the canvas usable when the viewport-minus-chrome calculation would
+// otherwise drive it negative. Above the md breakpoint the canvas reverts
+// to pure flex-fill since the side-by-side grid supplies its height
+// through the parent flex chain.
 export const Canvas = styled.div`
   flex: 1 1 auto;
   min-height: 0;
@@ -54,7 +60,13 @@ export const Canvas = styled.div`
   background: ${({ theme }) => theme.bg.graphCanvas};
 
   @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
-    min-height: 60vh;
+    /* Fallback for browsers without dvh support (< Safari 15.4). */
+    min-height: 240px;
+    /* dvh-aware clamp: never taller than viewport minus the editor +
+       Bar chrome above us, never shorter than the 240 px floor (max())
+       so the graph stays usable even on a 568 px tall portrait viewport
+       where calc(100dvh - 360px) = 208 px. */
+    min-height: max(240px, min(60dvh, calc(100dvh - 360px)));
   }
 `
 

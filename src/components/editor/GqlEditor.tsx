@@ -15,6 +15,17 @@ import { useAuth } from '../../auth/AuthProvider'
 // latch in api/connections so non-hook call sites can read it. Effect
 // deps on `isAuthed` ensure we still re-run when the user signs in/out.
 import { getLatestToken } from '../../api/connections'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { breakpoints } from '../../theme/tokens'
+
+// Mobile editor height is capped at 160 px so the editor + Bar + result
+// region all fit within an 812 px portrait viewport without scrolling
+// past the fold. Desktop default stays at 240 px to match the prior
+// behavior (and the LazyFallback's min-height in QueryPage). The `md`
+// breakpoint matches src/theme/tokens.ts.
+const MOBILE_EDITOR_HEIGHT = 160
+const DESKTOP_EDITOR_HEIGHT = 240
+const MOBILE_MEDIA_QUERY = `(max-width: ${breakpoints.md - 0.02}px)`
 
 type Props = {
   value: string
@@ -29,10 +40,17 @@ export const GqlEditor: React.FC<Props> = ({
   value,
   onChange,
   onRun,
-  height = 240,
+  height,
   graph,
   tenant,
 }) => {
+  // When the caller doesn't override height, shrink to a mobile-friendly
+  // value at <= md so the editor doesn't eat ~30% of vertical chrome on a
+  // 375x812 phone. An explicit `height` prop always wins (callers that
+  // want a fixed size keep it).
+  const isMobile = useMediaQuery(MOBILE_MEDIA_QUERY)
+  const effectiveHeight =
+    height ?? (isMobile ? MOBILE_EDITOR_HEIGHT : DESKTOP_EDITOR_HEIGHT)
   const lspRef = useRef<LspClientHandle | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
   // useAuth() throws when no AuthProvider is mounted (tests that render
@@ -131,7 +149,7 @@ export const GqlEditor: React.FC<Props> = ({
 
   return (
     <Editor
-      height={height}
+      height={effectiveHeight}
       language={GQL_LANGUAGE_ID}
       theme="vs-dark"
       value={value}

@@ -3,6 +3,13 @@ import styled from 'styled-components'
 import type { LayoutName } from '../useGraphPrefs'
 import { FindNodeInput } from './FindNodeInput'
 import { GraphToolbarMore } from './GraphToolbarMore'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
+import { breakpoints } from '../../../theme/tokens'
+
+// Mobile-only first-class affordances render below the `md` breakpoint.
+// Match the @media rule baked into the styled Toolbar above so the JS
+// branch and CSS branch agree on the cutover.
+const MOBILE_MEDIA_QUERY = `(max-width: ${breakpoints.md - 0.02}px)`
 
 const Toolbar = styled.div`
   display: flex;
@@ -154,8 +161,31 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onToggleRenderer: _onToggleRenderer,
 }) => {
+  // First-class sidebar toggle is rendered inline at <= md viewports so
+  // mobile users don't have to two-tap through the More dropdown to
+  // collapse/expand the inspector panel that stacks below the canvas.
+  // Above md the desktop dropdown entry (GraphToolbarMore) remains the
+  // primary affordance.
+  const isMobile = useMediaQuery(MOBILE_MEDIA_QUERY)
+  const sidebarToggleLabel = sidebarCollapsed
+    ? t('graph.toggleSidebarShow')
+    : t('graph.toggleSidebarHide')
   return (
     <Toolbar data-testid="graph-toolbar" role="toolbar">
+      {isMobile && (
+        <wa-button
+          appearance={sidebarCollapsed ? 'filled' : 'outlined'}
+          size="s"
+          role="button"
+          data-testid="query-sidebar-toggle"
+          aria-pressed={sidebarCollapsed ? 'true' : 'false'}
+          aria-label={sidebarToggleLabel}
+          title={sidebarToggleLabel}
+          onClick={onToggleSidebar}
+        >
+          {sidebarCollapsed ? '☰' : '⇤'}
+        </wa-button>
+      )}
       <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
       <Group
         data-testid="graph-toolbar-group-view"

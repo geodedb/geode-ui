@@ -53,6 +53,15 @@ const Bar = styled.div`
   flex-wrap: wrap;
   color: ${({ theme }) => theme.text.secondary};
   font-size: ${({ theme }) => theme.font.sizes.sm};
+
+  /* At <= md the desktop spacing.md gap (16 px) is too wide for narrow
+     viewports — it pushes the Run / Options cluster onto 2-3 wrapped
+     rows and inflates Bar height past the 80 px budget the mobile
+     audit settled on. Drop to spacing.sm so the controls pack into a
+     single row on a 320 px viewport. */
+  @media (max-width: ${({ theme }) => theme.breakpoints.md - 0.02}px) {
+    gap: ${({ theme }) => theme.spacing.sm};
+  }
 `
 
 const Err = styled.span`
