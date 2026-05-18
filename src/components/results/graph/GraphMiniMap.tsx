@@ -95,7 +95,30 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
       container: `#${PANEL_ID}`,
       viewLiveFramerate: 30,
     })
+    // Bug 5: cytoscape-navigator captures its preview image at init
+    // time from the cy core's current render snapshot. When the user
+    // toggles the mini-map on FOR THE FIRST TIME the core may have
+    // just finished a layout and the navigator misses the next paint
+    // tick, producing a blank / broken-image preview that only fixes
+    // itself when the user pans or zooms (each of which triggers the
+    // navigator's resize listener). Force-resize the core on the next
+    // animation frame so the navigator immediately gets a fresh
+    // snapshot of the painted scene without waiting for user input.
+    let raf: number | null = null
+    if (typeof window !== 'undefined') {
+      raf = window.requestAnimationFrame(() => {
+        raf = null
+        try {
+          cy.resize()
+        } catch {
+          /* core may already be destroyed; ignore */
+        }
+      })
+    }
     return () => {
+      if (raf != null && typeof window !== 'undefined') {
+        window.cancelAnimationFrame(raf)
+      }
       try {
         inst.destroy()
       } catch {

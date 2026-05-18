@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
+import { createPortal } from 'react-dom'
 
 // Headless Bootstrap 5.3 dropdown — wraps a trigger button and a
 // dropdown-menu list with the canonical Bootstrap class names so the
@@ -148,6 +156,94 @@ export const BootstrapDropdown = <T extends string>({
   else if (size === 'sm') sizeClass = 'btn-sm'
   const rootClass = `dropdown ${className ?? ''}`.trim()
 
+  // Anchor + width snapshot used to position the portaled menu. The
+  // menu can't render inside .dropdown anymore (the GraphToolbar wraps
+  // its row in `overflow-x: auto`, which on every modern browser
+  // implies `overflow-y: auto` and clips an absolutely-positioned
+  // child). Rendering the menu through createPortal to document.body
+  // sidesteps every ancestor overflow rule.
+  const [anchorRect, setAnchorRect] = useState<{
+    left: number
+    top: number
+    minWidth: number
+  } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setAnchorRect(null)
+      return undefined
+    }
+    const measure = (): void => {
+      const trigger = triggerRef.current
+      if (!trigger) return
+      const r = trigger.getBoundingClientRect()
+      setAnchorRect({
+        left: r.left,
+        top: r.bottom + 2,
+        minWidth: r.width,
+      })
+    }
+    measure()
+    // Re-measure on window resize / scroll so the menu stays anchored.
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+    }
+  }, [open])
+
+  // Extract style into a const so the JSX ternary doesn't trip the
+  // airbnb-vs-prettier indentation rules that fire when an object
+  // literal sits inside an inline JSX prop ternary.
+  let menuStyle: React.CSSProperties
+  if (anchorRect) {
+    menuStyle = {
+      position: 'fixed',
+      left: anchorRect.left,
+      top: anchorRect.top,
+      minWidth: anchorRect.minWidth,
+      margin: 0,
+      zIndex: 1050,
+    }
+  } else {
+    menuStyle = { position: 'fixed', visibility: 'hidden' }
+  }
+
+  const menuContents = (
+    <ul
+      ref={menuRef}
+      id={menuId}
+      className={`dropdown-menu${open ? ' show' : ''}`}
+      role="listbox"
+      aria-label={ariaLabel}
+      onKeyDown={onMenuKey}
+      style={menuStyle}
+    >
+      {items.map((item) => {
+        const isActive = item.value === value
+        return (
+          <li key={item.value}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={isActive}
+              data-active={isActive ? 'true' : 'false'}
+              disabled={item.disabled}
+              className={`dropdown-item ${isActive ? 'active' : ''}`.trim()}
+              onClick={() => {
+                onChange(item.value)
+                close(true)
+              }}
+            >
+              {item.label}
+            </button>
+          </li>
+        )
+      })}
+    </ul>
+  )
+
   return (
     <div className={rootClass} ref={rootRef}>
       <button
@@ -163,36 +259,16 @@ export const BootstrapDropdown = <T extends string>({
       >
         {label}
       </button>
-      <ul
-        ref={menuRef}
-        id={menuId}
-        className={`dropdown-menu${open ? ' show' : ''}`}
-        role="listbox"
-        aria-label={ariaLabel}
-        onKeyDown={onMenuKey}
-      >
-        {items.map((item) => {
-          const isActive = item.value === value
-          return (
-            <li key={item.value}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={isActive}
-                data-active={isActive ? 'true' : 'false'}
-                disabled={item.disabled}
-                className={`dropdown-item ${isActive ? 'active' : ''}`.trim()}
-                onClick={() => {
-                  onChange(item.value)
-                  close(true)
-                }}
-              >
-                {item.label}
-              </button>
-            </li>
-          )
-        })}
-      </ul>
+      {/* Portal the open menu to document.body so it escapes every
+          ancestor overflow / clip / transform / z-index stacking
+          context — the GraphToolbar's `overflow-x: auto` rule otherwise
+          eats the menu (Bug 1: only the active item is visible) and
+          forces the toolbar to grow a vertical scroll (Bug 4). When
+          closed we keep the <ul> inline-hidden so listbox a11y still
+          finds the controlled element via aria-controls. */}
+      {open && typeof document !== 'undefined'
+        ? createPortal(menuContents, document.body)
+        : menuContents}
     </div>
   )
 }

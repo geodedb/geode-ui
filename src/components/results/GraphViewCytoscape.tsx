@@ -309,8 +309,15 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
 
   // Wire cytoscape-lasso's enable-state to the sticky `lasso` pref.
   // `sig` is forwarded so a fresh cy core (post-rebuild) inherits the
-  // current toggle.
-  useLasso({ cyRef, enabled: lasso, sig })
+  // current toggle. Restore the user's prior selectionMode when lasso
+  // turns off so they don't get stranded in box-selection mode (Bug 6).
+  useLasso({
+    cyRef,
+    enabled: lasso,
+    restorePanningWhenDisabled: selectionMode === 'pan',
+    restoreBoxSelectionWhenDisabled: selectionMode === 'box',
+    sig,
+  })
 
   // Build a single HTML element + React root per node when DOM-node
   // rendering is enabled. The per-id root pool + sig-keyed cleanup
@@ -426,7 +433,10 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
         />
       </CanvasArea>
       {!sidebarCollapsed && (
-        <GraphSidebar>
+        <GraphSidebar
+          onCollapse={() => setSidebarCollapsed(true)}
+          collapseLabel={t('graph.toggleSidebarHide')}
+        >
           <GraphSidebarContents
             t={t}
             nodeLabelBuckets={nodeLabelBuckets}
