@@ -64,13 +64,12 @@ func TestStartPprofServer_Disabled(t *testing.T) {
 // depth gate on the env var so an operator who wires the feature on
 // cannot accidentally expose pprof on a public interface.
 func TestStartPprofServer_RefusesNonLoopback(t *testing.T) {
-	shutdown, err := startPprofServer(envFunc(map[string]string{
+	_, err := startPprofServer(envFunc(map[string]string{
 		"GEODE_PPROF":        "1",
 		"GEODE_PPROF_LISTEN": "0.0.0.0:6060",
 	}))
 	if err == nil {
 		t.Fatalf("expected error for non-loopback listen address; got nil")
-		_ = shutdown(context.Background())
 	}
 	if !strings.Contains(err.Error(), "non-loopback") {
 		t.Fatalf("error message should mention non-loopback; got %q", err)

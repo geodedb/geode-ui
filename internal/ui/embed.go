@@ -168,40 +168,11 @@ func handlerFS(sub fs.FS) (http.Handler, error) {
 
 		// PERF (#259) brotli precompression: when the client accepts
 		// `br` AND a `.br` sibling exists in the embed FS, serve the
-		// precompressed bytes verbatim with `Content-Encoding: br`.
-		// Falls back to the on-the-fly gzip path otherwise. The
-		// sibling check runs through statCached so it cost-amortises
-		// the same way as the primary asset stat.
+		// precompressed bytes verbatim. Falls back to the on-the-fly
+		// gzip path otherwise.
 		ext := servedExt(r.URL.Path)
-		if _, ok := compressibleExts[ext]; ok &&
-			r.Method != http.MethodHead &&
-			acceptsBrotli(r) {
-			brName := clean + ".br"
-			if r.URL.Path == "/" {
-				brName = "index.html.br"
-			} else if !strings.HasPrefix(r.URL.Path, "/") {
-				brName = clean + ".br"
-			} else {
-				brName = strings.TrimPrefix(r.URL.Path, "/") + ".br"
-			}
-			if brInfo, brErr := statCached(brName); brErr == nil {
-				// Found a precompressed sibling. Drop FileServer entirely
-				// for this response; we own the bytes.
-				w.Header().Set("Content-Encoding", "br")
-				w.Header().Add("Vary", "Accept-Encoding")
-				w.Header().Set("Content-Type", mimeFor(ext))
-				w.Header().Set("Content-Length", strconv.FormatInt(brInfo.Size(), 10))
-				f, openErr := sub.Open(brName)
-				if openErr == nil {
-					defer func() { _ = f.Close() }()
-					_, _ = io.Copy(w, f)
-					return
-				}
-				// Fallthrough to on-the-fly compression below if the
-				// open failed for any reason.
-				w.Header().Del("Content-Encoding")
-				w.Header().Del("Content-Length")
-			}
+		if served := maybeServeBrotli(w, r, sub, statCached, ext); served {
+			return
 		}
 
 		// Decide compression up front: we know the served file's
@@ -213,6 +184,61 @@ func handlerFS(sub fs.FS) (http.Handler, error) {
 		}
 		fileServer.ServeHTTP(w, r)
 	}), nil
+}
+
+// maybeServeBrotli writes the .br sibling for the request's resolved
+// path when the client accepts `br` and the sibling exists. Returns
+// true iff the response was served (the caller MUST NOT continue to
+// FileServer in that case). Returns false to indicate the caller
+// should fall through to the on-the-fly gzip path.
+//
+// Sibling resolution: a request for `/` maps to `index.html.br`; any
+// other path strips the leading `/` and appends `.br`. The sibling
+// check runs through statCached so it cost-amortises the same way as
+// the primary asset stat.
+func maybeServeBrotli(
+	w http.ResponseWriter,
+	r *http.Request,
+	sub fs.FS,
+	statCached func(string) (fs.FileInfo, error),
+	ext string,
+) bool {
+	if _, ok := compressibleExts[ext]; !ok {
+		return false
+	}
+	if r.Method == http.MethodHead {
+		return false
+	}
+	if !acceptsBrotli(r) {
+		return false
+	}
+	clean := strings.TrimPrefix(r.URL.Path, "/")
+	brName := clean + ".br"
+	if r.URL.Path == "/" {
+		brName = "index.html.br"
+	}
+	brInfo, brErr := statCached(brName)
+	if brErr != nil {
+		return false
+	}
+	w.Header().Set("Content-Encoding", "br")
+	w.Header().Add("Vary", "Accept-Encoding")
+	w.Header().Set("Content-Type", mimeFor(ext))
+	w.Header().Set("Content-Length", strconv.FormatInt(brInfo.Size(), 10))
+	f, openErr := sub.Open(brName)
+	if openErr != nil {
+		// Open failed despite a successful Stat (rare; e.g. transient
+		// FS error). Surface the failure by stripping the headers we
+		// just set so the caller's gzip fallback path produces a
+		// well-formed response instead of a Content-Length-mismatched
+		// truncation.
+		w.Header().Del("Content-Encoding")
+		w.Header().Del("Content-Length")
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = io.Copy(w, f)
+	return true
 }
 
 // acceptsBrotli reports whether the client's Accept-Encoding header
