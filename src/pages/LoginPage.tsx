@@ -12,17 +12,19 @@ import {
 import { isElectron } from '../api/electron-bridge'
 import { usePublicProfilesWithStoredPasswords } from '../lib/usePublicProfilesWithStoredPasswords'
 
+// Bootstrap-migrated styled-components — the Form, Title, ProfileList,
+// ProfileDescription, ErrText, and LogoSlot below now lean on Bootstrap
+// 5.3 utility classes for layout (d-flex, gap, mb-*, p-*) while the
+// styled-component keeps the theme-token-driven surface, border, and
+// typography concerns the utilities don't cover. Pattern documented at
+// docs/BOOTSTRAP_MIGRATION.md.
 const Form = styled.form`
   max-width: 380px;
   margin: 60px auto;
-  padding: ${({ theme }) => theme.spacing.lg};
   background: ${({ theme }) => theme.bg.surface};
   border: 1px solid ${({ theme }) => theme.border.default};
   border-radius: ${({ theme }) => theme.radii.xl};
   box-shadow: ${({ theme }) => theme.shadows.md};
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.md};
 `
 
 const Title = styled.h1`
@@ -33,43 +35,17 @@ const Title = styled.h1`
   margin: 0 0 ${({ theme }) => theme.spacing.sm};
 `
 
-const LogoSlot = styled.div`
-  display: flex;
-  justify-content: center;
-  margin-bottom: ${({ theme }) => theme.spacing.md};
-`
-
-const ErrText = styled.p`
-  color: ${({ theme }) => theme.text.danger};
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-`
-
-const ProfileList = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.xs};
-
-  li {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-`
-
+// ProfileDescription stays as a styled-component because the
+// overflow-wrap:anywhere rule is load-bearing for the multi-sentence
+// description copy inside the 380 px form card — replacing it with
+// Bootstrap's `.text-break` is fine in theory but the typography
+// (color: theme.text.secondary, theme-token font-size) keeps the
+// component tied to theme tokens. Bootstrap's `.text-secondary` would
+// shadow the wa-theme token under data-theme="dark"; keep it native.
 const ProfileDescription = styled.div`
   font-size: ${({ theme }) => theme.font.sizes.sm};
   color: ${({ theme }) => theme.text.secondary};
   padding: 0 ${({ theme }) => theme.spacing.sm};
-  /*
-    Word-wrap is the load-bearing rule here: the description can be a
-    multi-sentence paragraph and the form is only 380px wide. Keep it
-    in normal flow — block-level <div> already wraps, but be explicit
-    so a future ProfileList rule that switches direction can't break
-    it back into a single inline run.
-  */
   overflow-wrap: anywhere;
 `
 
@@ -156,16 +132,19 @@ export const LoginPage: React.FC = () => {
   const showList = profiles && profiles.length > 0 && !loadErr
 
   return (
-    <Form onSubmit={submit}>
-      <LogoSlot>
+    <Form onSubmit={submit} className="p-4 d-flex flex-column gap-3">
+      <div className="d-flex justify-content-center mb-3">
         <Logo height={36} variant="on-light" />
-      </LogoSlot>
+      </div>
       <Title>{t('auth.signIn')}</Title>
 
       {showList ? (
-        <ProfileList aria-label={t('auth.profileList')}>
+        <ul
+          aria-label={t('auth.profileList')}
+          className="list-unstyled m-0 p-0 d-flex flex-column gap-1"
+        >
           {profiles!.map((p) => (
-            <li key={p.name}>
+            <li key={p.name} className="d-flex flex-column gap-1">
               {/*
                 Profile description must sit OUTSIDE the <wa-button>: the
                 button's shadow-DOM label slot lays out children inline
@@ -198,7 +177,7 @@ export const LoginPage: React.FC = () => {
               ) : null}
             </li>
           ))}
-        </ProfileList>
+        </ul>
       ) : (
         <Field label={t('auth.profile')} htmlFor="login-profile">
           <WaInput
@@ -260,7 +239,11 @@ export const LoginPage: React.FC = () => {
       >
         {t('auth.signInButton')}
       </wa-button>
-      {err && <ErrText role="alert">{err}</ErrText>}
+      {err && (
+        <p role="alert" className="text-danger small m-0">
+          {err}
+        </p>
+      )}
     </Form>
   )
 }

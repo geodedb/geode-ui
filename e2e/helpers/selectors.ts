@@ -80,8 +80,17 @@ export const sel = {
     p.getByTestId('result-fullscreen-toggle'),
   resultFullscreenOverlay: (p: Page): Locator =>
     p.getByTestId('result-fullscreen-overlay'),
-  // Phase-1 graph-viz feature controls (GraphView toolbar). The layout
-  // picker (graph-layout-picker) and the sidebar toggle predate this.
+  // Phase-1 graph-viz feature controls (GraphView toolbar).
+  //
+  // The layout picker was a native <select> through v0.1.x. As of the
+  // Bug-C fix it's a Bootstrap dropdown: the trigger button keeps the
+  // 'graph-layout-picker' test-id; the options live in a sibling
+  // role=listbox menu and surface as role=option entries keyed by the
+  // i18n-translated label ("Force (cose)", "Force (fast)", "Layered
+  // (DAG)", "Breadth-first", "Circle", "Concentric", "Grid", "Spread
+  // (anti-overlap)"). Use selectGraphLayout(page, layoutName) below
+  // to open the trigger and click the matching option; .selectOption
+  // / .toHaveValue() will no longer work against this picker.
   graphLayoutPicker: (p: Page): Locator => p.getByTestId('graph-layout-picker'),
   graphSelectionMode: (p: Page): Locator =>
     p.getByTestId('graph-selection-mode'),
@@ -255,4 +264,52 @@ export const sel = {
     p.getByRole('button', { name: `Disconnect: ${profileName}` }),
   connectionMenuItemRadio: (p: Page, profileName: string): Locator =>
     p.getByRole('menuitemradio', { name: profileName }),
+}
+
+// Translated layout-picker labels (en.ts: graph.layout.*). Tests use
+// these to address Bootstrap-dropdown option rows by their accessible
+// name. Update in lockstep with src/services/i18n/locales/en.ts.
+const LAYOUT_LABELS: Record<string, RegExp> = {
+  cose: /Force \(cose\)/i,
+  fcose: /Force \(fast\)/i,
+  dagre: /Layered \(DAG\)/i,
+  breadthfirst: /Breadth-first/i,
+  circle: /^Circle$/i,
+  concentric: /Concentric/i,
+  grid: /^Grid$/i,
+  spread: /Spread \(anti-overlap\)/i,
+}
+
+/**
+ * Open the graph layout dropdown and select the entry that maps to the
+ * given layout name. Replaces the legacy `.selectOption(layoutName)`
+ * pattern that worked against the native <select>.
+ */
+export async function selectGraphLayout(
+  page: Page,
+  layoutName: keyof typeof LAYOUT_LABELS
+): Promise<void> {
+  const trigger = sel.graphLayoutPicker(page)
+  await trigger.click()
+  const labelRe = LAYOUT_LABELS[layoutName]
+  if (!labelRe) {
+    throw new Error(`Unknown layout name: ${layoutName}`)
+  }
+  await page.getByRole('option', { name: labelRe }).click()
+}
+
+/**
+ * Assert that the layout picker's currently displayed selection matches
+ * the given layout name (by its translated label). Replaces
+ * `expect(picker).toHaveValue('grid')` against the legacy <select>.
+ */
+export function expectGraphLayoutLabel(
+  page: Page,
+  layoutName: keyof typeof LAYOUT_LABELS
+): Locator {
+  // Callers do `await expect(<returned-locator>).toBeVisible()` (or chain
+  // a text assertion). Returning the trigger Locator filtered by the
+  // translated label keeps the spec-side assertion ergonomic.
+  const labelRe = LAYOUT_LABELS[layoutName]
+  return sel.graphLayoutPicker(page).filter({ hasText: labelRe })
 }

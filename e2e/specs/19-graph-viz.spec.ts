@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures'
-import { sel } from '../helpers/selectors'
+import { sel, selectGraphLayout } from '../helpers/selectors'
 import { seed } from '../helpers/gqlData'
 
 // Smoke test for the Phase-1 graph-viz feature ports: the fcose / dagre
@@ -30,12 +30,19 @@ test.describe('graph viz: layouts, clustering, path mode', () => {
     authedPage: page,
   }) => {
     const picker = page.getByTestId('graph-layout-picker')
-    await expect(picker.locator('option[value="fcose"]')).toHaveCount(1)
-    await expect(picker.locator('option[value="dagre"]')).toHaveCount(1)
-    await picker.selectOption('fcose')
-    await expect(picker).toHaveValue('fcose')
-    await picker.selectOption('dagre')
-    await expect(picker).toHaveValue('dagre')
+    // Bug-C fix: layout picker is a Bootstrap dropdown (role=listbox
+    // sibling, role=option entries) instead of a native <select>.
+    await picker.click()
+    await expect(page.getByRole('option', { name: /Force \(fast\)/i }))
+      .toHaveCount(1)
+    await expect(page.getByRole('option', { name: /Layered \(DAG\)/i }))
+      .toHaveCount(1)
+    // Close + re-open to drive each selection through the public path.
+    await page.keyboard.press('Escape')
+    await selectGraphLayout(page, 'fcose')
+    await expect(picker).toContainText(/Force \(fast\)/i)
+    await selectGraphLayout(page, 'dagre')
+    await expect(picker).toContainText(/Layered \(DAG\)/i)
   })
 
   test('group-by-label clustering toggle is pressable', async ({

@@ -45,6 +45,15 @@ const ALLOW_FILES = [
   // coded neutral palette so the failure UI cannot itself depend on
   // the bootstrap path it is trying to recover from.
   path.join(ROOT, 'components', 'FatalBootstrapError.tsx'),
+  // Bootstrap 5.3 bridge: the static layer at src/styles/bootstrap-
+  // bridge.css declares a small set of rgba() box-shadow overrides
+  // that intentionally do NOT route through theme.shadows — they soften
+  // Bootstrap's built-in shadows for dropdown/popover surfaces and are
+  // meant as a single global tweak, not per-theme. theme-bridge.ts
+  // handles all the palette/border/typography variables sourced from
+  // the active theme; this file complements it for the shadow-only
+  // override.
+  path.join(ROOT, 'styles', 'bootstrap-bridge.css'),
 ]
 
 const HEX = /#[0-9a-fA-F]{3,8}\b/

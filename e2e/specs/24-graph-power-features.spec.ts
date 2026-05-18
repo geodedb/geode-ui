@@ -1,6 +1,6 @@
 import { Page } from '@playwright/test'
 import { test, expect } from '../fixtures'
-import { sel } from '../helpers/selectors'
+import { sel, selectGraphLayout } from '../helpers/selectors'
 import { seed } from '../helpers/gqlData'
 
 // e2e smoke for Phase 1–8 of the graph power-features plan:
@@ -145,7 +145,8 @@ test.describe('graph power features', () => {
       'true'
     )
     // Switch layouts — pinned state must persist on the new layout.
-    await page.getByTestId('graph-layout-picker').selectOption('grid')
+    // Bug-C fix: layout picker is now a Bootstrap dropdown.
+    await selectGraphLayout(page, 'grid')
     await expect(page.getByTestId('graph-action-pin')).toHaveAttribute(
       'aria-pressed',
       'true'

@@ -76,6 +76,21 @@ const TabsRow = styled.div`
     flex-direction: column;
   }
 
+  /* CRITICAL — propagate the flex chain into the WA shadow DOM.
+     Web Awesome's <wa-tab-panel> wraps its slotted content in a
+     shadow-DOM <div part="base">. The light-DOM rule above sets the
+     flex on the host but NOT on the shadow wrapper, so without this
+     ::part rule the inner content (Cytoscape canvas, table, JSON view)
+     computes as flex:0 1 auto and only claims its intrinsic height
+     instead of stretching to fill the viewport. Bug A. */
+  wa-tab-panel::part(base) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+  }
+
   /* At <= md (and especially at 320 px / SE-1st gen) the four tab
      labels overflow the host width; the WA shadow-DOM nav then exposes
      left/right chevron scroll controls that most touch users don't

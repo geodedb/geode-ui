@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures'
-import { sel } from '../helpers/selectors'
+import { sel, selectGraphLayout } from '../helpers/selectors'
 import { seed } from '../helpers/gqlData'
 
 test.describe('query (graph view)', () => {
@@ -115,11 +115,13 @@ test.describe('query (graph view)', () => {
     await sel.queryTabGraph(page).click()
     const layoutPicker = page.getByTestId('graph-layout-picker')
     await expect(layoutPicker).toBeVisible()
-    await expect(layoutPicker).toHaveValue('cose')
+    // Bug-C fix: layout picker is a Bootstrap dropdown; the trigger
+    // text reflects the active layout's translated label.
+    await expect(layoutPicker).toContainText(/cose/i)
 
     // Pick a non-default layout.
-    await layoutPicker.selectOption('grid')
-    await expect(layoutPicker).toHaveValue('grid')
+    await selectGraphLayout(page, 'grid')
+    await expect(page.getByTestId('graph-layout-picker')).toContainText(/grid/i)
 
     // Re-run the same query. resetRunState() unmounts GraphView; the
     // identical response remounts it.
@@ -128,7 +130,7 @@ test.describe('query (graph view)', () => {
     await sel.queryTabGraph(page).click()
 
     // The previously-selected layout must still be in effect.
-    await expect(page.getByTestId('graph-layout-picker')).toHaveValue('grid')
+    await expect(page.getByTestId('graph-layout-picker')).toContainText(/grid/i)
   })
 
   // Reproduction test for the "graph inspector renders raw JSON only" UX gap.

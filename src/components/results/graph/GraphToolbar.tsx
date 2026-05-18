@@ -5,6 +5,7 @@ import { FindNodeInput } from './FindNodeInput'
 import { GraphToolbarMore } from './GraphToolbarMore'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { breakpoints } from '../../../theme/tokens'
+import { BootstrapDropdown } from '../../../services/bootstrap/Dropdown'
 
 // Mobile-only first-class affordances render below the `md` breakpoint.
 // Match the @media rule baked into the styled Toolbar above so the JS
@@ -192,18 +193,18 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
         aria-label={t('graph.viewGroupLabel')}
       >
         <span className="group-label">{t('graph.viewGroupLabel')}</span>
-        <select
-          data-testid="graph-layout-picker"
-          aria-label={t('graph.layoutLabel')}
+        <BootstrapDropdown<LayoutName>
+          items={layouts.map((name) => ({
+            value: name,
+            label: layoutLabel(name, t),
+          }))}
           value={layout}
-          onChange={(e) => onChangeLayout(e.target.value as LayoutName)}
-        >
-          {layouts.map((name) => (
-            <option key={name} value={name}>
-              {layoutLabel(name, t)}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => onChangeLayout(next)}
+          ariaLabel={t('graph.layoutLabel')}
+          size="sm"
+          className="geode-bs-inline-dropdown graph-layout-toggle-wrap"
+          triggerProps={{ 'data-testid': 'graph-layout-picker' }}
+        />
         <wa-button
           appearance="outlined"
           size="s"

@@ -53,6 +53,8 @@
   "dependencies": {
     "@awesome.me/webawesome": "^3.7.0",
     "@monaco-editor/react": "^4.7.0",
+    "@popperjs/core": "^2.11.8",
+    "bootstrap": "^5.3.3",
     "cytoscape": "^3.33.3",
     "cytoscape-cxtmenu": "^3.5.0",
     "cytoscape-dagre": "^2.5.0",

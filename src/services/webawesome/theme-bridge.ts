@@ -74,6 +74,61 @@ export function buildWaCssVariables(theme: Theme): string {
     `--wa-font-family-body: ${theme.font.family.body};`,
     `--wa-font-size-xs: ${theme.font.sizes.xs};`,
     `--wa-font-size-s: ${theme.font.sizes.sm};`,
+    // Bootstrap 5.3 bridge. Bootstrap reads its palette, typography,
+    // and spacing from `--bs-*` custom properties; overriding the
+    // load-bearing ones with our theme tokens keeps the two frameworks
+    // visually coherent.
+    `--bs-body-bg: ${theme.bg.canvas};`,
+    `--bs-body-color: ${theme.text.primary};`,
+    `--bs-secondary-bg: ${theme.bg.surface};`,
+    `--bs-secondary-color: ${theme.text.secondary};`,
+    `--bs-tertiary-bg: ${theme.bg.subtle};`,
+    `--bs-tertiary-color: ${theme.text.muted};`,
+    `--bs-emphasis-color: ${theme.text.primary};`,
+    `--bs-border-color: ${theme.border.default};`,
+    `--bs-border-color-translucent: ${theme.border.subtle};`,
+    `--bs-border-radius: ${theme.radii.md};`,
+    `--bs-border-radius-sm: ${theme.radii.sm};`,
+    `--bs-border-radius-lg: ${theme.radii.lg};`,
+    `--bs-link-color: ${theme.colors.primary};`,
+    `--bs-link-hover-color: ${theme.colors.primary};`,
+    `--bs-primary: ${theme.colors.primary};`,
+    `--bs-primary-rgb: ${hexToRgbTriplet(theme.colors.primary)};`,
+    `--bs-primary-bg-subtle: ${theme.bg.subtle};`,
+    `--bs-success: ${theme.colors.success};`,
+    `--bs-success-rgb: ${hexToRgbTriplet(theme.colors.success)};`,
+    `--bs-warning: ${theme.colors.warning};`,
+    `--bs-warning-rgb: ${hexToRgbTriplet(theme.colors.warning)};`,
+    `--bs-danger: ${theme.colors.danger};`,
+    `--bs-danger-rgb: ${hexToRgbTriplet(theme.colors.danger)};`,
+    `--bs-info: ${theme.colors.info};`,
+    `--bs-info-rgb: ${hexToRgbTriplet(theme.colors.info)};`,
+    `--bs-focus-ring-color: ${theme.border.focus};`,
+    `--bs-light: ${theme.bg.surface};`,
+    `--bs-dark: ${theme.text.primary};`,
+    `--bs-font-sans-serif: ${theme.font.family.body};`,
+    `--bs-font-monospace: ${theme.font.family.mono};`,
+    `--bs-body-font-family: ${theme.font.family.body};`,
+    `--bs-body-font-size: ${theme.font.sizes.md};`,
   ]
   return `${selector} {\n  ${lines.join('\n  ')}\n}\n`
+}
+
+/**
+ * Convert a #rrggbb hex color to a Bootstrap-style "R, G, B" triplet
+ * used by `--bs-*-rgb` variables (which feed rgba(...) opacity math
+ * for focus rings and tint backgrounds). Returns "0, 0, 0" when the
+ * input isn't a recognisable hex string, so a misconfigured theme
+ * value degrades to a safe black instead of throwing during the
+ * bridge build.
+ */
+function hexToRgbTriplet(hex: string | undefined): string {
+  if (typeof hex !== 'string') return '0, 0, 0'
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return '0, 0, 0'
+  const value = parseInt(m[1] as string, 16)
+  const r = (value >> 16) & 0xff
+  const g = (value >> 8) & 0xff
+  const b = value & 0xff
+  return `${r}, ${g}, ${b}`
 }

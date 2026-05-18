@@ -1,0 +1,78 @@
+/*
+ * Bootstrap 5.3 <-> Web Awesome bridge — STATIC overrides only.
+ *
+ * Dynamic palette / typography mapping happens in theme-bridge.ts via
+ * --bs-* CSS variables. This file handles the small set of rules that
+ * are not driven by theme tokens:
+ *
+ *   1. Reset Bootstrap's `button` outline so wa-button's focus ring
+ *      stays visible.
+ *   2. Bootstrap injects `.btn:focus-visible` + `.form-control:focus`
+ *      box-shadows that fight Web Awesome's focus ring tokens; we let
+ *      each component own its own focus styling.
+ *   3. Bootstrap's `dropdown-menu` shadow is too aggressive for our
+ *      surface tokens — soften it through --bs-* CSS variables that
+ *      reference our shadow scale.
+ *   4. Bootstrap's default `<a>` text-decoration:underline collides
+ *      with link styling inside wa-* component slots — keep links
+ *      underline-free except where we explicitly opt in via .link
+ *      utility classes.
+ *
+ * The .geode-bs-* utility namespace below is opt-in: it carries the
+ * Bootstrap class semantics but with project-specific spacing tweaks
+ * so a refactor can pull in `class="geode-bs-toolbar"` and avoid
+ * rebuilding the wa-button toolbar layout from scratch.
+ */
+
+:root {
+  /* Soften Bootstrap's default surface elevation so dropdown menus and
+     popovers feel like surface tokens, not stark white cards. */
+  --bs-box-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --bs-box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --bs-box-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+/* Bootstrap's `button` reset removes the focus outline; wa-button
+   manages its own ring, but our refactor lands Bootstrap-styled
+   buttons (.btn) in a few places too. Restore a focus-visible ring
+   that reads from our theme focus color. */
+.btn:focus-visible,
+.dropdown-toggle:focus-visible {
+  outline: 2px solid var(--bs-focus-ring-color, currentColor);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* The graph-toolbar layout picker is a Bootstrap dropdown that lives
+   inside a wa-button row; matching wa-button sizing keeps the row
+   visually balanced. */
+.btn-sm.dropdown-toggle.graph-layout-toggle {
+  min-height: 2rem;
+  font-size: var(--wa-font-size-s, 0.875rem);
+  padding: 0.25rem 0.75rem;
+}
+
+/* Bootstrap's `.dropdown-menu` has `position: absolute` by default;
+   Popper switches it to a fixed positioning context once data-bs-toggle
+   is initialised. Either way the menu must paint above the cytoscape
+   canvas (z-index 0) and below wa-dialog (1000+). */
+.dropdown-menu {
+  z-index: 1050;
+}
+
+/* Default Bootstrap link decoration fights every wa-button label slot.
+   Strip the underline on links inside wa-* components; explicit links
+   keep the `.link` utility class. */
+:where(wa-button, wa-dropdown, wa-tab-group, wa-menu) a {
+  text-decoration: none;
+}
+
+/* Utility: stack a Bootstrap dropdown inline with wa-button siblings
+   without the wrapping <div class="dropdown"> introducing a flex break. */
+.geode-bs-inline-dropdown {
+  display: inline-flex;
+  align-items: stretch;
+}
+.geode-bs-inline-dropdown > .btn {
+  align-self: stretch;
+}

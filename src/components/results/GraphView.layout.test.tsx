@@ -92,26 +92,40 @@ describe('Phase 1: fcose + dagre in the layout picker', () => {
 
   it('offers fcose and dagre in the layout picker and applies them', () => {
     renderGV(twoNodeOneEdgeResp)
-    const picker = screen.getByTestId(
-      'graph-layout-picker'
-    ) as HTMLSelectElement
-    expect([...picker.options].map((o) => o.value)).toEqual(
-      expect.arrayContaining([
-        'cose',
-        'fcose',
-        'dagre',
-        'breadthfirst',
-        'circle',
-        'concentric',
-        'grid',
-      ])
-    )
+    // The picker is now a Bootstrap dropdown (Bug C fix). The trigger
+    // button carries the data-testid; each option is a dropdown-item
+    // button keyed by translated label. Open the menu, then click the
+    // option matching the desired layout.
+    const trigger = screen.getByTestId('graph-layout-picker')
+    expect(trigger.tagName.toUpperCase()).not.toBe('SELECT')
     act(() => {
-      fireEvent.change(picker, { target: { value: 'fcose' } })
+      fireEvent.click(trigger)
+    })
+    // Every layout must surface a listbox option (the translated label
+    // is rendered as the option's accessible name).
+    const options = screen.getAllByRole('option')
+    const optionTexts = options.map((o) => o.textContent?.toLowerCase() ?? '')
+    expect(optionTexts.length).toBeGreaterThanOrEqual(7)
+    expect(optionTexts.join('|')).toMatch(/cose/)
+    expect(optionTexts.join('|')).toMatch(/fast/)
+    expect(optionTexts.join('|')).toMatch(/dag/i)
+    expect(optionTexts.join('|')).toMatch(/breadth-first/)
+    expect(optionTexts.join('|')).toMatch(/circle/)
+    expect(optionTexts.join('|')).toMatch(/concentric/)
+    expect(optionTexts.join('|')).toMatch(/grid/)
+    // Pick fcose ("Force (fast)").
+    const fcose = screen.getByRole('option', { name: /Force \(fast\)/i })
+    act(() => {
+      fireEvent.click(fcose)
     })
     expect(lastLayoutArg()).toMatchObject({ name: 'fcose' })
+    // Re-open the menu and pick dagre ("Layered (DAG)").
     act(() => {
-      fireEvent.change(picker, { target: { value: 'dagre' } })
+      fireEvent.click(screen.getByTestId('graph-layout-picker'))
+    })
+    const dagre = screen.getByRole('option', { name: /Layered \(DAG\)/i })
+    act(() => {
+      fireEvent.click(dagre)
     })
     expect(lastLayoutArg()).toMatchObject({ name: 'dagre', rankDir: 'TB' })
   })

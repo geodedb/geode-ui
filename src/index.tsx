@@ -5,6 +5,18 @@ import { createRoot } from 'react-dom/client'
 // bootstrap side-effect now rides inside the lazy GqlEditor chunk
 // (src/components/editor/GqlEditor.tsx imports it), so monaco is only
 // downloaded when the query editor mounts.
+// Bootstrap 5.3 ships utilities, grid, typography, and a small set of
+// JS-driven components (dropdown, modal, collapse, offcanvas, popover,
+// tooltip, scrollspy, tab). We import the CSS bundle here so utility
+// classes are available everywhere; component JavaScript is consumed
+// lazily by individual components that need it via `bootstrap/dist/js/
+// bootstrap.bundle.min.js` to avoid pulling Popper into the entry
+// chunk. The styles/bootstrap-bridge.css overlay below remaps a few
+// Bootstrap CSS variables to the Web Awesome theme tokens so any
+// Bootstrap-styled element inherits the same surface, text, border,
+// and brand colors as the wa-* components beside it.
+import 'bootstrap/dist/css/bootstrap.min.css'
+import './styles/bootstrap-bridge.css'
 import './assets/fonts/fonts.css'
 import App from './App'
 import type { ConnectionState } from './api/connections'

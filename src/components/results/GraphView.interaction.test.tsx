@@ -122,19 +122,24 @@ describe('graph display options survive a re-run remount', () => {
 
   test('layout-algorithm choice persists across an unmount/remount', () => {
     const first = renderGraph(makeGraphResp())
-    const picker = first.getByTestId('graph-layout-picker') as HTMLSelectElement
-    expect(picker.value).toBe('cose')
+    // Bug C fix: picker is now a Bootstrap dropdown — the trigger's
+    // text content reflects the active layout instead of a select.value.
+    const picker = first.getByTestId('graph-layout-picker')
+    // Default layout is 'cose' ("Force (cose)" in en.ts).
+    expect(picker.textContent).toMatch(/cose/i)
 
-    fireEvent.change(picker, { target: { value: 'grid' } })
-    expect(
-      (first.getByTestId('graph-layout-picker') as HTMLSelectElement).value
-    ).toBe('grid')
+    // Open the menu and click "Grid".
+    fireEvent.click(picker)
+    fireEvent.click(first.getByRole('option', { name: /^Grid$/i }))
+    expect(first.getByTestId('graph-layout-picker').textContent).toMatch(
+      /grid/i
+    )
 
     first.unmount()
     const second = renderGraph(makeGraphResp())
-    expect(
-      (second.getByTestId('graph-layout-picker') as HTMLSelectElement).value
-    ).toBe('grid')
+    expect(second.getByTestId('graph-layout-picker').textContent).toMatch(
+      /grid/i
+    )
   })
 
   test('node-label visibility toggle persists across an unmount/remount', () => {
