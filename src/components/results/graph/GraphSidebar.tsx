@@ -1,6 +1,8 @@
 import React from 'react'
 import styled from 'styled-components'
 
+import { Icon } from '../../ui'
+
 // Side is the responsive sidebar wrapper that holds the graph's
 // inspector and control blocks. Always fills its grid track in the
 // side-by-side layout; caps its height below the md breakpoint where
@@ -110,7 +112,7 @@ export const GraphSidebar: React.FC<GraphSidebarProps> = ({
           title={collapseLabel ?? 'Collapse sidebar'}
           onClick={onCollapse}
         >
-          ✕
+          <Icon name="xmark" />
         </CollapseBtn>
       )}
       {children}

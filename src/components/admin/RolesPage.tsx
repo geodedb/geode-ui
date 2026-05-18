@@ -14,6 +14,7 @@ import {
   DataTable,
   EmptyCell,
   Field,
+  Icon,
   Input,
   Modal,
   TableScroll,
@@ -266,7 +267,10 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     aria-label={t('roles.removePermission', { permission: p })}
                     onClick={() => removeChip(p)}
                   >
-                    ×
+                    <Icon
+                      name="xmark"
+                      label={t('roles.removePermission', { permission: p })}
+                    />
                   </ChipRemove>
                 </li>
               ))}

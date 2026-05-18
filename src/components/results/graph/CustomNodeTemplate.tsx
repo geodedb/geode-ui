@@ -1,6 +1,8 @@
 import React from 'react'
 import styled from 'styled-components'
 
+import { Icon } from '../../ui'
+
 const Card = styled.div`
   display: inline-flex;
   align-items: center;
@@ -62,7 +64,7 @@ export const CustomNodeTemplate: React.FC<CustomNodeTemplateProps> = ({
       <Label data-testid="custom-node-label">{label || '—'}</Label>
       {pinned && (
         <Pin data-testid="custom-node-pin" aria-hidden="true">
-          ●
+          <Icon name="thumbtack" />
         </Pin>
       )}
     </Card>

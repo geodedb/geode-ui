@@ -17,6 +17,14 @@ import { createRoot } from 'react-dom/client'
 // and brand colors as the wa-* components beside it.
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './styles/bootstrap-bridge.css'
+// Font Awesome Free — solid + regular + brands CSS plus the bundled
+// webfonts. Webpack's asset loader emits the .woff2 files into the
+// dist root; the CSS resolves them via relative ../webfonts/ paths
+// so no extra plumbing is needed. CSP "font-src 'self'" is already
+// allowed by the geode-ui server. Icons are rendered via the typed
+// <Icon> wrapper in src/components/ui/Icon.tsx — direct
+// `<i class="fa-...">` usage is allowed but discouraged.
+import '@fortawesome/fontawesome-free/css/all.min.css'
 import './assets/fonts/fonts.css'
 import App from './App'
 import type { ConnectionState } from './api/connections'

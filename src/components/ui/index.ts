@@ -28,3 +28,6 @@ export type { ModalProps, ConfirmModalProps } from './Modal'
 
 export { Logo } from './Logo'
 export type { LogoProps } from './Logo'
+
+export { Icon } from './Icon'
+export type { IconProps, IconStyle } from './Icon'

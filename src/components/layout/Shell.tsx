@@ -10,7 +10,7 @@ import styled, { DefaultTheme } from 'styled-components'
 
 import { useAuth } from '../../auth/AuthProvider'
 import { above, below } from '../../theme'
-import { Button, Logo, Spacer } from '../ui'
+import { Button, Icon, Logo, Spacer } from '../ui'
 import { AddConnectionModal } from './AddConnectionModal'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 import { ThemeSelector } from './ThemeSelector'
@@ -189,12 +189,12 @@ const MobileToggle = styled.button`
     display: inline-flex;
   `}
 
-  /* Three-bar hamburger drawn with currentColor so it tracks the
-     foreground in both themes. The bars collapse into an X when the
-     drawer is open. */
-  svg {
-    width: 22px;
-    height: 22px;
+  /* Font Awesome bars/xmark drawn with currentColor (the wrapping
+     button's color cascades into the <i>'s ::before pseudo-element).
+     Bump the glyph slightly above the 1em default so it stays legible
+     at the button's min touch-target size in both themes. */
+  i {
+    font-size: 1.25rem;
   }
 `
 
@@ -217,23 +217,6 @@ const Drawer = styled.div<{ $open: boolean }>`
     justify-content: flex-start;
   }
 `
-
-const Burger: React.FC<{ open: boolean }> = ({ open }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-    {open ? (
-      <>
-        <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
-        <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
-      </>
-    ) : (
-      <>
-        <line x1="4" y1="7" x2="20" y2="7" strokeLinecap="round" />
-        <line x1="4" y1="12" x2="20" y2="12" strokeLinecap="round" />
-        <line x1="4" y1="17" x2="20" y2="17" strokeLinecap="round" />
-      </>
-    )}
-  </svg>
-)
 
 export const Shell: React.FC = () => {
   const { signOut, isAdmin } = useAuth()
@@ -293,7 +276,7 @@ export const Shell: React.FC = () => {
           aria-controls="primary-drawer"
           onClick={() => setDrawerOpen((v) => !v)}
         >
-          <Burger open={drawerOpen} />
+          <Icon name={drawerOpen ? 'xmark' : 'bars'} fixedWidth />
         </MobileToggle>
       </Top>
       <Drawer

@@ -7,6 +7,7 @@ import { TableView } from './TableView'
 import { JsonView } from './JsonView'
 import { MatrixView } from './MatrixView'
 import { TabGroup, Tab, TabPanel } from '../../services/webawesome/components'
+import { Icon } from '../ui'
 
 // F10 (#54): Cytoscape (~hundreds of KiB) is React.lazy'd so webpack
 // emits it as a separate async chunk that is only fetched when the
@@ -189,7 +190,7 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
             }
             onClick={onToggleMaximize}
           >
-            {maximized ? '⤡' : '⤢'}
+            <Icon name={maximized ? 'compress' : 'expand'} />
           </wa-button>
         </MaximizeBtnRow>
       )}

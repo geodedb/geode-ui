@@ -1,6 +1,8 @@
 import React from 'react'
 import styled from 'styled-components'
 
+import { Icon } from '../../ui'
+
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
 const Strip = styled.div`
@@ -93,7 +95,7 @@ export const GraphFilterChips: React.FC<GraphFilterChipsProps> = ({
             aria-label={t('graph.filterChipClear')}
             onClick={() => onClearHidden(label)}
           >
-            ×
+            <Icon name="xmark" label={t('graph.filterChipClear')} />
           </button>
         </Chip>
       ))}
@@ -105,7 +107,7 @@ export const GraphFilterChips: React.FC<GraphFilterChipsProps> = ({
             aria-label={t('graph.filterChipClear')}
             onClick={onClearCluster}
           >
-            ×
+            <Icon name="xmark" label={t('graph.filterChipClear')} />
           </button>
         </Chip>
       )}
@@ -120,7 +122,7 @@ export const GraphFilterChips: React.FC<GraphFilterChipsProps> = ({
             aria-label={t('graph.filterChipClear')}
             onClick={onClearFocus}
           >
-            ×
+            <Icon name="xmark" label={t('graph.filterChipClear')} />
           </button>
         </Chip>
       )}
@@ -132,7 +134,7 @@ export const GraphFilterChips: React.FC<GraphFilterChipsProps> = ({
             aria-label={t('graph.filterChipClear')}
             onClick={onClearPath}
           >
-            ×
+            <Icon name="xmark" label={t('graph.filterChipClear')} />
           </button>
         </Chip>
       )}

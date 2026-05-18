@@ -1,6 +1,8 @@
 import React from 'react'
 import styled from 'styled-components'
 
+import { Icon } from '../ui'
+
 const Wrap = styled.section`
   border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
   margin-bottom: ${({ theme }) => theme.spacing.xs};
@@ -78,7 +80,7 @@ export const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   <Wrap data-testid={testId}>
     <Summary type="button" $open={open} aria-expanded={open} onClick={onToggle}>
       <span className="chev" aria-hidden="true">
-        ▸
+        <Icon name="chevron-right" />
       </span>
       <span>{title}</span>
     </Summary>

@@ -5,6 +5,7 @@ import styled from 'styled-components'
 import { useConnections, useActiveConnection } from '../../api/connections'
 import { useAuth } from '../../auth/AuthProvider'
 import { Dropdown, DropdownItem } from '../../services/webawesome/components'
+import { Icon } from '../ui'
 
 const SwitcherWrap = styled.div`
   position: relative;
@@ -208,7 +209,10 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
                 }}
                 style={disconnectStyle}
               >
-                ×
+                <Icon
+                  name="xmark"
+                  label={`${t('connection.disconnect')}: ${c.profileName}`}
+                />
               </span>
             </span>
           </DropdownItem>
@@ -218,7 +222,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
           role="menuitem"
           data-testid="connection-add"
         >
-          {`+ ${t('connection.addAnother')}`}
+          <Icon name="plus" /> {t('connection.addAnother')}
         </DropdownItem>
       </Dropdown>
     </SwitcherWrap>

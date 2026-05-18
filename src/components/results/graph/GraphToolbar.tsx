@@ -6,6 +6,7 @@ import { GraphToolbarMore } from './GraphToolbarMore'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { breakpoints } from '../../../theme/tokens'
 import { BootstrapDropdown } from '../../../services/bootstrap/Dropdown'
+import { Icon } from '../../ui'
 
 // Mobile-only first-class affordances render below the `md` breakpoint.
 // Match the @media rule baked into the styled Toolbar above so the JS
@@ -184,7 +185,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={sidebarToggleLabel}
           onClick={onToggleSidebar}
         >
-          {sidebarCollapsed ? '☰' : '⇤'}
+          <Icon name={sidebarCollapsed ? 'bars' : 'angles-left'} />
         </wa-button>
       )}
       <FindNodeInput nodes={findNodes} onPick={onFindPick} t={t} />
@@ -213,7 +214,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={t('graph.zoomIn')}
           onClick={onZoomIn}
         >
-          +
+          <Icon name="plus" />
         </wa-button>
         <wa-button
           appearance="outlined"
@@ -223,7 +224,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={t('graph.zoomOut')}
           onClick={onZoomOut}
         >
-          −
+          <Icon name="minus" />
         </wa-button>
         <wa-button
           appearance="outlined"
@@ -233,7 +234,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={t('graph.fit')}
           onClick={onFit}
         >
-          ⤢
+          <Icon name="expand" />
         </wa-button>
         <wa-button
           appearance="outlined"
@@ -243,7 +244,7 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           title={t('graph.resetView')}
           onClick={onResetView}
         >
-          ⟲
+          <Icon name="arrows-rotate" />
         </wa-button>
       </Group>
       <Group

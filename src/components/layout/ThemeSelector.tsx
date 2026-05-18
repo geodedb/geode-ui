@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useThemePreference } from '../../theme'
 import type { ThemeVariant } from '../../theme/types'
 import { BootstrapDropdown } from '../../services/bootstrap/Dropdown'
+import { Icon } from '../ui'
 
 // ThemeSelector exposes the Light / Dark / System variant choice in
 // the Shell top nav. Reads + writes the ThemeContext preference,
@@ -16,17 +17,14 @@ import { BootstrapDropdown } from '../../services/bootstrap/Dropdown'
 
 type Choice = ThemeVariant | 'system'
 
-// Use safer unicode glyphs for the variant icons. The earlier ☀/☾/◑
-// triple produced visible clipping on some fonts because the cusped
-// crescent and half-circle glyphs draw outside their reported em box
-// at small btn-sm padding. The replacements are widely-supported
-// emoji-presentation variants (variation selector U+FE0F suppresses
-// the emoji-style render so they stay monochrome glyph-mode on
-// systems with proper font fallback).
+// Variant → Font Awesome icon slug. The Icon wrapper renders an <i>
+// with the matching FA class, which paints consistently across themes
+// and platforms without the unicode-glyph clipping issues that the
+// earlier emoji-presentation characters suffered at btn-sm padding.
 const ICONS: Record<Choice, string> = {
-  light: '☀︎',
-  dark: '🌙︎',
-  system: '🖥︎',
+  light: 'sun',
+  dark: 'moon',
+  system: 'display',
 }
 
 export const ThemeSelector: React.FC = () => {
@@ -46,9 +44,30 @@ export const ThemeSelector: React.FC = () => {
   }
 
   const items = [
-    { value: 'light' as const, label: `${ICONS.light} ${t('theme.light')}` },
-    { value: 'dark' as const, label: `${ICONS.dark} ${t('theme.dark')}` },
-    { value: 'system' as const, label: `${ICONS.system} ${t('theme.system')}` },
+    {
+      value: 'light' as const,
+      label: (
+        <>
+          <Icon name={ICONS.light} /> {t('theme.light')}
+        </>
+      ),
+    },
+    {
+      value: 'dark' as const,
+      label: (
+        <>
+          <Icon name={ICONS.dark} /> {t('theme.dark')}
+        </>
+      ),
+    },
+    {
+      value: 'system' as const,
+      label: (
+        <>
+          <Icon name={ICONS.system} /> {t('theme.system')}
+        </>
+      ),
+    },
   ]
 
   // Show the current variant's icon as the trigger label. Keeps the
@@ -72,7 +91,7 @@ export const ThemeSelector: React.FC = () => {
         fontSize: '1em',
       }}
     >
-      {ICONS[variant]}
+      <Icon name={ICONS[variant]} />
     </span>
   )
 

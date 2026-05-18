@@ -1,6 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 import type { Badge } from './useGraphBadges'
+import { Icon } from '../../ui'
 
 const Layer = styled.div`
   position: absolute;
@@ -58,7 +59,7 @@ export const GraphBadges: React.FC<GraphBadgesProps> = ({ badges }) => {
               data-testid={`graph-badge-pin-${b.nodeId}`}
               style={{ left: b.x, top: b.y }}
             >
-              ●
+              <Icon name="thumbtack" />
             </PinBadge>
           )
         }

@@ -4,6 +4,7 @@ import styled from 'styled-components'
 import { createPortal } from 'react-dom'
 
 import { Button } from './Button'
+import { Icon } from './Icon'
 
 export interface ModalProps {
   open: boolean
@@ -216,7 +217,7 @@ export const Modal: React.FC<ModalProps> = ({
             aria-label={t('common.closeDialog')}
             onClick={onClose}
           >
-            ×
+            <Icon name="xmark" label={t('common.closeDialog')} />
           </CloseBtn>
         </header>
         <div className="p-4" style={{ overflowY: 'auto' }}>
