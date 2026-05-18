@@ -166,15 +166,110 @@ func handlerFS(sub fs.FS) (http.Handler, error) {
 			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		}
 
+		// PERF (#259) brotli precompression: when the client accepts
+		// `br` AND a `.br` sibling exists in the embed FS, serve the
+		// precompressed bytes verbatim with `Content-Encoding: br`.
+		// Falls back to the on-the-fly gzip path otherwise. The
+		// sibling check runs through statCached so it cost-amortises
+		// the same way as the primary asset stat.
+		ext := servedExt(r.URL.Path)
+		if _, ok := compressibleExts[ext]; ok &&
+			r.Method != http.MethodHead &&
+			acceptsBrotli(r) {
+			brName := clean + ".br"
+			if r.URL.Path == "/" {
+				brName = "index.html.br"
+			} else if !strings.HasPrefix(r.URL.Path, "/") {
+				brName = clean + ".br"
+			} else {
+				brName = strings.TrimPrefix(r.URL.Path, "/") + ".br"
+			}
+			if brInfo, brErr := statCached(brName); brErr == nil {
+				// Found a precompressed sibling. Drop FileServer entirely
+				// for this response; we own the bytes.
+				w.Header().Set("Content-Encoding", "br")
+				w.Header().Add("Vary", "Accept-Encoding")
+				w.Header().Set("Content-Type", mimeFor(ext))
+				w.Header().Set("Content-Length", strconv.FormatInt(brInfo.Size(), 10))
+				f, openErr := sub.Open(brName)
+				if openErr == nil {
+					defer func() { _ = f.Close() }()
+					_, _ = io.Copy(w, f)
+					return
+				}
+				// Fallthrough to on-the-fly compression below if the
+				// open failed for any reason.
+				w.Header().Del("Content-Encoding")
+				w.Header().Del("Content-Length")
+			}
+		}
+
 		// Decide compression up front: we know the served file's
 		// extension and exact size, so no deferred Content-Type sniffing
 		// is needed.
-		if gw := newGzipWriter(w, r, servedExt(r.URL.Path), info); gw != nil {
+		if gw := newGzipWriter(w, r, ext, info); gw != nil {
 			defer gw.close()
 			w = gw
 		}
 		fileServer.ServeHTTP(w, r)
 	}), nil
+}
+
+// acceptsBrotli reports whether the client's Accept-Encoding header
+// lists `br` (or "*") with a non-zero quality value. Mirrors the
+// shape of acceptsGzip but matches the `br` token. Brotli is the
+// preferred encoding when present because the precompressed sibling
+// ships at quality 11.
+func acceptsBrotli(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		token := part
+		q := 1.0
+		if i := strings.IndexByte(part, ';'); i >= 0 {
+			token = strings.TrimSpace(part[:i])
+			if j := strings.Index(strings.ToLower(part[i+1:]), "q="); j >= 0 {
+				if v, err := strconv.ParseFloat(strings.TrimSpace(part[i+1+j+2:]), 64); err == nil {
+					q = v
+				}
+			}
+		}
+		token = strings.ToLower(token)
+		if (token == "br" || token == "*") && q > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// mimeFor returns the canonical Content-Type for a compressible
+// extension. Mirrors what http.FileServer would emit via
+// mime.TypeByExtension but avoids the dependency on the runtime
+// mime-type database when we already know the answer for the small
+// set of compressible asset shapes.
+func mimeFor(ext string) string {
+	switch ext {
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".webmanifest":
+		return "application/manifest+json"
+	case ".map":
+		return "application/json; charset=utf-8"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // servedExt returns the lower-cased extension that determines the

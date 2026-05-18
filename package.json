@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "webpack serve --config webpack.dev.js",
-    "build": "NODE_ENV=production webpack --config webpack.prod.js",
+    "build": "NODE_ENV=production webpack --config webpack.prod.js && npm run build:precompress",
+    "build:precompress": "node scripts/precompress-dist.mjs",
     "test": "jest --config jest.config.cjs",
     "test:ts": "tsc --noEmit && npm run e2e:tsc && npm run scripts:tsc",
     "e2e:tsc": "tsc --project e2e/tsconfig.json --noEmit",

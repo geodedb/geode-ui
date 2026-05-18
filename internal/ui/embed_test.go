@@ -157,6 +157,12 @@ func findLargeJSAsset(t *testing.T) (string, []byte) {
 // for a sizeable .js bundle with Accept-Encoding: gzip must come back
 // Content-Encoding: gzip + Vary: Accept-Encoding, and the decompressed
 // body must byte-match the embedded asset.
+//
+// PERF (#259): the brotli precompression added in `acceptsBrotli` takes
+// precedence over on-the-fly gzip when the client advertises br AND
+// a .br sibling exists. This test deliberately uses a gzip-only
+// Accept-Encoding so the gzip path is exercised; the brotli precedence
+// is covered by TestHandlerServesBrotliWhenAccepted below.
 func TestHandlerGzipsLargeJSAsset(t *testing.T) {
 	h, err := Handler()
 	if err != nil {
@@ -165,7 +171,7 @@ func TestHandlerGzipsLargeJSAsset(t *testing.T) {
 	name, raw := findLargeJSAsset(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/"+name, nil)
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("Accept-Encoding", "gzip, deflate")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -256,6 +262,99 @@ func TestHandlerNoGzipForBinaryAsset(t *testing.T) {
 	}
 	if v := rec.Header().Get("Vary"); strings.Contains(v, "Accept-Encoding") {
 		t.Fatalf("Vary=%q should not mention Accept-Encoding for an incompressible asset", v)
+	}
+}
+
+// TestHandlerServesBrotliWhenAccepted pins PERF (#259): when the
+// client accepts `br` AND a `.br` precompressed sibling exists in the
+// embedded FS, the handler returns the precompressed bytes verbatim
+// with `Content-Encoding: br` + `Vary: Accept-Encoding`. Brotli
+// precedence over gzip is the load-bearing assertion: a client that
+// accepts both MUST receive br (the quality-11 precompressed sibling
+// is meaningfully smaller than the on-the-fly q1 gzip).
+func TestHandlerServesBrotliWhenAccepted(t *testing.T) {
+	h, err := Handler()
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	name, raw := findLargeJSAsset(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+name, nil)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 for /%s", rec.Code, name)
+	}
+	if ce := rec.Header().Get("Content-Encoding"); ce != "br" {
+		t.Fatalf("Content-Encoding=%q want br (brotli must take precedence over gzip)", ce)
+	}
+	if v := rec.Header().Get("Vary"); !strings.Contains(v, "Accept-Encoding") {
+		t.Fatalf("Vary=%q want it to contain Accept-Encoding", v)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl == "" {
+		t.Fatalf("Content-Length is empty; brotli sibling has a known size and must declare it")
+	}
+	// Wire body must be smaller than the raw asset.
+	wire := rec.Body.Bytes()
+	if len(wire) >= len(raw) {
+		t.Fatalf("br body (%d B) not smaller than raw asset (%d B)", len(wire), len(raw))
+	}
+}
+
+// TestHandlerSkipsBrotliWhenClientDoesntAccept: a client whose
+// Accept-Encoding excludes `br` falls through to the on-the-fly gzip
+// path even though the .br sibling exists.
+func TestHandlerSkipsBrotliWhenClientDoesntAccept(t *testing.T) {
+	h, err := Handler()
+	if err != nil {
+		t.Fatalf("Handler: %v", err)
+	}
+	name, _ := findLargeJSAsset(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+name, nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if ce := rec.Header().Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("Content-Encoding=%q want gzip (brotli must not be served when client did not accept it)", ce)
+	}
+}
+
+// TestAcceptsBrotli exercises the Accept-Encoding parser corner cases
+// for the `br` token. Mirrors TestAcceptsGzip's shape.
+func TestAcceptsBrotli(t *testing.T) {
+	cases := []struct {
+		hdr  string
+		want bool
+	}{
+		{"", false},
+		{"br", true},
+		{"gzip, deflate, br", true},
+		{"deflate, br", true},
+		{"BR", true},
+		{"br;q=1.0", true},
+		{"br;q=0.5", true},
+		{"br;q=0", false},
+		{"br; q=0", false},
+		{"identity", false},
+		{"*", true},
+		{"*;q=0", false},
+		{"gzip, *", true},
+		{"gzip", false}, // gzip-only must not match br
+	}
+	for _, c := range cases {
+		t.Run(c.hdr, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/x.js", nil)
+			if c.hdr != "" {
+				r.Header.Set("Accept-Encoding", c.hdr)
+			}
+			if got := acceptsBrotli(r); got != c.want {
+				t.Fatalf("acceptsBrotli(%q) = %v, want %v", c.hdr, got, c.want)
+			}
+		})
 	}
 }
 
