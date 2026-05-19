@@ -206,6 +206,15 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
             setLspState(s)
             // eslint-disable-next-line no-console
             console.debug('[lsp] state =', s)
+            // Test seam (PERF #312 pattern): expose the latest LSP
+            // transport state on `window` so Playwright can wait on
+            // it without scraping console output. The contract is
+            // read-only; the editor is the only writer.
+            if (typeof window !== 'undefined') {
+              const w = window as unknown as { __geode_lsp_state?: string }
+              // eslint-disable-next-line no-underscore-dangle
+              w.__geode_lsp_state = s
+            }
           },
         })
         if (cancelled) {
