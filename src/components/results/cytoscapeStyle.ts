@@ -78,6 +78,17 @@ export function createCytoscapeStyle(
   const selectedBorder = theme.colors.primary
   const fadedOpacity = 0.18
 
+  // Variant-driven label color + contrasting outline. Hard-coded white
+  // text (pre-fix) gave 1.6:1 against the dark-mode pastels and 4.24:1
+  // against the light-mode burnt-orange palette slot — both below WCAG
+  // AA 4.5:1 for body text. Pick a label color that matches the canvas
+  // tone (so it blends visually with the theme) plus an INVERSE outline
+  // so the glyph rim reads as a high-contrast halo (~21:1 text-vs-
+  // outline). The halo guarantees readability even on the palette slot
+  // where text-vs-fill contrast is marginal.
+  const labelTextColor = isDark ? '#13091e' : '#ffffff'
+  const labelOutlineColor = isDark ? '#ffffff' : '#13091e'
+
   // Resolve the immutable color seed for a node/edge. The data.label /
   // data.type fields are MUTATED by cyHelpers.applyLabels whenever the
   // user picks a different "Display Field" — using them as the color
@@ -110,12 +121,15 @@ export function createCytoscapeStyle(
         'border-width': 1.5,
         'border-color': nodeBorderColor,
         label: 'data(label)',
-        color: '#ffffff',
+        color: labelTextColor,
         'text-valign': 'center',
         'text-halign': 'center',
         'text-outline-width': 1.5,
-        'text-outline-color': (e: cytoscape.NodeSingular) =>
-          labelToColor(nodeColorSeed(e), variant),
+        // Constant halo (NOT the per-node fill — that's what made the
+        // pre-fix outline invisible by blending into the node body).
+        // The inverse-tone halo gives the glyph a visible rim that
+        // reads as the perceptual background on every palette slot.
+        'text-outline-color': labelOutlineColor,
         'font-family': theme.font.family.body,
         'font-size': 12,
         'font-weight': 600,

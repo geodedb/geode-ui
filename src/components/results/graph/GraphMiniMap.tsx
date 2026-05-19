@@ -85,79 +85,110 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const cy = cyRef.current as CoreWithNavigator | null
-    const el = ref.current
-    // `el` is still required so we don't init before React has mounted
-    // our wrapper into the DOM — cy.navigator() will querySelector the
-    // selector immediately and fail if the node isn't there yet.
-    if (!cy || !el || typeof cy.navigator !== 'function') return undefined
-    const inst = cy.navigator({
-      container: `#${PANEL_ID}`,
-      viewLiveFramerate: 30,
-    })
-    // cytoscape-navigator captures its preview image via cy.png() —
-    // a snapshot of whatever the cy canvas currently paints. Two
-    // failure modes if we don't actively refresh that snapshot:
+    // useGraphCytoscape's rebuild is debounced (setTimeout, 250 ms), so
+    // when this component mounts with sticky `miniMap: true` the effect
+    // runs BEFORE the cy core is constructed and cyRef.current is null.
+    // Pre-fix the early-return at `if (!cy)` exited without rescheduling
+    // and the useEffect deps `[cyRef, sig]` are stable refs — the effect
+    // never re-fired, so the navigator was never initialised and the
+    // user saw a blank panel.
     //
-    //   A) User toggles mini-map on FROM SETTLED STATE. The current
-    //      paint is correct; the navigator captures it on next
-    //      onRender tick. No problem.
-    //   B) User opens the page with sticky `miniMap: true`. The
-    //      navigator inits at the same time as cy's first layout —
-    //      the snapshot at that moment is empty / pre-layout, and
-    //      the navigator's throttled onRender (rerenderDelay: 500 ms)
-    //      misses the layoutstop event entirely. The user sees a
-    //      blank box until they toggle the mini-map off and back on
-    //      (which re-runs the init flow against the now-painted cy).
-    //
-    // Fix: (1) force `cy.resize()` on rAF for the settled-state
-    // case (mirrors the navigator's resize listener and forces a
-    // fresh thumbnail capture) AND (2) listen for `layoutstop` on
-    // the cy core — the moment the initial / any later layout
-    // completes, force another `cy.resize()` so the navigator
-    // captures the freshly-painted scene. The handler stays
-    // registered for the lifetime of the GraphMiniMap mount so
-    // subsequent layouts (e.g. user picks `dagre` from the View
-    // dropdown) also refresh the thumbnail.
+    // Fix: poll cyRef.current with a 50 ms retry until the core appears
+    // (same pattern as useNodeTooltip.tryBind). Once bound, the
+    // navigator + layoutstop wiring runs exactly as before.
+    let cancelled = false
+    let pollTimer: ReturnType<typeof setTimeout> | null = null
     let raf: number | null = null
-    if (typeof window !== 'undefined') {
-      raf = window.requestAnimationFrame(() => {
-        raf = null
+    let bound: {
+      cy: CoreWithNavigator
+      inst: { destroy: () => void }
+      onLayoutStop: () => void
+    } | null = null
+
+    const tryInit = (): void => {
+      if (cancelled || bound) return
+      const cy = cyRef.current as CoreWithNavigator | null
+      const el = ref.current
+      // `el` is required so we don't init before React has mounted our
+      // wrapper into the DOM — cy.navigator() will querySelector the
+      // selector immediately and fail if the node isn't there yet.
+      if (!cy || !el || typeof cy.navigator !== 'function') {
+        pollTimer = setTimeout(tryInit, 50)
+        return
+      }
+      const inst = cy.navigator({
+        container: `#${PANEL_ID}`,
+        viewLiveFramerate: 30,
+      })
+      // cytoscape-navigator captures its preview image via cy.png() —
+      // a snapshot of whatever the cy canvas currently paints. Two
+      // failure modes if we don't actively refresh that snapshot:
+      //
+      //   A) User toggles mini-map on FROM SETTLED STATE. The current
+      //      paint is correct; the navigator captures it on next
+      //      onRender tick. No problem.
+      //   B) User opens the page with sticky `miniMap: true`. The
+      //      navigator inits at the same time as cy's first layout —
+      //      the snapshot at that moment is empty / pre-layout, and
+      //      the navigator's throttled onRender (rerenderDelay: 500 ms)
+      //      misses the layoutstop event entirely.
+      //
+      // Force `cy.resize()` on rAF for the settled-state case AND
+      // listen for `layoutstop` on the cy core so subsequent layouts
+      // (and the very first one when the polling path landed mid-
+      // layout) refresh the thumbnail.
+      if (typeof window !== 'undefined') {
+        raf = window.requestAnimationFrame(() => {
+          raf = null
+          try {
+            cy.resize()
+          } catch {
+            /* core may already be destroyed; ignore */
+          }
+        })
+      }
+      const onLayoutStop = (): void => {
         try {
           cy.resize()
         } catch {
-          /* core may already be destroyed; ignore */
+          /* core may already be destroyed during teardown; ignore */
         }
-      })
-    }
-    const onLayoutStop = (): void => {
-      try {
-        cy.resize()
-      } catch {
-        /* core may already be destroyed during teardown; ignore */
       }
+      try {
+        cy.on('layoutstop', onLayoutStop)
+      } catch {
+        /* test stubs that lack `on` (no-op) — listener is best-effort */
+      }
+      bound = { cy, inst, onLayoutStop }
     }
-    try {
-      cy.on('layoutstop', onLayoutStop)
-    } catch {
-      /* test stubs that lack `on` (no-op) — listener is best-effort */
-    }
+
+    tryInit()
+
     return () => {
+      cancelled = true
+      if (pollTimer != null) {
+        clearTimeout(pollTimer)
+        pollTimer = null
+      }
       if (raf != null && typeof window !== 'undefined') {
         window.cancelAnimationFrame(raf)
+        raf = null
       }
-      try {
-        cy.off('layoutstop', onLayoutStop)
-      } catch {
-        /* ignore */
-      }
-      try {
-        inst.destroy()
-      } catch {
-        // Swallow — the underlying cy core may already be destroyed by
-        // the orchestrator's rebuild teardown, in which case the
-        // navigator's destroy() throws while trying to unbind listeners
-        // from a dead core. The next mount will reattach to the new core.
+      if (bound) {
+        try {
+          bound.cy.off('layoutstop', bound.onLayoutStop)
+        } catch {
+          /* ignore */
+        }
+        try {
+          bound.inst.destroy()
+        } catch {
+          // Swallow — the underlying cy core may already be destroyed by
+          // the orchestrator's rebuild teardown, in which case the
+          // navigator's destroy() throws while trying to unbind listeners
+          // from a dead core. The next mount will reattach to the new core.
+        }
+        bound = null
       }
     }
   }, [cyRef, sig])
