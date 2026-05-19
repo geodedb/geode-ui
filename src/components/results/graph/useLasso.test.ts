@@ -1,5 +1,12 @@
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { useLasso } from './useLasso'
+
+// PERF #316: useLasso now lazy-imports cytoscape-lasso when the pref
+// flips to enabled, so any test that exercises the enabled=true
+// branch must `await` for the dynamic import + cytoscape.use()
+// registration before asserting on the cy method calls. The
+// `enabled=false` branch stays synchronous (no plugin needed to
+// restore panning state).
 
 type LassoFakeCore = {
   lassoSelectionEnabled: jest.Mock<unknown, [boolean]>
@@ -19,7 +26,7 @@ function makeCy(): LassoFakeCore {
 }
 
 describe('useLasso', () => {
-  it('enables lasso when the prop flips to true', () => {
+  it('enables lasso when the prop flips to true', async () => {
     const cy = makeCy()
     const cyRef = { current: cy as never }
     const { rerender } = renderHook(
@@ -29,10 +36,12 @@ describe('useLasso', () => {
     )
     expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(false)
     rerender({ enabled: true })
-    expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(true)
+    await waitFor(() =>
+      expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(true)
+    )
   })
 
-  it('re-applies on sig change', () => {
+  it('re-applies on sig change', async () => {
     const cy = makeCy()
     const cyRef = { current: cy as never }
     const { rerender } = renderHook(
@@ -40,23 +49,29 @@ describe('useLasso', () => {
         useLasso({ cyRef: cyRef as never, enabled: true, sig }),
       { initialProps: { sig: 's1' } }
     )
-    expect(cy.lassoSelectionEnabled).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(cy.lassoSelectionEnabled).toHaveBeenCalledTimes(1)
+    )
     rerender({ sig: 's2' })
-    expect(cy.lassoSelectionEnabled).toHaveBeenCalledTimes(2)
+    await waitFor(() =>
+      expect(cy.lassoSelectionEnabled).toHaveBeenCalledTimes(2)
+    )
   })
 
-  it('disables panning + enables box selection while lasso is active (Bug 6)', () => {
+  it('disables panning + enables box selection while lasso is active (Bug 6)', async () => {
     const cy = makeCy()
     const cyRef = { current: cy as never }
     renderHook(() =>
       useLasso({ cyRef: cyRef as never, enabled: true, sig: 's1' })
     )
-    expect(cy.userPanningEnabled).toHaveBeenLastCalledWith(false)
-    expect(cy.boxSelectionEnabled).toHaveBeenLastCalledWith(true)
-    expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(true)
+    await waitFor(() => {
+      expect(cy.userPanningEnabled).toHaveBeenLastCalledWith(false)
+      expect(cy.boxSelectionEnabled).toHaveBeenLastCalledWith(true)
+      expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(true)
+    })
   })
 
-  it('restores caller-chosen panning + box selection when lasso turns off', () => {
+  it('restores caller-chosen panning + box selection when lasso turns off', async () => {
     const cy = makeCy()
     const cyRef = { current: cy as never }
     const { rerender } = renderHook(
@@ -71,9 +86,17 @@ describe('useLasso', () => {
         }),
       { initialProps: { enabled: true } }
     )
+    // Wait for the initial enabled=true apply to land before flipping.
+    await waitFor(() =>
+      expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(true)
+    )
     rerender({ enabled: false })
-    expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(false)
-    expect(cy.userPanningEnabled).toHaveBeenLastCalledWith(false)
-    expect(cy.boxSelectionEnabled).toHaveBeenLastCalledWith(true)
+    // Disable path is synchronous (no plugin load needed), but the
+    // waitFor wrapper is harmless and reads more uniformly.
+    await waitFor(() => {
+      expect(cy.lassoSelectionEnabled).toHaveBeenLastCalledWith(false)
+      expect(cy.userPanningEnabled).toHaveBeenLastCalledWith(false)
+      expect(cy.boxSelectionEnabled).toHaveBeenLastCalledWith(true)
+    })
   })
 })

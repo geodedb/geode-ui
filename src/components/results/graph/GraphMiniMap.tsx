@@ -8,21 +8,31 @@
 import React, { useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import cytoscape, { Core } from 'cytoscape'
-import navigator from 'cytoscape-navigator'
 
-// Side-effect import — the package ships its panner / viewport-rect
-// styles in this file. Without it the navigator div renders empty
-// (no visible rectangle, no draggable handle), which looks exactly
-// like a broken mini-map. The Jest CSS stub (jest.config.cjs's
-// moduleNameMapper for "\\.css$") returns an empty module so this
-// import is a no-op in tests.
-import 'cytoscape-navigator/cytoscape.js-navigator.css'
-
-// Idempotent registration — cytoscape.use is a no-op on second call, so
-// re-importing this module (e.g. across tests) doesn't double-register.
-// `cytoscape-navigator` predates the modern Ext typing, so we cast through
-// unknown — matches the project's existing pattern.
-cytoscape.use(navigator as unknown as cytoscape.Ext)
+// PERF #316: lazy-load the cytoscape-navigator plugin AND its bundled
+// CSS so users who never toggle the mini-map pay zero bytes for it.
+// The CSS sibling import is co-located here because Webpack needs it
+// inside the dynamic-import factory to roll the CSS into the same
+// chunk; the Jest CSS stub returns an empty module so it's a no-op
+// in tests. Same caching pattern as useLasso / useCxtMenu — first
+// mini-map mount pays the import cost; subsequent mounts (after a
+// toggle off/on) resolve immediately from the cached promise.
+let navigatorPluginPromise: Promise<void> | null = null
+function ensureNavigatorPlugin(): Promise<void> {
+  if (!navigatorPluginPromise) {
+    navigatorPluginPromise = Promise.all([
+      import(/* webpackChunkName: "cyto-navigator" */ 'cytoscape-navigator'),
+      import(
+        /* webpackChunkName: "cyto-navigator" */ 'cytoscape-navigator/cytoscape.js-navigator.css'
+      ),
+    ]).then(([mod]) => {
+      cytoscape.use(
+        (mod as { default: unknown }).default as unknown as cytoscape.Ext
+      )
+    })
+  }
+  return navigatorPluginPromise
+}
 
 // Stable id used both as the wrapper's DOM id and as the CSS selector
 // passed to cy.navigator(). The library's _initPanel only honors
@@ -112,6 +122,15 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
       // `el` is required so we don't init before React has mounted our
       // wrapper into the DOM — cy.navigator() will querySelector the
       // selector immediately and fail if the node isn't there yet.
+      //
+      // PERF #316: `cy.navigator` may legitimately be undefined for a
+      // few ms even after cy exists — the plugin chunk is lazy and
+      // registers async via ensureNavigatorPlugin() below. The poll
+      // gate handles both "cy not built yet" AND "plugin not loaded
+      // yet" with the same setTimeout retry; no separate plugin-await
+      // is needed inside the poll because the gate registers cytoscape
+      // .use() globally, which makes cy.navigator visible to every
+      // future cy instance on the same Core constructor.
       if (!cy || !el || typeof cy.navigator !== 'function') {
         pollTimer = setTimeout(tryInit, 50)
         return
@@ -162,6 +181,25 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
       bound = { cy, inst, onLayoutStop }
     }
 
+    // PERF #316: warm the plugin chunk in parallel with the cy-build
+    // poll. The promise resolves once cytoscape.use(navigator) has run
+    // globally — every cy instance constructed thereafter exposes
+    // `cy.navigator()`. `tryInit` is fired here AND from the
+    // ensureNavigatorPlugin then-callback so whichever lands first
+    // (plugin-ready or cy-built) triggers the poll; the cancelled +
+    // bound short-circuits guard against double-init.
+    ensureNavigatorPlugin().then(
+      () => {
+        tryInit()
+      },
+      () => {
+        // Plugin chunk failed to load — short-circuit the poll loop
+        // so we don't spin forever waiting for cy.navigator. The user
+        // sees an empty minimap div; toggling off and on retries via
+        // the next mount + cached rejected promise.
+        cancelled = true
+      }
+    )
     tryInit()
 
     return () => {

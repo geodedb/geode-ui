@@ -1,9 +1,30 @@
 import { useEffect } from 'react'
 import cytoscape, { Core } from 'cytoscape'
-import cxtmenu from 'cytoscape-cxtmenu'
 import type { Theme } from '@/theme/types'
 
-cytoscape.use(cxtmenu as unknown as cytoscape.Ext)
+// PERF #316: lazy-load the cytoscape-cxtmenu plugin so its ~hundreds-of-KiB
+// of glyph/canvas code only enters the active chunk when the user (or
+// scaleTier feature-gate) actually enables the radial menu. Static-imported
+// the plugin folded ~300 KiB of dead weight into the always-loaded graph
+// chunk for users who never right-click a node.
+//
+// Pattern: a single module-level promise caches the dynamic import + the
+// cytoscape.use() registration. The hook awaits it once per `enabled`
+// transition; subsequent enables resolve immediately from the cached
+// promise. Errors are surfaced via the promise rejection — the hook's
+// poll-and-cancel logic then no-ops gracefully (cxtmenu remains a
+// quality-of-life feature; failing closed is acceptable).
+let cxtMenuPluginPromise: Promise<void> | null = null
+function ensureCxtMenuPlugin(): Promise<void> {
+  if (!cxtMenuPluginPromise) {
+    cxtMenuPluginPromise = import(
+      /* webpackChunkName: "cyto-cxtmenu" */ 'cytoscape-cxtmenu'
+    ).then((mod: { default: unknown }) => {
+      cytoscape.use(mod.default as unknown as cytoscape.Ext)
+    })
+  }
+  return cxtMenuPluginPromise
+}
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 
@@ -103,6 +124,14 @@ export function useCxtMenu(args: UseCxtMenuArgs): void {
     // cyRef.current is null. A simple !cyRef.current return-early would
     // miss the cxtmenu factory call forever. Poll instead until cy is
     // mounted (or the effect is torn down).
+    //
+    // PERF #316: also wait for the lazy plugin chunk to load + register
+    // before polling. `ensureCxtMenuPlugin()` resolves immediately on
+    // every call after the first; first-enable pays the import cost
+    // (typically a few ms on warm cache). If the import rejects the
+    // poll loop is short-circuited via cancelled=true and the menu
+    // stays unmounted — operator sees no radial menu, which is the
+    // same UX as the pre-feature-gate (small graphs) baseline.
     let mounted: { destroy: () => void } | null = null
     let cancelled = false
     const tryMount = (): void => {
@@ -130,7 +159,17 @@ export function useCxtMenu(args: UseCxtMenuArgs): void {
         zIndex: 9999,
       })
     }
-    tryMount()
+    ensureCxtMenuPlugin().then(
+      () => {
+        tryMount()
+      },
+      () => {
+        // Plugin chunk failed to load (network error, etc.). Cancel
+        // the poll so we don't busy-wait for a cy.cxtmenu method that
+        // will never be registered.
+        cancelled = true
+      }
+    )
     return () => {
       cancelled = true
       if (mounted) {

@@ -1,6 +1,11 @@
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import type { Theme } from '@/theme/types'
 import { useCxtMenu, buildCommands } from './useCxtMenu'
+
+// PERF #316: useCxtMenu now lazy-imports cytoscape-cxtmenu when the
+// hook fires with enabled=true (or the default). The cy.cxtmenu()
+// factory call therefore lands after a microtask; tests await via
+// waitFor before asserting on the call shape.
 
 // The hook only reads three theme tokens for cosmetic options; a
 // minimal stub keeps the suite free of theme-module imports and lets
@@ -56,7 +61,7 @@ function makeCxtCy(): CxtFakeCore {
 }
 
 describe('useCxtMenu', () => {
-  it('mounts cxtmenu against the live core with selector node and the built commands', () => {
+  it('mounts cxtmenu against the live core with selector node and the built commands', async () => {
     const cy = makeCxtCy()
     const cyRef = { current: cy as never }
     const handlers = {
@@ -77,7 +82,7 @@ describe('useCxtMenu', () => {
         sig: 's1',
       })
     )
-    expect(cy.cxtmenu).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(cy.cxtmenu).toHaveBeenCalledTimes(1))
     const opts = cy.cxtmenu.mock.calls[0][0] as {
       selector?: string
       openMenuEvents?: string
@@ -97,7 +102,7 @@ describe('useCxtMenu', () => {
     ])
   })
 
-  it('tears down + re-mounts when sig changes (cy core rebuilt)', () => {
+  it('tears down + re-mounts when sig changes (cy core rebuilt)', async () => {
     const cy = makeCxtCy()
     const cyRef = { current: cy as never }
     const handlers = {
@@ -120,12 +125,12 @@ describe('useCxtMenu', () => {
         }),
       { initialProps: { sig: 's1' } }
     )
-    expect(cy.cxtmenu).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(cy.cxtmenu).toHaveBeenCalledTimes(1))
     rerender({ sig: 's2' })
-    expect(cy.cxtmenu).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(cy.cxtmenu).toHaveBeenCalledTimes(2))
   })
 
-  it('uses inverse-theme tokens for fillColor + itemColor (legibility on light theme)', () => {
+  it('uses inverse-theme tokens for fillColor + itemColor (legibility on light theme)', async () => {
     const cy = makeCxtCy()
     const cyRef = { current: cy as never }
     const inverseStubTheme = {
@@ -151,6 +156,7 @@ describe('useCxtMenu', () => {
         theme: inverseStubTheme as never,
       })
     )
+    await waitFor(() => expect(cy.cxtmenu).toHaveBeenCalledTimes(1))
     const opts = cy.cxtmenu.mock.calls[0]?.[0] as {
       fillColor: string
       itemColor: string

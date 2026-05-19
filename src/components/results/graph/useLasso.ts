@@ -1,8 +1,22 @@
 import { useEffect } from 'react'
 import cytoscape, { Core } from 'cytoscape'
-import lasso from 'cytoscape-lasso'
 
-cytoscape.use(lasso as unknown as cytoscape.Ext)
+// PERF #316: lazy-load cytoscape-lasso so users who never toggle the
+// lasso pref pay zero bytes for it. Same pattern as useCxtMenu — a
+// single module-level promise caches the import + cytoscape.use()
+// registration; first-enable pays the import cost, subsequent calls
+// resolve immediately.
+let lassoPluginPromise: Promise<void> | null = null
+function ensureLassoPlugin(): Promise<void> {
+  if (!lassoPluginPromise) {
+    lassoPluginPromise = import(
+      /* webpackChunkName: "cyto-lasso" */ 'cytoscape-lasso'
+    ).then((mod: { default: unknown }) => {
+      cytoscape.use(mod.default as unknown as cytoscape.Ext)
+    })
+  }
+  return lassoPluginPromise
+}
 
 type CoreWithLasso = Core & {
   lassoSelectionEnabled: (on?: boolean) => unknown
@@ -47,21 +61,47 @@ export function useLasso(args: UseLassoArgs): void {
     sig,
   } = args
   useEffect(() => {
-    const cy = cyRef.current as CoreWithLasso | null
-    if (!cy || typeof cy.lassoSelectionEnabled !== 'function') return undefined
-    if (enabled) {
-      // Order matters: disable panning BEFORE enabling lasso so the
-      // plugin's drag handler captures the next mousedown without
-      // racing the pan handler.
-      cy.userPanningEnabled(false)
-      cy.boxSelectionEnabled(true)
-      cy.lassoSelectionEnabled(true)
-    } else {
-      cy.lassoSelectionEnabled(false)
-      cy.userPanningEnabled(restorePanningWhenDisabled)
-      cy.boxSelectionEnabled(restoreBoxSelectionWhenDisabled)
+    let cancelled = false
+    // PERF #316: when the lasso pref is on, await the lazy plugin
+    // chunk + registration before touching the cy methods. When the
+    // pref is OFF we don't need the plugin loaded at all — the
+    // `cy.lassoSelectionEnabled` no-op safety check below still
+    // succeeds for the "OFF" branch because the cy methods that were
+    // installed by a prior on→off transition are still in place, and
+    // a never-enabled lasso has nothing to disable. This keeps the
+    // common case (lasso pref never flipped) at zero plugin cost.
+    const apply = (): void => {
+      if (cancelled) return
+      const cy = cyRef.current as CoreWithLasso | null
+      if (!cy || typeof cy.lassoSelectionEnabled !== 'function') return
+      if (enabled) {
+        // Order matters: disable panning BEFORE enabling lasso so the
+        // plugin's drag handler captures the next mousedown without
+        // racing the pan handler.
+        cy.userPanningEnabled(false)
+        cy.boxSelectionEnabled(true)
+        cy.lassoSelectionEnabled(true)
+      } else {
+        cy.lassoSelectionEnabled(false)
+        cy.userPanningEnabled(restorePanningWhenDisabled)
+        cy.boxSelectionEnabled(restoreBoxSelectionWhenDisabled)
+      }
     }
-    return undefined
+    if (enabled) {
+      ensureLassoPlugin().then(apply, () => {
+        // Plugin failed to load — leave panning/box-selection in
+        // their current state and bail. The user can re-toggle to
+        // retry (next ensureLassoPlugin() call returns the cached
+        // rejected promise, but a manual fix would reset the cache).
+      })
+    } else {
+      // Disable path doesn't need the plugin loaded — if `cy.lasso*`
+      // is missing the apply() function is a no-op via the type-guard.
+      apply()
+    }
+    return () => {
+      cancelled = true
+    }
   }, [
     cyRef,
     enabled,
