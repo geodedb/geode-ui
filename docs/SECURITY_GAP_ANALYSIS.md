@@ -1,10 +1,16 @@
 # Security Gap Analysis — geode-ui
 
-**Last updated:** 2026-05-17 (Phase 5 — /codepros:gap-close round-3 cohort: 9 security gaps reified with closure SHAs. S-09/#272 (`b0e7cc6`), S-10/#274 (`8bc00af` — ADR 0002), S-12/#280 (`8b01c57`), S-13/#283 (`c672d36`), S-NEW-10/#264 (`3bcba7d`), S-NEW-11/#265 (`a758ac4`), S-NEW-12/#267 (`9823965`, underlying fix `755ede6`), S-NEW-13/#266 (`f60f1a2`, underlying fix `d914df6`), CO-242 NFKC corpus on #242 (`5e54315`). S-11/#277 (css-minimizer 7→8) deferred to a separate PR per user direction. GAP-037 / #282 (SECURITY.md misattribution) closed via `60d965a` and tracked under `GAP_ANALYSIS.md`. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
+**Last updated:** 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: S-NEW-J / #322 + S-NEW-K / #323 Closed via `1cde6ba` (`${VAR:?msg}` required form + per-checkout `.env.test` random generation + pre-commit gate); S-NEW-C / #308 Closed via `36661d7` (`extractTokenForRevoke` sunset-exempt); S-NEW-A / #300 **Partial — Scope-A Closed** via `71352b2` (`auth_role_resolved` audit event with `source=bootstrap`); Scope-B remains Open — blocked on upstream Geode (real SHOW USERS ROLES discovery). 9 of 13 2026-05-19 security items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
+
+**Previous:** 2026-05-19 (Phase 4 — /codepros:audit 2026-05-19 cohort: 13 new findings filed (#300, #304, #308, #310, #313, #317, #318, #320, #321, #322, #323, #324, #325); 3 confidential (#300, #322, #323); 0 Critical, 1 High, 5 Medium, 4 Low, 3 Info; top risk is S-NEW-A / #300 (Risk 48 — authenticateUpstream returns nil roles); supply-chain hardening: S-NEW-J / #322 + S-NEW-K / #323 remove operator-misuse hardcoded defaults from `deploy/docker-compose.test.yml`. Prior content below preserved verbatim.)
+
+**Last updated (prior):** 2026-05-17 (Phase 5 — /codepros:gap-close round-3 cohort: 9 security gaps reified with closure SHAs. S-09/#272 (`b0e7cc6`), S-10/#274 (`8bc00af` — ADR 0002), S-12/#280 (`8b01c57`), S-13/#283 (`c672d36`), S-NEW-10/#264 (`3bcba7d`), S-NEW-11/#265 (`a758ac4`), S-NEW-12/#267 (`9823965`, underlying fix `755ede6`), S-NEW-13/#266 (`f60f1a2`, underlying fix `d914df6`), CO-242 NFKC corpus on #242 (`5e54315`). S-11/#277 (css-minimizer 7→8) deferred to a separate PR per user direction. GAP-037 / #282 (SECURITY.md misattribution) closed via `60d965a` and tracked under `GAP_ANALYSIS.md`. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
 **Audit:** /codepros:audit Phase 3 → Phase 4 tracking (Audit-2026-05-17 cohort)
 **Repository:** `devnw/codepros/geode/geode-ui`
 **Branch reviewed:** `main` @ `d5c47da`
 
+> **Audit-2026-05-19 Phase 4 jump-link:** see [2026-05-19 audit cohort](#2026-05-19-audit-cohort) for the **13 newly-filed `S-NEW-A..M` findings** (issues #300, #304, #308, #310, #313, #317, #318, #320, #321, #322, #323, #324, #325). Three confidential (#300, #322, #323). 0 Critical, 1 High, 5 Medium, 4 Low, 3 Info. Top risk: S-NEW-A / #300 (Risk 48 — `authenticateUpstream` returns nil roles).
+>
 > **Audit-2026-05-17 Phase 4 follow-on jump-link:** see [2026-05-17 audit cohort](#2026-05-17-audit-cohort) for the **9 cohort-resident findings**: the original 8 from earlier in the day (S-2026-05-17-01..08, mapped to #264-#267 + cross-links to #241/#242/#71/#233) PLUS the Phase-4 follow-on **5 newly-filed `S-2026-05-17-09..13`** findings (issues #272, #274, #277, #280, #283 — all public, no confidential filings) and **two Phase-4 update comments** on existing issues (#233 enumerated phased remediation; #242 missing-case classification). Two findings from Phase 2 dropped as not-a-gap (see Dropped subsection). No findings warrant CVE filing.
 >
 > **Audit-2026-05-13 cohort jump-link:** see [2026-05-13 audit cohort](#2026-05-13-audit-cohort) for the 8 newly-filed `S-NEW-*` + `GO-2026-4918` findings (issues #201, #202, #205, #206, #209, #210, #211, #212; three confidential — #201, #202, #205). S3 (#116) is explicitly upgraded from PARTIAL → CLOSED in this pass. F2/F4/F7/N2/S5/S8 re-validated as still-closed.
@@ -521,3 +527,83 @@ The cohort is **smaller and lower-impact than the 2026-05-13 cohort**. The domin
 - **Within 90 days:** (all earlier items already Closed). Note: S-2026-05-17-02 / #265 already Closed — all three WS surfaces default-deny cross-origin upgrades; cmd-level pin added 2026-05-17. S-2026-05-17-04 / #264 already Closed via `9a787d8` — `RoleGate` wraps `/admin/*`; App-level smoke added 2026-05-17. S-2026-05-17-05 / #266 already Closed via `d914df6` — bare `wss:` removed from CSP `connect-src`.
 - **Backlog:** S-2026-05-17-06 (#233 already filed; Phase-4 follow-on enumerated 16 unpinned refs + phased remediation), S-2026-05-17-07 (#242 already filed; Phase-4 follow-on reclassified as missing-case), S-2026-05-17-10 (#274, **Closed 2026-05-17** via ADR 0002), **S-2026-05-17-11 (#277)** (css-minimizer-webpack-plugin dev-tree bump), S-2026-05-17-12 (#280, **Closed 2026-05-17** via release-cli:v0.24.0 + digest pin), S-2026-05-17-13 (#283, **Closed 2026-05-17** via the slow-read regression test in `cmd/server/main_test.go` exercising `wsExemptTimeoutHandler` end-to-end with an `httptest.NewServer`). Note: **S-2026-05-17-08 (#267) was already Closed via `755ede6`** (renamed fixtures to `test-admin`, added `TestNoLiteralGeodeAdminFixture`); the GitLab tracker label was the only state still showing Open and is being synced. All remaining Low / Info; bundle with the next routine hardening sprint.
 - **Follow-up to verify:** S-NEW-3 (#209) — current code shows the shim is already removed; the issue may be eligible for closure. Quick read confirms it's gone; suggest re-validating against the original issue body before closing.
+
+---
+
+## 2026-05-19 audit cohort
+
+**Audit:** /codepros:audit Phase 3 → Phase 4 tracking (Audit-2026-05-19 cohort)
+**Branch reviewed:** `main` @ HEAD (2026-05-19)
+**Scope:** Adversarial security review of auth, web/API, input handling, supply chain, operational surfaces against the post-2026-05-17 closure tree.
+
+### 2026-05-19 findings — stack ranked by Risk Score
+
+| Rank | ID | Severity | Risk (I × L × 4) | Title | Issue | Confidential | File:Line | OWASP / CWE | Confidence | Status |
+|------|----|----------|------------------|-------|-------|--------------|-----------|-------------|------------|--------|
+| 1 | **S-NEW-A** | High | **48** (4 × 3 × 4) | `authenticateUpstream` returns nil roles — admin gate stale after `CREATE USER ROLE admin` | [#300](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/300) | **YES** | `internal/server/handlers_auth.go:333`; `cmd/server/app.go:310-322` | A01 / CWE-285 | confirmed | **Partial — Scope-A Closed (2026-05-19)** via `71352b2` (`auth_role_resolved` audit event from `adminRolesFor` with `source=bootstrap`); Scope-B (real SHOW USERS ROLES upstream role discovery) remains Open — blocked on upstream Geode. Issue #300 stays open pending Scope-B. |
+| 2 | **S-NEW-B** | Medium | **32** (4 × 2 × 4) | `-admin-users` CSV case-sensitive and not NFKC-normalised | [#304](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/304) | no | `cmd/server/app.go:310-322` | A01 / CWE-178 | suspected | Open |
+| 3 | **S-NEW-J** | Medium | **32** (4 × 2 × 4) | `docker-compose.test.yml` `GEODE_PROFILESTORE_KEY` default is 32 zero bytes | [#322](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/322) | **YES** | `deploy/docker-compose.test.yml:124` | A07 / CWE-798 | confirmed | **Closed (2026-05-19)** via `1cde6ba` — `${VAR:?msg}` required form in compose; `make e2e-env` generates per-checkout `deploy/.env.test` with `openssl rand`; `scripts/check-compose-secrets.mjs` pre-commit gate. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19". |
+| 4 | **S-NEW-K** | Medium | **32** (4 × 2 × 4) | `docker-compose.test.yml` `JWT_SECRET_HEX` default is hardcoded `0123…cdef` | [#323](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/323) | **YES** | `deploy/docker-compose.test.yml:129` | A07 / CWE-798 | confirmed | **Closed (2026-05-19)** via `1cde6ba` — same supply-chain hardening as #322; `JWT_SECRET_HEX` default stripped; per-checkout `.env.test` provides a freshly random value. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19". |
+| 5 | **S-NEW-C** | Medium | **24** (2 × 3 × 4) | Post-2026-07-01 sunset: `?access_token=` logout becomes silent no-op (defeats S-NEW-9 / #205) | [#308](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/308) | no | `internal/server/handlers_auth.go:215,245`; `auth.go:104-118` | A07 / CWE-613 | confirmed | **Closed (2026-05-19)** via `36661d7` — `extractTokenForRevoke` (sunset-exempt) keeps post-2026-07-01 logout-side `?access_token=` revoke working; preserves S-NEW-9 / #205 nuisance-replay defense. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19". |
+| 6 | **S-NEW-I** | Medium | **24** (2 × 3 × 4) | `injectAuthIntoInitialize` — no depth/size cap on LSP initialize JSON re-emit (authenticated DoS) | [#321](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/321) | no | `internal/server/ws_lsp.go:244-274` | A04 / CWE-1287 + CWE-770 | suspected | Open |
+| 7 | **S-NEW-E** | Low | **16** (2 × 2 × 4) | JWT kid rotation does not mass-revoke legacy tokens (operator-expectation gap) | [#313](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/313) | no | `internal/jwt/jwt.go:275-278` | A02 / CWE-294 | confirmed | Open |
+| 8 | **S-NEW-F** | Low | **16** (2 × 2 × 4) | `peekLoginCreds`: multipart/form-data falls through, limiter bucket desyncs from inner Login | [#317](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/317) | no | `internal/server/loginlimiter.go:492-517` | A07 / CWE-799 | suspected | Open |
+| 9 | **S-NEW-D** | Low | **8** (2 × 1 × 4) | Login min-failure-latency floor bypassed on JWT-issuer-nil / Profiles-nil 500 paths | [#310](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/310) | no | `internal/server/handlers_auth.go:32-47` | A07 / CWE-208 | suspected | Open |
+| 10 | **S-NEW-G** | Info | **8** (1 × 2 × 4) | CSRF middleware exempts `/api/v1/auth/logout` — defense-in-depth gap (mitigated by SameSite=Strict) | [#318](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/318) | no | `internal/server/csrf.go:148` | A01 / CWE-352 | confirmed | Open |
+| 11 | **S-NEW-L** | Low | **8** (2 × 1 × 4) | GO-2026-4918: `golang.org/x/net@v0.52.0` indirect (fixed in v0.53.0); unreached today | [#324](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/324) | no | `go.sum`, `go.mod` | A06 / CWE-835 | confirmed | Open |
+| 12 | **S-NEW-M** | Info | **8** (1 × 2 × 4) | `emitAudit` in `rejectLogin` includes `key` with embedded NUL byte (possible SIEM truncation) | [#325](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/325) | no | `internal/server/profilelimiter.go:357-362` | A09 / CWE-117 | suspected | Open |
+| 13 | **S-NEW-H** | Info | **4** (1 × 1 × 4) | `mcpx.SetAuthVerifier` is process-wide global (embedding-only architectural risk) | [#320](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/320) | no | `gen/pkg/mcpx/mcp.go:46` | A05 / CWE-1357 | confirmed | Open |
+
+**Severity counts (2026-05-19 cohort):** Critical 0 | High 1 | Medium 5 | Low 4 | Info 3 | **Total 13**.
+**Confidential issues:** S-NEW-A (#300), S-NEW-J (#322), S-NEW-K (#323) — 3 of 13. Filed `--confidential` because each describes either an authorization-staleness exploit path or a hardcoded-credential operator-misuse class.
+
+### 2026-05-19 findings by area
+
+**Auth / Authorization:** S-NEW-A (#300), S-NEW-B (#304), S-NEW-C (#308), S-NEW-D (#310), S-NEW-E (#313)
+**Web / API:** S-NEW-F (#317), S-NEW-G (#318), S-NEW-H (#320)
+**Input handling:** S-NEW-I (#321)
+**Supply chain / Infra:** S-NEW-J (#322), S-NEW-K (#323), S-NEW-L (#324)
+**Operational / Observability:** S-NEW-M (#325)
+
+### 2026-05-19 — top 5 Risk-Score findings
+
+1. **S-NEW-A (#300, confidential)** — `authenticateUpstream` returns nil roles. Risk 48 / High. Admin authority sourced solely from bootstrap `-admin-users` allowlist; post-boot `CREATE USER ROLE admin` grants are silently denied, post-boot `DROP USER ROLE admin` revocations don't reach existing JWTs until natural expiry. Fix: real upstream role-discovery OR document the bootstrap-only contract + audit-emit. SLA 2026-06-18.
+2. **S-NEW-B (#304)** — `-admin-users` CSV case-sensitive, no NFKC. Risk 32 / Medium. Suspected. Confirm by cross-reading Geode's username normalisation rules; if Geode normalises and this server doesn't, the gap is real. Fix: reuse the existing `profilestore.NormalizeProfileName` helper (Phase-5 closed #241 with that helper) at bootstrap + login.
+3. **S-NEW-J (#322, confidential)** — `GEODE_PROFILESTORE_KEY` default = 32 zero bytes in test compose. Risk 32 / Medium. Operator-misuse class. Fix: remove the default; require explicit env var or secrets manager.
+4. **S-NEW-K (#323, confidential)** — `JWT_SECRET_HEX` default = `0123…cdef` in test compose. Risk 32 / Medium. Operator-misuse class. Fix: remove the default; require explicit env var or secrets manager; consider startup low-entropy rejection.
+5. **S-NEW-C (#308)** — Post-sunset logout silently no-ops for `?access_token=` clients. Risk 24 / Medium. Defeats S-NEW-9 / #205 nuisance-replay defense. **Must land before 2026-07-01 sunset** — 43 days from filing.
+
+### 2026-05-19 — roadmap
+
+**Quick wins (< 1 day):**
+
+- S-NEW-J / #322 — remove `GEODE_PROFILESTORE_KEY` default from compose.
+- S-NEW-K / #323 — remove `JWT_SECRET_HEX` default from compose.
+- S-NEW-L / #324 — `go get golang.org/x/net@v0.53.0` + `go mod tidy`.
+- S-NEW-G / #318 — drop the `/api/v1/auth/logout` CSRF exemption or pin SameSite=Strict dependency in a code-comment.
+
+**Medium (1–5 days):**
+
+- S-NEW-B / #304 — wire NFKC+lower normaliser at bootstrap + login.
+- S-NEW-C / #308 — extend `extractToken` for logout-specific bypass OR add post-sunset legacy-shape audit. **Land before 2026-07-01 sunset.**
+- S-NEW-I / #321 — cap LSP `initialize` body size + typed-struct + RawMessage pass-through.
+- S-NEW-D / #310 — convert bootstrap-misconfig nil branches into startup invariants OR extend latency-floor wrap to the 500 paths.
+- S-NEW-F / #317 — extend `peekLoginCreds` to parse multipart bodies (or reject multipart login with 415).
+- S-NEW-M / #325 — replace NUL separator with printable representation in `emitAudit`.
+
+**Strategic (> 5 days):**
+
+- S-NEW-A / #300 — wire real upstream role discovery (preferred) OR document bootstrap-only contract + admin-resolution audit.
+- S-NEW-E / #313 — add `RotateAndRevokeAll` API on `Issuer` (preferred) OR runbook entry under #179.
+- S-NEW-H / #320 — upstream genapi PR to remove the process-wide global verifier.
+
+### 2026-05-19 — immediate actions
+
+- **None requiring secret rotation.** The compose defaults are test-only and have not (per current scan) reached production deploys. Confirm with operator before closing — if any production deploy ever inherited the compose default, rotate both `GEODE_PROFILESTORE_KEY` and `JWT_SECRET_HEX`.
+- **None requiring immediate code change for active exploit mitigation.** No active RCE, no live leaked credentials, no privilege-escalation path open without operator action.
+- **Coordinate before 2026-07-01 (43 days):** S-NEW-C / #308 must land before the `?access_token=` sunset to preserve the S-NEW-9 / #205 logout-side revocation contract for legacy clients.
+- **Cross-cohort observation:** S-NEW-A (#300) and the 2026-05-17 cohort's "RoleGate" closure (#264 / S-2026-05-17-04) are both rooted in the same admin-authority surface. The RoleGate gives correct client-side hiding for non-admins; #300 highlights that server-side authority remains bootstrap-only. Both need to be considered together when expanding the admin model upstream.
+
+### 2026-05-19 — verdict
+
+The 2026-05-19 cohort is **smaller than the 2026-05-17 cohort** and dominated by **defense-in-depth tightening + operator-misuse hardening** on already-mitigated surfaces. No novel vulnerability classes. The single High finding (S-NEW-A / #300) is an architectural authority-source clarification rather than an active exploit. No active RCE, no live leaked production secrets, no auth-bypass-without-operator-action. No findings warrant CVE filing.

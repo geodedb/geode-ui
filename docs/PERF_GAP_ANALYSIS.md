@@ -1,6 +1,10 @@
 # Performance Gap Analysis
 
-Last updated: 2026-05-17 (Phase 5 — /codepros:gap-close round-3 cohort: PERF-N1 #275 (`a37caa3`), PERF-N3 #278 (`a1a1313`), PERF-N4 #281 (`912be6d`), PERF-N5 #284 (`5a052b8`), PERF-N6 #285 (`f8ed2f2`), PERF-N7 #286 (`f2b8566`), CO-242 NFKC corpus on #242 (`5e54315`), CO-259 brotli on #259 (`43eb1ef`), GAP-035 baseline rotation #276 (`42d3664`). All seven new Phase-4 findings closed plus two carry-overs. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
+Last updated: 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: PERF-2026-05-19-06 / #312 Closed via `e42a92c` (bench harness gaps). Three perf items (#316 lazy-load cytoscape plugins, #297 WS parse worker, #291 layoutWorker transferable Float32Array) deferred to next session — clean tree, context budget. 6 of 7 2026-05-19 perf items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
+
+Previous: 2026-05-19 (Phase 4 — /codepros:audit 2026-05-19 cohort: 7 new perf issues filed against the graph layout/worker, WS protocol, bench harness, and bundle-bloat surfaces uncovered by the 2026-05-19 perf-smoke bench. See "Phase 4 (2026-05-19) Findings — Newly Opened" section below.)
+
+Previous: 2026-05-17 (Phase 5 — /codepros:gap-close round-3 cohort: PERF-N1 #275 (`a37caa3`), PERF-N3 #278 (`a1a1313`), PERF-N4 #281 (`912be6d`), PERF-N5 #284 (`5a052b8`), PERF-N6 #285 (`f8ed2f2`), PERF-N7 #286 (`f2b8566`), CO-242 NFKC corpus on #242 (`5e54315`), CO-259 brotli on #259 (`43eb1ef`), GAP-035 baseline rotation #276 (`42d3664`). All seven new Phase-4 findings closed plus two carry-overs. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
 
 Scope: app code, generated clients/servers, Go backend, React/Electron UI, CI/CD, Docker/release config, scripts, and performance-relevant docs. This review is non-destructive; product code was not changed.
 
@@ -117,6 +121,34 @@ Six new GitLab issues filed (cadence IDs `PERF-2026-05-17-11` through `PERF-2026
 | PERF-2026-05-17-15 | [#285](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/285) | P3 | ~25 | 3.7 MiB largest async chunk; no chunk-budget tripwire in CI | UI build/perf | `internal/ui/dist/4111.5f8253d51707c022176e.js` 3,803,806 bytes; `webpack.prod.js:4-22` excludes async chunks from entrypoint budget | **Closed (2026-05-17)** via `f8ed2f2` — added `scripts/check-chunk-budget.mjs` + `scripts/check-chunk-budget.test.mjs` (6 cases) + `npm run check:chunk-budget` script. Walks `internal/ui/dist/` for `.js` chunks, sorts heaviest-first, fails if any chunk exceeds `--budget <bytes>` (default 4 MiB). Wired as a new `chunk-budget` job in `.gitlab-ci.yml` with `allow_failure: true`. |
 | PERF-2026-05-17-16 | [#286](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/286) | P3 | ~20 | `graphStatsCache` is unbounded Map; entries for never-revisited graphs leak | UI memory | `src/lib/useOverviewData.ts:54-67` — 60s TTL only prunes on read-miss for exact same key | **Closed (2026-05-17)** via `f2b8566` — bounded to 32 entries via JS-Map-insertion-order LRU. `writeGraphStatsCache` does `delete-before-set` so an existing key re-registers as the newest, and post-write a `while (size > cap)` loop evicts the oldest. Two new tests pin the contract: `loadStats LRU eviction` + `loadStats LRU refresh`. |
 | (no new issue) | [#259](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/259) | P2 | ~50 | Brotli precompression — long-form implementation plan landed alongside the closure | UI build + static-file negotiation | `internal/ui/embed.go:46-66` (gzip-only pre-fix); `webpack.prod.js` no `CompressionPlugin`; vendors.js 555 KiB, main.js 228 KiB | **Closed (2026-05-17)** via `43eb1ef` — `scripts/precompress-dist.mjs` wired into `npm run build` as `build:precompress`; `internal/ui/embed.go::Handler` serves `.br` siblings when `Accept-Encoding: br`. Measured 64.08 MiB -> 11.10 MiB. 5 Go tests + 5 Node tests pin the contract. |
+
+## Phase 4 (2026-05-19) Findings — Newly Opened
+
+Seven new GitLab issues filed (cadence IDs `PERF-2026-05-19-01` through `PERF-2026-05-19-07`). Discovered by `/codepros:audit` Phase 3 perf-reviewer pass against the 2026-05-19 perf-smoke baseline (`docs/performance/2026-05-19-perf-smoke.results.json`). Phase 3 also flagged 1 candidate (B — runLayout partial-cache 3×O(n) rerun) that was dropped at this gate: at large n the rerun is negligible relative to layout convergence cost. Recorded under "Dropped 2026-05-19" below.
+
+Stack-ranked by PerfScore (descending):
+
+| Cadence ID | Issue | PerfSeverity | PerfScore | Finding | Component | Evidence | Status |
+|---|---|---|---:|---|---|---|---|
+| PERF-2026-05-19-01 | [#291](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/291) | P1 | 80 | layoutWorker JSON-encode + toPosMap re-iteration per 33ms tick — transferable Float32Array | UI graph worker | `src/components/results/graph/layoutWorker.ts:71-81`; `src/components/results/graph/useLayoutWorker.ts:40-44,70-72`; bench `docs/performance/2026-05-19-perf-smoke.results.json` n=10000 p5Fps=0.3 | **OPEN — deferred to next session (clean tree)**: ~180 LOC scope (worker protocol change + main-thread reciprocal + bench A/B). Not started this session — context budget. |
+| PERF-2026-05-19-07 | [#316](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/316) | P1 | 80 | cytoscape chunk 6.41 MiB (eager plugins) + fcose imported twice — lazy-load + dedupe | UI build | `internal/ui/dist/2749.*.js` 6,717,982 B; main + worker both pull `cytoscape-fcose` | **OPEN — deferred to next session (clean tree)**: ~120 LOC across 4-5 files (`useLasso`/`useCxtMenu`/`GraphMiniMap` dynamic imports), requires bundle delta verification (`scripts/check-chunk-budget`) and tests must `await` dynamic imports. Not started this session. |
+| PERF-2026-05-19-06 | [#312](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/312) | P1 | 60 | bench harness — no warm rerun, worker path never exercised, p5Fps gate @ n=5000 wrong tier, bench-gate.ts 10% threshold no abs-ms floor | CI/UI bench | `e2e/specs/19-graph-bench.spec.ts:40-179,136`; `src/components/results/graph/scaleTier.ts:1-11`; `scripts/bench-gate.ts:26` | **Closed (2026-05-19)** via `e42a92c` — bench harness: warm-rerun + worker-path combos; `scaleTier.MID_MAX` 5_000→5_001; `window.__geode_bench` debug surface; `layoutCache.getStats()`; `bench-gate.ts MIN_ABSOLUTE_MS` floor. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19". |
+| PERF-2026-05-19-03 | [#297](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/297) | P1 | 60 | WS frame parse uses JSON.parse on main thread — offload to worker for 100k-row streams | UI streaming | `src/lib/queryStream.ts:77-90`; `internal/server/ws_query.go:39` | **OPEN — deferred to next session (clean tree)**: ~140 LOC (new worker file + URL helper + fallback to main thread on construct fail); bench rerun needed. Not started this session. |
+| PERF-2026-05-19-02 | [#294](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/294) | P2 | 48 | layoutCache.get clones full PosMap on every hit — drop defensive clone | UI graph cache | `src/components/results/graph/layoutCache.ts:42` | OPEN |
+| PERF-2026-05-19-04 | [#302](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/302) | P2 | 36 | WS protocol is JSON-only — evaluate MessagePack/CBOR (design + bench, not implementation) | UI + Backend | `internal/server/ws_query.go:39`; `src/lib/queryStream.ts:77-90`; no `gen/pkg/wsx` binary path | OPEN |
+| PERF-2026-05-19-05 | [#306](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/306) | P2 | 32 | streamRowsOverWS sequential scan→encode→write — producer goroutine + bounded channel | Backend WS | `internal/server/ws_query.go:391-455` | OPEN |
+
+Top 5 by PerfScore (2026-05-19 Phase 4 OPEN set):
+
+1. **#291 (PerfScore 80, P1)** — layoutWorker per-tick JSON-encode + main-thread toPosMap rebuild. Bench shows p5Fps=0.3 / avgFps=33.3 at n=10000. Transferable Float32Array is the fix.
+2. **#316 (PerfScore 80, P1)** — 6.41 MiB cytoscape chunk + fcose duplication. Lazy-load cytoscape plugins and dedupe fcose; expected 1-2 MiB removed from the graph chunk. Complements existing #285 (chunk-budget tripwire).
+3. **#312 (PerfScore 60, P1)** — bench harness has four compounding blind spots (no warm rerun / worker path never exercised / p5Fps@n=5000 wrong tier / bench-gate threshold has no abs-ms floor). Bundled umbrella.
+4. **#297 (PerfScore 60, P1)** — WS JSON.parse on main thread; 1,562 parse events on a 100k-row stream burst compete with React reconciliation and graph layout. Offload to worker.
+5. **#294 (PerfScore 48, P2)** — layoutCache.get clones PosMap on cache hit. Quick win.
+
+### Dropped 2026-05-19 (Phase 2/3 candidates)
+
+- **B — `runLayout.ts:65-71` partial-cache rerun does 3×O(n) (lock, layout, unlock).** Dropped. At large n the rerun cost is dominated by layout convergence; the 3×O(n) is single-digit ms. Watchlist note only.
 
 ### R1 — Phase 2 recommendation already covered
 

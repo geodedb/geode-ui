@@ -1,6 +1,8 @@
 # Quality Gap Analysis
 
-Last updated: 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort: QUALITY-16/17/18/19 (#268/#269/#270/#271) reified with closure SHAs `eca3040` / `5350b99` / `12dc773` / `c71f812`. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
+Last updated: 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: Q-NEW-Q / #289 Closed via `b78c0da` (runSync generation counter); Q-NEW-R / #314 Closed via `f725ea4` (tab-scoped `ResultTabErrorBoundary`). 9 of 11 2026-05-19 quality items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
+
+Previous: 2026-05-19 (audit Phase 4 — quality-reviewer added 26 findings, grouped into 11 GitLab issues: #289/#292/#295/#299/#303/#307/#309/#311/#314/#315/#319. New cohort table appended at the end of this file.)
 
 Repo: `devnw/codepros/geode/geode-ui`
 
@@ -175,3 +177,82 @@ Phase-2 candidate dropped (no issue filed):
 - **M7 Zustand selector shape issue**: `src/lib/queryStore.ts` has 2 fields (`stagedStatement`, `setStaged`); per-field selectors are the correct pattern here. No gap.
 - **A1 Admin nav 2-level pattern**: Subsumed by [#252](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/252).
 - **A3 Profile-name normalisation authority**: Subsumed by [#241](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/241) (the authority IS the missing server side; that is the bug being fixed).
+
+## 2026-05-19 audit cohort
+
+Phase 3 (quality-reviewer) produced **26 confirmed findings** against the graph + query + results subsystems. Findings cluster around four hot files that exceed the readability LOC budget after recent feature work:
+
+- `src/components/results/graph/useGraphCytoscape.ts` (474 LOC) — rebuild closure monolith + 8-effect surface + module-level singleton.
+- `src/pages/QueryPage.tsx` (630 LOC) — 4-concern effect surface + `streamStateToResp` co-location + abort/dedup gaps.
+- `src/components/results/TableView.tsx` (615 LOC) — styled + virt-math + cell renderer + NDJSON export bundled.
+- `src/components/results/GraphViewCytoscape.tsx` (498 LOC) — 23-field prop bundle wants a constructor.
+
+The 26 findings were grouped into **11 GitLab issues** along natural cleavage lines (one umbrella per file or per concern cluster). All 11 carry `Discovered-By: 2026-05-19 audit`, `confidence::confirmed` (one `confidence::suspected`), and `status::triage`.
+
+Severity counts (new):
+
+- High: 4 (Q-NEW-Q runSync abort, Q-NEW-N lastRebuild singleton, Q-NEW-O tap-handler leak on error path, Q-NEW-R missing ErrorBoundary)
+- Medium: 5 (Q-NEW-A/B/C/S decomposition umbrella, Q-NEW-D/E QueryPage extract, Q-NEW-F TableView split, Q-NEW-G+I+J+K+L+M type-safety umbrella, Q-NEW-P history dedup)
+- Low: 2 (Q-NEW-T TTI mark on all branches, Q-NEW-H+U+V+W+X+Y+Z docs umbrella)
+
+Top 5 by PriorityScore and release risk:
+
+1. Q-NEW-Q — `runSync` has no AbortController; rapid double-Run clobbers fresh result with stale: [#289](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/289). PriorityScore **64**.
+2. Q-NEW-A+B+C+S — `useGraphCytoscape` rebuild closure decomposition + `useWhenCy` helper + ref-in-deps cleanup: [#292](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/292). PriorityScore **48**.
+3. Q-NEW-N — module-level `lastRebuild` singleton breaks multi-instance graphs: [#307](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/307). PriorityScore **48**.
+4. Q-NEW-O — `cy.on` tap handlers not removed before `cy.destroy()` on error path: [#309](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/309). PriorityScore **48**.
+5. Q-NEW-R — no `ErrorBoundary` between `GraphViewCytoscape` and `ResultPanel` tabs: [#314](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/314). PriorityScore **48**.
+
+### Ranked PriorityScore table (2026-05-19 cohort)
+
+`PriorityScore = Impact(1-5) * Likelihood(1-5) * 4`.
+
+| Rank | IID | Severity | PriorityScore | Category | Finding | Component | Effort | Confidence | Status |
+|---:|---|---|---:|---|---|---|---|---|---|
+| 1 | [#289](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/289) | High | 64 | maintainability | Q-NEW-Q — `runSync` no AbortController; double-Run race | `src/pages/QueryPage.tsx:310-344` | S-M | confirmed | **Closed (2026-05-19)** via `b78c0da` — runSync generation counter; stale resolved promises short-circuit before clobbering fresh setResp. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence. |
+| 2 | [#292](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/292) | Medium | 48 | readability | Q-NEW-A+B+C+S — `useGraphCytoscape` rebuild closure (170 LOC, 7 concerns) + `useWhenCy` helper + ref-in-deps cleanup + eslint marker | `src/components/results/graph/useGraphCytoscape.ts:163-333,337-448` | M | confirmed | open / triage |
+| 3 | [#307](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/307) | High | 48 | maintainability | Q-NEW-N — module-level `lastRebuild` singleton breaks multi-instance | `src/components/results/graph/useGraphCytoscape.ts:71,223-229` | S | confirmed | open / triage |
+| 4 | [#309](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/309) | High | 48 | maintainability | Q-NEW-O — `cy.on` tap handlers leak on rebuild error path | `src/components/results/graph/useGraphCytoscape.ts:253-269,310-315` | S | confirmed | open / triage |
+| 5 | [#314](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/314) | High | 48 | architecture | Q-NEW-R — no `ErrorBoundary` between graph and ResultPanel; crash whitescreens page | `src/components/results/GraphViewCytoscape.tsx`, `ResultPanel.tsx` | S | confirmed | **Closed (2026-05-19)** via `f725ea4` — tab-scoped `ResultTabErrorBoundary` wraps each TabPanel body; resetKey clears prior crash on tab/query change. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19". |
+| 6 | [#295](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/295) | Medium | 48 | readability | Q-NEW-D+E — QueryPage 4-concern effect surface + co-locate `streamStateToResp` | `src/pages/QueryPage.tsx:144-151,200-291,403-444,445-455` | M | confirmed | open / triage |
+| 7 | [#299](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/299) | Medium | 48 | readability | Q-NEW-F — `TableView.tsx` 615 LOC; split styled / sizing / CellView / exportNdjson | `src/components/results/TableView.tsx` | M | confirmed | open / triage |
+| 8 | [#303](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/303) | Medium | 48 | api-contract | Q-NEW-G+I+J+K+L+M — prop-bundle constructor + `as unknown as` casts + NDJSON typing + UIError envelope + Window aug + test-seam gate | `useGraphCytoscape.ts:275-279,456-473`, `QueryPage.tsx:144-151,337`, `TableView.tsx:414-417`, `GraphViewCytoscape.tsx` | M | confirmed | open / triage |
+| 9 | [#311](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/311) | Medium | 36 | maintainability | Q-NEW-P — stream history-record can re-fire on rapid status flips | `src/pages/QueryPage.tsx:280-291` | S | suspected | open / triage |
+| 10 | [#315](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/315) | Low | 24 | perf | Q-NEW-T — `graph:firstInteractive` skipped on streaming-gate branch; TTI undercounted | `src/components/results/graph/useGraphCytoscape.ts:231-238,305-309` | S | confirmed | open / triage |
+| 11 | [#319](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/319) | Low | 24 | docs | Q-NEW-H+U+V+W+X+Y+Z — `useLasso` JSDoc + FONT_AWESOME_MIGRATION + useQueryPageStore ADR + `__geode_cy` in OPERATIONS + perf-coord doc + effect-ordering diagram | `docs/*`, `useLasso.ts:17-22`, `useGraphCytoscape.ts:275-279` | S | confirmed | open / triage |
+
+### Grouping rationale (26 reviewer findings → 11 issues)
+
+- **#292** absorbs Q-NEW-A (rebuild monolith), Q-NEW-B (`useWhenCy` helper), Q-NEW-C (ref-in-deps), Q-NEW-S (missing eslint marker) — all live in the same file and share the same refactor PR.
+- **#295** absorbs Q-NEW-D (4-concern QueryPage effects) + Q-NEW-E (`streamStateToResp` co-location) — same file, related extraction.
+- **#303** absorbs Q-NEW-G (prop-bundle constructor), Q-NEW-I (`streamStateToResp` typing), Q-NEW-J (NDJSON typing), Q-NEW-K (error envelope), Q-NEW-L (Window aug), Q-NEW-M (test-seam exports) — all are small typed-edge fixes that can land in 6 small commits inside one umbrella.
+- **#319** absorbs Q-NEW-H + Q-NEW-W (useLasso docs/changelog), Q-NEW-U (FONT_AWESOME_MIGRATION), Q-NEW-V (useQueryPageStore ADR), Q-NEW-X (__geode_cy in OPERATIONS), Q-NEW-Y (perf-coord doc), Q-NEW-Z (effect-ordering diagram) — all are 1-2 paragraph doc additions landing in one MR.
+
+### 2026-05-19 cohort roadmap
+
+Quick wins (< 1 day):
+
+- Q-NEW-N — move `lastRebuild` from module scope to `useRef` ([#307](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/307)).
+- Q-NEW-O — hoist `cyRef.current = cy` so error path destroys orphan ([#309](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/309)).
+- Q-NEW-P — add `lastRecordedRef` dedup in history-record effect ([#311](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/311)).
+- Q-NEW-T — emit `graph:firstInteractive` on both rebuild branches ([#315](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/315)).
+- Q-NEW-R — `GraphErrorBoundary` wrapper + ResultPanel mount fix ([#314](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/314)).
+
+Medium (1-5 days):
+
+- Q-NEW-Q — `runSync` AbortController + ignore AbortError in catch ([#289](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/289)).
+- Q-NEW-A+B+C+S — `useGraphCytoscape` decomposition + `useWhenCy` ([#292](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/292)).
+- Q-NEW-D+E — QueryPage hook extraction + `streamStateToResp` move ([#295](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/295)).
+- Q-NEW-F — TableView 4-way split ([#299](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/299)).
+- Q-NEW-G+I+J+K+L+M — type-safety umbrella ([#303](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/303)).
+- Q-NEW-H+U+V+W+X+Y+Z — docs umbrella ([#319](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/319)).
+
+Strategic (> 5 days):
+
+- None this cohort — all findings are file-local or single-feature refactors; the contract-mirror ADR ([#261](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/261)) from the 2026-05-17 cohort remains the only open strategic item.
+
+### Unknowns / confirm-before-fix (2026-05-19 cohort)
+
+- **#311 (Q-NEW-P)** is `confidence::suspected`: the duplicate-history-entry race is plausible from the code (status transit `done → idle → done` re-fires the effect) but has not been reproduced in a test. Verify before fixing by adding a jest case that drives the reducer through `done → reset → done` in two render passes and asserts `useQueryHistory.record` is called exactly once per logical run.
+- **#314 (Q-NEW-R)** requires confirming there is not already an ErrorBoundary higher in the tree that catches graph throws gracefully. Verify by `git grep -E 'class\s+\w*ErrorBoundary'` and a manual injected-throw test before sizing the fix.
+- **#319 (Q-NEW-X)** depends on `__geode_cy` actually being read by an e2e test today. Confirm with `git grep '__geode_cy' e2e/` before committing to "preserve forever" wording in OPERATIONS.md.

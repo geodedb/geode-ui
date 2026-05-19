@@ -565,3 +565,164 @@ Already-closed pre-run: #73 (F12, closed earlier as part of the #72 combined fix
 - Gap-ID cross-ref notes posted to #208 / #207 / #138 (note IDs visible via `glab issue view <iid>`).
 - No new GitLab issues were created in this run — the policy was "do not file duplicates of OPEN canonical issues; cross-reference instead".
 - Doc files updated: `docs/GAP_ANALYSIS.md` (this section + header refresh), `docs/GAP_ANALYSIS_RESOLVED.md` (header refresh — adds 2026-05-17 gap-sync line, preserves all Phase 2 content from sibling perf/security trackers).
+
+## Cohort: 2026-05-19 audit
+
+A `/codepros:audit` Phase 3 (gap-detector) → Phase 4 (issue sync) re-ran on 2026-05-19 against HEAD `9878443` (`fix: preserve QueryPage editor + results across route navigation`). The detector surfaced 9 actionable findings + 2 tracker updates + 1 stale-baseline correction.
+
+### Stale-baseline correction (#148)
+
+- The 2026-05-19 detector initially flagged the Go 1.26.2 stdlib release-blocker (canonical issue #148, [SEC-F-SUP-1]) as a candidate finding. **This is a stale-baseline echo only:** #148 was closed on the tracker 2026-05-17 14:45Z and is recorded as RESOLVED in `docs/GAP_ANALYSIS_RESOLVED.md:723` (`F-SUP-1 (#148): Go toolchain go1.26.2 → go1.26.3 — closes 4 CALLED stdlib CVEs [RESOLVED]`) and at lines 1323 / 1398 / 1806 / 1807. No re-open. Doc-only correction recorded here for traceability.
+
+### Tracker drift fixed in this run (revalidation, not closure)
+
+| Gap-ID | Title | Action | Issue |
+|--------|-------|--------|-------|
+| GAP-004 | e2e-20 ops audit spec skips when `/api/v1/audit` returns 403 | Stripped stale `blocked-on-upstream-Geode` label (which implied "Won't Do until v0.6"). Re-labelled `gap-status::in-progress` + `needs-revalidation::Geode-v0.5.18`. Comment posted naming v0.5.18 as the version to re-test against (not the v0.5.15 in the doc row). | [#4](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/4) |
+| GAP-005 | e2e-21 MCP `tools/list` skip on jsonrpc error | Same as GAP-004 — relabel + v0.5.18 revalidation comment. | [#5](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/5) |
+
+Note: the doc rows above (`docs/GAP_ANALYSIS.md:42-43`) still cite Geode v0.5.15. They are intentionally left at v0.5.15 until the v0.5.18 e2e revalidation completes; the tracker now carries the "needs revalidation" marker so the next audit pass picks it up.
+
+### Newly filed (2026-05-19 cohort)
+
+| Gap-ID | Title | Severity | Status | Issue |
+|--------|-------|----------|--------|-------|
+| GAP-038 | Bootstrap 5.3 rollout undocumented (docs/ARCHITECTURE.md gap) | Medium | needs-doc | [#287](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/287) |
+| GAP-039 | Font Awesome Free migration undocumented + CSP `font-src`/`style-src` implications | High | open + needs-doc | [#288](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/288) |
+| GAP-040 | QueryPage zustand singleton — dynamic-import cycle-avoidance contract undocumented + untested | High | open | [#290](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/290) |
+| GAP-041 | `lspSettings.ts` localStorage `geode.lsp.settings.v1` — no schema/migration/clear path | Medium | needs-doc | [#293](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/293) |
+| GAP-042 | `src/hooks/useMediaQuery` — new hooks extension point not catalogued | Low | needs-doc | [#296](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/296) |
+| GAP-043 | `Makefile` `e2e-build` `cd -P` + manual `docker build` — bypasses compose-v5 + symlink bug | Medium | needs-doc | [#298](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/298) |
+| GAP-044 | `useLasso` mutates `userPanningEnabled`/`boxSelectionEnabled`; `restorePanning*`/`restoreBoxSelection*` undocumented public API | Medium | open | [#301](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/301) |
+| GAP-045 | `AuthProvider.tsx:293` TODO #122 — "Forget Saved Password" Settings UI never surfaced | Medium | open | [#305](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/305) |
+
+**Numbering note:** the Phase-3 detector report used draft IDs GAP-034..042. The published cohort renumbers to GAP-038..045 because GAP-034/035/036/037 were already burnt by the 2026-05-17 audit Phase-4 sync (issues #273 / #276 / #279 / #282, all closed 2026-05-17). One draft entry — "css-minimizer-webpack-plugin → serialize-javascript HIGH" — is a duplicate of the canonical [#277](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/277) [S-2026-05-17-11]; a cross-reference note was posted on #277 instead of filing a new issue.
+
+### Detailed records — GAP-038..GAP-045
+
+#### GAP-038: Bootstrap 5.3 rollout undocumented
+
+- **Issue:** [#287](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/287)
+- **Category:** Docs
+- **Severity:** Medium
+- **Status:** Open / needs-doc
+- **Evidence:** `package.json` declares `bootstrap@^5.3.x` + `@awesome.me/webawesome`; `docs/BOOTSTRAP_MIGRATION.md` is pre-WA; `docs/web-awesome-migration.md` does not cover the Bootstrap base.
+- **Why this is a gap:** The Bootstrap-base + WA-layer split, import order, and override-pinning rationale are not captured in any single doc.
+- **Next action:** Add a section to `docs/ARCHITECTURE.md` (or new `docs/CSS_STACK.md`) + a CI ratchet.
+
+#### GAP-039: Font Awesome Free migration undocumented + CSP implications
+
+- **Issue:** [#288](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/288)
+- **Category:** Security + Docs
+- **Severity:** High
+- **Status:** Open + needs-doc
+- **Evidence:** Commit `3ae4916` "feat: migrate every UI icon to Font Awesome Free"; FA Free packages in `package.json`; no doc reference; CSP `font-src` / `style-src` coverage of FA load paths not confirmed in-repo.
+- **Why this is a gap:** The icon-set decision + the CSP directive contract for the new font load paths are invisible.
+- **Next action:** Doc section in `docs/ARCHITECTURE.md` + CSP audit in `docs/SECURITY.md` + lint rule.
+
+#### GAP-040: QueryPage zustand singleton — dynamic-import contract undocumented
+
+- **Issue:** [#290](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/290)
+- **Category:** Quality / Test
+- **Severity:** High
+- **Status:** Open
+- **Evidence:** Commit `9878443` adds the zustand singleton + dynamic-import pattern; no in-repo doc or test pins the cycle-avoidance contract.
+- **Why this is a gap:** A future static-import refactor silently reintroduces the module cycle and breaks QueryPage state preservation across routes.
+- **Next action:** `src/pages/QueryPage/README.md` + regression test + lint rule.
+
+#### GAP-041: lspSettings.ts localStorage v1 — no schema/migration/clear path
+
+- **Issue:** [#293](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/293)
+- **Category:** Docs / Quality
+- **Severity:** Medium
+- **Status:** needs-doc
+- **Evidence:** `src/lib/lspSettings.ts` writes to `geode.lsp.settings.v1` with no schema export, no migration template, no documented clear path in `docs/`.
+- **Why this is a gap:** The `v1` suffix implies a schema contract that does not exist; support engineers have no documented clear path.
+- **Next action:** Typed schema + `docs/OPERATIONS.md` (or `docs/CLIENT_STORAGE.md`) section + unit test.
+
+#### GAP-042: useMediaQuery — hooks extension point not catalogued
+
+- **Issue:** [#296](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/296)
+- **Category:** Docs
+- **Severity:** Low
+- **Status:** needs-doc
+- **Evidence:** `src/hooks/useMediaQuery.ts` is a new file; `docs/ARCHITECTURE.md` has no hooks index; no `docs/HOOKS.md`.
+- **Why this is a gap:** Future contributors duplicate the hook because there is no catalogue.
+- **Next action:** Hooks-index doc section + CI ratchet.
+
+#### GAP-043: Makefile e2e-build cd -P bypass undocumented
+
+- **Issue:** [#298](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/298)
+- **Category:** Docs / CI-CD
+- **Severity:** Medium
+- **Status:** needs-doc
+- **Evidence:** `Makefile`'s `e2e-build` target uses `cd -P` + manual `docker build`; every other docker target uses `docker compose`; the symlink-bug workaround is not documented.
+- **Why this is a gap:** A future Makefile consolidation silently regresses the e2e build.
+- **Next action:** Inline Makefile comment + `docs/OPERATIONS.md` section + optional symlink-bug follow-up.
+
+#### GAP-044: useLasso mutates Cytoscape flags; restore hooks undocumented
+
+- **Issue:** [#301](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/301)
+- **Category:** Quality / Test
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:** `useLasso` enters lasso mode by mutating `cy.userPanningEnabled` + `cy.boxSelectionEnabled`; the new `restorePanning*` / `restoreBoxSelection*` siblings are undocumented + untested.
+- **Why this is a gap:** A consumer that forgets to call the restore pair leaves the graph un-pannable; a future refactor that drops the restore call ships silently.
+- **Next action:** JSDoc lifecycle contract + test asserting enter → exit → restored-to-pre-state.
+
+#### GAP-045: AuthProvider TODO #122 — Forget Saved Password Settings UI never surfaced
+
+- **Issue:** [#305](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/305)
+- **Category:** Feature / UI
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:** `src/auth/AuthProvider.tsx:293` carries a `// TODO(#122)` for the Settings entry; the service method exists; the Settings tree has no entry.
+- **Why this is a gap:** End users cannot revoke a saved password from this device.
+- **Cross-reference:** Original #122 (S9 accepted-risk, closed 2026-05-10) — context for the original deferral. This issue tracks the UI-surfacing follow-up.
+- **Next action:** Add Settings entry + test + remove TODO.
+
+### Cohort verification
+
+- 8 new GitLab issues filed: #287 / #288 / #290 / #293 / #296 / #298 / #301 / #305.
+- 2 GitLab issues relabelled: #4 + #5 (stripped `blocked-on-upstream-Geode`, added `gap-status::in-progress` + `needs-revalidation::Geode-v0.5.18`).
+- 1 duplicate cross-reference posted: #277 (canonical for the `serialize-javascript` HIGH dev-tree advisory).
+- 1 stale-baseline correction: #148 confirmed in `GAP_ANALYSIS_RESOLVED.md` — no re-open.
+- All new issues carry the `Discovered-By: 2026-05-19 audit` label.
+
+## Closure cohort 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 cohort)
+
+A `/codepros:gap-close` cohort on 2026-05-19 closed **7 GitLab issues** (6 fully + 1 partial) across three domain trackers (SECURITY 4, PERF 1, QUALITY 2). All seven closures shipped Jest, Go, or `node --test` tests pinning the regression. Three high-PriorityScore perf items (#291 / #297 / #316) were **deferred** to the next session — they require ~140-180 LOC apiece + bench A/B reruns and the tree was kept clean for review.
+
+### Closures
+
+| Issue | Domain | Cohort ID | Closure SHA | Title |
+|---|---|---|---|---|
+| [#322](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/322) | Security | S-NEW-J | `1cde6ba` | Compose hardcoded `GEODE_PROFILESTORE_KEY` default stripped — `${VAR:?msg}` required form |
+| [#323](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/323) | Security | S-NEW-K | `1cde6ba` | Compose hardcoded `JWT_SECRET_HEX` default stripped — same operator-misuse hardening |
+| [#314](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/314) | Quality | Q-NEW-R | `f725ea4` | Tab-scoped `ResultTabErrorBoundary` wraps each TabPanel body; resetKey clears prior crash |
+| [#312](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/312) | Perf | PERF-2026-05-19-06 | `e42a92c` | Bench harness: warm-rerun + worker-path combos; `scaleTier.MID_MAX` 5_000→5_001; `__geode_bench` debug surface; `bench-gate.ts MIN_ABSOLUTE_MS` floor |
+| [#308](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/308) | Security | S-NEW-C | `36661d7` | `extractTokenForRevoke` (sunset-exempt) keeps post-2026-07-01 logout-side `?access_token=` revoke working |
+| [#289](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/289) | Quality | Q-NEW-Q | `b78c0da` | `runSync` generation counter; stale resolved promises short-circuit before clobbering fresh `setResp` |
+| [#300](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/300) | Security | S-NEW-A | `71352b2` | **Partial — Scope-A only.** `auth_role_resolved` audit event from `adminRolesFor` with `source=bootstrap`; Scope-B (real SHOW USERS ROLES upstream role discovery) remains Open — blocked on upstream Geode. |
+
+### Deferred to next session (clean tree)
+
+| Issue | Domain | Reason |
+|---|---|---|
+| [#316](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/316) | Perf | Lazy-load cytoscape plugins — ~120 LOC across 4-5 files (`useLasso`/`useCxtMenu`/`GraphMiniMap` dynamic imports), requires bundle delta verification (`scripts/check-chunk-budget`); tests need to `await` dynamic imports. Not started — clean tree. |
+| [#297](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/297) | Perf | WS parse worker offload — ~140 LOC new worker file + URL helper + fallback to main thread on construct fail; bench rerun needed. Not started. |
+| [#291](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/291) | Perf | layoutWorker transferable Float32Array — ~180 LOC, worker protocol change + main-thread reciprocal + bench A/B. Not started. |
+
+### Verification (session-end snapshot)
+
+- `npm test --no-coverage --silent` → 977/977 passed.
+- `scripts/run-go.sh test ./internal/server/ ./cmd/server/ ./internal/jwt/` → all pass.
+- `npx tsc --noEmit` → clean.
+- `npx eslint src/**/*.{ts,tsx}` → clean (90 pre-existing errors in `scripts/*.mjs` are out of CI lint scope and unchanged by this session).
+
+### Headline metrics
+
+- Closure commits: 6 (`1cde6ba`, `f725ea4`, `e42a92c`, `36661d7`, `b78c0da`, `71352b2`) plus the `1166bda` e2e-build pre-cohort fix already on `main`.
+- Issues closed: 7 (6 full + 1 partial).
+- Issues deferred: 3 (all PERF P1, all left Open with deferral note in `PERF_GAP_ANALYSIS.md` cohort row).
+- Detail: see `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" section.
