@@ -112,3 +112,34 @@ describe('pushRealEdges', () => {
     expect(out).toHaveLength(0)
   })
 })
+
+describe('pushRealEdges — property pass-through (regression for inspector "no props")', () => {
+  it('preserves an edge with two custom properties on data.props', () => {
+    const out: ElementDefinition[] = []
+    pushRealEdges(out, [
+      {
+        id: 1,
+        start_node: 1,
+        end_node: 2,
+        type: 'ACTED_IN',
+        properties: { roles: ['Neo'], year: 1999 },
+      },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]?.data?.props).toEqual({ roles: ['Neo'], year: 1999 })
+  })
+
+  it('defaults data.props to an empty object when properties is missing', () => {
+    const out: ElementDefinition[] = []
+    pushRealEdges(out, [
+      {
+        id: 2,
+        start_node: 1,
+        end_node: 2,
+        type: 'DIRECTED',
+        properties: undefined as unknown as Record<string, unknown>,
+      },
+    ])
+    expect(out[0]?.data?.props).toEqual({})
+  })
+})

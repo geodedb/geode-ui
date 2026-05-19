@@ -87,7 +87,7 @@ export function pushRealEdges(
         // relationship type ('ACTED_IN', 'DIRECTED') so the canvas
         // color is stable.
         edgeType: e.type,
-        props: e.properties,
+        props: e.properties ?? {},
       },
     })
   })
