@@ -149,3 +149,26 @@ describe('cytoscapeStyle — node label contrast', () => {
     }
   )
 })
+
+describe('cytoscapeStyle — edge clickability', () => {
+  it('edge style has events:yes and a hit-area-friendly width', () => {
+    const style = createCytoscapeStyle(darkTheme) as Array<{
+      selector: string
+      style?: Record<string, unknown>
+    }>
+    const edgeBlock = style.find((b) => b.selector === 'edge')
+    expect(edgeBlock?.style?.events).toBe('yes')
+    // Pre-fix the width was 1.5 px; that's not a comfortable click
+    // target. Bump to 3 px and validate the regression here.
+    expect(edgeBlock?.style?.width).toBe(3)
+  })
+
+  it('edge:active widens to advertise clickability', () => {
+    const style = createCytoscapeStyle(darkTheme) as Array<{
+      selector: string
+      style?: Record<string, unknown>
+    }>
+    const hover = style.find((b) => b.selector === 'edge:active')
+    expect(hover?.style?.width).toBe(5)
+  })
+})

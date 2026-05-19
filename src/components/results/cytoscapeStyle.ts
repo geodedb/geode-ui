@@ -148,7 +148,8 @@ export function createCytoscapeStyle(
       selector: 'edge',
       style: {
         'curve-style': 'bezier',
-        width: 1.5,
+        width: 3,
+        events: 'yes' as unknown as undefined,
         // Color the edge stroke + arrow by relationship type so the
         // operator can read a multi-type graph at a glance. The seed
         // is the IMMUTABLE edgeType field (stamped by pushRealEdges /
@@ -179,6 +180,12 @@ export function createCytoscapeStyle(
         'text-background-padding': '2px',
         'text-background-shape': 'roundrectangle',
         color: edgeLabelColor,
+      },
+    },
+    {
+      selector: 'edge:active',
+      style: {
+        width: 5,
       },
     },
     {
