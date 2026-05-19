@@ -37,9 +37,32 @@ function tryCreateWorker(): Worker | null {
   }
 }
 
-function toPosMap(record: Record<string, [number, number]>): PosMap {
+// PERF #291: build a PosMap by indexing the caller-supplied node list
+// against a flat Float32Array of length 2*N posted by the worker. The
+// worker iterates cy.nodes() in insertion order; the main thread holds
+// the SAME insertion order (msg.nodes), so position[i] in the array
+// belongs to nodes[i].id. Backward-compatible: the legacy
+// `Record<string, [number, number]>` shape is still accepted in case
+// a stale worker bundle ships during a deploy lap (worker chunk is
+// content-hashed so the new main bundle won't load an old worker, but
+// belt-and-braces is cheap).
+function toPosMap(
+  positions: Float32Array | Record<string, [number, number]>,
+  nodes: NodeSnap[]
+): PosMap {
   const m: PosMap = new Map()
-  Object.entries(record).forEach(([id, [x, y]]) => m.set(id, { x, y }))
+  if (positions instanceof Float32Array) {
+    nodes.forEach((node, i) => {
+      if (!node) return
+      const x = positions[i * 2]
+      const y = positions[i * 2 + 1]
+      if (x === undefined || y === undefined) return
+      m.set(node.id, { x, y })
+    })
+    return m
+  }
+  // Legacy Record path — kept for resilience to mid-deploy chunk skew.
+  Object.entries(positions).forEach(([id, [x, y]]) => m.set(id, { x, y }))
   return m
 }
 
@@ -58,17 +81,17 @@ export function runLayoutOnWorker(args: RunArgs): void {
       | {
           kind: 'tick'
           runId: number
-          positions: Record<string, [number, number]>
+          positions: Float32Array | Record<string, [number, number]>
         }
       | {
           kind: 'done'
           runId: number
-          positions: Record<string, [number, number]>
+          positions: Float32Array | Record<string, [number, number]>
         }
       | { kind: 'error'; runId: number; message: string }
     if (msg.runId !== runId) return
     if (msg.kind === 'tick') {
-      args.onTick(toPosMap(msg.positions))
+      args.onTick(toPosMap(msg.positions, args.nodes))
       return
     }
     clearTimeout(watchdogs.get(runId))
@@ -78,7 +101,7 @@ export function runLayoutOnWorker(args: RunArgs): void {
       args.onFallback(`worker-error:${msg.message}`)
       return
     }
-    args.onDone(toPosMap(msg.positions))
+    args.onDone(toPosMap(msg.positions, args.nodes))
   }
 
   w.addEventListener('message', listener)

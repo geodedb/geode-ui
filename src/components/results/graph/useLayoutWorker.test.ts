@@ -80,7 +80,37 @@ describe('runLayoutOnWorker', () => {
     expect(typeof posted.runId).toBe('number')
   })
 
-  it('calls onDone with the final positions map', () => {
+  it('calls onDone with the final positions map (Float32Array protocol)', () => {
+    // PERF #291: the worker now posts positions as a Float32Array
+    // (length = 2 * nodes.length, packed [x, y, x, y, …]) in the
+    // SAME order as the input nodes. The main thread closes over
+    // args.nodes to recover the id-by-index mapping.
+    const onDone = jest.fn()
+    runLayoutOnWorker({
+      nodes: [{ id: 'a' }, { id: 'b' }],
+      edges: [],
+      opts: {},
+      onTick: jest.fn(),
+      onDone,
+      onFallback: jest.fn(),
+    })
+    const posted = FakeWorker.lastInstance?.posted[0] as { runId: number }
+    FakeWorker.lastInstance?.fakeMessage({
+      kind: 'done',
+      runId: posted.runId,
+      positions: new Float32Array([10, 20, 30, 40]),
+    })
+    expect(onDone).toHaveBeenCalledTimes(1)
+    const pos = onDone.mock.calls[0][0] as Map<string, { x: number; y: number }>
+    expect(pos.get('a')).toEqual({ x: 10, y: 20 })
+    expect(pos.get('b')).toEqual({ x: 30, y: 40 })
+  })
+
+  it('accepts the legacy Record<id, [x,y]> shape (mid-deploy chunk skew resilience)', () => {
+    // PERF #291: if a stale worker bundle ships during a deploy lap
+    // and posts the pre-fix Record shape, the main thread must still
+    // build a valid PosMap. Mainline is Float32Array (test above);
+    // this pin keeps the legacy decoder reachable.
     const onDone = jest.fn()
     runLayoutOnWorker({
       nodes: [{ id: 'a' }],
@@ -114,7 +144,7 @@ describe('runLayoutOnWorker', () => {
     FakeWorker.lastInstance?.fakeMessage({
       kind: 'done',
       runId: 999999,
-      positions: { a: [1, 2] },
+      positions: new Float32Array([1, 2]),
     })
     expect(onDone).not.toHaveBeenCalled()
   })
