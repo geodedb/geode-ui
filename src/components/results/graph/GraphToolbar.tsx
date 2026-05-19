@@ -93,10 +93,6 @@ export type GraphToolbarProps = {
   onChangeLayout: (next: LayoutName) => void
   layouts: readonly LayoutName[]
   layoutLabel: (name: LayoutName, t: TFn) => string
-  onZoomIn: () => void
-  onZoomOut: () => void
-  onFit: () => void
-  onResetView: () => void
   selectionMode: 'pan' | 'box'
   onToggleSelectionMode: () => void
   clusterByLabel: boolean
@@ -132,10 +128,6 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
   onChangeLayout,
   layouts,
   layoutLabel,
-  onZoomIn,
-  onZoomOut,
-  onFit,
-  onResetView,
   selectionMode,
   onToggleSelectionMode,
   clusterByLabel,
@@ -206,46 +198,6 @@ export const GraphToolbar: React.FC<GraphToolbarProps> = ({
           className="geode-bs-inline-dropdown graph-layout-toggle-wrap"
           triggerProps={{ 'data-testid': 'graph-layout-picker' }}
         />
-        <wa-button
-          appearance="outlined"
-          size="s"
-          data-testid="graph-zoom-in"
-          aria-label={t('graph.zoomIn')}
-          title={t('graph.zoomIn')}
-          onClick={onZoomIn}
-        >
-          <Icon name="plus" />
-        </wa-button>
-        <wa-button
-          appearance="outlined"
-          size="s"
-          data-testid="graph-zoom-out"
-          aria-label={t('graph.zoomOut')}
-          title={t('graph.zoomOut')}
-          onClick={onZoomOut}
-        >
-          <Icon name="minus" />
-        </wa-button>
-        <wa-button
-          appearance="outlined"
-          size="s"
-          data-testid="graph-fit"
-          aria-label={t('graph.fit')}
-          title={t('graph.fit')}
-          onClick={onFit}
-        >
-          <Icon name="expand" />
-        </wa-button>
-        <wa-button
-          appearance="outlined"
-          size="s"
-          data-testid="graph-reset-view"
-          aria-label={t('graph.resetView')}
-          title={t('graph.resetView')}
-          onClick={onResetView}
-        >
-          <Icon name="arrows-rotate" />
-        </wa-button>
       </Group>
       <Group
         data-testid="graph-toolbar-group-filters"

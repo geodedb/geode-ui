@@ -7,6 +7,7 @@ import { GraphMiniMap } from './GraphMiniMap'
 import { GraphBadges } from './GraphBadges'
 import { GraphTooltip } from './GraphTooltip'
 import { FocusClearChip } from './FocusClearChip'
+import { GraphCanvasControls } from './GraphCanvasControls'
 import type { useGraphBadges } from './useGraphBadges'
 import type { TooltipTargetData } from './useNodeTooltip'
 
@@ -38,6 +39,12 @@ export type GraphCanvasOverlayProps = {
   focusActive: boolean
   onClearFocus: () => void
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void
+  zoomLevel: number
+  onZoomLevelChange: (level: number) => void
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onFit: () => void
+  onResetView: () => void
 }
 
 export const GraphCanvasOverlay: React.FC<GraphCanvasOverlayProps> = ({
@@ -55,6 +62,12 @@ export const GraphCanvasOverlay: React.FC<GraphCanvasOverlayProps> = ({
   focusActive,
   onClearFocus,
   onKeyDown,
+  zoomLevel,
+  onZoomLevelChange,
+  onZoomIn,
+  onZoomOut,
+  onFit,
+  onResetView,
 }) => (
   <div
     className="position-relative d-flex flex-column flex-fill"
@@ -77,5 +90,14 @@ export const GraphCanvasOverlay: React.FC<GraphCanvasOverlayProps> = ({
     {badgesEnabled && <GraphBadges badges={badges} />}
     {tooltipsEnabled && <GraphTooltip targetData={tooltipTarget} t={t} />}
     <FocusClearChip active={focusActive} onClear={onClearFocus} t={t} />
+    <GraphCanvasControls
+      zoomLevel={zoomLevel}
+      onZoomLevelChange={onZoomLevelChange}
+      onZoomIn={onZoomIn}
+      onZoomOut={onZoomOut}
+      onFit={onFit}
+      onResetView={onResetView}
+      t={t}
+    />
   </div>
 )

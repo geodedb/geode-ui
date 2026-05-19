@@ -37,6 +37,7 @@ import { useGraphPreferences } from './graph/useGraphPreferences'
 import { useGraphSelectionActions } from './graph/useGraphSelectionActions'
 import { useGraphSigReset } from './graph/useGraphSigReset'
 import { useGraphToolbarActions } from './graph/useGraphToolbarActions'
+import { useZoomLevel } from './graph/useZoomLevel'
 import { CanvasArea, PathStatus, Wrap } from './graph/styled'
 
 // Register the layout extensions once, at module load. cytoscape.use is
@@ -266,6 +267,8 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     setHiddenLabels,
   })
 
+  const { level: zoomLevel, setZoomLevel } = useZoomLevel(cyRef, sig)
+
   // QUAL #164: every selection-driven derived value (1-hop neighbours
   // memo, find-node list memo) and click-jump callback (onJumpNeighbor,
   // onFindPick, nodeDisplayLabel) is hoisted into
@@ -374,10 +377,6 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
           onChangeLayout={setLayout}
           layouts={LAYOUTS}
           layoutLabel={layoutLabel}
-          onZoomIn={onZoomIn}
-          onZoomOut={onZoomOut}
-          onFit={onFit}
-          onResetView={onResetView}
           selectionMode={selectionMode}
           onToggleSelectionMode={onToggleSelectionMode}
           clusterByLabel={clusterByLabel}
@@ -432,6 +431,12 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
           focusActive={focusMode.state !== null}
           onClearFocus={() => focusMode.clear()}
           onKeyDown={handleKey}
+          zoomLevel={zoomLevel}
+          onZoomLevelChange={setZoomLevel}
+          onZoomIn={onZoomIn}
+          onZoomOut={onZoomOut}
+          onFit={onFit}
+          onResetView={onResetView}
         />
       </CanvasArea>
       {!sidebarCollapsed && (

@@ -134,6 +134,17 @@ export const sel = {
   // on. Use this selector to get the actual input element directly.
   graphFindInput: (p: Page): Locator =>
     p.getByTestId('graph-find-input').locator('input'),
+  // On-canvas zoom/fit/reset controls (GraphCanvasControls pill).
+  // These replaced the toolbar buttons (graph-zoom-in / graph-zoom-out /
+  // graph-fit / graph-reset-view) that were removed in Task 6.
+  graphCanvasZoomIn: (p: Page): Locator =>
+    p.getByTestId('graph-canvas-zoom-in'),
+  graphCanvasZoomOut: (p: Page): Locator =>
+    p.getByTestId('graph-canvas-zoom-out'),
+  graphCanvasZoomSlider: (p: Page): Locator =>
+    p.getByTestId('graph-canvas-zoom-slider'),
+  graphCanvasFit: (p: Page): Locator => p.getByTestId('graph-canvas-fit'),
+  graphCanvasReset: (p: Page): Locator => p.getByTestId('graph-canvas-reset'),
 
   // Overview dashboard (22-dashboard.spec.ts) — mounted at /dashboard. An
   // <h1> "Overview" plus a grid of 4 cards: GraphsCard

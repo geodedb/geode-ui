@@ -253,14 +253,14 @@ test.describe('graph power features', () => {
     expect(strayCount).toBe(0)
   })
 
-  test('wa-button renders with non-zero size (foundation CSS loaded)', async ({
+  test('canvas controls render with non-zero size (foundation CSS loaded)', async ({
     authedPage: page,
   }) => {
-    // The toolbar contains multiple <wa-button> instances. If the
-    // foundation CSS (dist/styles/webawesome.css) isn't imported,
+    // The canvas-overlay pill contains zoom/fit/reset icon buttons.
+    // If the foundation CSS (dist/styles/webawesome.css) isn't imported,
     // these render as unstyled custom elements with collapsed
     // bounding boxes. Pin at least one button has a positive box.
-    const button = page.getByTestId('graph-zoom-in')
+    const button = sel.graphCanvasZoomIn(page)
     await expect(button).toBeVisible()
     const box = await button.boundingBox()
     expect(box).not.toBeNull()

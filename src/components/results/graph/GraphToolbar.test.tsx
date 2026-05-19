@@ -17,10 +17,6 @@ const toolbarProps = (
   onChangeLayout: jest.fn(),
   layouts: ['cose'] as const,
   layoutLabel: (k) => k,
-  onZoomIn: jest.fn(),
-  onZoomOut: jest.fn(),
-  onFit: jest.fn(),
-  onResetView: jest.fn(),
   selectionMode: 'pan',
   onToggleSelectionMode: jest.fn(),
   clusterByLabel: false,
@@ -83,16 +79,17 @@ describe('GraphToolbar grouped layout', () => {
     expect(screen.getByTestId('graph-more-sidebar')).toBeInTheDocument()
   })
 
-  it('keeps the high-frequency view controls (zoom, fit, reset) as icon buttons', () => {
+  it('does NOT contain zoom/fit/reset buttons (moved to on-canvas controls)', () => {
     render(
       <ThemeProvider theme={theme}>
         <GraphToolbar {...toolbarProps()} />
       </ThemeProvider>
     )
-    expect(screen.getByTestId('graph-zoom-in')).toBeInTheDocument()
-    expect(screen.getByTestId('graph-zoom-out')).toBeInTheDocument()
-    expect(screen.getByTestId('graph-fit')).toBeInTheDocument()
-    expect(screen.getByTestId('graph-reset-view')).toBeInTheDocument()
+    // These four buttons now live in GraphCanvasControls, not the toolbar.
+    expect(screen.queryByTestId('graph-zoom-in')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('graph-zoom-out')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('graph-fit')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('graph-reset-view')).not.toBeInTheDocument()
     // The layout picker is still visible.
     expect(screen.getByTestId('graph-layout-picker')).toBeInTheDocument()
   })
