@@ -115,18 +115,28 @@ services:
       geode-init:
         condition: service_completed_successfully
     environment:
-      # GAP-S5 (#118): the server requires GEODE_PROFILESTORE_KEY
-      # (base64 of 32 bytes) to bring up the at-rest encryption layer
-      # for the SQLite profile store. The e2e stack uses a fixed
-      # known-test key — base64 of 32 zero bytes — so Playwright runs
-      # are reproducible. A production deployment MUST generate its own
-      # via `openssl rand -base64 32`.
-      GEODE_PROFILESTORE_KEY: ${GEODE_PROFILESTORE_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      # SEC #322 (was: GAP-S5 / #118): GEODE_PROFILESTORE_KEY is the
+      # base64-encoded 32-byte AES-256-GCM DEK for the profile store.
+      # Pre-fix this carried an inline default of 32 zero bytes so the
+      # e2e stack worked out-of-the-box, but `${VAR:-default}` silently
+      # substitutes when the env is unset — an operator copying this
+      # compose to non-test without rotating env values would inherit a
+      # well-known key. Switched to the required-from-env form `:?` so
+      # `docker compose up` fails loud with the named error if the var
+      # isn't set. The `make e2e-env` Makefile target generates a fresh
+      # `deploy/.env.test` (gitignored) on first run; `make e2e-up`
+      # loads it via `--env-file`.
+      GEODE_PROFILESTORE_KEY: ${GEODE_PROFILESTORE_KEY:?GEODE_PROFILESTORE_KEY must be set; run `make e2e-env` to generate deploy/.env.test or export your own (base64 of 32 random bytes; `openssl rand -base64 32`)}
     command:
     - -listen
     - :8080
     - -jwt-secret-hex
-    - ${JWT_SECRET_HEX:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+    # SEC #323 (sibling of #322): pre-fix this carried a predictable hex
+    # default. Switched to the required-from-env form `:?` for the same
+    # reason — operator-misuse on copy-to-prod would yield forgeable
+    # HS256 signatures. Same `make e2e-env` flow generates a random
+    # 32-byte hex secret on first run.
+    - ${JWT_SECRET_HEX:?JWT_SECRET_HEX must be set; run `make e2e-env` to generate deploy/.env.test or export your own (`openssl rand -hex 32`)}
     - -profiles
     - /etc/geode-ui/profiles.json
     - -upload-dir

@@ -239,6 +239,19 @@ repos:
     files: ^CHANGELOG\.md$
     always_run: true
 
+      # SEC #322/#323: docker-compose.test.yml must not embed hardcoded
+      # secret defaults — operator-misuse on copy-to-prod would yield
+      # forgeable HS256 JWTs (#323) and cleartext-equivalent profile
+      # encryption (#322). The gate also pins the `${VAR:?msg}` required
+      # form so `:-` doesn't sneak back in via a future "fix".
+  - id: check-compose-secrets
+    name: check:compose-secrets
+    entry: node scripts/check-compose-secrets.mjs
+    language: system
+    pass_filenames: false
+    files: ^deploy/docker-compose\.test\.yml$
+    always_run: true
+
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
       # QUALITY #174: explicit GO_PKGS list so neither golangci-lint nor
       # go test walks `node_modules/flatted/golang/`. Mirrors the
@@ -316,6 +329,7 @@ ci:
   - check-html-renderers
   - check-doc-routes
   - check-changelog
+  - check-compose-secrets
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck
