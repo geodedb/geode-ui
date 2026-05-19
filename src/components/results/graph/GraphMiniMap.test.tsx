@@ -98,6 +98,37 @@ describe('GraphMiniMap', () => {
     expect(layoutstopOff.length).toBeGreaterThan(0)
   })
 
+  it('initialises the navigator once cyRef.current becomes non-null (build is debounced)', async () => {
+    // BUG: useGraphCytoscape debounces the cy build by 250 ms. When the
+    // user opens a page with sticky `miniMap: true`, GraphMiniMap mounts
+    // BEFORE the cy core is constructed (cyRef.current === null). The
+    // pre-fix useEffect early-returned at `if (!cy)` and never re-ran —
+    // its deps `[cyRef, sig]` are stable references, so the navigator
+    // was never initialised. The fix polls cyRef.current with a 50 ms
+    // retry (same pattern as useNodeTooltip) until the core appears.
+    jest.useFakeTimers()
+    try {
+      const navigator = jest.fn(() => ({ destroy: jest.fn() }))
+      const cyRef: { current: { navigator: jest.Mock } | null } = {
+        current: null,
+      }
+      render(
+        <ThemeProvider theme={theme}>
+          <GraphMiniMap cyRef={cyRef as never} />
+        </ThemeProvider>
+      )
+      // Pre-condition: nothing happens while cy is null.
+      expect(navigator).not.toHaveBeenCalled()
+      // Simulate the debounced build landing: cy core appears on the ref.
+      cyRef.current = { navigator }
+      // Advance time so the polling retry fires.
+      jest.advanceTimersByTime(200)
+      expect(navigator).toHaveBeenCalled()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('passes a string CSS-selector to cy.navigator (not the raw HTMLElement)', () => {
     const navigator = jest.fn(() => ({ destroy: jest.fn() }))
     const cy = { navigator } as unknown as { navigator: jest.Mock }
