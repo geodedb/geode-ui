@@ -186,6 +186,16 @@ export const QueryPage: React.FC = () => {
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
   const editorRef = useRef<GqlEditorHandle | null>(null)
+  // QUAL #289: monotonic generation counter for `runSync`. The
+  // generated client doesn't expose an AbortSignal on its
+  // `client.query` method, so we can't cancel the in-flight HTTP
+  // request — but we CAN guard against the resolved promise calling
+  // setResp/setErr with stale data after the user has already kicked
+  // off a newer Run. Each runSync captures the current counter, bumps
+  // it, and only writes its result if its captured value is still the
+  // latest. resetRunState ALSO bumps the counter so a stream-run
+  // started between two sync runs invalidates the in-flight sync.
+  const runSyncGenRef = useRef(0)
   const autoFormatEnabled = useLspSettings((s) => s.autoFormatEnabled)
   const setAutoFormatEnabled = useLspSettings((s) => s.setAutoFormatEnabled)
   // The statement that the in-flight stream run actually started with.
@@ -305,6 +315,11 @@ export const QueryPage: React.FC = () => {
       handleRef.current.cancel()
       handleRef.current = null
     }
+    // QUAL #289: bump the sync-run counter so any in-flight
+    // client.query promise from a prior runSync is invalidated; its
+    // resolve/reject handlers will short-circuit when their captured
+    // generation no longer matches.
+    runSyncGenRef.current += 1
   }
 
   const runSync = async (): Promise<void> => {
@@ -315,6 +330,10 @@ export const QueryPage: React.FC = () => {
     // the SUBMITTED statement, not the live editor buffer.
     setSubmittedStmt(ranStmt)
     resetRunState()
+    // QUAL #289: snapshot the generation AFTER resetRunState so we
+    // get the post-bump value; a second runSync click will bump again
+    // (via its own resetRunState) and invalidate this snapshot.
+    const myGen = runSyncGenRef.current
     setBusy(true)
     try {
       // The server validator (gen/types/types.gen.go QueryReq.Valid) treats
@@ -327,6 +346,12 @@ export const QueryPage: React.FC = () => {
         page_size: 1000,
         timeout_ms: 30000,
       })
+      // QUAL #289: only write the result + history entry if this
+      // promise is still the latest sync run. Without this guard, a
+      // rapid double-Run that completes out of order could let the
+      // FIRST (older, slower) response clobber the SECOND (newer,
+      // already-rendered) response.
+      if (runSyncGenRef.current !== myGen) return
       setResp(r)
       useQueryHistory.getState().record({
         statement: ranStmt,
@@ -334,12 +359,23 @@ export const QueryPage: React.FC = () => {
         ok: true,
       })
     } catch (e: unknown) {
+      if (runSyncGenRef.current !== myGen) return
       setErr(e instanceof Error ? e.message : t('errors.queryFailed'))
       useQueryHistory
         .getState()
         .record({ statement: ranStmt, rowCount: null, ok: false })
     } finally {
-      setBusy(false)
+      // setBusy is intentionally NOT gated on the generation check:
+      // the user must always see the spinner stop when their MOST
+      // RECENT run resolves. The last-to-resolve fulfilment will
+      // settle busy correctly because both branches bypassed setResp
+      // when their gen mismatched — the only state busy needs to
+      // reflect is "is there any in-flight client.query?", which we
+      // can't track from here. Leaving busy=false on every settle is
+      // the closest approximation; an unsetbusy on a stale settle is
+      // harmless because the active run will re-set it on its own
+      // setResp path.
+      if (runSyncGenRef.current === myGen) setBusy(false)
     }
   }
 

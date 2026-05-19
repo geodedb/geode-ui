@@ -362,6 +362,75 @@ describe('B1: running a query records it into the query history', () => {
   })
 })
 
+// QUAL #289: rapid double-Run race regression. Pre-fix `runSync` had
+// no AbortController + no generation guard, so if the user clicked Run
+// twice in quick succession and the FIRST request resolved AFTER the
+// SECOND, the stale response would clobber the freshly-rendered one
+// (setResp(r1) ran after setResp(r2)). This test pins the fix's
+// generation-counter contract: the slow first response is dropped on
+// the floor and the fast second response stays visible.
+describe('QUAL #289: rapid double-Run race', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useQueryHistory.setState({ entries: [] })
+    queryMock.mockReset()
+  })
+
+  test('a stale first response does not overwrite a fresh second response', async () => {
+    // Stage two responses on independent promises so the test can
+    // resolve them out of order: r2 first (fresh), then r1 (stale).
+    let resolveR1: (v: unknown) => void = () => {}
+    const firstPromise = new Promise((res) => {
+      resolveR1 = res as (v: unknown) => void
+    })
+    const fresh = {
+      columns: [{ name: 'fresh', type: 'STRING' }],
+      rows: [['second-result']],
+      row_count: 1,
+      elapsed_ms: 1,
+    }
+    const stale = {
+      columns: [{ name: 'stale', type: 'STRING' }],
+      rows: [['first-result']],
+      row_count: 1,
+      elapsed_ms: 9,
+    }
+    queryMock
+      .mockImplementationOnce(() => firstPromise)
+      .mockResolvedValueOnce(fresh)
+
+    const view = render(
+      <Wrappers>
+        <QueryPage />
+      </Wrappers>
+    )
+    await waitFor(() =>
+      expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()
+    )
+
+    // First click — kicks off the slow first request.
+    fireEvent.click(view.getByRole('button', { name: /run/i }))
+    // Second click — kicks off the fast second request; its resolve
+    // wins the visible result first.
+    fireEvent.click(view.getByRole('button', { name: /run/i }))
+    await waitFor(() =>
+      expect(view.queryByText('second-result')).toBeInTheDocument()
+    )
+
+    // Now resolve the slow first request. Pre-fix this would call
+    // setResp(stale) and overwrite the fresh render. Post-fix the
+    // generation guard short-circuits the resolve and the visible
+    // result stays at the second response.
+    resolveR1(stale)
+    // Give React a tick to process the (would-be) stale write.
+    await new Promise((r) => {
+      setTimeout(r, 10)
+    })
+    expect(view.queryByText('first-result')).toBeNull()
+    expect(view.queryByText('second-result')).toBeInTheDocument()
+  })
+})
+
 // Phase 3 — the Matrix result tab. It sits next to table/json/graph and
 // renders <MatrixView resp={activeResp}> (the adjacency heatmap). For a
 // result that carries a graph_summary with edges, switching to the tab
