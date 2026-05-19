@@ -57,6 +57,8 @@ export function useGraphPreferences() {
   const toggleSection = useGraphPrefs((s) => s.toggleSection)
   const focusHops = useGraphPrefs((s) => s.focusHops)
   const setFocusHops = useGraphPrefs((s) => s.setFocusHops)
+  const wheelSensitivity = useGraphPrefs((s) => s.wheelSensitivity)
+  const setWheelSensitivity = useGraphPrefs((s) => s.setWheelSensitivity)
   return {
     layout,
     setLayout,
@@ -91,5 +93,7 @@ export function useGraphPreferences() {
     toggleSection,
     focusHops,
     setFocusHops,
+    wheelSensitivity,
+    setWheelSensitivity,
   }
 }
