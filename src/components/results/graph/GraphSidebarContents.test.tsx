@@ -45,6 +45,8 @@ const baseProps = {
   setFocusHops: () => {},
   sectionsOpen: DEFAULT_SECTIONS_OPEN,
   onToggleSection: () => {},
+  wheelSensitivity: 1.0,
+  setWheelSensitivity: () => {},
 }
 
 describe('GraphSidebarContents collapsible sections', () => {

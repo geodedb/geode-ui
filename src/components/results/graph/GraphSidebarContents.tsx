@@ -69,6 +69,9 @@ export type GraphSidebarContentsProps = {
   // via useGraphPrefs.sectionsOpen.
   sectionsOpen: Record<GraphSectionId, boolean>
   onToggleSection: (id: GraphSectionId) => void
+  // Wheel-zoom sensitivity slider (0.05–2.0).
+  wheelSensitivity: number
+  setWheelSensitivity: (v: number) => void
 }
 
 // GraphSidebarContents renders the inner blocks of the graph sidebar:
@@ -119,6 +122,8 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
   setFocusHops,
   sectionsOpen,
   onToggleSection,
+  wheelSensitivity,
+  setWheelSensitivity,
 }) => {
   return (
     <>
@@ -211,6 +216,22 @@ export const GraphSidebarContents: React.FC<GraphSidebarContentsProps> = ({
                 </select>
               </div>
             ))}
+          <div className="toggle-row">
+            <label htmlFor="wheel-sensitivity">
+              {t('graph.wheelSensitivity')}
+            </label>
+            <input
+              id="wheel-sensitivity"
+              type="range"
+              min={0.05}
+              max={2.0}
+              step={0.05}
+              value={wheelSensitivity}
+              data-testid="graph-sidebar-wheel-sensitivity"
+              onChange={(e) => setWheelSensitivity(Number(e.target.value))}
+            />
+            <code>{wheelSensitivity.toFixed(2)}</code>
+          </div>
         </ControlsBlock>
       </CollapsibleSection>
       {hiddenIds.length > 0 && (

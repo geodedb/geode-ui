@@ -116,6 +116,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     focusHops,
     setFocusHops,
     wheelSensitivity,
+    setWheelSensitivity,
   } = useGraphPreferences()
   // Result-scoped path-mode state machine; reset on sig change.
   const {
@@ -483,6 +484,8 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             setFocusHops={setFocusHops}
             sectionsOpen={sectionsOpen}
             onToggleSection={toggleSection}
+            wheelSensitivity={wheelSensitivity}
+            setWheelSensitivity={setWheelSensitivity}
           />
         </GraphSidebar>
       )}

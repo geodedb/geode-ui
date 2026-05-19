@@ -207,6 +207,7 @@ export const en = {
       aria: 'Zoom level',
     },
     miniMap: 'Mini-map',
+    wheelSensitivity: 'Mouse-wheel zoom sensitivity',
     lasso: 'Lasso',
     domNodes: 'HTML nodes',
     findPlaceholder: 'Find node…',
