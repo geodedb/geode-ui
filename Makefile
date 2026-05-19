@@ -155,7 +155,7 @@ COMPOSE := docker compose -f deploy/docker-compose.test.yml
 # exactly — compose finds these by name when run with `up -d` (no
 # --build), so any drift here causes a transparent pull attempt
 # instead of using the locally-built image.
-GEODE_IMAGE    := geode:v0.5.18
+GEODE_IMAGE    := geode:v0.5.19
 GEODE_UI_IMAGE := geode-ui:e2e
 
 # Per-checkout test env. Generated on first `make e2e-up` (see e2e-env

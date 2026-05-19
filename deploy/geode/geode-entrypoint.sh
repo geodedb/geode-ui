@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Geode v0.5.18 test-stack entrypoint. Splits the first-start flow into
+# Geode v0.5.19 test-stack entrypoint. Splits the first-start flow into
 # two deterministic phases:
 #
 #   1. (first run only) `geode auth init --data-dir /data` — creates the
