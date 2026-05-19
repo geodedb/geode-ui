@@ -95,15 +95,30 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
       container: `#${PANEL_ID}`,
       viewLiveFramerate: 30,
     })
-    // Bug 5: cytoscape-navigator captures its preview image at init
-    // time from the cy core's current render snapshot. When the user
-    // toggles the mini-map on FOR THE FIRST TIME the core may have
-    // just finished a layout and the navigator misses the next paint
-    // tick, producing a blank / broken-image preview that only fixes
-    // itself when the user pans or zooms (each of which triggers the
-    // navigator's resize listener). Force-resize the core on the next
-    // animation frame so the navigator immediately gets a fresh
-    // snapshot of the painted scene without waiting for user input.
+    // cytoscape-navigator captures its preview image via cy.png() —
+    // a snapshot of whatever the cy canvas currently paints. Two
+    // failure modes if we don't actively refresh that snapshot:
+    //
+    //   A) User toggles mini-map on FROM SETTLED STATE. The current
+    //      paint is correct; the navigator captures it on next
+    //      onRender tick. No problem.
+    //   B) User opens the page with sticky `miniMap: true`. The
+    //      navigator inits at the same time as cy's first layout —
+    //      the snapshot at that moment is empty / pre-layout, and
+    //      the navigator's throttled onRender (rerenderDelay: 500 ms)
+    //      misses the layoutstop event entirely. The user sees a
+    //      blank box until they toggle the mini-map off and back on
+    //      (which re-runs the init flow against the now-painted cy).
+    //
+    // Fix: (1) force `cy.resize()` on rAF for the settled-state
+    // case (mirrors the navigator's resize listener and forces a
+    // fresh thumbnail capture) AND (2) listen for `layoutstop` on
+    // the cy core — the moment the initial / any later layout
+    // completes, force another `cy.resize()` so the navigator
+    // captures the freshly-painted scene. The handler stays
+    // registered for the lifetime of the GraphMiniMap mount so
+    // subsequent layouts (e.g. user picks `dagre` from the View
+    // dropdown) also refresh the thumbnail.
     let raf: number | null = null
     if (typeof window !== 'undefined') {
       raf = window.requestAnimationFrame(() => {
@@ -115,9 +130,26 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
         }
       })
     }
+    const onLayoutStop = (): void => {
+      try {
+        cy.resize()
+      } catch {
+        /* core may already be destroyed during teardown; ignore */
+      }
+    }
+    try {
+      cy.on('layoutstop', onLayoutStop)
+    } catch {
+      /* test stubs that lack `on` (no-op) — listener is best-effort */
+    }
     return () => {
       if (raf != null && typeof window !== 'undefined') {
         window.cancelAnimationFrame(raf)
+      }
+      try {
+        cy.off('layoutstop', onLayoutStop)
+      } catch {
+        /* ignore */
       }
       try {
         inst.destroy()

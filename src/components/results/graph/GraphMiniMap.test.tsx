@@ -61,6 +61,43 @@ describe('GraphMiniMap', () => {
     expect(navigator).toHaveBeenCalled()
   })
 
+  it('subscribes to cy.layoutstop so it can refresh the thumbnail once layout finishes', () => {
+    // Bug: when the user opens a page with sticky `miniMap: true`, the
+    // navigator initialises while cytoscape is still running its first
+    // layout. The thumbnail captured at init time is therefore blank,
+    // and the user only sees the actual graph after toggling the
+    // mini-map off and on again (which re-runs the init flow). Fix:
+    // listen for `layoutstop` (cytoscape fires this when a layout
+    // finishes) and trigger `cy.resize()` to re-capture the thumbnail.
+    const navigator = jest.fn(() => ({ destroy: jest.fn() }))
+    const onSpy = jest.fn()
+    const offSpy = jest.fn()
+    const cy = {
+      navigator,
+      on: onSpy,
+      off: offSpy,
+      resize: jest.fn(),
+    } as unknown as { navigator: jest.Mock; on: jest.Mock; off: jest.Mock }
+    const cyRef = { current: cy as never }
+    const { unmount } = render(
+      <ThemeProvider theme={theme}>
+        <GraphMiniMap cyRef={cyRef as never} />
+      </ThemeProvider>
+    )
+    // A handler must be registered for layoutstop.
+    const layoutstopCalls = onSpy.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && c[0].includes('layoutstop')
+    )
+    expect(layoutstopCalls.length).toBeGreaterThan(0)
+    // On unmount the handler is torn down (no leak across navigator
+    // re-mounts after sig change).
+    unmount()
+    const layoutstopOff = offSpy.mock.calls.filter(
+      (c) => typeof c[0] === 'string' && c[0].includes('layoutstop')
+    )
+    expect(layoutstopOff.length).toBeGreaterThan(0)
+  })
+
   it('passes a string CSS-selector to cy.navigator (not the raw HTMLElement)', () => {
     const navigator = jest.fn(() => ({ destroy: jest.fn() }))
     const cy = { navigator } as unknown as { navigator: jest.Mock }
