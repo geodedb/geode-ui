@@ -51,6 +51,13 @@ module.exports = {
     // FakeWorker installed by useLayoutWorker.test.ts ignores the URL.
     '(^|/)layoutWorkerUrl$':
       '<rootDir>/__test_utils__/mocks/layoutWorkerUrlMock.js',
+    // Same pattern for the WS-parse worker URL (PERF #297). queryStream
+    // tests rely on the synchronous main-thread parse fallback that
+    // engages when `new Worker(url, …)` fails — the stub keeps the URL
+    // resolver from crashing at parse time so the rest of the module
+    // loads cleanly.
+    '(^|/)queryStreamWorkerUrl$':
+      '<rootDir>/__test_utils__/mocks/queryStreamWorkerUrlMock.js',
   },
   transformIgnorePatterns: [
     'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style|nanoid)/)',

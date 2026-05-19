@@ -1,4 +1,8 @@
-import { streamQuery, StreamMsg } from './queryStream'
+import {
+  streamQuery,
+  StreamMsg,
+  __resetParseWorkerForTest,
+} from './queryStream'
 
 type Listener = (arg?: any) => void
 
@@ -157,4 +161,101 @@ test('forwards a batched rows frame as ONE rowBatch message (no per-row fan-out)
     [4, 'dave'],
     [5, 'erin'],
   ])
+})
+
+// PERF #297: when the parse worker is available, every WS frame's
+// JSON.parse runs off the main thread. The worker is single-threaded
+// so responses arrive FIFO; queryStream forwards them to onMessage in
+// the same order they entered. This test installs a fake Worker, fires
+// two WS frames, posts back the parsed payloads OUT OF ORDER (second
+// then first), and pins that the test's onMessage receives them in
+// the order the worker emits — proving the FIFO contract is real.
+test('PERF #297: parse-worker path dispatches messages in worker-FIFO order', () => {
+  type FakeWorkerListener = (ev: { data: unknown }) => void
+  type SentParse = { kind: 'parse'; seq: number; data: string }
+
+  class FakeWorker {
+    listeners: Record<string, FakeWorkerListener[]> = {}
+
+    posted: SentParse[] = []
+
+    addEventListener(type: string, cb: FakeWorkerListener): void {
+      if (!this.listeners[type]) this.listeners[type] = []
+      this.listeners[type]!.push(cb)
+    }
+
+    removeEventListener(type: string, cb: FakeWorkerListener): void {
+      const list = this.listeners[type]
+      if (!list) return
+      const idx = list.indexOf(cb)
+      if (idx >= 0) list.splice(idx, 1)
+    }
+
+    postMessage(m: SentParse): void {
+      this.posted.push(m)
+    }
+
+    fire(seq: number, parsedMsg: unknown): void {
+      const list = this.listeners.message || []
+      list.forEach((cb) =>
+        cb({ data: { kind: 'parsed', seq, msg: parsedMsg } })
+      )
+    }
+
+    onerror: ((e?: unknown) => void) | null = null
+
+    // eslint-disable-next-line class-methods-use-this
+    terminate(): void {
+      /* no-op */
+    }
+  }
+
+  // Install the fake Worker constructor globally so tryCreateParseWorker
+  // returns one of these instead of failing. Resetting the singleton
+  // ensures THIS test gets a fresh instance.
+  __resetParseWorkerForTest()
+  const fakeWorkers: FakeWorker[] = []
+  const PrevWorker = (globalThis as { Worker?: unknown }).Worker
+  // eslint-disable-next-line semi-style
+  ;(globalThis as { Worker: unknown }).Worker = function FakeWorkerCtor() {
+    const w = new FakeWorker()
+    fakeWorkers.push(w)
+    return w
+  } as unknown as typeof Worker
+  try {
+    const msgs: StreamMsg[] = []
+    streamQuery('MATCH (n) RETURN n', undefined, (m) => msgs.push(m))
+    const ws = lastInstance!
+    ws.fire('open')
+    expect(fakeWorkers).toHaveLength(1)
+    const worker = fakeWorkers[0]!
+
+    // Two frames arrive on the WS in order. Worker receives both
+    // (seq 1 then seq 2).
+    ws.fire('message', {
+      data: JSON.stringify({ kind: 'rows', rows: [[1], [2]] }),
+    })
+    ws.fire('message', {
+      data: JSON.stringify({ kind: 'end' }),
+    })
+    expect(worker.posted.map((p) => p.seq)).toEqual([1, 2])
+
+    // Pre-dispatch: no messages have been forwarded yet — the parse
+    // is async via the worker.
+    expect(msgs).toHaveLength(0)
+
+    // Worker emits responses in FIFO (single-threaded). dispatch in
+    // the same order.
+    worker.fire(1, { kind: 'rows', rows: [[1], [2]] })
+    worker.fire(2, { kind: 'end' })
+    expect(msgs.map((m) => m.kind)).toEqual(['rowBatch', 'end'])
+  } finally {
+    if (PrevWorker === undefined) {
+      delete (globalThis as { Worker?: unknown }).Worker
+    } else {
+      // eslint-disable-next-line no-extra-semi
+      ;(globalThis as { Worker: unknown }).Worker = PrevWorker
+    }
+    __resetParseWorkerForTest()
+  }
 })
