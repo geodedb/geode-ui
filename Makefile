@@ -151,6 +151,13 @@ dev:
 # ----- E2E stack -----
 COMPOSE := docker compose -f deploy/docker-compose.test.yml
 
+# Image tags must match docker-compose.test.yml's `image:` fields
+# exactly — compose finds these by name when run with `up -d` (no
+# --build), so any drift here causes a transparent pull attempt
+# instead of using the locally-built image.
+GEODE_IMAGE    := geode:v0.5.18
+GEODE_UI_IMAGE := geode-ui:e2e
+
 # Prerequisite: build the geode binary on the host because the
 # Dockerfile.geode runtime stage COPYs ../geode/zig-out/bin/geode.
 # Zig caches builds, so this is idempotent and fast on rebuilds.
@@ -162,9 +169,34 @@ e2e-deps:
 	  echo "==> ../geode/zig-out/bin/geode already present (skipping zig build)"; \
 	fi
 
-# Bring up the test stack (build images, run init, leave services running).
-e2e-up: e2e-deps
-	$(COMPOSE) up -d --build
+# Build the e2e images with `docker build` directly rather than letting
+# `docker compose up --build` drive them. Two reasons:
+#
+# 1. Docker Compose v5+ routes builds through `docker buildx bake`,
+#    which has shown context-transfer flakiness on relative `context:`
+#    paths that escape the compose-file directory (`context: ../..`
+#    here). Delegating builds out of compose makes the build path the
+#    same regardless of compose version.
+#
+# 2. `cd -P ..` (physical, not logical) is required because geode-ui
+#    is occasionally checked out via a parent directory whose siblings
+#    are symlinks pointing to the canonical worktree elsewhere. Plain
+#    `cd ..` lands in the symlink-laden parent — BuildKit refuses to
+#    follow symlinks that escape the build context root, so it loads
+#    a near-empty (~91 B) context and the `COPY geode/zig-out/bin/
+#    geode` step fails with "not found". `cd -P ..` resolves through
+#    the symlinks to the canonical parent that actually contains the
+#    binary, the geode-client-go sources, etc.
+e2e-build: e2e-deps
+	@echo "==> building $(GEODE_IMAGE)"
+	cd -P .. && docker build -f geode-ui/deploy/geode/Dockerfile.geode -t $(GEODE_IMAGE) .
+	@echo "==> building $(GEODE_UI_IMAGE)"
+	cd -P .. && docker build -f geode-ui/deploy/Dockerfile -t $(GEODE_UI_IMAGE) .
+
+# Bring up the test stack (images already built by e2e-build; compose
+# only starts containers + runs the seed init).
+e2e-up: e2e-build
+	$(COMPOSE) up -d
 	@echo "stack is up — http://localhost:8080 (UI), :8090 (MCP), :2087 (LSP), :3141/udp (Geode)"
 
 # Tear down + delete named volumes (full reset for next run).
