@@ -200,6 +200,16 @@ export const en = {
     pathResult: 'Path: {{from}} → {{to}} · {{hops}} hops',
     pathNone: 'No path between {{from}} and {{to}}',
     pathClear: 'Clear path',
+    canvasControls: {
+      aria: 'Graph viewport controls',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      fit: 'Fit graph to view',
+      reset: 'Reset view + layout',
+    },
+    zoomSlider: {
+      aria: 'Zoom level',
+    },
     miniMap: 'Mini-map',
     lasso: 'Lasso',
     domNodes: 'HTML nodes',
