@@ -217,6 +217,10 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
             // hardcoded 0.2 was too coarse for one class and too jittery for
             // the other.
             wheelSensitivity,
+            // Explicitly enable pinch-zoom on touch devices. Cytoscape defaults
+            // this to true when the container is touch-capable, but we make the
+            // contract explicit to prevent future toggles from silently disabling it.
+            userZoomingEnabled: true,
           })
           const initialIds: string[] = []
           cy.nodes().forEach((node) => {
@@ -482,14 +486,18 @@ export function __writeTierForTest(n: number): void {
   }
 }
 
-// Test seam: exercises the wheelSensitivity forwarding contract without
-// spinning up a full Cytoscape Core. The cytoscapeFactory stub captures
-// the options object so the test can assert the sensitivity value
-// reaches the constructor call site.
+// Test seam: exercises the wheelSensitivity and userZoomingEnabled
+// forwarding contract without spinning up a full Cytoscape Core. The
+// cytoscapeFactory stub captures the options object so the test can
+// assert both the sensitivity value and the zoom-enabling flag reach
+// the constructor call site.
 export function __buildWithSensitivityForTest(opts: {
-  cytoscapeFactory: (cfg: { wheelSensitivity: number }) => unknown
+  cytoscapeFactory: (cfg: Record<string, unknown>) => unknown
   sensitivity: number
 }): void {
-  opts.cytoscapeFactory({ wheelSensitivity: opts.sensitivity })
+  opts.cytoscapeFactory({
+    wheelSensitivity: opts.sensitivity,
+    userZoomingEnabled: true,
+  })
 }
 /* eslint-enable no-underscore-dangle */

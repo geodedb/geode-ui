@@ -3,17 +3,29 @@ import { useGraphPrefs } from '../useGraphPrefs'
 import { scaleTier } from './scaleTier'
 import { __buildWithSensitivityForTest } from './useGraphCytoscape'
 
-describe('useGraphCytoscape — wheelSensitivity forwarding', () => {
+describe('useGraphCytoscape — wheelSensitivity & userZoomingEnabled forwarding', () => {
   it('forwards wheelSensitivity from prefs into cytoscape() constructor', () => {
-    const calls: Array<{ wheelSensitivity?: number }> = []
+    const captured: Record<string, unknown> = {}
     __buildWithSensitivityForTest({
       cytoscapeFactory: (opts) => {
-        calls.push({ wheelSensitivity: opts.wheelSensitivity })
+        Object.assign(captured, opts)
         return { destroy: jest.fn() } as never
       },
       sensitivity: 1.25,
     })
-    expect(calls[0]?.wheelSensitivity).toBe(1.25)
+    expect(captured.wheelSensitivity).toBe(1.25)
+  })
+
+  it('keeps userZoomingEnabled=true so pinch-zoom works on touch devices', () => {
+    const captured: Record<string, unknown> = {}
+    __buildWithSensitivityForTest({
+      cytoscapeFactory: (opts) => {
+        Object.assign(captured, opts)
+        return { destroy: jest.fn() } as never
+      },
+      sensitivity: 0.5,
+    })
+    expect(captured.userZoomingEnabled).toBe(true)
   })
 })
 
