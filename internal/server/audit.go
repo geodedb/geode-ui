@@ -55,6 +55,17 @@ const (
 	auditEventProfileDeleted     = "profile_deleted"
 	auditEventProfileReloadFail  = "profile_reload_failed"
 	auditEventProfileRateLimited = "profile_rate_limited"
+	// SEC #300 (Scope-A): emitted alongside login_success when a role
+	// is attached to a JWT, naming the SOURCE of the role decision.
+	// Currently only `source=bootstrap` (the -admin-users CSV) fires,
+	// because Geode v0.5.18's wire dialect lacks `SHOW USERS … ROLES`
+	// and authenticateUpstream returns nil roles. Operators can grep
+	// for `source=bootstrap` to spot configurations where the
+	// upstream role-discovery path isn't yet wired and admins are
+	// being granted purely by the static allowlist — the signal that
+	// `CREATE USER … ROLE admin` provisioning won't actually grant
+	// admin gates until the upstream gets a queryable role surface.
+	auditEventRoleResolved = "auth_role_resolved"
 )
 
 // sensitiveKeys are case-insensitive substrings that, when found in an

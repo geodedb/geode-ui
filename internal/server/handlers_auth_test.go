@@ -222,6 +222,39 @@ func TestAppendUnique(t *testing.T) {
 
 // equalStrings is defined in handlers_schema_test.go (same package).
 
+// TestAdminRolesFor_EmitsAuthRoleResolvedAudit_SEC_300 pins SEC #300
+// Scope-A: when adminRolesFor grants admin via the bootstrap CSV, an
+// `auth_role_resolved` audit row must fire with source=bootstrap so
+// operators can grep the log to spot configurations where the upstream
+// role-discovery path isn't wired and CREATE USER+ROLE provisioning
+// won't actually grant admin gates. Non-admin users get no event.
+func TestAdminRolesFor_EmitsAuthRoleResolvedAudit_SEC_300(t *testing.T) {
+	since := time.Now()
+	s := &GraphServer{cfg: Config{AdminUsernames: map[string]bool{"root": true}}}
+	s.adminRolesFor("root", nil)
+	s.adminRolesFor("alice", []string{"reader"})
+	entries := defaultAuditRing.snapshot(since)
+	var resolved []AuditEntry
+	for _, e := range entries {
+		if e.Event == auditEventRoleResolved {
+			resolved = append(resolved, e)
+		}
+	}
+	if len(resolved) != 1 {
+		t.Fatalf("want exactly one auth_role_resolved entry, got %d (%v)", len(resolved), resolved)
+	}
+	e := resolved[0]
+	if got, _ := e.Fields["sub"].(string); got != "root" {
+		t.Errorf("sub: got %q want %q", got, "root")
+	}
+	if got, _ := e.Fields["role"].(string); got != "admin" {
+		t.Errorf("role: got %q want %q", got, "admin")
+	}
+	if got, _ := e.Fields["source"].(string); got != "bootstrap" {
+		t.Errorf("source: got %q want %q", got, "bootstrap")
+	}
+}
+
 // TestAdminRolesFor covers the -admin-users membership → grant "admin"
 // role helper extracted from Login (#146 / Q12).
 func TestAdminRolesFor(t *testing.T) {

@@ -142,12 +142,26 @@ func denyLogin(w http.ResponseWriter, authStart time.Time, reason, username, pas
 }
 
 // adminRolesFor returns upstreamRoles with the "admin" role appended when
-// username is a configured bootstrap admin (-admin-users). Geode v0.5.11
-// doesn't expose a queryable role-enumeration form (see
+// username is a configured bootstrap admin (-admin-users). Geode v0.5.18
+// still doesn't expose a queryable role-enumeration form (see
 // authenticateUpstream comment), so without this the bootstrap user would
 // carry empty roles and every required_roles=["admin"] gate would 403.
+//
+// SEC #300 (Scope-A): emits the `auth_role_resolved` audit row so the
+// SOURCE of every admin role decision is visible in the audit log.
+// Currently only `source=bootstrap` fires; a future Geode that adds a
+// SHOW USERS ROLES form should also emit `source=upstream` (Scope-B,
+// blocked on upstream wire support — tracked in the issue body).
+// Operators grep `source=bootstrap` to spot configurations where an
+// admin provisioned via `CREATE USER … ROLE admin` won't actually
+// gain admin gates on next login (no upstream role discovery yet).
 func (s *GraphServer) adminRolesFor(username string, upstreamRoles []string) []string {
 	if s.cfg.AdminUsernames[username] {
+		emitAudit(auditEventRoleResolved,
+			"sub", username,
+			"role", "admin",
+			"source", "bootstrap",
+		)
 		return appendUnique(upstreamRoles, "admin")
 	}
 	return upstreamRoles
