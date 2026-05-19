@@ -114,6 +114,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     toggleSection,
     focusHops,
     setFocusHops,
+    wheelSensitivity,
   } = useGraphPreferences()
   // Result-scoped path-mode state machine; reset on sig change.
   const {
@@ -240,6 +241,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     reapplyPins: pinning.reapplyAll,
     reapplyFocus: focusMode.reapply,
     t,
+    wheelSensitivity,
   })
 
   // Open expand-popover target node id (null = closed).

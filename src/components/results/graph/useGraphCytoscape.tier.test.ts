@@ -1,6 +1,21 @@
 /* eslint-disable no-underscore-dangle, global-require -- internal __-prefixed test seam + require() to re-import the module under test */
 import { useGraphPrefs } from '../useGraphPrefs'
 import { scaleTier } from './scaleTier'
+import { __buildWithSensitivityForTest } from './useGraphCytoscape'
+
+describe('useGraphCytoscape — wheelSensitivity forwarding', () => {
+  it('forwards wheelSensitivity from prefs into cytoscape() constructor', () => {
+    const calls: Array<{ wheelSensitivity?: number }> = []
+    __buildWithSensitivityForTest({
+      cytoscapeFactory: (opts) => {
+        calls.push({ wheelSensitivity: opts.wheelSensitivity })
+        return { destroy: jest.fn() } as never
+      },
+      sensitivity: 1.25,
+    })
+    expect(calls[0]?.wheelSensitivity).toBe(1.25)
+  })
+})
 
 describe('useGraphCytoscape — tier writeback', () => {
   beforeEach(() => {

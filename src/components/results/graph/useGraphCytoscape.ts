@@ -114,6 +114,10 @@ export type UseGraphCytoscapeArgs = {
   // focus class memory) and after a layout rerun (defensive, idempotent).
   reapplyFocus?: () => void
   t: TFn
+  // UX (#TBD): user-configurable zoom wheel speed. Clamped to [0.05, 2.0]
+  // in the store; 0.5 is the default. Passed straight through to the
+  // Cytoscape constructor so the setting takes effect on the next rebuild.
+  wheelSensitivity: number
 }
 
 // useGraphCytoscape owns every effect that talks to the live Cytoscape
@@ -149,6 +153,7 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     reapplyPins,
     reapplyFocus,
     t,
+    wheelSensitivity,
   } = args
 
   // Stash the theme in a ref so the rebuild reads the latest value
@@ -206,7 +211,12 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
             elements: els,
             style: createCytoscapeStyle(themeRef.current),
             layout: { name: 'preset' },
-            wheelSensitivity: 0.2,
+            // PERF / UX (#TBD): wheelSensitivity comes from a user pref so a
+            // mouse that ships an aggressive scroll wheel (e.g. MX Master) can
+            // pull the value DOWN while a flat trackpad can push it UP. The
+            // hardcoded 0.2 was too coarse for one class and too jittery for
+            // the other.
+            wheelSensitivity,
           })
           const initialIds: string[] = []
           cy.nodes().forEach((node) => {
@@ -470,5 +480,16 @@ export function __writeTierForTest(n: number): void {
     useGraphPrefs.getState().setTier(next)
     perfMarks.tier(next)
   }
+}
+
+// Test seam: exercises the wheelSensitivity forwarding contract without
+// spinning up a full Cytoscape Core. The cytoscapeFactory stub captures
+// the options object so the test can assert the sensitivity value
+// reaches the constructor call site.
+export function __buildWithSensitivityForTest(opts: {
+  cytoscapeFactory: (cfg: { wheelSensitivity: number }) => unknown
+  sensitivity: number
+}): void {
+  opts.cytoscapeFactory({ wheelSensitivity: opts.sensitivity })
 }
 /* eslint-enable no-underscore-dangle */
