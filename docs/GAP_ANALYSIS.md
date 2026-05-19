@@ -2,7 +2,8 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort: **24 gaps closed across 4 trackers** in a single closure pass (1b3f414..3d3ba14 — 26 closure commits + 2 housekeeping). Cluster breakdown: 4 GAP-N rows (GAP-034/035/036/037 now reified with closure SHAs `0622d84` / `42d3664` / `d309293` / `60d965a`); 4 QUALITY rows (#268/#269/#270/#271); 7 PERF rows (#275/#278/#281/#284/#285/#286 + brotli on #259); 9 SECURITY rows (#264/#265/#266/#267/#272/#274/#280/#283 + NFKC corpus on #242). All gates green: 928/928 Jest, 100% reachable Go packages, golangci-lint + tsc-strict clean. Cohort detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
+- **Last refreshed:** 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 deferred-items follow-up: the 3 PERF P1 items deferred earlier in round-4 (#291 / #297 / #316) are now **all Closed**. Closure SHAs `86e0463` (#291 layoutWorker transferable Float32Array), `e085a7f` (#297 WS JSON.parse worker), `3259dab` (#316 lazy-load cytoscape plugins). Combined with the prior round-4 closures (#322, #323, #314, #312, #308, #289, plus #300 Scope-A), **10 of 10 actionable findings from the 2026-05-19 audit cohort are now Closed**. #300 Scope-B remains the only OPEN item in this cohort — still blocked on upstream Geode landing SHOW USERS … ROLES. Gates: Jest 979/979 (146 suites), Go `./internal/server/` + `./cmd/server/` + `./internal/jwt/` all pass, `tsc --noEmit` clean, `eslint --quiet 'src/**/*.{ts,tsx}'` clean. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 cohort)" section.)
+- **Previous refresh:** 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort: **24 gaps closed across 4 trackers** in a single closure pass (1b3f414..3d3ba14 — 26 closure commits + 2 housekeeping). Cluster breakdown: 4 GAP-N rows (GAP-034/035/036/037 now reified with closure SHAs `0622d84` / `42d3664` / `d309293` / `60d965a`); 4 QUALITY rows (#268/#269/#270/#271); 7 PERF rows (#275/#278/#281/#284/#285/#286 + brotli on #259); 9 SECURITY rows (#264/#265/#266/#267/#272/#274/#280/#283 + NFKC corpus on #242). All gates green: 928/928 Jest, 100% reachable Go packages, golangci-lint + tsc-strict clean. Cohort detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
 - **Previous refresh:** 2026-05-17 (audit Phase 4 gap-sync (round 2) — drift sweep across the GitLab tracker and the in-repo docs. **Drift closed (tracker side):** GAP-002 / #2 and GAP-003 / #3 (upstream-Geode admin-DDL blockers documented Closed 2026-05-13 but never closed on the tracker) — closed with `gap-status::wont-do` + closure-evidence note citing the 2026-05-13 v0.5.15 auth-DDL integration plan; GAP-017 / #44 already closed earlier this day via `63b4feb` (`[QUALITY-12]` finish pnpm-to-npm migration); #122 (S9 accepted-risk, closed 2026-05-10) had stale `gap-status::open` label stripped + `gap-status::wont-do` applied. **Four new gaps filed:** GAP-034 / #273 (mirror `check:doc-routes` + `check:changelog` pre-commit gates into CI; Medium), GAP-035 / #276 (`make perf-smoke` overwrites historical Cytoscape baseline at a fixed path; Medium), GAP-036 / #279 (stale `docs/PRIVATE_REGISTRY.md`; Low), GAP-037 / #282 (`SECURITY.md` misattributes DOMPurify + RBAC to `@devnw/components`; Low). Slot-reservation placeholders for GAP-034/035/036 in earlier drafts were repurposed for these concrete findings. **Doc side:** GAP-017 row updated to Closed in the 2026-05-11 table; the "eleven open items" sentence at the PSR cohort header updated to reflect zero in-repo Open items; closure cohort 2026-05-17 added to `GAP_ANALYSIS_RESOLVED.md`.)
 - **Previous refresh:** 2026-05-17 (audit Phase 4 gap-sync (round 1) — the 47 issues closed locally during the 2026-05-16 gap-close pass were never closed on the GitLab tracker; this run posted closure-evidence notes and ran `glab issue close` on all 47, catching the tracker up to local `main` HEAD `e4fc9ff`. Also: 3 newly-detected gaps GAP-031/032/033 were assigned Gap-IDs and cross-linked to their pre-existing GitLab equivalents #208 (Q-NEW-G), #207 (Q-NEW-F), #138 (Q1) — no new GitLab issues filed because they are exact duplicates; the recommended fixes carry over verbatim.)
 - **Earlier refresh:** 2026-05-16 (gap-close pass — 50 commits across Tiers A through H closed every actionable item across the four `*GAP_ANALYSIS.md` tracking files: 9 Security, 3 Quality release-blockers, 4 P1 UI Perf, 13 Quality Medium, 6 P2 Perf, 9 P3 Perf, 5 Quality Low + misc, GAP-021 #102, GAP-023..027 docs drift; one combined won't-do/blocked commit closes GAP-004/005/011/012/015/016, S9 #122, and the F-SUP-3 codesign-windows-ssl carry-over)
@@ -691,7 +692,7 @@ Note: the doc rows above (`docs/GAP_ANALYSIS.md:42-43`) still cite Geode v0.5.15
 
 ## Closure cohort 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 cohort)
 
-A `/codepros:gap-close` cohort on 2026-05-19 closed **7 GitLab issues** (6 fully + 1 partial) across three domain trackers (SECURITY 4, PERF 1, QUALITY 2). All seven closures shipped Jest, Go, or `node --test` tests pinning the regression. Three high-PriorityScore perf items (#291 / #297 / #316) were **deferred** to the next session — they require ~140-180 LOC apiece + bench A/B reruns and the tree was kept clean for review.
+A `/codepros:gap-close` cohort on 2026-05-19 closed **10 GitLab issues** (9 fully + 1 partial) across three domain trackers (SECURITY 4, PERF 4, QUALITY 2) across two sessions. All ten closures shipped Jest, Go, or `node --test` tests pinning the regression. The three high-PriorityScore PERF P1 items (#291 / #297 / #316) deferred in the first session of this round were closed in the follow-up session.
 
 ### Closures
 
@@ -704,25 +705,25 @@ A `/codepros:gap-close` cohort on 2026-05-19 closed **7 GitLab issues** (6 fully
 | [#308](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/308) | Security | S-NEW-C | `36661d7` | `extractTokenForRevoke` (sunset-exempt) keeps post-2026-07-01 logout-side `?access_token=` revoke working |
 | [#289](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/289) | Quality | Q-NEW-Q | `b78c0da` | `runSync` generation counter; stale resolved promises short-circuit before clobbering fresh `setResp` |
 | [#300](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/300) | Security | S-NEW-A | `71352b2` | **Partial — Scope-A only.** `auth_role_resolved` audit event from `adminRolesFor` with `source=bootstrap`; Scope-B (real SHOW USERS ROLES upstream role discovery) remains Open — blocked on upstream Geode. |
+| [#316](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/316) | Perf | PERF-2026-05-19-07 | `3259dab` | Lazy-load opt-in cytoscape plugins (cxtmenu / lasso / navigator) via dynamic `import()` with module-level promise caching. Bundle-delta realised ~30 KiB (audit's 1-2 MiB projection was over-optimistic — see `PERF_GAP_ANALYSIS.md` "Bundle-delta correction"). |
+| [#297](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/297) | Perf | PERF-2026-05-19-03 | `e085a7f` | WS JSON.parse offloaded to a Web Worker (`queryStreamWorker.ts` + URL helper + main-thread fallback when Worker construct fails). |
+| [#291](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/291) | Perf | PERF-2026-05-19-01 | `86e0463` | layoutWorker posts positions as transferable `Float32Array` (length=2*N, packed `[x,y,x,y,…]`); zero-copy `postMessage`; main-thread `toPosMap` accepts both new and legacy shapes for chunk-skew resilience. |
 
-### Deferred to next session (clean tree)
+### Remaining Open from this cohort
 
-| Issue | Domain | Reason |
-|---|---|---|
-| [#316](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/316) | Perf | Lazy-load cytoscape plugins — ~120 LOC across 4-5 files (`useLasso`/`useCxtMenu`/`GraphMiniMap` dynamic imports), requires bundle delta verification (`scripts/check-chunk-budget`); tests need to `await` dynamic imports. Not started — clean tree. |
-| [#297](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/297) | Perf | WS parse worker offload — ~140 LOC new worker file + URL helper + fallback to main thread on construct fail; bench rerun needed. Not started. |
-| [#291](https://gitlab.com/devnw/codepros/geode/geode-ui/-/issues/291) | Perf | layoutWorker transferable Float32Array — ~180 LOC, worker protocol change + main-thread reciprocal + bench A/B. Not started. |
+- **#300 Scope-B** — real upstream `SHOW USERS … ROLES` role discovery. Blocked on upstream Geode landing the corresponding SQL surface. Issue #300 kept open as the single tracking point.
 
-### Verification (session-end snapshot)
+### Verification (session-end snapshot — deferred-items follow-up)
 
-- `npm test --no-coverage --silent` → 977/977 passed.
+- `npm test --no-coverage --silent` → 979/979 passed (146 suites).
 - `scripts/run-go.sh test ./internal/server/ ./cmd/server/ ./internal/jwt/` → all pass.
 - `npx tsc --noEmit` → clean.
-- `npx eslint src/**/*.{ts,tsx}` → clean (90 pre-existing errors in `scripts/*.mjs` are out of CI lint scope and unchanged by this session).
+- `npx eslint --quiet 'src/**/*.{ts,tsx}'` → clean.
+- Pre-commit hooks (every closure commit) → green.
 
 ### Headline metrics
 
-- Closure commits: 6 (`1cde6ba`, `f725ea4`, `e42a92c`, `36661d7`, `b78c0da`, `71352b2`) plus the `1166bda` e2e-build pre-cohort fix already on `main`.
-- Issues closed: 7 (6 full + 1 partial).
-- Issues deferred: 3 (all PERF P1, all left Open with deferral note in `PERF_GAP_ANALYSIS.md` cohort row).
+- Closure commits: 9 across two sessions — first session: `1cde6ba`, `f725ea4`, `e42a92c`, `36661d7`, `b78c0da`, `71352b2` plus the `1166bda` e2e-build pre-cohort fix already on `main`; deferred-items follow-up: `3259dab` (#316), `e085a7f` (#297), `86e0463` (#291).
+- Issues closed: 10 (9 full + 1 partial). All 10 actionable findings from the 2026-05-19 audit cohort closed.
+- Issues remaining Open from this cohort: 1 — #300 Scope-B (blocked on upstream Geode).
 - Detail: see `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" section.
