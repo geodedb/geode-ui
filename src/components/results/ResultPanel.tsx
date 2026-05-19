@@ -6,6 +6,8 @@ import type { QueryResp } from '@api'
 import { TableView } from './TableView'
 import { JsonView } from './JsonView'
 import { MatrixView } from './MatrixView'
+import { ResultTabErrorBoundary } from './ResultTabErrorBoundary'
+import { respSignature } from './graph/cyHelpers'
 import { TabGroup, Tab, TabPanel } from '../../services/webawesome/components'
 import { Icon } from '../ui'
 
@@ -172,6 +174,13 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
   // props. role=status keeps it announced to assistive tech.
   const graphFallback = <div role="status">{t('query.loadingGraph')}</div>
 
+  // QUAL #314: resetKey for the tab-scoped ErrorBoundary. Tracks the
+  // current tab + query/result signature so a render-time crash inside
+  // any tab self-heals when the user (a) switches tabs or (b) runs a
+  // new query. `respSignature` is already memoised by the graph stack;
+  // reusing it here avoids re-encoding the resp on every render.
+  const respSig = respSignature(resp)
+
   return (
     <TabsRow>
       {onToggleMaximize && (
@@ -262,7 +271,14 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           active={tab === 'table'}
           aria-hidden={tab === 'table' ? 'false' : 'true'}
         >
-          {tab === 'table' && <TableView resp={resp} expand={expand} />}
+          {tab === 'table' && (
+            <ResultTabErrorBoundary
+              resetKey={`table|${respSig}`}
+              tabLabel={t('query.tabTable')}
+            >
+              <TableView resp={resp} expand={expand} />
+            </ResultTabErrorBoundary>
+          )}
         </TabPanel>
         <TabPanel
           name="json"
@@ -270,7 +286,14 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           active={tab === 'json'}
           aria-hidden={tab === 'json' ? 'false' : 'true'}
         >
-          {tab === 'json' && <JsonView data={resp} />}
+          {tab === 'json' && (
+            <ResultTabErrorBoundary
+              resetKey={`json|${respSig}`}
+              tabLabel={t('query.tabJson')}
+            >
+              <JsonView data={resp} />
+            </ResultTabErrorBoundary>
+          )}
         </TabPanel>
         <TabPanel
           name="graph"
@@ -279,9 +302,14 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           aria-hidden={tab === 'graph' ? 'false' : 'true'}
         >
           {tab === 'graph' && (
-            <Suspense fallback={graphFallback}>
-              <GraphView resp={resp} query={query} />
-            </Suspense>
+            <ResultTabErrorBoundary
+              resetKey={`graph|${respSig}|${query ?? ''}`}
+              tabLabel={t('query.tabGraph')}
+            >
+              <Suspense fallback={graphFallback}>
+                <GraphView resp={resp} query={query} />
+              </Suspense>
+            </ResultTabErrorBoundary>
           )}
         </TabPanel>
         <TabPanel
@@ -290,7 +318,14 @@ export const ResultPanel: React.FC<ResultPanelProps> = ({
           active={tab === 'matrix'}
           aria-hidden={tab === 'matrix' ? 'false' : 'true'}
         >
-          {tab === 'matrix' && <MatrixView resp={resp} query={query} />}
+          {tab === 'matrix' && (
+            <ResultTabErrorBoundary
+              resetKey={`matrix|${respSig}|${query ?? ''}`}
+              tabLabel={t('query.tabMatrix')}
+            >
+              <MatrixView resp={resp} query={query} />
+            </ResultTabErrorBoundary>
+          )}
         </TabPanel>
       </TabGroup>
     </TabsRow>
