@@ -275,6 +275,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     // login starts from a known-empty role posture.
     writeStoredRoles(null)
     setRoles([])
+    // Drop QueryPage's cross-route memory (editor text, last result,
+    // tab/streamMode/expand). The store is a module-level singleton
+    // and survives router navigation by design; signOut is one of
+    // exactly two legitimate reset points (the other is switchActive
+    // below). Lazy-imported via require so a cycle between AuthProvider
+    // and queryPageStore.ts can't form at module-load time.
+    import('../lib/queryPageStore')
+      .then((m) => m.useQueryPageStore.getState().reset())
+      .catch(() => {
+        /* store init can't fail in practice; ignore */
+      })
     // S9 (#122): saved passwords intentionally PERSIST past signOut.
     // This mirrors the browser-password-manager analog called out in
     // Plan E §8 — logging out should not silently nuke the user's
@@ -336,6 +347,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!target) return
       conns.setActive(connectionId)
       setLatestToken(target.token)
+      // Drop QueryPage's cross-route memory. Switching active
+      // connection / profile is the second legitimate reset point
+      // (see signOut for the rationale and import strategy).
+      import('../lib/queryPageStore')
+        .then((m) => m.useQueryPageStore.getState().reset())
+        .catch(() => {
+          /* ignore */
+        })
     },
     [conns]
   )

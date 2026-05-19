@@ -90,6 +90,17 @@ jest.mock('../api/client', () => ({
 
 import { QueryPage } from './QueryPage'
 import { useQueryHistory } from '../lib/useQueryHistory'
+import { useQueryPageStore } from '../lib/queryPageStore'
+
+// The QueryPage editor + result state lives in a module-level zustand
+// store so it can survive route navigation. The store therefore also
+// survives ACROSS Jest tests inside the same worker — reset before
+// every test so a previous case's `setStmt('MATCH (x) RETURN x')`
+// doesn't leak into the next case that expects the default
+// `MATCH (n) RETURN n LIMIT 25`.
+beforeEach(() => {
+  useQueryPageStore.getState().reset()
+})
 
 // QueryPage reads `?statement=` via react-router's useSearchParams, so it
 // must be rendered inside a router. Wrap it in a MemoryRouter (default

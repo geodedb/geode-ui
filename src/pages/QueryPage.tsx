@@ -12,11 +12,12 @@ import { useSearchParams } from 'react-router-dom'
 import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
-import { ResultPanel, type ResultTab } from '../components/results/ResultPanel'
+import { ResultPanel } from '../components/results/ResultPanel'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryHistory } from '../lib/useQueryHistory'
 import { useQueryStore } from '../lib/queryStore'
+import { useQueryPageStore } from '../lib/queryPageStore'
 import { useLspSettings } from '../lib/lspSettings'
 import type { GqlEditorHandle } from '../components/editor/GqlEditor'
 import { Dropdown, DropdownItem } from '../services/webawesome/components'
@@ -151,22 +152,35 @@ function streamStateToResp(s: StreamState): QueryResp {
 
 export const QueryPage: React.FC = () => {
   const { t } = useTranslation()
-  const [stmt, setStmt] = useState('MATCH (n) RETURN n LIMIT 25')
+  // queryPageStore is a module-level singleton — its state survives the
+  // QueryPage component being unmounted by router navigation (user
+  // clicks Schema, then comes back to Query). signOut + switchActive in
+  // AuthProvider call reset() on this store so a new session / new
+  // connection starts from a clean editor.
+  const stmt = useQueryPageStore((s) => s.stmt)
+  const setStmt = useQueryPageStore((s) => s.setStmt)
   // Bug #6: the SUBMITTED statement, tracked separately from the live
   // editor buffer (`stmt`). ResultPanel.query — and through it
   // GraphView's `sig` — must depend on this, NOT on the editor buffer,
   // or every keystroke triggers a full cytoscape rebuild + cxtmenu
   // remount + lasso re-apply + tooltip rebind + dom-node remount.
   // Update from EVERY run path (sync, stream, and any future retry).
-  const [submittedStmt, setSubmittedStmt] = useState('')
-  const [resp, setResp] = useState<QueryResp | null>(null)
-  const [err, setErr] = useState<string | null>(null)
+  const submittedStmt = useQueryPageStore((s) => s.submittedStmt)
+  const setSubmittedStmt = useQueryPageStore((s) => s.setSubmittedStmt)
+  const resp = useQueryPageStore((s) => s.resp)
+  const setResp = useQueryPageStore((s) => s.setResp)
+  const err = useQueryPageStore((s) => s.err)
+  const setErr = useQueryPageStore((s) => s.setErr)
+  const tab = useQueryPageStore((s) => s.tab)
+  const setTab = useQueryPageStore((s) => s.setTab)
+  const streamMode = useQueryPageStore((s) => s.streamMode)
+  const setStreamMode = useQueryPageStore((s) => s.setStreamMode)
+  const expand = useQueryPageStore((s) => s.expand)
+  const setExpand = useQueryPageStore((s) => s.setExpand)
+  // `busy` and `maximized` stay local — `busy` is transient (Run
+  // button loading state) and `maximized` is intentionally per-mount
+  // (a fullscreen overlay on QueryPage shouldn't follow you to /schema).
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<ResultTab>('table')
-  const [streamMode, setStreamMode] = useState(false)
-  const [expand, setExpand] = useState(true)
-  // Result panel maximized into a viewport-filling overlay. Session-
-  // local (defaults closed); Esc and the toggle both close it.
   const [maximized, setMaximized] = useState(false)
   const maximizeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
@@ -572,7 +586,7 @@ export const QueryPage: React.FC = () => {
             checked={expand || undefined}
             aria-checked={expand ? 'true' : 'false'}
             role="menuitemcheckbox"
-            onClick={() => setExpand((e) => !e)}
+            onClick={() => setExpand(!expand)}
           >
             {t('query.expandGraphCells')}
           </DropdownItem>

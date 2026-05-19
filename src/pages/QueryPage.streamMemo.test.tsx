@@ -109,6 +109,7 @@ class MockWebSocket implements MockWS {
 }
 
 import { QueryPage } from './QueryPage'
+import { useQueryPageStore } from '../lib/queryPageStore'
 
 beforeEach(() => {
   tableViewRefs.length = 0
@@ -117,6 +118,9 @@ beforeEach(() => {
   // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
   ;(window as unknown as { WebSocket: unknown }).WebSocket = MockWebSocket
   localStorage.removeItem('geode-ui.legacy-auth')
+  // Reset the cross-route editor + result store so prior tests don't
+  // leak state across cases (see QueryPage.test.tsx for the rationale).
+  useQueryPageStore.getState().reset()
 })
 
 async function renderStreamingPage(): Promise<void> {
