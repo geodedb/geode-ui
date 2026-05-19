@@ -130,6 +130,12 @@ type GraphPrefsState = {
   // Per-section open/closed state for the sidebar — see GraphSectionId.
   // Sticky.
   sectionsOpen: Record<GraphSectionId, boolean>
+  // Wheel sensitivity modifier for zoom speed (1.0 = default). Clamped
+  // to [0.05, 2.0] so the operator can fine-tune responsiveness without
+  // making the viewport uncontrollable. Default 0.5 is smoother than the
+  // prior hardcoded 0.2. Sticky.
+  wheelSensitivity: number
+  setWheelSensitivity: (v: number) => void
   setLayout: (l: LayoutName) => void
   toggleHiddenLabel: (label: string) => void
   setHiddenLabels: (next: Set<string>) => void
@@ -175,6 +181,7 @@ type PersistedShape = {
   renderer: Renderer
   useWorkerLayout: boolean
   sectionsOpen: Record<GraphSectionId, boolean>
+  wheelSensitivity: number
 }
 
 function coerceInspectorView(v: unknown): InspectorView {
@@ -219,6 +226,9 @@ export const useGraphPrefs = create<GraphPrefsState>()(
       tier: 'small' as Tier,
       useWorkerLayout: true,
       sectionsOpen: { ...DEFAULT_SECTIONS_OPEN },
+      wheelSensitivity: 0.5,
+      setWheelSensitivity: (v) =>
+        set({ wheelSensitivity: Math.min(2.0, Math.max(0.05, v)) }),
       setLayout: (l) => set({ layout: l }),
       toggleHiddenLabel: (label) =>
         set((s) => {
@@ -277,6 +287,7 @@ export const useGraphPrefs = create<GraphPrefsState>()(
         renderer: s.renderer,
         useWorkerLayout: s.useWorkerLayout,
         sectionsOpen: s.sectionsOpen,
+        wheelSensitivity: s.wheelSensitivity,
       }),
       // Rehydrate the persisted string[] back into a Set so consumers
       // always see a Set regardless of where the value came from. A
@@ -342,6 +353,15 @@ export const useGraphPrefs = create<GraphPrefsState>()(
               collapsed: p2.collapsed !== false,
               inspector: p2.inspector !== false,
             }
+          })(),
+          // wheelSensitivity: clamp to [0.05, 2.0] and default to 0.5 for
+          // any missing / non-finite persisted value so a stale persisted
+          // shape (pre-wheelSensitivity) gets a sensible default on first
+          // read.
+          wheelSensitivity: (() => {
+            const v = p.wheelSensitivity
+            if (typeof v !== 'number' || !Number.isFinite(v)) return 0.5
+            return Math.min(2.0, Math.max(0.05, v))
           })(),
         }
       },

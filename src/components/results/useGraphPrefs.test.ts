@@ -276,48 +276,25 @@ describe('useGraphPrefs renderer pref', () => {
   })
 })
 
-describe('useGraphPrefs.sectionsOpen', () => {
-  beforeEach(() => {
-    // Reset the persisted state and the in-memory store so each test
-    // starts from defaults. Clearing the localStorage key first so the
-    // persist middleware doesn't rehydrate a previous test's state.
-    window.localStorage.removeItem('geode-ui.graph-prefs')
-    useGraphPrefs.setState({
-      sectionsOpen: {
-        visibility: true,
-        display: true,
-        hidden: true,
-        collapsed: true,
-        inspector: true,
-      },
-    })
+describe('wheelSensitivity pref', () => {
+  it('defaults to 0.5 (smoother than the prior hardcoded 0.2)', () => {
+    // Reset the store so prior tests don't bleed in.
+    useGraphPrefs.setState(useGraphPrefs.getInitialState())
+    expect(useGraphPrefs.getState().wheelSensitivity).toBe(0.5)
   })
 
-  it('defaults to all five sections expanded', () => {
-    const s = useGraphPrefs.getState()
-    expect(s.sectionsOpen).toEqual({
-      visibility: true,
-      display: true,
-      hidden: true,
-      collapsed: true,
-      inspector: true,
-    })
+  it('clamps setWheelSensitivity to [0.05, 2.0]', () => {
+    useGraphPrefs.getState().setWheelSensitivity(5.0)
+    expect(useGraphPrefs.getState().wheelSensitivity).toBe(2.0)
+    useGraphPrefs.getState().setWheelSensitivity(0)
+    expect(useGraphPrefs.getState().wheelSensitivity).toBe(0.05)
+    useGraphPrefs.getState().setWheelSensitivity(0.75)
+    expect(useGraphPrefs.getState().wheelSensitivity).toBe(0.75)
   })
 
-  it('toggleSection flips the open flag for one section', () => {
-    useGraphPrefs.getState().toggleSection('display')
-    expect(useGraphPrefs.getState().sectionsOpen.display).toBe(false)
-    useGraphPrefs.getState().toggleSection('display')
-    expect(useGraphPrefs.getState().sectionsOpen.display).toBe(true)
-  })
-
-  it('toggleSection does not affect other sections', () => {
-    useGraphPrefs.getState().toggleSection('hidden')
-    const s = useGraphPrefs.getState().sectionsOpen
-    expect(s.hidden).toBe(false)
-    expect(s.visibility).toBe(true)
-    expect(s.display).toBe(true)
-    expect(s.collapsed).toBe(true)
-    expect(s.inspector).toBe(true)
+  it('persists wheelSensitivity to the zustand storage key', () => {
+    useGraphPrefs.getState().setWheelSensitivity(1.2)
+    const raw = localStorage.getItem('geode-ui.graph-prefs') ?? ''
+    expect(raw).toContain('"wheelSensitivity":1.2')
   })
 })
