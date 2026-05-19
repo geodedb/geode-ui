@@ -1,7 +1,15 @@
 export type Tier = 'small' | 'mid' | 'large'
 
 const SMALL_MAX = 2_000
-const MID_MAX = 5_000
+// PERF #312: MID_MAX is the FIRST node count at which the `large` tier
+// kicks in. The spec's T19 P1 bench point at exactly n=5000 must land
+// in `mid` (where domNodes/cxtmenu/tooltips/badges stay enabled), not
+// in `large` — otherwise the p5Fps@n=5000 gate is unrealistic (the
+// large tier disables those features and steady-state FPS reads near
+// zero). Pre-fix this was 5_000 with a `>=` test, putting n=5000 in
+// `large`. Bumping to 5_001 keeps `>=` semantics but yields the
+// spec-intended tier mapping: n=5000 → mid, n=5001+ → large.
+const MID_MAX = 5_001
 const HYSTERESIS = 100
 
 function rawTier(n: number): Tier {

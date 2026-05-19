@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react'
 import { GraphView } from '../../components/results/GraphView'
 import { seededGraph } from '../../lib/seededGraph'
 import { useGraphPrefs } from '../../components/results/useGraphPrefs'
+import { layoutCache } from '../../components/results/graph/layoutCache'
 import type { QueryRespLike } from '../../lib/graphResult'
 
 // Dev-only benchmark host for the cytoscape→reagraph spike. Reads
@@ -14,13 +15,24 @@ import type { QueryRespLike } from '../../lib/graphResult'
 // IMPORTANT: This page is ONLY mounted in non-production builds. The
 // App router gates the route accordingly.
 
-function readQuery(): { n: number; renderer: 'cytoscape' | 'reagraph' } {
+// PERF #312: `?worker=1` makes the bench harness opt into the worker
+// layout path without clicking the in-page checkbox. The toggle
+// remains user-visible for manual repro; this flag just pushes the
+// initial value into the pref store on mount.
+type Query = {
+  n: number
+  renderer: 'cytoscape' | 'reagraph'
+  worker: boolean
+}
+
+function readQuery(): Query {
   const params = new URLSearchParams(window.location.search)
   const nRaw = parseInt(params.get('n') ?? '1000', 10)
   const n = Number.isFinite(nRaw) && nRaw > 0 ? Math.min(nRaw, 50_000) : 1000
   const r = params.get('renderer')
   const renderer = r === 'reagraph' ? 'reagraph' : 'cytoscape'
-  return { n, renderer }
+  const worker = params.get('worker') === '1'
+  return { n, renderer, worker }
 }
 
 // Strip the `seededGraph` `'n'` id prefix and parse to a number.
@@ -64,7 +76,7 @@ function toQueryRespLike(
 }
 
 export const GraphBenchPage: React.FC = () => {
-  const { n, renderer } = useMemo(readQuery, [])
+  const { n, renderer, worker } = useMemo(readQuery, [])
   const setRenderer = useGraphPrefs((s) => s.setRenderer)
   const useWorkerLayout = useGraphPrefs((s) => s.useWorkerLayout)
   const setUseWorkerLayout = useGraphPrefs((s) => s.setUseWorkerLayout)
@@ -75,6 +87,32 @@ export const GraphBenchPage: React.FC = () => {
   useEffect(() => {
     setRenderer(renderer)
   }, [renderer, setRenderer])
+  // PERF #312: same shape as renderer — push the `?worker=1` URL choice
+  // into the pref store so the layout dispatcher takes the worker path
+  // without requiring a user click. Only fires on the URL flag, so a
+  // manual probe (click the in-page toggle) is unaffected.
+  useEffect(() => {
+    if (worker) setUseWorkerLayout(true)
+  }, [worker, setUseWorkerLayout])
+  // PERF #312: expose a read-only debug surface that the Playwright
+  // harness in e2e/specs/19-graph-bench.spec.ts samples after each
+  // combo. `cacheHitRate` reads the production `layoutCache` counters
+  // (cumulative across the page lifetime; the harness compares deltas
+  // across cold/warm combos to verify the warm-rerun gate). `usedWorker`
+  // mirrors the current pref so the spec records which path actually
+  // ran. The surface is on `window` because Playwright's `page.evaluate`
+  // can't reach React state directly — same pattern as `__geode_cy`
+  // in useGraphCytoscape.ts. Read-only contract — never write here.
+  useEffect(() => {
+    const w = window as unknown as {
+      __geode_bench?: { cacheHitRate: number; usedWorker: boolean }
+    }
+    // eslint-disable-next-line no-underscore-dangle
+    w.__geode_bench = {
+      cacheHitRate: layoutCache.getStats().hitRate,
+      usedWorker: useWorkerLayout,
+    }
+  })
 
   // Frame-time sampler. requestAnimationFrame fires once per displayed
   // frame; we average frame-times into FPS over a 200ms window and

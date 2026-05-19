@@ -31,17 +31,53 @@ type BenchRecord = {
   usedWorker: boolean // false in P0; meaningful in P1+
 }
 
+// PERF #312: inline tier helper kept in sync with the canonical
+// implementation at src/components/results/graph/scaleTier.ts. The e2e
+// tsconfig restricts imports to the e2e tree, so we cannot reuse the
+// production helper directly — the boundary values are pinned here to
+// match. The spec's T19 P1 sample point at n=5000 must land in `mid`
+// (where domNodes/cxtmenu/tooltips/badges stay enabled); pre-fix this
+// helper had `>= 5000` semantics that put n=5000 in `large`, making
+// the spec's `p5Fps@n=5000 ≥ 20` gate unmeasurable.
 function tierOf(n: number): 'small' | 'mid' | 'large' {
-  if (n >= 5000) return 'large'
+  if (n >= 5001) return 'large'
   if (n >= 2000) return 'mid'
   return 'small'
 }
 
-const COMBOS: { renderer: 'cytoscape' | 'reagraph'; n: number }[] = [
+// PERF #312: bench combos now include a `worker` axis at n≥5000 so the
+// audit's worker-layout perf path is actually exercised by the harness.
+// Pre-fix the bench never set `worker=1` on the URL, so layoutWorker
+// allocations and cache-warm reruns were uncovered. The companion
+// `useWorkerLayout` user-pref is honored by GraphBenchPage when the
+// `worker` query param is `1`.
+//
+// `cache` axis: a second run at the same (renderer, n) re-uses the
+// in-memory `layoutCache`, hitting the warm-rerun gate (cacheHitRate
+// ≈ 1 expected). The cache survives the second navigate because the
+// page is the same Playwright tab; cytoscape's layoutCache is in-
+// memory only and goes away on full reload, which Playwright doesn't
+// do between combos.
+type Combo = {
+  renderer: 'cytoscape' | 'reagraph'
+  n: number
+  worker?: boolean
+  cacheRerun?: boolean
+}
+
+const COMBOS: Combo[] = [
   { renderer: 'cytoscape', n: 500 },
   { renderer: 'cytoscape', n: 2000 },
   { renderer: 'cytoscape', n: 5000 },
+  // Same-shape rerun immediately after the cold n=5000 run so the
+  // production `layoutCache` registers a hit. `cacheRerun: true` is
+  // a marker for the JSON output.
+  { renderer: 'cytoscape', n: 5000, cacheRerun: true },
   { renderer: 'cytoscape', n: 10000 },
+  // Worker-path axis: same n=10000 sample point as above but routed
+  // through the worker layout. Lets the harness compare cytoscape-
+  // main-thread vs cytoscape-worker on the same hardware.
+  { renderer: 'cytoscape', n: 10000, worker: true },
   { renderer: 'reagraph', n: 500 },
   { renderer: 'reagraph', n: 2000 },
   { renderer: 'reagraph', n: 5000 },
@@ -76,10 +112,7 @@ const SAMPLE_WINDOW_MS = 5000
 // start). Anything before this is treated as warmup, not perf data.
 const WARMUP_MS = 3000
 
-async function runOne(
-  page: Page,
-  combo: { renderer: 'cytoscape' | 'reagraph'; n: number }
-): Promise<BenchRecord> {
+async function runOne(page: Page, combo: Combo): Promise<BenchRecord> {
   const samples: Sample[] = []
   let firstSample = -1
   const onConsole = (msg: import('@playwright/test').ConsoleMessage): void => {
@@ -99,7 +132,17 @@ async function runOne(
   page.on('console', onConsole)
   try {
     const navStart = Date.now()
-    await page.goto(`/dev/graph-bench?n=${combo.n}&renderer=${combo.renderer}`)
+    // PERF #312: the URL carries optional `worker=1` so the bench can
+    // exercise the worker layout path (useLayoutWorker.ts). The dev
+    // page is the only place this is reachable; `cacheRerun` doesn't
+    // need a URL flag — re-issuing the same URL re-uses the in-process
+    // layoutCache for a cache hit.
+    const params = new URLSearchParams({
+      n: String(combo.n),
+      renderer: combo.renderer,
+    })
+    if (combo.worker) params.set('worker', '1')
+    await page.goto(`/dev/graph-bench?${params.toString()}`)
     // Pragmatic mount wait — the probe pattern that worked reliably.
     // Avoids DOM-testid races under the lazy / Suspense path.
     await page.waitForTimeout(WARMUP_MS)
@@ -115,6 +158,24 @@ async function runOne(
         'mark'
       )[0]
       return m ? m.startTime : 0
+    })
+    // PERF #312: read the production cache-hit + worker-used signals
+    // off the in-page debug surface. GraphBenchPage exposes these via
+    // `window.__geode_bench` so the harness records whether the cache
+    // and worker paths actually ran. Fallback to 0/false on legacy
+    // builds (page version pre-dating the surface) so the harness
+    // still passes — those rows just won't be useful for the warm-
+    // rerun / worker gates.
+    const benchSignals = await page.evaluate(() => {
+      const w = window as unknown as {
+        __geode_bench?: { cacheHitRate?: number; usedWorker?: boolean }
+      }
+      // eslint-disable-next-line no-underscore-dangle
+      const sig = w.__geode_bench
+      return {
+        cacheHitRate: sig?.cacheHitRate ?? 0,
+        usedWorker: sig?.usedWorker ?? false,
+      }
     })
     const fpsVals = samples.map((s) => s.fps).sort((a, b) => a - b)
     const avgFps =
@@ -132,8 +193,8 @@ async function runOne(
       avgFps: Number(avgFps.toFixed(2)),
       p5Fps: Number(p5Fps.toFixed(2)),
       peakHeapBytes,
-      cacheHitRate: 0,
-      usedWorker: false,
+      cacheHitRate: benchSignals.cacheHitRate,
+      usedWorker: benchSignals.usedWorker,
     }
   } finally {
     page.off('console', onConsole)
