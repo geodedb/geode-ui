@@ -117,6 +117,34 @@ func extractToken(r *http.Request) (string, error) {
 	return "", errors.New("auth: missing Authorization header")
 }
 
+// extractTokenForRevoke is a sunset-exempt sibling of extractToken used
+// ONLY by the logout-side best-effort JTI revoke (SEC #308 / SEC-NEW-9).
+//
+// Why a separate function: extractToken returns errAccessTokenQuerySunset
+// for `?access_token=` after AccessTokenSunsetTime on non-WS endpoints.
+// That refusal is correct for AUTHENTICATING a request — pinning the
+// sunset prevents callers from drifting past 2026-07-01 still using
+// the deprecated transport. But for the LOGOUT endpoint the only thing
+// the server does with a recognised token is revoke its JTI; revocation
+// never escalates privileges, and refusing the query fallback there
+// means a programmatic caller that hadn't migrated by the cutoff
+// silently gets HTTP 204 with no Revoke side-effect, leaving the
+// stolen-token window open until natural exp. Exempt the query path
+// for THIS call site only so the SEC-NEW-9 nuisance-replay defense
+// remains effective for the whole transition window.
+func extractTokenForRevoke(r *http.Request) (string, error) {
+	if h := r.Header.Get("Authorization"); h != "" {
+		return extractBearer(r)
+	}
+	if c, err := r.Cookie(AuthCookieName); err == nil && c.Value != "" {
+		return c.Value, nil
+	}
+	if q := r.URL.Query().Get("access_token"); q != "" {
+		return q, nil
+	}
+	return "", errors.New("auth: missing Authorization header")
+}
+
 // errAccessTokenQuerySunset is returned by extractToken when a request
 // arrives with a `?access_token=` query fallback after the
 // AccessTokenSunsetTime has passed AND the route is not a WS upgrade.

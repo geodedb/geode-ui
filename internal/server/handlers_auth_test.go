@@ -673,6 +673,50 @@ func TestLogout_RevokesAuthorizationHeaderJTI_SEC_NEW_9(t *testing.T) {
 	}
 }
 
+// TestLogout_RevokesQueryParamJTIPostSunset_SEC_308 pins SEC #308:
+// after the AccessTokenSunsetTime (2026-07-01) has passed, a
+// programmatic client that still POSTs `/api/v1/auth/logout?access_token=`
+// must STILL revoke the JTI even though the global query-token
+// fallback is otherwise refused for non-WS routes. Pre-fix the logout
+// handler called extractToken(r), which returns errAccessTokenQuerySunset
+// post-sunset and silently dropped the revoke (HTTP 204 with no
+// blacklist effect) — leaving the token valid until its natural exp
+// and defeating the SEC-NEW-9 (#205) nuisance-replay defense for any
+// caller that hadn't yet migrated off `?access_token=` by the cutoff.
+func TestLogout_RevokesQueryParamJTIPostSunset_SEC_308(t *testing.T) {
+	issuer, err := jwt.NewIssuer(jwtSecret32ForTest(), time.Hour)
+	if err != nil {
+		t.Fatalf("NewIssuer: %v", err)
+	}
+	tok, _, err := issuer.Issue("carol", "default", []string{"user"}, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	srv := New(Config{SecureCookies: true, JWT: issuer})
+
+	// Move the audit / sunset clock one second past the cutoff so the
+	// `?access_token=` fallback is otherwise refused on REST routes.
+	withClockOverride(t, AccessTokenSunsetTime.Add(time.Second))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/auth/logout?access_token="+tok,
+		nil,
+	)
+	srv.HandleLogout(w, r)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status=%d want 204", w.Code)
+	}
+	// The fix: even post-sunset, the logout endpoint must accept the
+	// query-token fallback (the only thing that can be done with it is
+	// revocation, which never escalates privileges) and call Revoke.
+	if _, err := issuer.Parse(tok); !errors.Is(err, jwt.ErrRevoked) {
+		t.Fatalf("SEC #308: post-sunset query-token logout did not revoke; Parse returned %v, want ErrRevoked", err)
+	}
+}
+
 // TestLogout_NoTokenStillReturns204 pins that HandleLogout is still
 // idempotent / safe to call without an authenticated session — a
 // regression here would re-introduce the failure mode the original

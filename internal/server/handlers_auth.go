@@ -242,7 +242,14 @@ func (s *GraphServer) bestEffortRevokeFromRequest(r *http.Request) (sub string, 
 	if s.cfg.JWT == nil {
 		return "", false
 	}
-	tok, err := extractToken(r)
+	// SEC #308: use the sunset-exempt extractor so the post-2026-07-01
+	// `?access_token=` logout path still revokes. extractToken would
+	// return errAccessTokenQuerySunset for the query fallback after the
+	// cutoff and silently drop the revoke; that defeats SEC-NEW-9 (#205)
+	// for any caller that hadn't migrated to the cookie/header transport
+	// by the deadline. Revocation never escalates privileges so the
+	// exemption is safe.
+	tok, err := extractTokenForRevoke(r)
 	if err != nil || tok == "" {
 		return "", false
 	}
