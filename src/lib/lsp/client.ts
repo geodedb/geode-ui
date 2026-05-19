@@ -8,6 +8,63 @@ import {
 } from 'vscode-languageclient/lib/common/client.js'
 import { createWebSocketTransport, LspTransport } from './websocketTransport'
 
+// monaco-languageclient v8 requires the @codingame/monaco-vscode-api
+// services to be initialized before a MonacoLanguageClient instance
+// can `start()`. Pre-fix this initialization was missing entirely,
+// so the first attempted client.start() threw "Default api is not
+// ready yet, do not forget to import 'vscode/localExtensionHost' and
+// wait for services initialization" and the LSP transport silently
+// died. (Diagnostics never published, formatter never registered —
+// `editor.action.formatDocument` became a no-op.) See
+// https://github.com/TypeFox/monaco-languageclient/blob/main/docs/
+// versions-and-history.md for the v2→v8 architectural change.
+//
+// The minimum service set for an LSP-based language with formatting
+// + diagnostics is `languages` + `model` + `environment` + `files`.
+// `quickAccess` is added so the cmd-palette-style picker doesn't
+// throw if a hover provider's action invokes one. Service-override
+// modules are dynamically imported alongside the client startup so
+// the lazy `gql-editor` chunk is the only place the @codingame
+// surface is reachable from — main bundle stays unaffected.
+//
+// Initialization is single-flighted across the whole process via a
+// module-level promise. monaco-languageclient's `start()` can be
+// called many times across a session (reconnects, graph switches,
+// tenant flips), but the vscode-api bootstrap is one-shot.
+let servicesInitPromise: Promise<void> | null = null
+function ensureVscodeServicesInitialized(): Promise<void> {
+  if (servicesInitPromise) return servicesInitPromise
+  servicesInitPromise = (async () => {
+    // monaco-languageclient ships a `vscode/services` subpath that
+    // wraps the @codingame/monaco-vscode-api bootstrap (initEnhanced
+    // MonacoEnvironment, side-effect-imports `vscode/localExtensionHost`,
+    // merges the always-on services, and calls the underlying
+    // `initialize`). Calling `initServices({})` is the supported
+    // one-liner that the error message "Default api is not ready yet,
+    // do not forget to import 'vscode/localExtensionHost' and wait
+    // for services initialization" prescribes. The empty
+    // serviceConfig is fine for a basic LSP-formatter + diagnostics
+    // client — monaco-languageclient adds its required languages +
+    // model overrides internally.
+    // ESLint's `import/no-unresolved` doesn't follow monaco-languageclient's
+    // `exports` map for `./vscode/services`. The subpath resolves at
+    // runtime (webpack honors `exports`) and unit tests virtual-mock
+    // the same string. Disable the rule via the next-line directive
+    // immediately above the import (the rule is line-scoped).
+    const { initServices } = await import(
+      // eslint-disable-next-line import/no-unresolved
+      /* webpackChunkName: "vscode-services" */ 'monaco-languageclient/vscode/services'
+    )
+    await initServices({ caller: 'geode-ui:GqlEditor' })
+  })()
+  // If init fails, reset the cache so the next attempt retries instead
+  // of inheriting a poisoned rejected promise.
+  servicesInitPromise.catch(() => {
+    servicesInitPromise = null
+  })
+  return servicesInitPromise
+}
+
 export type LspState = 'connecting' | 'open' | 'closed' | 'failed'
 
 /**
@@ -55,6 +112,22 @@ const RECONNECT_BACKOFF_MS = [500, 1500, 4500]
 export async function startLspClient(
   opts: StartOptions
 ): Promise<LspClientHandle> {
+  // Bootstrap the @codingame/monaco-vscode-api services exactly once
+  // per process before the first MonacoLanguageClient instance can
+  // `start()`. See `ensureVscodeServicesInitialized` comment for why.
+  // A rejected init poisons the LSP entirely; surface the error
+  // through `onStateChange('failed')` rather than throwing so the
+  // caller's UI can render an editor-without-LSP rather than crash.
+  try {
+    await ensureVscodeServicesInitialized()
+  } catch {
+    opts.onStateChange?.('failed')
+    return {
+      dispose: async () => {
+        /* nothing to dispose; init never completed */
+      },
+    }
+  }
   const maxRetries = opts.maxRetries ?? 3
   const emitState = (s: LspState) => {
     try {

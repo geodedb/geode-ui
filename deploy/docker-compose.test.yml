@@ -166,6 +166,17 @@ services:
       # rewritten against SHOW USERS.
     - -admin-users
     - geode,e2e_admin
+      # /ws/lsp upstream — point at the geode-lsp sidecar container,
+      # NOT geode-ui's own loopback (the default `127.0.0.1:3142` only
+      # works for a colocated `geode serve --lsp-port=3142` setup; this
+      # stack runs the LSP server in a separate container exposed at
+      # geode-lsp:2087 via socat). Without this override, the /ws/lsp
+      # bridge dials a dead address inside geode-ui's network namespace
+      # and the editor never gets diagnostics squiggles or canonical
+      # formatting — Monaco's `editor.action.formatDocument` is a no-op
+      # when no LSP formatter has been registered.
+    - -lsp-upstream
+    - geode-lsp:2087
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
     - geode-ui-uploads:/var/lib/geode-ui/uploads

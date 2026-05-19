@@ -77,6 +77,16 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
     null
   )
   const [lspState, setLspState] = useState<LspState>('closed')
+  // `monacoReady` flips to true in handleMount; the LSP-start useEffect
+  // depends on it so it re-fires once the editor's onMount has set
+  // `monacoRef.current`. Pre-fix the useEffect ran a single time during
+  // the initial render — BEFORE Monaco's lazy mount completes — saw
+  // `monacoRef.current == null`, early-returned, and never re-fired
+  // because the ref isn't a dep. That silently disabled the LSP for
+  // every visit (no diagnostics squiggles, no canonical formatting),
+  // regardless of upstream config. The state trigger is the canonical
+  // React pattern for "wait until the imperative handle is wired".
+  const [monacoReady, setMonacoReady] = useState(false)
   // Pending one-shot format. Set by requestFormatWhenReady(); cleared
   // by the open-state effect after the format dispatches.
   const formatPendingRef = useRef(false)
@@ -159,6 +169,9 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
     )
     monacoRef.current = monaco as unknown as typeof import('monaco-editor')
     editorRef.current = editor
+    // Tell the LSP-start useEffect that the monaco ref is now wired
+    // (see `monacoReady` declaration for the regression context).
+    setMonacoReady(true)
   }
 
   // Re-create the LSP client whenever the auth token, graph, tenant,
@@ -166,9 +179,25 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
   // simpler (and matches the monaco-languageclient lifecycle, which
   // doesn't support reusing a started client with a new transport).
   useEffect(() => {
-    if (!isAuthed || !monacoRef.current) return undefined
-    const token = getLatestToken()
-    if (!token) return undefined
+    // Gate on both `isAuthed` and `monacoReady`. The latter is a state
+    // (not a ref read) so a flip from false → true re-fires the effect
+    // — see the `monacoReady` declaration comment for why the ref-only
+    // version silently never started the LSP.
+    if (!isAuthed || !monacoReady || !monacoRef.current) return undefined
+    // Post-cookie-migration (#62 / SEC-F7), `getLatestToken()` returns
+    // null on every page load — the JWT lives in the HttpOnly
+    // `geode-ui-auth` cookie that JS cannot read. The pre-fix LSP
+    // startup early-returned here, which silently disabled both
+    // diagnostics squiggles and LSP-driven formatting for any user on
+    // the canonical cookie auth path. The cookie still authenticates
+    // same-origin WebSocket upgrades automatically (browsers attach it
+    // to the upgrade request) and the server's /ws/lsp handler reads
+    // either the cookie OR the `?access_token=` query, so passing an
+    // empty string is correct: the server falls through to the
+    // cookie. The legacy `geode-ui.legacy-auth=1` backout path still
+    // surfaces a real token via `getLatestToken()`; in that mode the
+    // bearer-subprotocol channel carries auth as before.
+    const token = getLatestToken() ?? ''
     let cancelled = false
     // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
     ;(async () => {
@@ -235,8 +264,11 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
     }
     // formatKey is the structural identity of formatOpts — comparing
     // the joined-string identity is what we want here so an unrelated
-    // store update doesn't bounce the LSP transport.
-  }, [isAuthed, graph, tenant, formatKey])
+    // store update doesn't bounce the LSP transport. `monacoReady`
+    // gates the first start until the editor's onMount has wired
+    // `monacoRef.current`; without it the effect would early-return
+    // on the initial render and never re-fire (the ref isn't a dep).
+  }, [isAuthed, graph, tenant, formatKey, monacoReady])
 
   // When the LSP transitions to 'open' AND a one-shot format was
   // queued, dispatch it. Monaco's formatDocument action is a no-op

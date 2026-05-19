@@ -20,7 +20,16 @@ export async function createWebSocketTransport(
   opts: TransportOptions
 ): Promise<LspTransport> {
   const url = new URL(opts.url)
-  url.searchParams.set('access_token', opts.accessToken)
+  // Only attach the `?access_token=` query when a non-empty bearer is
+  // available. In cookie-mode auth (#62 / SEC-F7) the JWT lives in the
+  // HttpOnly `geode-ui-auth` cookie that JS cannot read, and the
+  // /ws/lsp upgrade carries the cookie automatically — adding an
+  // empty `access_token=` would just trip the server's strict parser
+  // for nothing. Legacy bearer mode still passes a real token through
+  // this same channel.
+  if (opts.accessToken) {
+    url.searchParams.set('access_token', opts.accessToken)
+  }
   const ws = new WebSocket(url.toString())
   await new Promise<void>((resolve, reject) => {
     ws.onopen = () => resolve()

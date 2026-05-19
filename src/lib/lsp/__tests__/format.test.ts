@@ -31,6 +31,20 @@ jest.mock('monaco-languageclient', () => ({
   })),
 }))
 
+// See client.test.ts for the rationale — the production client now
+// lazy-imports this subpath to bootstrap @codingame/monaco-vscode-api
+// before constructing a MonacoLanguageClient (otherwise v8 throws
+// "Default api is not ready yet"). Stub so the dynamic-import in
+// ensureVscodeServicesInitialized() resolves to a no-op under jest.
+jest.mock(
+  'monaco-languageclient/vscode/services',
+  () => ({
+    __esModule: true,
+    initServices: jest.fn().mockResolvedValue(undefined),
+  }),
+  { virtual: true }
+)
+
 jest.mock(
   'vscode-languageclient/lib/common/client.js',
   () => ({
