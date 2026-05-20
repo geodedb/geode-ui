@@ -23,11 +23,13 @@ class HTTPError extends Error {
 
 const restoreFn = jest.fn()
 const backupUpload = jest.fn()
+const getBackups = jest.fn()
 
 jest.mock('../../api/client', () => ({
   client: {
     restore: (...a: unknown[]) => restoreFn(...a),
     backupUpload: (...a: unknown[]) => backupUpload(...a),
+    getBackups: (...a: unknown[]) => getBackups(...a),
   },
 }))
 
@@ -52,6 +54,7 @@ function renderPage(initialEntries?: unknown[]): void {
 beforeEach(() => {
   restoreFn.mockReset()
   backupUpload.mockReset()
+  getBackups.mockReset()
   restoreFn.mockResolvedValue({})
   backupUpload.mockResolvedValue({
     file: 'uploaded.tar.gz',
@@ -59,20 +62,25 @@ beforeEach(() => {
     size_bytes: 99,
     uploaded_at: '2025-01-01T00:00:00Z',
   })
+  getBackups.mockResolvedValue({ backups: [] })
 })
 
-test('renders the restore form', () => {
+test('renders the restore form', async () => {
   renderPage()
+  // Wait for the initial getBackups fetch to settle so no act() warnings fire.
+  await waitFor(() => expect(getBackups).toHaveBeenCalledTimes(1))
   expect(screen.getByRole('heading', { name: 'Restore' })).toBeInTheDocument()
-  expect(screen.getByRole('textbox', { name: 'File' })).toBeInTheDocument()
+  expect(screen.getByRole('combobox', { name: 'File' })).toBeInTheDocument()
 })
 
 test('pre-fills the File field from router location state (BackupPage deep-link)', async () => {
   renderPage([
     { pathname: '/admin/restore', state: { file: 'geode-2025-01-01.tar.gz' } },
   ])
+  // waitFor covers both the location-state useEffect AND the getBackups fetch.
   await waitFor(() => {
-    expect(screen.getByRole('textbox', { name: 'File' })).toHaveValue(
+    expect(getBackups).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue(
       'geode-2025-01-01.tar.gz'
     )
   })
@@ -80,7 +88,9 @@ test('pre-fills the File field from router location state (BackupPage deep-link)
 
 test('submitting the form fires client.restore with file + target_time', async () => {
   renderPage()
-  fireEvent.change(screen.getByRole('textbox', { name: 'File' }), {
+  // Wait for the initial getBackups fetch before interacting.
+  await waitFor(() => expect(getBackups).toHaveBeenCalledTimes(1))
+  fireEvent.change(screen.getByRole('combobox', { name: 'File' }), {
     target: { value: 'snap.tar.gz' },
   })
   fireEvent.change(screen.getByLabelText('Target time'), {
@@ -100,6 +110,8 @@ test('submitting the form fires client.restore with file + target_time', async (
 
 test('uploading a backup file pre-fills the File field via client.backupUpload', async () => {
   renderPage()
+  // Wait for the initial getBackups fetch before interacting.
+  await waitFor(() => expect(getBackups).toHaveBeenCalledTimes(1))
   const fileInput = screen.getByLabelText(
     'Upload backup file'
   ) as HTMLInputElement
@@ -109,7 +121,7 @@ test('uploading a backup file pre-fills the File field via client.backupUpload',
     expect(backupUpload).toHaveBeenCalledTimes(1)
   })
   await waitFor(() => {
-    expect(screen.getByRole('textbox', { name: 'File' })).toHaveValue(
+    expect(screen.getByRole('combobox', { name: 'File' })).toHaveValue(
       'uploaded.tar.gz'
     )
   })
@@ -123,7 +135,9 @@ test('error-envelope: a backup_not_found HTTPError from restore renders in role=
     new HTTPError(404, '{"error":{"code":"backup_not_found"}}')
   )
   renderPage()
-  fireEvent.change(screen.getByRole('textbox', { name: 'File' }), {
+  // Wait for the initial getBackups fetch before interacting.
+  await waitFor(() => expect(getBackups).toHaveBeenCalledTimes(1))
+  fireEvent.change(screen.getByRole('combobox', { name: 'File' }), {
     target: { value: 'missing.tar.gz' },
   })
   fireEvent.click(screen.getByRole('button', { name: 'Restore' }))
@@ -137,6 +151,8 @@ test('error-envelope: an upload_failed HTTPError from backupUpload renders in ro
     new HTTPError(413, '{"error":{"code":"backup_upload_failed"}}')
   )
   renderPage()
+  // Wait for the initial getBackups fetch before interacting.
+  await waitFor(() => expect(getBackups).toHaveBeenCalledTimes(1))
   const fileInput = screen.getByLabelText(
     'Upload backup file'
   ) as HTMLInputElement
@@ -145,4 +161,28 @@ test('error-envelope: an upload_failed HTTPError from backupUpload renders in ro
   const alert = await screen.findByRole('alert')
   expect(alert).toHaveTextContent('backup_upload_failed')
   expect(alert).toHaveTextContent('413')
+})
+
+test('GAP-autocomplete: restore file input has a datalist of existing backups', async () => {
+  getBackups.mockResolvedValueOnce({
+    backups: [
+      { file: 'backup-2025-01-01.tar.gz' },
+      { file: 'backup-2025-01-02.tar.gz' },
+    ],
+  })
+
+  renderPage()
+
+  await waitFor(() => {
+    const fileInput = screen.getByRole('combobox', {
+      name: 'File',
+    }) as HTMLInputElement
+    const listId = fileInput.getAttribute('list')
+    expect(listId).toBeTruthy()
+    const options = Array.from(
+      document.getElementById(listId!)?.querySelectorAll('option') ?? []
+    ).map((o) => (o as HTMLOptionElement).value)
+    expect(options).toContain('backup-2025-01-01.tar.gz')
+    expect(options).toContain('backup-2025-01-02.tar.gz')
+  })
 })

@@ -4,7 +4,15 @@ import { Link, useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
-import { Button, Field, Input, Stack } from '../ui'
+import { useApiResource } from '../../hooks/useApiResource'
+import {
+  Button,
+  DedupedDatalist,
+  Field,
+  Input,
+  Stack,
+  useUniqueValues,
+} from '../ui'
 
 // RestorePage drives the /admin/restore tab. Backed by Geode B7:
 //
@@ -38,6 +46,29 @@ const BackLink = styled(Link)`
 
 export const RestorePage: React.FC = () => {
   const { t } = useTranslation()
+
+  // GAP-autocomplete: surface existing backup names as datalist
+  // suggestions on the file-name input. The fetch is best-effort —
+  // if /api/v1/backups errors the input still works as a free-text
+  // field. useApiResource owns its own AbortController so a mid-flight
+  // fetch is cancelled if the page unmounts.
+  const { data: backupsData } = useApiResource<{
+    backups: Array<{ file?: string }>
+  }>(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    async (_signal) => {
+      const r = (await client.getBackups({})) as {
+        backups?: Array<{ file?: string }>
+      }
+      return { backups: r.backups ?? [] }
+    },
+    []
+  )
+  const backupOptions = useUniqueValues(
+    backupsData?.backups ?? [],
+    (b) => b.file
+  )
+
   const location = useLocation()
   const [file, setFile] = useState('')
   const [targetTime, setTargetTime] = useState('')
@@ -129,11 +160,13 @@ export const RestorePage: React.FC = () => {
         <Field label={t('restore.fieldFile')} htmlFor="rp-file" required>
           <Input
             id="rp-file"
+            list="restore-file-list"
             placeholder={t('restore.filePlaceholder')}
             value={file}
             onChange={(e) => setFile(e.target.value)}
             required
           />
+          <DedupedDatalist id="restore-file-list" values={backupOptions} />
         </Field>
         <Field
           label={t('restore.fieldTargetTime')}
