@@ -26,6 +26,7 @@ import { useCxtMenu } from './graph/useCxtMenu'
 import { useLasso } from './graph/useLasso'
 import { useDomNodes } from './graph/useDomNodes'
 import { useNodeTooltip } from './graph/useNodeTooltip'
+import { useEdgeTooltip } from './graph/useEdgeTooltip'
 import { ExpandQueryPopover, ExpandRunOpts } from './graph/ExpandQueryPopover'
 import { useGraphKeyboardNav } from './graph/useGraphKeyboardNav'
 // QUALITY #164: extracted from this orchestrator so the file focuses on
@@ -311,7 +312,16 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
   })
 
   // Hover tooltip exposes the hovered node's id/label/props.
-  const { targetData: tooltipTarget } = useNodeTooltip({ cyRef, sig })
+  const { targetData: nodeTooltipTarget } = useNodeTooltip({ cyRef, sig })
+  // GAP-059: edge counterpart — bound to 'edge' selector so the user
+  // gets the same hover preview on relationships as on nodes. The two
+  // hooks select disjoint element classes so they never race; the
+  // tooltipTarget shown to GraphCanvasOverlay is whichever one fires
+  // most recently. We prefer the edge target when both are non-null
+  // (an edge tooltip overlaying a node tooltip during a fast hover
+  // sweep should land on the more specific element).
+  const { targetData: edgeTooltipTarget } = useEdgeTooltip({ cyRef, sig })
+  const tooltipTarget = edgeTooltipTarget ?? nodeTooltipTarget
 
   // Wire cytoscape-lasso's enable-state to the sticky `lasso` pref.
   // `sig` is forwarded so a fresh cy core (post-rebuild) inherits the
