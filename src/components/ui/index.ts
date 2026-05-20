@@ -29,7 +29,7 @@ export { Card, CardHeader, CardTitle, CardSubtitle } from '@geodedb/ui-core'
 export { DedupedDatalist } from './DedupedDatalist'
 export type { DedupedDatalistProps } from './DedupedDatalist'
 
-export { DataTable, TableScroll, EmptyCell } from './DataTable'
+export { DataTable, TableScroll, EmptyCell } from '@geodedb/ui-core'
 
 export { Modal, ConfirmModal } from './Modal'
 export type { ModalProps, ConfirmModalProps } from './Modal'
