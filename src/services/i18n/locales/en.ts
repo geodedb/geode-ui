@@ -65,6 +65,16 @@ export const en = {
     adminTabAudit: 'Audit',
   },
 
+  admin: {
+    // GAP-050: copy shown on hover / via aria-disabled when a capability
+    // gate marks an Admin sub-page as unavailable on this Geode build.
+    // The point is to differentiate "not yet wired upstream" from
+    // "you lack the role" or "transient server error" — operators
+    // managing a security surface should never wonder which is which.
+    featureUpcoming:
+      'Scheduled for a future Geode release. Read-only listing remains available.',
+  },
+
   theme: {
     selectorLabel: 'Theme',
     light: 'Light',
