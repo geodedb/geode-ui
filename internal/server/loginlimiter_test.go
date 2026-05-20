@@ -289,6 +289,77 @@ func TestLoginLimiter_Wrapper_NoteSuccessOn200(t *testing.T) {
 	}
 }
 
+// S-NEW-F (#317): peekLoginCreds must only parse form-urlencoded
+// bodies. Multipart / JSON / unknown content-types return empty
+// profile + username, which lands the limiter in the IP-fallback
+// bucket instead of de-syncing from the inner handler's view.
+func TestPeekLoginCreds_IgnoresNonFormContentType(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		contentType string
+		body        string
+		wantProfile string
+		wantUser    string
+	}{
+		{
+			name:        "form-urlencoded peeks profile",
+			contentType: "application/x-www-form-urlencoded",
+			body:        "profile=p1&username=alice",
+			wantProfile: "p1",
+			wantUser:    "alice",
+		},
+		{
+			name:        "form-urlencoded with charset boilerplate",
+			contentType: "application/x-www-form-urlencoded; charset=UTF-8",
+			body:        "profile=p2&username=bob",
+			wantProfile: "p2",
+			wantUser:    "bob",
+		},
+		{
+			name:        "multipart falls through (empty peek)",
+			contentType: "multipart/form-data; boundary=----WebKitFormBoundary",
+			body:        "------WebKitFormBoundary\r\nContent-Disposition: form-data; name=\"profile\"\r\n\r\np3\r\n------WebKitFormBoundary--",
+			wantProfile: "",
+			wantUser:    "",
+		},
+		{
+			name:        "json falls through (empty peek)",
+			contentType: "application/json",
+			body:        `{"profile":"p4","username":"carol"}`,
+			wantProfile: "",
+			wantUser:    "",
+		},
+		{
+			name:        "malformed content-type falls through",
+			contentType: "garbage///",
+			body:        "profile=p5&username=dave",
+			wantProfile: "",
+			wantUser:    "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/auth/login",
+				strings.NewReader(tc.body),
+			)
+			r.Header.Set("Content-Type", tc.contentType)
+			profile, username, err := peekLoginCreds(r)
+			if err != nil {
+				t.Fatalf("peekLoginCreds err: %v", err)
+			}
+			if profile != tc.wantProfile {
+				t.Errorf("profile=%q want %q", profile, tc.wantProfile)
+			}
+			if username != tc.wantUser {
+				t.Errorf("username=%q want %q", username, tc.wantUser)
+			}
+		})
+	}
+}
+
 func TestLoginLimiter_Wrapper_PassesThroughNonLogin(t *testing.T) {
 	t.Parallel()
 	clk := newFakeClock()

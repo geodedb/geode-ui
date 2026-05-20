@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -489,6 +490,18 @@ func rejectLogin(w http.ResponseWriter, retry time.Duration, reason string) {
 // restores the body on the request so the inner handler can re-parse
 // it. Limits the read to 4096 bytes to match the genapi-emitted body
 // cap on this route. Returns "" + nil error if the body is empty.
+//
+// S-NEW-F (#317): the peek only understands application/x-www-form-
+// urlencoded. multipart/form-data bodies start with a boundary
+// declaration; url.ParseQuery silently returns empty values for that
+// shape (no error). Pre-fix the limiter bucket de-synced from the
+// inner Login handler — the limiter bucketed under the empty-profile
+// key while the inner handler authenticated against a non-empty one.
+// Net effect: an attacker that submitted multipart bodies could
+// dodge the per-profile rate limit by hiding behind the IP fallback
+// bucket. The fix gates the form parse on Content-Type and returns
+// empty (which lands the limiter in the conservative IP fallback for
+// every non-form body) when the body isn't url-encoded form data.
 func peekLoginCreds(r *http.Request) (profile, username string, err error) {
 	if r.Body == nil {
 		return "", "", nil
@@ -506,8 +519,26 @@ func peekLoginCreds(r *http.Request) (profile, username string, err error) {
 	// Restore for the inner handler.
 	r.Body = io.NopCloser(bytes.NewReader(buf))
 
-	// Form-encoded; gen/api/handlers_gen.go:1484-1488 uses r.ParseForm()
-	// + r.FormValue.
+	// gen/api/handlers_gen.go:1484-1488 uses r.ParseForm() + r.FormValue
+	// against an `application/x-www-form-urlencoded` body. Anything
+	// else (multipart, JSON, missing Content-Type) lands the limiter
+	// in the IP-fallback bucket — the per-profile precision is a best-
+	// effort optimisation, but the IP fallback still rate-limits the
+	// caller.
+	ct := r.Header.Get("Content-Type")
+	if ct != "" {
+		// mime.ParseMediaType strips trailing parameters (`; charset=UTF-8`)
+		// so the prefix check below is robust to boilerplate the SPA
+		// fetch wrapper might attach.
+		if mt, _, mErr := mime.ParseMediaType(ct); mErr == nil {
+			if mt != "application/x-www-form-urlencoded" {
+				return "", "", nil
+			}
+		} else {
+			// Malformed Content-Type — be conservative.
+			return "", "", nil
+		}
+	}
 	vals, perr := url.ParseQuery(string(buf))
 	if perr != nil {
 		// Treat as empty — the inner handler's r.ParseForm will reject.
