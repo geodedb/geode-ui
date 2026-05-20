@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { createPortal } from 'react-dom'
 
-import { Icon } from '@geodedb/ui-core'
-import { Button } from './Button'
+import { Icon, Button } from '@geodedb/ui-core'
 
 export interface ModalProps {
   open: boolean

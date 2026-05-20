@@ -8,8 +8,8 @@
 //   3. Honor prefers-reduced-motion for any animation.
 //   4. Meet WCAG 2.5.5 touch-target minimums (theme.touchTargets.min).
 
-export { Button } from './Button'
-export type { ButtonProps, ButtonVariant, ButtonSize } from './Button'
+export { Button } from '@geodedb/ui-core'
+export type { ButtonProps, ButtonVariant, ButtonSize } from '@geodedb/ui-core'
 
 export { Input, Textarea, Select } from '@geodedb/ui-core'
 export type {
