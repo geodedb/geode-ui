@@ -17,7 +17,7 @@ export type { InputProps, TextareaProps, SelectProps, InputSize } from './Input'
 export { Field } from './Field'
 export type { FieldProps } from './Field'
 
-export { Stack, Inline, Container, Grid, Spacer } from './Stack'
+export { Stack, Inline, Container, Grid, Spacer } from '@geodedb/ui-core'
 
 export { Card, CardHeader, CardTitle, CardSubtitle } from './Card'
 
