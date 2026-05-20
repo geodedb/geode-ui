@@ -16,6 +16,7 @@ import '../../monaco-bootstrap'
 import type * as MonacoEditorApi from 'monaco-editor'
 import Editor, { OnMount } from '@monaco-editor/react'
 import { GQL_LANGUAGE_ID, registerGqlLanguage } from './gqlLanguage'
+import { registerGqlSnippetProvider } from '../../lib/snippets/gqlSnippetProvider'
 import type { LspClientHandle, LspState } from '../../lib/lsp/client'
 import { useAuth } from '../../auth/AuthProvider'
 // Origin/main moved the access token off `useAuth()` into a module-level
@@ -154,6 +155,15 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
 
   const handleMount: OnMount = (editor, monaco) => {
     registerGqlLanguage(monaco)
+    // GAP-063: snippet provider sits beside the LSP completion path.
+    // Both providers run on every keystroke; the snippet provider's
+    // CompletionItemKind.Snippet entries surface as the standard
+    // Monaco snippet UI (tab-stops + placeholder navigation) while
+    // the LSP keeps owning identifier completion.
+    registerGqlSnippetProvider(
+      monaco as unknown as typeof import('monaco-editor'),
+      GQL_LANGUAGE_ID
+    )
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun)
     // Cmd/Ctrl+Shift+F runs the document formatter. Monaco wires this
     // for many built-in languages but the Geode 'gql' language is
