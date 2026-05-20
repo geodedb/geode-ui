@@ -59,8 +59,15 @@ export const en = {
     adminTabRoles: 'Roles',
     adminTabPolicies: 'Policies',
     adminTabGrants: 'Grants',
-    adminTabBackups: 'Backups',
-    adminTabRestore: 'Restore',
+    // GAP-051: single user-facing entry point for the
+    // backup ↔ restore workflow. The two underlying routes
+    // (/admin/backups + /admin/restore) stay live for deep-links;
+    // the tab now reads as one snapshot operation. The pre-GAP-051
+    // `adminTabBackups` / `adminTabRestore` keys were removed because
+    // the orphan-key gate (`verify:translations` --max-warnings-total=0)
+    // flags unreferenced strings.
+    adminTabSnapshots: 'Snapshots',
+    adminTabBackToSnapshots: '← Back to Snapshots',
     adminTabMigrations: 'Migrations',
     adminTabAudit: 'Audit',
   },

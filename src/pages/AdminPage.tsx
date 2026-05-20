@@ -143,11 +143,22 @@ export const AdminPage: React.FC = () => {
           loading: capsLoading,
           upcomingLabel: upcoming,
         })}
-        <Tab to="backups" $active={pathname.endsWith('/backups')}>
-          {t('nav.adminTabBackups')}
-        </Tab>
-        <Tab to="restore" $active={pathname.endsWith('/restore')}>
-          {t('nav.adminTabRestore')}
+        {/* GAP-051: collapse Backups + Restore into a single
+            "Snapshots" tab. The two underlying routes still exist for
+            backward-compatible deep links (BackupPage's per-row
+            "Restore" action still navigates to /admin/restore with the
+            file pre-filled), but the operator sees one entry point so
+            the snapshot ↔ restore workflow reads as a single
+            operation. The tab is active on EITHER underlying route so
+            the highlight follows the workflow, not the URL.
+         */}
+        <Tab
+          to="backups"
+          $active={
+            pathname.endsWith('/backups') || pathname.endsWith('/restore')
+          }
+        >
+          {t('nav.adminTabSnapshots')}
         </Tab>
         <Tab to="migrations" $active={pathname.endsWith('/migrations')}>
           {t('nav.adminTabMigrations')}

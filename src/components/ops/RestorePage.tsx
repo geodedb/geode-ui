@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -14,14 +14,26 @@ import { Button, Field, Input, Stack } from '../ui'
 // user clicks "Restore" on a row in BackupPage; otherwise users type
 // the filename in by hand.
 
-// Heading keeps a styled-component: the brand display font + 20px xl
-// size + semibold weight don't map onto Bootstrap's fs-* scale.
+// GAP-051: heading + back-link share the visual language used by
+// BackupPage's ToolBar so the two halves of the snapshots workflow
+// look like one product surface. The bespoke `Heading` styled-
+// component shrank to a small wrapper so the breadcrumb sits flush
+// above the title.
 const Heading = styled.h2`
   font-family: ${({ theme }) => theme.font.family.display};
   font-size: ${({ theme }) => theme.font.sizes.xl};
   font-weight: ${({ theme }) => theme.font.weights.semibold};
   color: ${({ theme }) => theme.text.primary};
   margin: 0;
+`
+
+const BackLink = styled(Link)`
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  color: ${({ theme }) => theme.text.link};
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
+  }
 `
 
 export const RestorePage: React.FC = () => {
@@ -96,6 +108,9 @@ export const RestorePage: React.FC = () => {
 
   return (
     <Stack $gap="md">
+      <BackLink to="/admin/backups" data-testid="restore-back-to-snapshots">
+        {t('nav.adminTabBackToSnapshots')}
+      </BackLink>
       <Heading>{t('restore.title')}</Heading>
       <form
         className="d-flex flex-column gap-3"
