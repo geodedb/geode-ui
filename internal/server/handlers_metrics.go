@@ -156,7 +156,8 @@ func (s *GraphServer) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 	// apply for required_roles=[].
 	if err := s.AuthJWT(r); err != nil {
 		writeEndpointError(w, &endpointError{
-			status: http.StatusUnauthorized, code: "unauthorized",
+			status:      http.StatusUnauthorized,
+			code:        ErrCodeUnauthorized,
 			description: "authentication required",
 		})
 		return

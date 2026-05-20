@@ -49,6 +49,13 @@ const (
 	// (401). Constant value is byte-identical across every login-failure
 	// mode (see errorBody doc / GAP-N10).
 	ErrCodeInvalidCredentials = "invalid_credentials"
+	// ErrCodeUnauthorized: a request hit a JWT-gated handler without a
+	// valid bearer / cookie / access_token (401). Distinct from
+	// ErrCodeInvalidCredentials because no login attempt was made — the
+	// request never carried credentials in the first place. Used by
+	// hand-rolled handlers that enforce AuthJWT themselves rather than
+	// going through the genapi middleware chain.
+	ErrCodeUnauthorized = "unauthorized"
 
 	// --- password policy ---
 
@@ -242,6 +249,7 @@ var allErrorCodes = []string{
 	ErrCodeInternalError,
 	ErrCodeServerMisconfigured,
 	ErrCodeInvalidCredentials,
+	ErrCodeUnauthorized,
 	ErrCodePasswordTooShort,
 	ErrCodePasswordTooWeak,
 	ErrCodePasswordContainsUsername,
