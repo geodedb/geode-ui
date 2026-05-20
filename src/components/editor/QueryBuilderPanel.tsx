@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import { synthesiseGql, BuilderState, EdgeDirection } from './queryBuilder'
+import { DedupedDatalist, useUniqueValues } from '../ui'
 
 // GAP-060 Phase 1: visual query builder side-panel. The operator
 // picks a starting label, optionally an edge type + terminal label,
@@ -61,11 +62,18 @@ export interface QueryBuilderPanelProps {
   graph?: string
   /** Called with the synthesised GQL when the operator clicks Apply. */
   onApply: (gql: string) => void
+  // GAP-autocomplete: optional caller-provided suggestion sources.
+  // SchemaExplorer + schemaCache already hold these; QueryPage threads
+  // them through when the panel mounts.
+  knownLabels?: ReadonlyArray<string>
+  knownEdgeTypes?: ReadonlyArray<string>
 }
 
 export const QueryBuilderPanel: React.FC<QueryBuilderPanelProps> = ({
   graph,
   onApply,
+  knownLabels,
+  knownEdgeTypes,
 }) => {
   const { t } = useTranslation()
   const [startLabel, setStartLabel] = useState('Person')
@@ -73,6 +81,9 @@ export const QueryBuilderPanel: React.FC<QueryBuilderPanelProps> = ({
   const [endLabel, setEndLabel] = useState('')
   const [edgeDirection, setEdgeDirection] = useState<EdgeDirection>('out')
   const [limit, setLimit] = useState<number>(25)
+
+  const labelOptions = useUniqueValues(knownLabels ?? [], (s) => s)
+  const edgeOptions = useUniqueValues(knownEdgeTypes ?? [], (s) => s)
 
   const handleApply = (): void => {
     const state: BuilderState = {
@@ -95,19 +106,23 @@ export const QueryBuilderPanel: React.FC<QueryBuilderPanelProps> = ({
         {t('queryBuilder.startLabel')}
         <Input
           data-testid="qb-start-label"
+          list="qb-start-label-list"
           value={startLabel}
           onChange={(e) => setStartLabel(e.target.value)}
           placeholder="Person"
         />
+        <DedupedDatalist id="qb-start-label-list" values={labelOptions} />
       </Field>
       <Field>
         {t('queryBuilder.edgeType')}
         <Input
           data-testid="qb-edge-type"
+          list="qb-edge-type-list"
           value={edgeType}
           onChange={(e) => setEdgeType(e.target.value)}
           placeholder="ACTED_IN"
         />
+        <DedupedDatalist id="qb-edge-type-list" values={edgeOptions} />
       </Field>
       <Field>
         {t('queryBuilder.edgeDirection')}
@@ -125,10 +140,12 @@ export const QueryBuilderPanel: React.FC<QueryBuilderPanelProps> = ({
         {t('queryBuilder.endLabel')}
         <Input
           data-testid="qb-end-label"
+          list="qb-end-label-list"
           value={endLabel}
           onChange={(e) => setEndLabel(e.target.value)}
           placeholder="Movie"
         />
+        <DedupedDatalist id="qb-end-label-list" values={labelOptions} />
       </Field>
       <Field>
         {t('queryBuilder.limit')}

@@ -53,3 +53,48 @@ test('GAP-060: empty start label aborts apply (no-op)', () => {
   fireEvent.click(screen.getByTestId('qb-apply'))
   expect(onApply).not.toHaveBeenCalled()
 })
+
+test('GAP-autocomplete: start label input has a datalist of known labels', () => {
+  const onApply = jest.fn()
+  render(
+    <LocalizationProvider>
+      <ThemeProvider theme={theme}>
+        <QueryBuilderPanel
+          graph="movies"
+          knownLabels={['Person', 'Movie', 'Director']}
+          knownEdgeTypes={['ACTED_IN', 'DIRECTED']}
+          onApply={onApply}
+        />
+      </ThemeProvider>
+    </LocalizationProvider>
+  )
+  const startInput = screen.getByTestId('qb-start-label') as HTMLInputElement
+  const listId = startInput.getAttribute('list')
+  expect(listId).toBeTruthy()
+  const options = Array.from(
+    document.getElementById(listId!)?.querySelectorAll('option') ?? []
+  ).map((o) => (o as HTMLOptionElement).value)
+  expect(options).toEqual(['Director', 'Movie', 'Person'])
+})
+
+test('GAP-autocomplete: edge type input has a datalist of known edge types', () => {
+  const onApply = jest.fn()
+  render(
+    <LocalizationProvider>
+      <ThemeProvider theme={theme}>
+        <QueryBuilderPanel
+          graph="movies"
+          knownLabels={[]}
+          knownEdgeTypes={['ACTED_IN', 'DIRECTED', 'ACTED_IN']}
+          onApply={onApply}
+        />
+      </ThemeProvider>
+    </LocalizationProvider>
+  )
+  const edgeInput = screen.getByTestId('qb-edge-type') as HTMLInputElement
+  const listId = edgeInput.getAttribute('list')
+  const options = Array.from(
+    document.getElementById(listId!)?.querySelectorAll('option') ?? []
+  ).map((o) => (o as HTMLOptionElement).value)
+  expect(options).toEqual(['ACTED_IN', 'DIRECTED'])
+})
