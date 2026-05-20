@@ -30,7 +30,11 @@ export function useUniqueValues<T>(
       }
     })
     const next = Array.from(seen).sort()
-    const key = next.join(' ')
+    // \x1F (Unit Separator) cannot appear in any reasonable picker
+    // output (it is a non-printable C0 control character), so the
+    // join-and-compare cache key is collision-free even when entries
+    // contain whitespace.
+    const key = next.join('\x1F')
     if (cacheRef.current.key === key) {
       return cacheRef.current.value
     }
