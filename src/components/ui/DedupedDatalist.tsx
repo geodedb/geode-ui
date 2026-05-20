@@ -23,8 +23,7 @@ export const DedupedDatalist: React.FC<DedupedDatalistProps> = ({
 }) => (
   <datalist id={id}>
     {values.map((v) => (
-      // eslint-disable-next-line jsx-a11y/control-has-associated-label
-      <option key={v} value={v} />
+      <option key={v} value={v} label={v} />
     ))}
   </datalist>
 )
