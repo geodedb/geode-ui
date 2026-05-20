@@ -66,7 +66,7 @@ test('submits via connectMore with the typed profile/credentials', async () => {
   renderModal(true, onClose)
   await waitFor(() => {
     expect(
-      screen.getByRole('combobox', { name: /profile/i })
+      screen.getByRole('combobox', { name: /connection/i })
     ).toBeInTheDocument()
   })
   // Username + password fields. The "Use saved password" toggle (F14)
@@ -122,7 +122,7 @@ test('PSR-F13: opening the modal batches fetchPublicProfiles + listProfiles into
   renderModal(true, jest.fn())
   await waitFor(() => {
     expect(
-      screen.getByRole('combobox', { name: /profile/i })
+      screen.getByRole('combobox', { name: /connection/i })
     ).toBeInTheDocument()
   })
   // Each mock should have been called exactly once on open.
@@ -184,7 +184,7 @@ test('PSR-F14: with toggle ON, getStoredPassword fires once after debounce windo
     })
     await waitFor(() => {
       expect(
-        screen.getByRole('combobox', { name: /profile/i })
+        screen.getByRole('combobox', { name: /connection/i })
       ).toBeInTheDocument()
     })
     // Flip the toggle ON.
@@ -278,7 +278,7 @@ test('PSR-G04: submit failure renders an inline error message', async () => {
   renderModal(true, onClose)
   await waitFor(() => {
     expect(
-      screen.getByRole('combobox', { name: /profile/i })
+      screen.getByRole('combobox', { name: /connection/i })
     ).toBeInTheDocument()
   })
   fireEvent.change(screen.getByLabelText(/username/i), {
@@ -334,7 +334,7 @@ test('PSR-G04: fetchPublicProfiles failure renders fallback warning and switches
   // No <select role="combobox"> when the public list failed — it falls
   // through to the free-form Input branch.
   expect(
-    screen.queryByRole('combobox', { name: /profile/i })
+    screen.queryByRole('combobox', { name: /connection/i })
   ).not.toBeInTheDocument()
   // Reset the rejection so subsequent tests get the default mock.
   fetchPublicProfiles.mockResolvedValue([
