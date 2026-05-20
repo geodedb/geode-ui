@@ -24,12 +24,17 @@ const gridStyle: React.CSSProperties = {
   gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
 }
 
-// The graph whose stats the GraphStatsCard offers to load: prefer a
-// graph literally named 'default', else the first graph, else nothing.
+// The graph whose stats the GraphStatsCard offers to load. Geode
+// auto-provisions an empty graph literally named "default" on first
+// boot — the previous heuristic preferred that name, so any operator
+// whose real data lived in another graph saw "default stats — Nodes 0
+// / Edges 0" no matter what. Prefer the FIRST non-"default" graph in
+// the server's list order; only fall back to "default" when it is the
+// only graph the operator has. Returns null when the list is empty.
 function pickDefaultGraph(graphs: string[] | null): string | null {
   if (!graphs || graphs.length === 0) return null
-  if (graphs.includes('default')) return 'default'
-  return graphs[0] ?? null
+  const realGraph = graphs.find((g) => g !== 'default')
+  return realGraph ?? graphs[0] ?? null
 }
 
 export const DashboardPage: React.FC = () => {

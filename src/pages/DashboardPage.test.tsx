@@ -82,4 +82,43 @@ describe('DashboardPage', () => {
       'v0.5.11'
     )
   })
+
+  // Regression: Geode auto-provisions an empty graph named "default"
+  // on first boot. The stats card used to prefer that name unconditionally,
+  // so an operator whose real data lived in any other graph saw the
+  // card title "default stats" with Nodes 0 / Edges 0 and no way to
+  // pick the real graph. The card MUST now title itself with the
+  // first non-"default" graph in the list — if every graph the user
+  // has is empty by name we still fall back to "default", but real
+  // data takes precedence.
+  it('prefers a non-default graph when both "default" and a real graph are present', () => {
+    overviewFixture.graphs = ['default', 'movies']
+    renderPage()
+    expect(screen.getByTestId('dashboard-stats-card')).toHaveTextContent(
+      'movies stats'
+    )
+    expect(screen.getByTestId('dashboard-stats-card')).not.toHaveTextContent(
+      'default stats'
+    )
+  })
+
+  it('falls back to "default" when it is the only graph available', () => {
+    overviewFixture.graphs = ['default']
+    renderPage()
+    expect(screen.getByTestId('dashboard-stats-card')).toHaveTextContent(
+      'default stats'
+    )
+  })
+
+  it('prefers a non-default graph regardless of position in the list', () => {
+    // The SHOW GRAPHS driver-order may return "default" first or
+    // anywhere in the middle; the picker must scan the whole list
+    // rather than treat any specific index as authoritative.
+    overviewFixture.graphs = ['movies', 'default', 'vulndb']
+    renderPage()
+    const card = screen.getByTestId('dashboard-stats-card')
+    // First non-default in list order wins so the operator can predict
+    // which graph the card surfaces.
+    expect(card).toHaveTextContent('movies stats')
+  })
 })
