@@ -26,8 +26,8 @@ export { Stack, Inline, Container, Grid, Spacer } from '@geodedb/ui-core'
 
 export { Card, CardHeader, CardTitle, CardSubtitle } from '@geodedb/ui-core'
 
-export { DedupedDatalist } from './DedupedDatalist'
-export type { DedupedDatalistProps } from './DedupedDatalist'
+export { DedupedDatalist } from '@geodedb/ui-core'
+export type { DedupedDatalistProps } from '@geodedb/ui-core'
 
 export { DataTable, TableScroll, EmptyCell } from '@geodedb/ui-core'
 
