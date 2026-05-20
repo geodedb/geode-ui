@@ -16,7 +16,8 @@ import { createRoot } from 'react-dom/client'
 // Bootstrap-styled element inherits the same surface, text, border,
 // and brand colors as the wa-* components beside it.
 import 'bootstrap/dist/css/bootstrap.min.css'
-import './styles/bootstrap-bridge.css'
+// eslint-disable-next-line import/no-unresolved
+import '@geodedb/ui-core/styles/bootstrap-bridge.css'
 // Font Awesome Free — solid + regular + brands CSS plus the bundled
 // webfonts. Webpack's asset loader emits the .woff2 files into the
 // dist root; the CSS resolves them via relative ../webfonts/ paths
