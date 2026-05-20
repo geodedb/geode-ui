@@ -3,6 +3,9 @@
   "version": "0.1.1",
   "description": "Geode graph database admin & query UI",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "main": "internal/ui/electron-dist/main.js",
   "author": {
     "name": "Geode Database",
