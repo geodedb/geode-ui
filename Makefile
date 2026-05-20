@@ -279,3 +279,24 @@ electron-package: electron-build
 # point at internal/ui/electron-dist/main.js).
 electron-e2e: electron-build
 	npm run electron:e2e
+
+# ----- ui-core package (Storybook + library build) -----
+.PHONY: ui-core-build ui-core-test ui-core-lint stories stories-build stories-clean
+
+ui-core-build:
+	npm run -w @geodedb/ui-core build
+
+ui-core-test:
+	npm run -w @geodedb/ui-core test
+
+ui-core-lint:
+	npm run -w @geodedb/ui-core typecheck
+
+stories:
+	npm run -w @geodedb/ui-core storybook
+
+stories-build:
+	npm run -w @geodedb/ui-core build-storybook
+
+stories-clean:
+	npm run -w @geodedb/ui-core clean
