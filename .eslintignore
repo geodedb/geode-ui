@@ -1,0 +1,6 @@
+# ESLint 8 ignores dot-directories by default. Negate the ignore for
+# .storybook/ config files so they are linted normally and the
+# "File ignored by default" warning is not emitted when pre-commit
+# passes these files explicitly.
+!packages/ui-core/.storybook/
+packages/ui-core/storybook-static/

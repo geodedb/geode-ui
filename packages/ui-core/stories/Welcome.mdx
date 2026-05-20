@@ -1,0 +1,37 @@
+import { Meta } from '@storybook/blocks'
+
+<Meta title="Welcome" />
+
+# @geodedb/ui-core
+
+Reusable presentational primitives and theme system extracted from the
+[geode-ui](https://gitlab.com/devnw/codepros/geode/geode-ui) application.
+
+## Install
+
+```bash
+npm install @geodedb/ui-core
+```
+
+`@geodedb/ui-core` declares React, ReactDOM, and styled-components as
+peer dependencies. Make sure your host app provides them.
+
+## Quick start
+
+```tsx
+import { Button, ThemeProvider, lightTheme } from '@geodedb/ui-core'
+import { ThemeProvider as StyledThemeProvider } from 'styled-components'
+
+function App() {
+  return (
+    <ThemeProvider initialVariant="light">
+      <StyledThemeProvider theme={lightTheme}>
+        <Button variant="primary">Hello</Button>
+      </StyledThemeProvider>
+    </ThemeProvider>
+  )
+}
+```
+
+Browse the sidebar to explore the available components, props, and a11y
+notes for each one.

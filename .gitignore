@@ -98,3 +98,7 @@ coverage.txt
 
 # Transient `npm test`/`go test` output redirects.
 /test-output.txt
+
+# ui-core build outputs
+packages/ui-core/dist/
+packages/ui-core/storybook-static/
