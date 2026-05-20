@@ -83,6 +83,20 @@ export const en = {
       'Scheduled for a future Geode release. Read-only listing remains available.',
   },
 
+  queryBuilder: {
+    // GAP-060 Phase 1: visual query builder panel labels.
+    title: 'Query builder',
+    startLabel: 'Start label',
+    edgeType: 'Edge type (optional)',
+    edgeDirection: 'Edge direction',
+    directionOut: 'Outgoing →',
+    directionIn: 'Incoming ←',
+    directionBoth: 'Either',
+    endLabel: 'End label',
+    limit: 'LIMIT',
+    apply: 'Apply to editor',
+  },
+
   docs: {
     // GAP-061: in-app documentation viewer.
     navAria: 'Documentation pages',
@@ -147,6 +161,9 @@ export const en = {
     formatHotkey: 'Format ({{mod}}{{shift}}F)',
     formatAriaLabel: 'Format query',
     autoFormatInserted: 'Auto-format inserted queries',
+    // GAP-060: Options-menu entry that toggles the visual query
+    // builder side panel.
+    optionBuilder: 'Show query builder',
     streamRetentionBanner:
       '{{truncated}} more streamed rows were not retained (in-memory cap {{cap}}). Re-run with server-side export to get the full result.',
   },

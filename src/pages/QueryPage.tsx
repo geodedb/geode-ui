@@ -20,6 +20,7 @@ import { useQueryStore } from '../lib/queryStore'
 import { useQueryPageStore } from '../lib/queryPageStore'
 import { useLspSettings } from '../lib/lspSettings'
 import { modKeyLabel, shiftKeyLabel } from '../lib/platformKeyHints'
+import { QueryBuilderPanel } from '../components/editor/QueryBuilderPanel'
 import type { GqlEditorHandle } from '../components/editor/GqlEditor'
 import { Dropdown, DropdownItem } from '../services/webawesome/components'
 import {
@@ -183,6 +184,10 @@ export const QueryPage: React.FC = () => {
   // (a fullscreen overlay on QueryPage shouldn't follow you to /schema).
   const [busy, setBusy] = useState(false)
   const [maximized, setMaximized] = useState(false)
+  // GAP-060 Phase 1: visual builder side panel toggle. Persisted only
+  // for the session — the toggle lives in the Options menu so an
+  // operator can hide it once they're comfortable with the text path.
+  const [builderOpen, setBuilderOpen] = useState(false)
   const maximizeBtnRef = useRef<HTMLButtonElement | null>(null)
   const [stream, dispatch] = useReducer(streamReducer, initialStreamState)
   const handleRef = useRef<StreamHandle | null>(null)
@@ -664,6 +669,20 @@ export const QueryPage: React.FC = () => {
           >
             {t('query.autoFormatInserted')}
           </DropdownItem>
+          {/* GAP-060: visual builder toggle. Lives in Options so the
+              text-first power user can keep it hidden. The panel
+              renders below the editor when open. */}
+          <DropdownItem
+            type="checkbox"
+            value="queryBuilder"
+            data-testid="query-options-builder"
+            checked={builderOpen || undefined}
+            aria-checked={builderOpen ? 'true' : 'false'}
+            role="menuitemcheckbox"
+            onClick={() => setBuilderOpen(!builderOpen)}
+          >
+            {t('query.optionBuilder')}
+          </DropdownItem>
         </Dropdown>
         {activeResp && (
           <span>
@@ -685,6 +704,21 @@ export const QueryPage: React.FC = () => {
             cap: stream.rowRetentionCap,
           })}
         </StreamOverflowBanner>
+      )}
+      {builderOpen && (
+        <div className="mt-2" data-testid="query-builder-region">
+          <QueryBuilderPanel
+            onApply={(gql) => {
+              // Install the synthesised GQL into the editor and clear
+              // any prior result so the operator sees a clean slate
+              // until they hit Run.
+              setStmt(gql)
+              setResp(null)
+              setErr(null)
+              setSubmittedStmt('')
+            }}
+          />
+        </div>
       )}
       {inlineResultRegion}
       {overlayResultRegion}
