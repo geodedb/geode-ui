@@ -11,8 +11,13 @@
 export { Button } from './Button'
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button'
 
-export { Input, Textarea, Select } from './Input'
-export type { InputProps, TextareaProps, SelectProps, InputSize } from './Input'
+export { Input, Textarea, Select } from '@geodedb/ui-core'
+export type {
+  InputProps,
+  TextareaProps,
+  SelectProps,
+  InputSize,
+} from '@geodedb/ui-core'
 
 export { Field } from '@geodedb/ui-core'
 export type { FieldProps } from '@geodedb/ui-core'
