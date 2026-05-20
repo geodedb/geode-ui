@@ -34,9 +34,6 @@ export { DataTable, TableScroll, EmptyCell } from '@geodedb/ui-core'
 export { Modal, ConfirmModal } from './Modal'
 export type { ModalProps, ConfirmModalProps } from './Modal'
 
-export { Logo } from './Logo'
-export type { LogoProps } from './Logo'
-
 export { Icon } from '@geodedb/ui-core'
 export type { IconProps, IconStyle } from '@geodedb/ui-core'
 

@@ -14,3 +14,5 @@ export type { ButtonProps, ButtonVariant, ButtonSize } from './components/Button
 export { DataTable, TableScroll, EmptyCell } from './components/DataTable'
 export { DedupedDatalist } from './components/DedupedDatalist'
 export type { DedupedDatalistProps } from './components/DedupedDatalist'
+export { Logo } from './components/Logo'
+export type { LogoProps } from './components/Logo'

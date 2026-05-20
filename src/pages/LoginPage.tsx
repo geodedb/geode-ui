@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { useAuth } from '../auth/AuthProvider'
-import { Field, Logo } from '../components/ui'
+import { Field } from '../components/ui'
+import { GeodeLogo as Logo } from '../components/brand/GeodeLogo'
 import {
   Input as WaInput,
   Checkbox as WaCheckbox,
