@@ -193,12 +193,20 @@ export const BootstrapDropdown = <T extends string>({
       })
     }
     measure()
-    // Re-measure on window resize / scroll so the menu stays anchored.
+    // Window resize still re-anchors the menu so a hot-corner resize
+    // doesn't strand it. But scroll CLOSES the menu instead of
+    // re-anchoring it (Bootstrap's own dropdown default). The previous
+    // re-anchor-on-scroll behaviour shifted the menu under the user's
+    // pointer mid-click, redirecting onClick to a neighbouring option —
+    // the "sometimes randomly select another" symptom. Closing on
+    // scroll forces the operator to re-open at the new trigger
+    // position, which is unambiguous.
+    const onScroll = (): void => setOpen(false)
     window.addEventListener('resize', measure)
-    window.addEventListener('scroll', measure, true)
+    window.addEventListener('scroll', onScroll, true)
     return () => {
       window.removeEventListener('resize', measure)
-      window.removeEventListener('scroll', measure, true)
+      window.removeEventListener('scroll', onScroll, true)
     }
   }, [open])
 
@@ -238,10 +246,18 @@ export const BootstrapDropdown = <T extends string>({
               role="option"
               aria-selected={isActive}
               data-active={isActive ? 'true' : 'false'}
+              // Carry the value on the element so the click handler
+              // can read it from event.currentTarget rather than rely
+              // solely on the render-time closure. The two must agree,
+              // but the DOM read makes the element that actually
+              // received the click authoritative and removes any
+              // closure-vs-target divergence as a failure mode.
+              data-value={item.value}
               disabled={item.disabled}
               className={`dropdown-item ${isActive ? 'active' : ''}`.trim()}
-              onClick={() => {
-                onChange(item.value)
+              onClick={(e) => {
+                const v = (e.currentTarget.dataset.value ?? item.value) as T
+                onChange(v)
                 close(true)
               }}
             >
