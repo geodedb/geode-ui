@@ -19,7 +19,7 @@ export type { FieldProps } from './Field'
 
 export { Stack, Inline, Container, Grid, Spacer } from '@geodedb/ui-core'
 
-export { Card, CardHeader, CardTitle, CardSubtitle } from './Card'
+export { Card, CardHeader, CardTitle, CardSubtitle } from '@geodedb/ui-core'
 
 export { DedupedDatalist } from './DedupedDatalist'
 export type { DedupedDatalistProps } from './DedupedDatalist'
