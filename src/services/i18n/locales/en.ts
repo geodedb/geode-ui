@@ -528,6 +528,8 @@ export const en = {
     columnEvent: 'Event',
     columnFields: 'Fields',
     empty: 'No audit entries.',
+    hideJson: 'Hide raw JSON',
+    viewJson: 'View raw JSON',
   },
 
   errors: {
