@@ -118,14 +118,52 @@ export const LabelList: React.FC<{
     }
   }, [graph, effectiveCache])
 
+  // GAP-056: surface the cold-miss window with a skeleton so the user
+  // knows the panel is fetching rather than empty. The data-state
+  // attribute is the deterministic test seam.
+  let dataState: 'loading' | 'loaded' | 'empty' = 'loaded'
+  if (!loaded) dataState = 'loading'
+  else if (labels.length === 0) dataState = 'empty'
+
+  if (!loaded) {
+    return (
+      <ul
+        className="list-unstyled m-0 p-0 d-flex flex-column gap-1"
+        data-testid="label-list"
+        data-state={dataState}
+        aria-busy="true"
+        aria-label={t('schema.loadingLabels')}
+      >
+        {[0, 1, 2].map((i) => (
+          <li key={i} className="placeholder-glow" data-testid="label-skeleton">
+            <span
+              className="placeholder bg-secondary-subtle d-block rounded"
+              style={{ height: 36 }}
+            />
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
   if (loaded && labels.length === 0) {
     return (
-      <p className="text-body-tertiary fst-italic">{t('schema.noLabels')}</p>
+      <p
+        className="text-body-tertiary fst-italic"
+        data-testid="label-list"
+        data-state={dataState}
+      >
+        {t('schema.noLabels')}
+      </p>
     )
   }
 
   return (
-    <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
+    <ul
+      className="list-unstyled m-0 p-0 d-flex flex-column gap-1"
+      data-testid="label-list"
+      data-state={dataState}
+    >
       {labels.map((l) => (
         <li key={l}>
           <Btn

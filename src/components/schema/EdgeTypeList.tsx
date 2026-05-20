@@ -110,14 +110,58 @@ export const EdgeTypeList: React.FC<{
     }
   }, [graph, effectiveCache])
 
+  // GAP-056: surface the cold-miss window so the user knows the panel
+  // is fetching rather than empty. Pre-fix the body rendered nothing
+  // while the wire round-trip resolved, which was indistinguishable
+  // from "this graph has no edge types." The data-state attribute is
+  // the deterministic test seam (loading / loaded / empty).
+  let dataState: 'loading' | 'loaded' | 'empty' = 'loaded'
+  if (!loaded) dataState = 'loading'
+  else if (types.length === 0) dataState = 'empty'
+
+  if (!loaded) {
+    return (
+      <ul
+        className="list-unstyled m-0 p-0 d-flex flex-column gap-1"
+        data-testid="edge-type-list"
+        data-state={dataState}
+        aria-busy="true"
+        aria-label={t('schema.loadingEdgeTypes')}
+      >
+        {[0, 1, 2].map((i) => (
+          <li
+            key={i}
+            className="placeholder-glow"
+            data-testid="edge-type-skeleton"
+          >
+            <span
+              className="placeholder bg-secondary-subtle d-block rounded"
+              style={{ height: 36 }}
+            />
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
   if (loaded && types.length === 0) {
     return (
-      <p className="text-body-tertiary fst-italic">{t('schema.noEdgeTypes')}</p>
+      <p
+        className="text-body-tertiary fst-italic"
+        data-testid="edge-type-list"
+        data-state={dataState}
+      >
+        {t('schema.noEdgeTypes')}
+      </p>
     )
   }
 
   return (
-    <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
+    <ul
+      className="list-unstyled m-0 p-0 d-flex flex-column gap-1"
+      data-testid="edge-type-list"
+      data-state={dataState}
+    >
       {types.map((t) => (
         <li key={t}>
           <Btn

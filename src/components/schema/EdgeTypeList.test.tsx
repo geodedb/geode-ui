@@ -163,6 +163,35 @@ test('PERF-#154: switching graph mid-flight aborts the prior fetch; a late resol
   })
 })
 
+// GAP-056: during the cold-miss window the user needs an in-product
+// signal that the panel is fetching, not empty. The data-state seam
+// flips loading -> loaded once the wire call resolves; the skeleton
+// rows render while loading; the existing aria-busy contract surfaces
+// the state to assistive tech.
+test('GAP-056: renders loading skeleton during cold-miss fetch', async () => {
+  edgeTypesAutoResolve = null
+  renderEdge({ graph: 'movies', cache: createSchemaCache() })
+
+  // The fetch is in-flight (resolver pending) — the list is in
+  // loading state and three skeleton rows render.
+  const list = screen.getByTestId('edge-type-list')
+  expect(list).toHaveAttribute('data-state', 'loading')
+  expect(list).toHaveAttribute('aria-busy', 'true')
+  expect(screen.getAllByTestId('edge-type-skeleton')).toHaveLength(3)
+
+  // Resolve the fetch — state flips to loaded.
+  await act(async () => {
+    edgeTypeResolvers[0]?.({ types: ['ACTED_IN'] })
+    await Promise.resolve()
+  })
+  await waitFor(() => {
+    expect(screen.getByTestId('edge-type-list')).toHaveAttribute(
+      'data-state',
+      'loaded'
+    )
+  })
+})
+
 test('PERF-#154: cache LRU eviction respects maxEntries (shared across kinds)', () => {
   const cache = createSchemaCache(2)
   cache.putEdgeTypes('a', ['A'])

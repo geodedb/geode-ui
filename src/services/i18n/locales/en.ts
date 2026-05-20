@@ -288,6 +288,8 @@ export const en = {
     constraints: 'Constraints',
     noLabels: 'No labels.',
     noEdgeTypes: 'No edge types.',
+    loadingLabels: 'Loading labels…',
+    loadingEdgeTypes: 'Loading edge types…',
     noIndexes: 'No indexes.',
     noConstraints: 'No constraints.',
   },
