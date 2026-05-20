@@ -209,6 +209,101 @@ test('PSR-F9: re-adding the same connection identity does not re-fire IPC', () =
   expect(mockStore).not.toHaveBeenCalled()
 })
 
+// GAP-046: re-running signIn against the same profile must NOT
+// produce two switcher rows. Pre-fix the reducer keyed `byId` on the
+// server-issued `connectionId` (a fresh opaque id on every login),
+// so a second login for the same profile inserted a SECOND entry with
+// the new id and the user saw two indistinguishable rows in the
+// switcher menu — one holding a stale-soon JWT.
+test('GAP-046: re-adding the same profileName replaces in place (single switcher row)', () => {
+  const DualAdder: React.FC = () => {
+    const { add, connections } = useConnections()
+    const addFirst = (): void =>
+      add({
+        connectionId: 'first',
+        token: 'tok-first',
+        profileName: 'shared',
+        expiresAt: 1700000000000,
+      })
+    const addSecond = (): void =>
+      add({
+        connectionId: 'second',
+        token: 'tok-second',
+        profileName: 'shared',
+        expiresAt: 1700001000000,
+      })
+    return (
+      <div>
+        <span data-testid="size">{connections.size}</span>
+        <span data-testid="profiles">
+          {[...connections.values()].map((c) => c.profileName).join(',')}
+        </span>
+        <span data-testid="tokens">
+          {[...connections.values()].map((c) => c.token).join(',')}
+        </span>
+        <button
+          data-testid="add-first"
+          aria-label="add-first"
+          onClick={addFirst}
+        />
+        <button
+          data-testid="add-second"
+          aria-label="add-second"
+          onClick={addSecond}
+        />
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider>
+      <DualAdder />
+    </ConnectionsProvider>
+  )
+  act(() => screen.getByTestId('add-first').click())
+  expect(screen.getByTestId('size').textContent).toBe('1')
+  expect(screen.getByTestId('tokens').textContent).toBe('tok-first')
+
+  // Second login for the same profile. Size must stay at 1, token must
+  // reflect the fresh JWT, and the entry must be the new connectionId.
+  act(() => screen.getByTestId('add-second').click())
+  expect(screen.getByTestId('size').textContent).toBe('1')
+  expect(screen.getByTestId('tokens').textContent).toBe('tok-second')
+  expect(screen.getByTestId('profiles').textContent).toBe('shared')
+})
+
+test('GAP-046: dedupe is per-profile — distinct profiles still get distinct rows', () => {
+  const PairAdder: React.FC = () => {
+    const { add, connections } = useConnections()
+    const handle = (): void => {
+      add({
+        connectionId: 'a',
+        token: 't-a',
+        profileName: 'one',
+        expiresAt: 1700000000000,
+      })
+      add({
+        connectionId: 'b',
+        token: 't-b',
+        profileName: 'two',
+        expiresAt: 1700001000000,
+      })
+    }
+    return (
+      <div>
+        <span data-testid="size">{connections.size}</span>
+        <button data-testid="add-pair" aria-label="add-pair" onClick={handle} />
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider>
+      <PairAdder />
+    </ConnectionsProvider>
+  )
+  act(() => screen.getByTestId('add-pair').click())
+  expect(screen.getByTestId('size').textContent).toBe('2')
+})
+
 test('PSR-F9: removing a connection that does not exist is a no-op (no IPC)', () => {
   render(
     <ConnectionsProvider>

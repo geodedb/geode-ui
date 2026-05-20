@@ -68,15 +68,47 @@ function sameConn(a: ConnectionState, b: ConnectionState): boolean {
 function reducer(s: State, a: Action): State {
   switch (a.type) {
     case 'add': {
-      const existing = s.byId.get(a.conn.connectionId)
-      // First connection auto-activates; subsequent additions don't
-      // steal focus (Plan C will add explicit switching UI).
-      const nextActive = s.activeId ?? a.conn.connectionId
-      // Re-adding the same payload is a no-op — skip the Map clone and
-      // the version bump so the persist effect stays quiet.
-      if (existing && sameConn(existing, a.conn) && nextActive === s.activeId) {
-        return s
+      // GAP-046: dedupe by profileName, not by connectionId. Re-running
+      // signIn against the same profile mints a fresh server-issued
+      // connectionId, so the old by-connectionId lookup never matched
+      // a re-connect and the switcher rendered two indistinguishable
+      // rows for the same profile (each holding a different JWT — one
+      // approaching expiry).
+      //
+      // The contract: at most ONE entry per `profileName`. A re-add
+      // for an existing profile replaces the token / expiresAt / id
+      // in-place and shifts the active pointer to the fresh row so
+      // the user lands on the freshest JWT without seeing duplicates.
+      const existingByProfile = [...s.byId.values()].find(
+        (c) => c.profileName === a.conn.profileName
+      )
+      if (existingByProfile) {
+        // Same connectionId + same payload = no-op (avoids needless
+        // persist churn when the same JWT round-trips through hydrate
+        // and then a redundant `add` from a stale caller).
+        if (
+          existingByProfile.connectionId === a.conn.connectionId &&
+          sameConn(existingByProfile, a.conn) &&
+          s.activeId === a.conn.connectionId
+        ) {
+          return s
+        }
+        const next = new Map(s.byId)
+        // Drop the stale entry under the old connectionId, then insert
+        // the fresh one. Map key changes (connectionIds differ) so we
+        // can't just `set` — we must delete + set.
+        next.delete(existingByProfile.connectionId)
+        next.set(a.conn.connectionId, a.conn)
+        return {
+          byId: next,
+          activeId: a.conn.connectionId,
+          version: s.version + 1,
+        }
       }
+      // First connection for this profile. First connection overall
+      // auto-activates; subsequent first-time-for-profile additions
+      // don't steal focus (Plan C will add explicit switching UI).
+      const nextActive = s.activeId ?? a.conn.connectionId
       const next = new Map(s.byId)
       next.set(a.conn.connectionId, a.conn)
       return { byId: next, activeId: nextActive, version: s.version + 1 }
