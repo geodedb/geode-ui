@@ -1,0 +1,41 @@
+# HELP geode_server_uptime Seconds since process start
+# TYPE geode_server_uptime gauge
+geode_server_uptime 2.295530655
+# HELP geode_server_health 1 healthy, 0 unhealthy per component
+# TYPE geode_server_health gauge
+geode_server_health{geode_component="server"} 1
+# HELP geode_transport_connection_count Current number of active QUIC connections
+# TYPE geode_transport_connection_count gauge
+geode_transport_connection_count{geode_transport_protocol="quic"} 0
+# HELP geode_transactions_failed_total Total number of failed transactions
+# TYPE geode_transactions_failed_total counter
+geode_transactions_failed_total 0
+# HELP geode_query_duration_seconds Query execution duration in seconds
+# TYPE geode_query_duration_seconds histogram
+geode_query_duration_seconds_bucket{le="+Inf"} 0
+geode_query_duration_seconds_sum 0
+geode_query_duration_seconds_count 0
+# HELP geode_queries_total Total number of queries executed
+# TYPE geode_queries_total counter
+geode_queries_total 0
+# HELP geode_transactions_total Total number of transactions
+# TYPE geode_transactions_total counter
+geode_transactions_total 0
+# HELP geode_queries_failed_total Total number of failed queries
+# TYPE geode_queries_failed_total counter
+geode_queries_failed_total 0
+# HELP geode_nodes_total Total number of nodes in the graph
+# TYPE geode_nodes_total gauge
+geode_nodes_total 0
+# HELP geode_connections_total Total number of connections
+# TYPE geode_connections_total counter
+geode_connections_total 0
+# HELP geode_memory_bytes Memory usage in bytes
+# TYPE geode_memory_bytes gauge
+geode_memory_bytes 0
+# HELP geode_edges_total Total number of edges in the graph
+# TYPE geode_edges_total gauge
+geode_edges_total 0
+# HELP geode_connections_active Number of active connections
+# TYPE geode_connections_active gauge
+geode_connections_active 0

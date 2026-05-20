@@ -1,0 +1,29 @@
+# HELP geode_queries_total Total queries executed
+# TYPE geode_queries_total counter
+geode_queries_total 42
+# HELP geode_queries_failed_total Total number of failed queries
+# TYPE geode_queries_failed_total counter
+geode_queries_failed_total 3
+# HELP geode_connections_active Number of active connections
+# TYPE geode_connections_active gauge
+geode_connections_active 5
+# HELP geode_nodes_total Total number of nodes in the graph
+# TYPE geode_nodes_total gauge
+geode_nodes_total 1500
+# HELP geode_edges_total Total number of edges in the graph
+# TYPE geode_edges_total gauge
+geode_edges_total 3200
+# HELP geode_memory_bytes Memory usage in bytes
+# TYPE geode_memory_bytes gauge
+geode_memory_bytes 134217728
+# HELP geode_query_duration_seconds Query execution duration in seconds
+# TYPE geode_query_duration_seconds histogram
+geode_query_duration_seconds_bucket{le="0.005"} 10
+geode_query_duration_seconds_bucket{le="0.01"} 25
+geode_query_duration_seconds_bucket{le="0.05"} 38
+geode_query_duration_seconds_bucket{le="+Inf"} 42
+geode_query_duration_seconds_sum 0.184
+geode_query_duration_seconds_count 42
+# HELP geode_server_health 1 healthy, 0 unhealthy per component
+# TYPE geode_server_health gauge
+geode_server_health{geode_component="server"} 1

@@ -78,6 +78,17 @@ func registerRoutes(mux *http.ServeMux, cfg appConfig, pool *conn.Pool, issuer *
 	// requests.
 	mux.HandleFunc("/api/v1/csrf", srv.HandleCSRF)
 
+	// GET /api/v1/metrics — server-side proxy for the upstream geode
+	// Prometheus exposition. Hand-rolled rather than genapi-emitted to
+	// avoid regenerating the entire generated client surface for a
+	// single new route (see internal/server/handlers_metrics.go for the
+	// "why not genapi" rationale). AuthJWT is enforced inside the
+	// handler itself, mirroring the genapi-emitted required_roles=[]
+	// pattern; the handler returns 503 METRICS_DISABLED when the
+	// MetricsURL config is empty so the SPA can render a clean
+	// "metrics not configured" empty state without polling.
+	mux.HandleFunc("GET /api/v1/metrics", srv.HandleMetrics)
+
 	// /ws/* surface lives on a separate server type because the
 	// generated WS interface emits "Query" for /ws/query, which would
 	// collide with the API "Query" method on *GraphServer. Both

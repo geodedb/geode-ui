@@ -133,6 +133,18 @@ type Config struct {
 	// password-set handlers hermetic. main.go wires HIBPCheck via the
 	// `-password-hibp-check` CLI flag.
 	PasswordPolicy PasswordPolicy
+	// MetricsURL points at the upstream geode Prometheus `/metrics`
+	// endpoint (e.g. "http://geode:9090/metrics" in the e2e compose
+	// stack). Empty disables the `/api/v1/metrics` proxy — the handler
+	// returns 503 METRICS_DISABLED so the SPA can render a clean
+	// "metrics not configured" empty state. Populated from the
+	// GEODE_METRICS_URL env var in cmd/server/app.go.
+	MetricsURL string
+	// MetricsHTTPClient is the *http.Client used to GET MetricsURL. nil
+	// (production) falls through to a default client with a 2s timeout.
+	// Tests inject a httptest.Server's client here to avoid binding to
+	// a port and to keep the upstream-503 / -timeout branches hermetic.
+	MetricsHTTPClient *http.Client
 	// testAuthenticate is an optional override for authenticateUpstream
 	// used by handler tests that don't want to spin up the database/sql
 	// driver. When non-nil, Login calls this in place of

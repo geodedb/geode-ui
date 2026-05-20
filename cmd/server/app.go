@@ -273,6 +273,14 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		Store:          store,
 		PoolReloader:   pool,
 		PasswordPolicy: server.PasswordPolicy{HIBPCheck: cfg.passwordHIBPCheck},
+		// Metrics proxy wiring. GEODE_METRICS_URL points at the
+		// upstream geode prometheus listener (set when the geode
+		// server runs with GEODE_METRICS_PORT). Empty disables the
+		// `/api/v1/metrics` proxy — the SPA falls back to a "metrics
+		// not configured" empty state without polling. Read at
+		// startup; no hot-reload path because the env-driven URL is
+		// part of the deployment topology, not a runtime preference.
+		MetricsURL: getenv("GEODE_METRICS_URL"),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("register routes: %w", err)
