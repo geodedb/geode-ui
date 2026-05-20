@@ -897,7 +897,7 @@ build-storybook:
   before_script:
     - npm ci --prefer-offline --no-audit --no-fund
   script:
-    - NODE_OPTIONS='--max-old-space-size=4096' npm run -w @geodedb/ui-core build-storybook
+    - NODE_OPTIONS='--max-old-space-size=4096' STORYBOOK_BASE_URL=/storybook/ npm run -w @geodedb/ui-core build-storybook
     - mkdir -p packages/ui-core/storybook-static
   artifacts:
     paths:

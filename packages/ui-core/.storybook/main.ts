@@ -26,11 +26,10 @@ const config: StorybookConfig = {
     },
   },
   docs: { autodocs: 'tag' },
-  // Honour STORYBOOK_PUBLIC_PATH when deploying to a GitLab Pages subdirectory.
-  // The CI job sets it to `/${CI_PROJECT_NAME}/` so asset URLs resolve correctly.
-  managerHead: (head) => `${head}`,
   // Inject a Babel loader for TypeScript/TSX files so the Webpack5 builder
   // can parse `import type` syntax in .storybook/preview.tsx and story files.
+  // Also sets output.publicPath from STORYBOOK_BASE_URL so the build works
+  // when served from a subpath (e.g. GitLab Pages at /<project>/storybook/).
   webpackFinal: async (webpackConfig: Configuration) => {
     webpackConfig.module = webpackConfig.module ?? { rules: [] }
     webpackConfig.module.rules = webpackConfig.module.rules ?? []
@@ -42,6 +41,14 @@ const config: StorybookConfig = {
         options: { configFile: true },
       },
     })
+
+    // Honour STORYBOOK_BASE_URL for subpath deployments (e.g., GitLab Pages
+    // at /<project>/storybook/). When unset, falls back to '/' which is
+    // correct for `storybook dev` and root-served builds.
+    const baseUrl = process.env.STORYBOOK_BASE_URL || '/'
+    webpackConfig.output = webpackConfig.output || {}
+    webpackConfig.output.publicPath = baseUrl
+
     return webpackConfig
   },
 }
