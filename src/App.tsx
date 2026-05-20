@@ -12,7 +12,11 @@ import { Shell } from './components/layout/Shell'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoginPage } from './pages/LoginPage'
 import { QueryPage } from './pages/QueryPage'
-import { DashboardPage } from './pages/DashboardPage'
+// DashboardPage is lazy-loaded so the recharts dep (~140 KiB) lives
+// in its own async chunk rather than the main entrypoint. The
+// dashboard isn't the landing page anyway — /login or /query is —
+// so the chunk fetch happens behind a Suspense boundary the first
+// time the operator navigates to /dashboard.
 import { SchemaPage } from './pages/SchemaPage'
 import { AdminPage } from './pages/AdminPage'
 import { UsersPage } from './components/admin/UsersPage'
@@ -39,6 +43,23 @@ const GraphBenchPage = React.lazy(() =>
   import('./pages/dev/GraphBenchPage').then((m) => ({
     default: m.GraphBenchPage,
   }))
+)
+
+// DashboardPage carries the recharts dependency for the metrics +
+// audit donut cards. Code-splitting it keeps the main entrypoint
+// under the 1.5 MiB performance budget.
+const DashboardPage = React.lazy(() =>
+  import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
+)
+
+// SuspenseDashboardRoute extracts the Suspense wrapper so the inline
+// Route element stays single-line (same dance as DevGraphBenchRoute
+// above — prettier and react/jsx-wrap-multilines disagree about
+// wrapping parens around multi-line element props).
+const SuspenseDashboardRoute: React.FC = () => (
+  <React.Suspense fallback={<div />}>
+    <DashboardPage />
+  </React.Suspense>
 )
 
 // Suspense-wrapped element extracted into a named component so the
@@ -163,7 +184,10 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                 />
                 <Route element={<ProtectedShell />}>
                   <Route index element={<QueryPage />} />
-                  <Route path="dashboard" element={<DashboardPage />} />
+                  <Route
+                    path="dashboard"
+                    element={<SuspenseDashboardRoute />}
+                  />
                   <Route path="schema" element={<SchemaPage />} />
                   {/*
                     SEC issue 264: /admin/* is wrapped in a client-side

@@ -66,7 +66,14 @@ module.exports = {
       '<rootDir>/__test_utils__/mocks/queryStreamWorkerUrlMock.js',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style|nanoid)/)',
+    // recharts ships ESM under recharts/es6/* with no .cjs fallback.
+    // The dashboard cards import per-chart from recharts/es6/* (plan
+    // open-question #1 — bundle-size budget); without the negative
+    // lookahead jest's default node resolver chokes on the `export`
+    // keyword in the published .js files. d3-* + the small graph
+    // utilities are transitive deps of recharts and need the same
+    // transform pass for the same reason.
+    'node_modules/(?!(?:@devnw|@awesome\\.me|lit|lit-html|lit-element|@lit|@floating-ui|@shoelace-style|nanoid|recharts|d3-[a-z-]+|internmap|delaunator|robust-predicates|victory-vendor)/)',
   ],
   // QUALITY #48 / GAP-019: ratcheted coverage thresholds. Set to the
   // current measured floor minus 1 pp so a micro-regression (a

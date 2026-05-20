@@ -14,7 +14,16 @@
 
 import React, { useId } from 'react'
 import styled from 'styled-components'
-import { Line, LineChart, ResponsiveContainer, Tooltip, YAxis } from 'recharts'
+// Per-chart imports (plan open-question #1 fallback): pulling from the
+// top-level `recharts` barrel inflates the production bundle by ~140
+// KiB because webpack can't tree-shake all the chart families. Reaching
+// into recharts/es6/ trims the dependency to the LineChart graph and
+// drops the Pie/Radar/Bar/etc. branches.
+import { LineChart } from 'recharts/es6/chart/LineChart'
+import { Line } from 'recharts/es6/cartesian/Line'
+import { ResponsiveContainer } from 'recharts/es6/component/ResponsiveContainer'
+import { Tooltip } from 'recharts/es6/component/Tooltip'
+import { YAxis } from 'recharts/es6/cartesian/YAxis'
 
 const Wrapper = styled.div<{ $h: number }>`
   width: 100%;

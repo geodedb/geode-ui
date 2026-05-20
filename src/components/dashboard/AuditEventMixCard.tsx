@@ -15,14 +15,15 @@
 
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts'
+// Per-chart imports (plan open-question #1 fallback) — pulling from
+// recharts/es6/* keeps the bundle delta under the 1.5 MiB webpack
+// budget. See the matching note in Sparkline.tsx.
+import { Cell } from 'recharts/es6/component/Cell'
+import { Legend } from 'recharts/es6/component/Legend'
+import { Pie } from 'recharts/es6/polar/Pie'
+import { PieChart } from 'recharts/es6/chart/PieChart'
+import { ResponsiveContainer } from 'recharts/es6/component/ResponsiveContainer'
+import { Tooltip } from 'recharts/es6/component/Tooltip'
 
 import { Card } from './Card'
 import { useApiResource } from '../../hooks/useApiResource'
