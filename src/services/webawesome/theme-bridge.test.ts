@@ -1,4 +1,4 @@
-import type { Theme } from '../../theme/types'
+import type { Theme } from '@geodedb/ui-core/theme'
 import { buildWaCssVariables } from './theme-bridge'
 
 // A minimal Theme stub matching the shape of theme/types.ts. The

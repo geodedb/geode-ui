@@ -1,7 +1,6 @@
 import type cytoscape from 'cytoscape'
 import { createCytoscapeStyle, labelToColor } from './cytoscapeStyle'
-import { darkTheme } from '../../theme/dark'
-import { lightTheme } from '../../theme/light'
+import { darkTheme, lightTheme } from '@geodedb/ui-core/theme'
 
 // Pull the `node` selector block out of the stylesheet so each test can
 // reason about a single styling concern without scanning the full array.

@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled, { useTheme } from 'styled-components'
-import type { ColorScale, Theme } from '../../theme/types'
+import type { ColorScale, Theme } from '@geodedb/ui-core/theme'
 import type { QueryRespLike } from '../../lib/graphResult'
 import { extractElements } from '../../lib/graphResult'
 import {

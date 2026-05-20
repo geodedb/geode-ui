@@ -1,10 +1,11 @@
 import React from 'react'
 import styled from 'styled-components'
+import { breakpoints } from '@geodedb/ui-core/theme'
+
 import type { LayoutName } from '../useGraphPrefs'
 import { FindNodeInput } from './FindNodeInput'
 import { GraphToolbarMore } from './GraphToolbarMore'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
-import { breakpoints } from '../../../theme/tokens'
 import { BootstrapDropdown } from '../../../services/bootstrap/Dropdown'
 import { Icon } from '../../ui'
 

@@ -1,6 +1,6 @@
 import 'styled-components'
 
-import type { Theme } from './theme/types'
+import type { Theme } from '@geodedb/ui-core/theme'
 
 declare module 'styled-components' {
   // The styled-components DefaultTheme is the union all `${({ theme }) => …}`

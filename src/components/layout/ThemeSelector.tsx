@@ -1,8 +1,9 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 
+import type { ThemeVariant } from '@geodedb/ui-core/theme'
+
 import { useThemePreference } from '../../theme'
-import type { ThemeVariant } from '../../theme/types'
 import { BootstrapDropdown } from '../../services/bootstrap/Dropdown'
 import { Icon } from '../ui'
 

@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import type { Theme } from '@/theme/types'
+import type { Theme } from '@geodedb/ui-core/theme'
 import { useCxtMenu, buildCommands } from './useCxtMenu'
 
 // PERF #316: useCxtMenu now lazy-imports cytoscape-cxtmenu when the

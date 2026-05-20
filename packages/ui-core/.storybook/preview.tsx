@@ -8,11 +8,11 @@ const withTheme: Decorator = (Story, context) => {
   const variant = context.globals.theme === 'dark' ? 'dark' : 'light'
   const themeObject = variant === 'dark' ? darkTheme : lightTheme
   return (
-    <ThemeProvider initialVariant={variant}>
+    <ThemeProvider>
       <StyledThemeProvider theme={themeObject}>
         <div
           style={{
-            background: themeObject.bg?.app ?? '#fff',
+            background: themeObject.bg?.canvas ?? '#fff',
             color: themeObject.text?.primary ?? '#111',
             padding: '1.5rem',
             minHeight: '100vh',

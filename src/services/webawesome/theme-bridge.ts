@@ -1,4 +1,4 @@
-import type { Theme } from '../../theme/types'
+import type { Theme } from '@geodedb/ui-core/theme'
 
 // Map our styled-components theme tokens to Web Awesome's CSS custom
 // properties. WA's components read these from CSS custom properties

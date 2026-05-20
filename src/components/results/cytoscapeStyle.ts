@@ -1,5 +1,5 @@
 import type cytoscape from 'cytoscape'
-import type { Theme } from '../../theme/types'
+import type { Theme } from '@geodedb/ui-core/theme'
 
 // Hand-tuned palettes for the per-label node fills. Each palette
 // trades pure-saturation for theme-fit:

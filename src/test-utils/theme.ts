@@ -5,4 +5,4 @@
 // pass it to <ThemeProvider theme={testTheme}>. This keeps the test
 // surface aligned with the real Theme contract — when a new token is
 // added to `Theme`, every test exercises it without per-file edits.
-export { darkTheme as testTheme } from '../theme/dark'
+export { darkTheme as testTheme } from '@geodedb/ui-core/theme'

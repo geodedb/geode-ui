@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import cytoscape, { Core } from 'cytoscape'
-import type { Theme } from '@/theme/types'
+import type { Theme } from '@geodedb/ui-core/theme'
 
 // PERF #316: lazy-load the cytoscape-cxtmenu plugin so its ~hundreds-of-KiB
 // of glyph/canvas code only enters the active chunk when the user (or

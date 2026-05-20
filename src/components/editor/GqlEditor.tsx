@@ -15,6 +15,8 @@ import React, {
 import '../../monaco-bootstrap'
 import type * as MonacoEditorApi from 'monaco-editor'
 import Editor, { OnMount } from '@monaco-editor/react'
+import { breakpoints } from '@geodedb/ui-core/theme'
+
 import { GQL_LANGUAGE_ID, registerGqlLanguage } from './gqlLanguage'
 import { registerGqlSnippetProvider } from '../../lib/snippets/gqlSnippetProvider'
 import type { LspClientHandle, LspState } from '../../lib/lsp/client'
@@ -24,7 +26,6 @@ import { useAuth } from '../../auth/AuthProvider'
 // deps on `isAuthed` ensure we still re-run when the user signs in/out.
 import { getLatestToken } from '../../api/connections'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { breakpoints } from '../../theme/tokens'
 import { useLspSettings } from '../../lib/lspSettings'
 
 // Mobile editor height is capped at 160 px so the editor + Bar + result
