@@ -5,6 +5,9 @@ import styled from 'styled-components'
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
 import { DataTable, EmptyCell, Field, Input, Stack, TableScroll } from '../ui'
+import { formatAuditTimestamp } from '../../lib/intl/formatAuditTimestamp'
+import { AuditFieldList } from './AuditFieldList'
+import { AuditRowJsonToggle } from './AuditRowJsonToggle'
 
 // PERF-2026-05-17-05 (issue 243): 300 ms after the operator stops
 // typing in any filter input the page refetches the filtered audit
@@ -26,14 +29,9 @@ const AUDIT_FILTER_DEBOUNCE_MS = 300
 // inspect arbitrary metadata that the server attached.
 type AuditEntry = {
   timestamp?: string
-  ts?: string
-  time?: string
-  user?: string
-  username?: string
   event?: string
-  action?: string
   fields?: Record<string, unknown>
-} & Record<string, unknown>
+}
 
 type Filters = {
   since: string
@@ -61,52 +59,17 @@ const FilterBar = styled.form`
   align-items: end;
 `
 
-// Snippet renders an inline code-style snippet of arbitrary JSON. The
-// monospace family + pre-wrap + word-break behaviours and the 480px
-// max-width don't map onto Bootstrap utilities; keep the styled-component.
-const Snippet = styled.code`
-  display: block;
-  font-family: ${({ theme }) => theme.font.family.mono};
-  font-size: ${({ theme }) => theme.font.sizes.xs};
-  color: ${({ theme }) => theme.text.muted};
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-width: 480px;
-`
-
-// pickField walks a small set of plausible names because the server
-// payload uses different capitalizations across event types.
-const pickField = (e: AuditEntry, names: string[]): string => {
-  const found = names.map((n) => e[n]).find((v) => typeof v === 'string') as
-    | string
-    | undefined
+// pickFieldFromFields reads a value from the nested `fields` map by
+// walking a list of candidate key names. The real wire shape from
+// emitAudit() in internal/server/audit.go puts "user" inside fields,
+// not at the top level of the entry — the prior pickField read e.user
+// which was always undefined in production.
+const pickFieldFromFields = (e: AuditEntry, names: string[]): string => {
+  if (!e.fields) return ''
+  const found = names
+    .map((n) => e.fields?.[n])
+    .find((v) => typeof v === 'string') as string | undefined
   return found ?? ''
-}
-
-// fieldsSnippet renders a compact JSON view of every key that is not a
-// dedicated column so operators can see arbitrary metadata.
-const fieldsSnippet = (e: AuditEntry): string => {
-  const skip = new Set([
-    'timestamp',
-    'ts',
-    'time',
-    'user',
-    'username',
-    'event',
-    'action',
-  ])
-  const rest = Object.keys(e)
-    .filter((k) => !skip.has(k))
-    .reduce<Record<string, unknown>>((acc, k) => {
-      acc[k] = e[k]
-      return acc
-    }, {})
-  if (Object.keys(rest).length === 0) return ''
-  try {
-    return JSON.stringify(rest)
-  } catch {
-    return String(rest)
-  }
 }
 
 export const AuditLogPage: React.FC = () => {
@@ -197,10 +160,11 @@ export const AuditLogPage: React.FC = () => {
     () =>
       entries.map((e, i) => ({
         key: i,
-        ts: pickField(e, ['timestamp', 'ts', 'time']),
-        user: pickField(e, ['user', 'username']),
-        event: pickField(e, ['event', 'action']),
-        snippet: fieldsSnippet(e),
+        ts: formatAuditTimestamp(e.timestamp),
+        user: pickFieldFromFields(e, ['user', 'username']),
+        event: e.event ?? '',
+        fields: e.fields,
+        raw: e,
       })),
     [entries]
   )
@@ -275,7 +239,8 @@ export const AuditLogPage: React.FC = () => {
                   <td>{r.user}</td>
                   <td>{r.event}</td>
                   <td>
-                    <Snippet>{r.snippet}</Snippet>
+                    <AuditFieldList fields={r.fields} />
+                    <AuditRowJsonToggle entry={r.raw} />
                   </td>
                 </tr>
               ))

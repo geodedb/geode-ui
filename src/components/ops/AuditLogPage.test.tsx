@@ -1,7 +1,9 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react'
+import { MemoryRouter } from 'react-router-dom'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
+import { LocalizationProvider } from '../../services/i18n'
 
 // Mock the generated client BEFORE importing AuditLogPage so the
 // useEffect-driven poll resolves against a canned entry list. We use a
@@ -11,12 +13,15 @@ jest.useFakeTimers()
 
 const auditMock = jest.fn().mockResolvedValue({
   entries: [
-    { timestamp: '2025-01-01T00:00:00Z', user: 'alice', event: 'login' },
+    {
+      timestamp: '2025-01-01T00:00:00Z',
+      event: 'login_success',
+      fields: { user: 'alice', cid: 'c1' },
+    },
     {
       timestamp: '2025-01-01T00:00:01Z',
-      user: 'bob',
-      event: 'query',
-      graph: 'default',
+      event: 'query_executed',
+      fields: { user: 'bob', graph: 'default', rows: 3 },
     },
   ],
 })
@@ -39,16 +44,16 @@ test('renders audit entries from the mocked client', async () => {
   )
 
   await waitFor(() => {
-    expect(screen.getByText('alice')).toBeInTheDocument()
-    expect(screen.getByText('bob')).toBeInTheDocument()
+    expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('bob').length).toBeGreaterThan(0)
   })
 
-  expect(screen.getByText('login')).toBeInTheDocument()
-  expect(screen.getByText('query')).toBeInTheDocument()
+  expect(screen.getByText('login_success')).toBeInTheDocument()
+  expect(screen.getByText('query_executed')).toBeInTheDocument()
   // Header reflects the count once the first poll resolves.
   expect(screen.getByText('Audit log (2)')).toBeInTheDocument()
-  // The non-column "graph: default" field is dumped as a JSON snippet.
-  expect(screen.getByText(/"graph":"default"/)).toBeInTheDocument()
+  // The fields map is rendered as a key→value list; "graph" key appears.
+  expect(screen.getByText('graph:')).toBeInTheDocument()
 })
 
 // PERF #224 regression gate: the 5-second polling interval MUST be
@@ -150,6 +155,38 @@ test('filter typing debounces refetches (PERF #243)', async () => {
     await Promise.resolve()
   })
   await waitFor(() => expect(auditMock).toHaveBeenCalledTimes(2))
+})
+
+test('GAP-audit: user column reads entry.fields.user (the real wire shape)', async () => {
+  render(
+    <MemoryRouter>
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <AuditLogPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    </MemoryRouter>
+  )
+  await waitFor(() => {
+    expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('bob').length).toBeGreaterThan(0)
+  })
+})
+
+test('GAP-audit: timestamps are formatted via Intl, not raw ISO strings', async () => {
+  render(
+    <MemoryRouter>
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <AuditLogPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    </MemoryRouter>
+  )
+  await waitFor(() => {
+    expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
+  })
+  expect(screen.queryByText('2025-01-01T00:00:00Z')).toBeNull()
 })
 
 // AUDIT_FILTER_DEBOUNCE_MS_FOR_TEST mirrors the production debounce
