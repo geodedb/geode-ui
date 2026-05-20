@@ -150,6 +150,44 @@ describe('cytoscapeStyle — node label contrast', () => {
   )
 })
 
+// GAP-058: placeholder nodes (synthesised stubs for edge endpoints
+// outside the query projection — see pushPlaceholderNodes) used to
+// inherit the generic `width: data(size) ?? 38` rule. Combined with
+// the focus animation's re-layout that landed on a degenerate value
+// and the focused node collapsed to a thin vertical oval. Pin a
+// dedicated rule that locks every placeholder to a fixed 40 px disc.
+describe('cytoscapeStyle — placeholder node shape', () => {
+  it('binds an explicit width/height/shape rule to placeholder nodes', () => {
+    const style = createCytoscapeStyle(darkTheme) as Array<{
+      selector: string
+      style?: Record<string, unknown>
+    }>
+    const placeholderBlock = style.find(
+      (b) => b.selector === 'node[?placeholder]'
+    )
+    expect(placeholderBlock).toBeDefined()
+    expect(placeholderBlock?.style?.width).toBe(40)
+    expect(placeholderBlock?.style?.height).toBe(40)
+    expect(placeholderBlock?.style?.shape).toBe('ellipse')
+  })
+
+  it('keeps the width/height ratio inside [0.7, 1.4]', () => {
+    // The bug surfaced as a thin vertical oval — width << height. Pin
+    // the contract: a placeholder must be roughly disc-shaped so the
+    // focus animation cannot stretch it. Both axes are constants, so
+    // the ratio is exactly 1.0 — well inside the acceptance band.
+    const style = createCytoscapeStyle(darkTheme) as Array<{
+      selector: string
+      style?: Record<string, unknown>
+    }>
+    const block = style.find((b) => b.selector === 'node[?placeholder]')
+    const w = block?.style?.width as number
+    const h = block?.style?.height as number
+    expect(w / h).toBeGreaterThanOrEqual(0.7)
+    expect(w / h).toBeLessThanOrEqual(1.4)
+  })
+})
+
 describe('cytoscapeStyle — edge clickability', () => {
   it('edge style has events:yes and a hit-area-friendly width', () => {
     const style = createCytoscapeStyle(darkTheme) as Array<{

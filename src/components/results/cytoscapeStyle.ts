@@ -145,6 +145,29 @@ export function createCytoscapeStyle(
       },
     },
     {
+      // GAP-058: placeholder nodes are the synthesised stubs for edge
+      // endpoints that fell outside the query projection (see
+      // src/lib/graphResult/pushRealElements.ts:pushPlaceholderNodes).
+      // They carry an empty `data.props = {}` and no degree-sizing
+      // stamp, so the generic `width: data(size) ?? 38` path can land
+      // on a degenerate value when combined with the focus animation's
+      // re-layout — the node renders as a thin vertical oval.
+      //
+      // Pin every placeholder to a fixed disc: explicit 40 px width +
+      // 40 px height + shape: ellipse. This is the smallest correct
+      // override — the rule only fires on the placeholder branch, so
+      // real nodes still get degree sizing. The ellipse shape is
+      // already the cytoscape default for nodes; restating it makes
+      // the contract self-documenting and guards against a future
+      // base-node rule that mutates `shape`.
+      selector: 'node[?placeholder]',
+      style: {
+        width: 40,
+        height: 40,
+        shape: 'ellipse',
+      },
+    },
+    {
       selector: 'edge',
       style: {
         'curve-style': 'bezier',
