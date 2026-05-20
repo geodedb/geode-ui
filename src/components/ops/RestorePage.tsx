@@ -3,8 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'react-router-dom'
 import styled from 'styled-components'
 
-import { client } from '../../api/client'
-import { useApiResource } from '../../hooks/useApiResource'
 import {
   Button,
   DedupedDatalist,
@@ -12,7 +10,9 @@ import {
   Input,
   Stack,
   useUniqueValues,
-} from '../ui'
+} from '@geodedb/ui-core'
+import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // RestorePage drives the /admin/restore tab. Backed by Geode B7:
 //

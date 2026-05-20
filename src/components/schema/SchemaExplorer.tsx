@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import styled from 'styled-components'
 
+import type { Theme } from '@geodedb/ui-core/theme'
+import { below } from '@geodedb/ui-core/theme'
 import { client } from '../../api/client'
-import type { Theme } from '../../theme'
-import { below } from '../../theme'
 import { LabelList } from './LabelList'
 import { EdgeTypeList } from './EdgeTypeList'
 import {

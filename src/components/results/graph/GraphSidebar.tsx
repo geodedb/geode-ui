@@ -1,7 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 
-import { Icon } from '../../ui'
+import { Icon } from '@geodedb/ui-core'
 
 // Side is the responsive sidebar wrapper that holds the graph's
 // inspector and control blocks. Always fills its grid track in the

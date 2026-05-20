@@ -2,8 +2,8 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
+import { DedupedDatalist, useUniqueValues } from '@geodedb/ui-core'
 import { synthesiseGql, BuilderState, EdgeDirection } from './queryBuilder'
-import { DedupedDatalist, useUniqueValues } from '../ui'
 
 // GAP-060 Phase 1: visual query builder side-panel. The operator
 // picks a starting label, optionally an edge type + terminal label,

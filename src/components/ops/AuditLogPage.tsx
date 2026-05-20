@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import { client } from '../../api/client'
-import { useApiResource } from '../../hooks/useApiResource'
 import {
   DataTable,
   DedupedDatalist,
@@ -13,7 +11,9 @@ import {
   Stack,
   TableScroll,
   useUniqueValues,
-} from '../ui'
+} from '@geodedb/ui-core'
+import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 import { formatAuditTimestamp } from '../../lib/intl/formatAuditTimestamp'
 import { AuditFieldList } from './AuditFieldList'
 import { AuditRowJsonToggle } from './AuditRowJsonToggle'

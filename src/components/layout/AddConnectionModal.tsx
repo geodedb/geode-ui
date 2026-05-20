@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Button, Field, Input, Modal } from '@geodedb/ui-core'
 import { useAuth } from '../../auth/AuthProvider'
 import { listProfiles, ProfileView } from '../../api/profiles'
-import { Button, Field, Input, Modal } from '../ui'
 import { isElectron } from '../../api/electron-bridge'
 import { usePublicProfilesWithStoredPasswords } from '../../lib/usePublicProfilesWithStoredPasswords'
 

@@ -2,12 +2,12 @@ import React from 'react'
 import styled from 'styled-components'
 import { breakpoints } from '@geodedb/ui-core/theme'
 
+import { Icon } from '@geodedb/ui-core'
 import type { LayoutName } from '../useGraphPrefs'
 import { FindNodeInput } from './FindNodeInput'
 import { GraphToolbarMore } from './GraphToolbarMore'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 import { BootstrapDropdown } from '../../../services/bootstrap/Dropdown'
-import { Icon } from '../../ui'
 
 // Mobile-only first-class affordances render below the `md` breakpoint.
 // Match the @media rule baked into the styled Toolbar above so the JS

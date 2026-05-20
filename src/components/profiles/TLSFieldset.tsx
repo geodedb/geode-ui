@@ -22,7 +22,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import { Button, Field, Textarea } from '../ui'
+import { Button, Field, Textarea } from '@geodedb/ui-core'
 import { isElectron, pickPemFile } from '../../api/electron-bridge'
 import { FormState } from './useProfileForm'
 

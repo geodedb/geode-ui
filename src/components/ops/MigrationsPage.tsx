@@ -2,8 +2,6 @@ import React, { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import { client } from '../../api/client'
-import { useApiResource } from '../../hooks/useApiResource'
 import {
   Button,
   DataTable,
@@ -14,7 +12,9 @@ import {
   Stack,
   TableScroll,
   Textarea,
-} from '../ui'
+} from '@geodedb/ui-core'
+import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // MigrationsPage drives the /admin/migrations tab. Geode B8 endpoints:
 //

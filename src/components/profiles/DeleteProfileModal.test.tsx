@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, act } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 import { I18nextProvider } from 'react-i18next'
 import i18n from '../../services/i18n/config'
-import { lightTheme } from '../../theme'
+import { lightTheme } from '@geodedb/ui-core/theme'
 import { DeleteProfileModal } from './DeleteProfileModal'
 import type { ProfileView } from '../../api/profiles'
 

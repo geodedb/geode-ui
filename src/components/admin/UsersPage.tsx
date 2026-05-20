@@ -3,6 +3,16 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import type { User } from '@api'
+import {
+  Button,
+  ConfirmModal,
+  DataTable,
+  EmptyCell,
+  Field,
+  Input,
+  Modal,
+  TableScroll,
+} from '@geodedb/ui-core'
 import { client } from '../../api/client'
 import {
   isWireFeatureMissingError,
@@ -13,16 +23,6 @@ import {
   PolicyViolation,
   validatePassword as validateClientPolicy,
 } from '../../lib/passwordPolicy'
-import {
-  Button,
-  ConfirmModal,
-  DataTable,
-  EmptyCell,
-  Field,
-  Input,
-  Modal,
-  TableScroll,
-} from '../ui'
 import { AdminPageShell, ErrorBanner } from './AdminPageShell'
 import { useAdminListPage } from './useAdminListPage'
 

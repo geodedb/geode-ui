@@ -3,13 +3,13 @@ import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
 import type { QueryResp } from '@api'
+import { Icon } from '@geodedb/ui-core'
 import { TableView } from './TableView'
 import { JsonView } from './JsonView'
 import { MatrixView } from './MatrixView'
 import { ResultTabErrorBoundary } from './ResultTabErrorBoundary'
 import { respSignature } from './graph/cyHelpers'
 import { TabGroup, Tab, TabPanel } from '../../services/webawesome/components'
-import { Icon } from '../ui'
 
 // F10 (#54): Cytoscape (~hundreds of KiB) is React.lazy'd so webpack
 // emits it as a separate async chunk that is only fetched when the

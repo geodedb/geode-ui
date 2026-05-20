@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
+import { Button, Field, Inline, Input, Select, Stack } from '@geodedb/ui-core'
 import { client } from '../../api/client'
 import {
   isWireFeatureMissingError,
@@ -14,7 +15,6 @@ import {
   permissionSuggestions,
   type RbacGranteeKind,
 } from '../../lib/rbacVocab'
-import { Button, Field, Inline, Input, Select, Stack } from '../ui'
 
 // GrantsPanel drives the /admin/grants tab. The Geode B6 endpoints back
 // every action:

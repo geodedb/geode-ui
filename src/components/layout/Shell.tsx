@@ -8,9 +8,9 @@ import {
 } from 'react-router-dom'
 import styled, { DefaultTheme } from 'styled-components'
 
+import { above, below } from '@geodedb/ui-core/theme'
+import { Button, Icon, Spacer } from '@geodedb/ui-core'
 import { useAuth } from '../../auth/AuthProvider'
-import { above, below } from '../../theme'
-import { Button, Icon, Spacer } from '../ui'
 import { GeodeLogo as Logo } from '../brand/GeodeLogo'
 import { AddConnectionModal } from './AddConnectionModal'
 import { ConnectionSwitcher } from './ConnectionSwitcher'

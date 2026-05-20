@@ -2,12 +2,6 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
-import { client } from '../../api/client'
-import {
-  isWireFeatureMissingError,
-  wireFeatureMissingDescription,
-} from '../../api/capabilities'
-import { permissionSuggestions } from '../../lib/rbacVocab'
 import {
   Button,
   ConfirmModal,
@@ -18,7 +12,13 @@ import {
   Input,
   Modal,
   TableScroll,
-} from '../ui'
+} from '@geodedb/ui-core'
+import { client } from '../../api/client'
+import {
+  isWireFeatureMissingError,
+  wireFeatureMissingDescription,
+} from '../../api/capabilities'
+import { permissionSuggestions } from '../../lib/rbacVocab'
 import { AdminPageShell, ErrorBanner } from './AdminPageShell'
 import { useAdminListPage } from './useAdminListPage'
 

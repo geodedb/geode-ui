@@ -3,8 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
-import { client } from '../../api/client'
-import { useApiResource } from '../../hooks/useApiResource'
 import {
   Button,
   ConfirmModal,
@@ -15,7 +13,9 @@ import {
   Modal,
   Stack,
   TableScroll,
-} from '../ui'
+} from '@geodedb/ui-core'
+import { client } from '../../api/client'
+import { useApiResource } from '../../hooks/useApiResource'
 
 // BackupPage drives the /admin/backups tab. The Geode B7 endpoints back
 // every action:

@@ -1,7 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
+import { Icon } from '@geodedb/ui-core'
 import type { Badge } from './useGraphBadges'
-import { Icon } from '../../ui'
 
 const Layer = styled.div`
   position: absolute;

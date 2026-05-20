@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 
 import type { ThemeVariant } from '@geodedb/ui-core/theme'
 
-import { useThemePreference } from '../../theme'
+import { useThemePreference } from '@geodedb/ui-core/theme'
+import { Icon } from '@geodedb/ui-core'
 import { BootstrapDropdown } from '../../services/bootstrap/Dropdown'
-import { Icon } from '../ui'
 
 // ThemeSelector exposes the Light / Dark / System variant choice in
 // the Shell top nav. Reads + writes the ThemeContext preference,

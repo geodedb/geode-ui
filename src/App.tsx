@@ -2,6 +2,7 @@ import './services/webawesome' // side-effect: registers <wa-button> etc.
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { createGlobalStyle } from 'styled-components'
+import { ThemeProvider } from '@geodedb/ui-core/theme'
 import { AuthProvider } from './auth/AuthProvider'
 import { ConnectionsProvider } from './api/connections'
 import type { ConnectionState } from './api/connections'
@@ -25,7 +26,6 @@ import { RestorePage } from './components/ops/RestorePage'
 import { MigrationsPage } from './components/ops/MigrationsPage'
 import { AuditLogPage } from './components/ops/AuditLogPage'
 import { LocalizationProvider } from './services/i18n'
-import { ThemeProvider } from './theme'
 import { ThemeStyleSheet } from './services/webawesome/ThemeStyleSheet'
 
 // Renderer benchmark host for the cytoscape→reagraph A/B harness.

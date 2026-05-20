@@ -1,7 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 
-import { Icon } from '../../ui'
+import { Icon } from '@geodedb/ui-core'
 
 type TFn = (key: string, opts?: Record<string, unknown>) => string
 

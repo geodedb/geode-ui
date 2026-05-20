@@ -1,6 +1,6 @@
 import React from 'react'
 import styled from 'styled-components'
-import { Icon } from '../../ui'
+import { Icon } from '@geodedb/ui-core'
 
 const Pill = styled.div`
   position: absolute;

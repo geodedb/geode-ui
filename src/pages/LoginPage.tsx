@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
 
+import { Field } from '@geodedb/ui-core'
 import { useAuth } from '../auth/AuthProvider'
-import { Field } from '../components/ui'
 import { GeodeLogo as Logo } from '../components/brand/GeodeLogo'
 import {
   Input as WaInput,

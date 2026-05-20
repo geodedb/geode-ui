@@ -11,7 +11,7 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button, Field, Input, Select, Modal } from '../ui'
+import { Button, Field, Input, Select, Modal } from '@geodedb/ui-core'
 import {
   ProfileView,
   Scope,

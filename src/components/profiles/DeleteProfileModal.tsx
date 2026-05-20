@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ConfirmModal } from '../ui'
+import { ConfirmModal } from '@geodedb/ui-core'
 import { deleteProfile } from '../../api/profiles'
 import type { ProfileView } from '../../api/profiles'
 

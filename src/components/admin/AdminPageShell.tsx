@@ -1,7 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 
-import { Button, Stack } from '../ui'
+import { Button, Stack } from '@geodedb/ui-core'
 
 // QUALITY-18 (#270): the three Admin sub-pages (PoliciesPage,
 // RolesPage, UsersPage) emitted the same ToolBar + ErrorBanner

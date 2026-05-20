@@ -2,10 +2,10 @@ import React, { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
+import { Icon } from '@geodedb/ui-core'
 import { useConnections, useActiveConnection } from '../../api/connections'
 import { useAuth } from '../../auth/AuthProvider'
 import { Dropdown, DropdownItem } from '../../services/webawesome/components'
-import { Icon } from '../ui'
 
 const SwitcherWrap = styled.div`
   position: relative;
