@@ -8,6 +8,17 @@
 import React, { useEffect, useRef } from 'react'
 import styled from 'styled-components'
 import cytoscape, { Core } from 'cytoscape'
+import { breakpoints } from '@geodedb/ui-core/theme'
+import { useMediaQuery } from '../../../hooks/useMediaQuery'
+
+// On mobile (<= md) the 160×120 navigator panel takes ~50 % of a 320
+// px viewport's horizontal canvas and obscures the bottom-right
+// quadrant of the actual graph. When the canvas itself is shorter
+// than ~132 px the panel even extends ABOVE the canvas top edge into
+// the toolbar/filter chips row. Suppress the panel below md; the
+// sticky `miniMap` pref is untouched so a desktop visit picks it
+// back up.
+const MOBILE_MEDIA_QUERY = `(max-width: ${breakpoints.md - 0.02}px)`
 
 // PERF #316: lazy-load the cytoscape-navigator plugin AND its bundled
 // CSS so users who never toggle the mini-map pay zero bytes for it.
@@ -93,8 +104,14 @@ export type GraphMiniMapProps = {
 // core and tears the instance down on unmount or sig change.
 export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
   const ref = useRef<HTMLDivElement>(null)
+  const isMobile = useMediaQuery(MOBILE_MEDIA_QUERY)
 
   useEffect(() => {
+    // Skip the navigator plugin init on mobile — the panel is hidden
+    // (see render branch below) so there's no panel DOM for the
+    // navigator to attach to. Returning early also avoids paying the
+    // lazy-import cost for a chunk we don't display.
+    if (isMobile) return undefined
     // useGraphCytoscape's rebuild is debounced (setTimeout, 250 ms), so
     // when this component mounts with sticky `miniMap: true` the effect
     // runs BEFORE the cy core is constructed and cyRef.current is null.
@@ -229,7 +246,8 @@ export const GraphMiniMap: React.FC<GraphMiniMapProps> = ({ cyRef, sig }) => {
         bound = null
       }
     }
-  }, [cyRef, sig])
+  }, [cyRef, sig, isMobile])
 
+  if (isMobile) return null
   return <Box ref={ref} id={PANEL_ID} data-testid="graph-minimap" />
 }
