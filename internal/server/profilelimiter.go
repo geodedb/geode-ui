@@ -340,6 +340,21 @@ func (l *ProfileLimiter) actorKey(r *http.Request) string {
 	return "ip\x00" + clientIP(r, l.cfg.TrustProxyXFF)
 }
 
+// auditableActorKey returns the actorKey with NUL separators replaced
+// by a printable pipe character so the value can be embedded in audit
+// records without truncating downstream SIEM ingestors. S-NEW-M
+// (#325): a syslog-style consumer that treats NUL as an end-of-record
+// silently dropped the "u" / "ip" prefix on every emit, leaving the
+// audit row unable to disambiguate "user X hit the limit" from
+// "IP X hit the limit." The NUL is load-bearing inside the limiter
+// (it guarantees no collision between the two namespaces); replacing
+// it for the AUDIT export only keeps that contract intact while
+// fixing the observability gap. CWE-117 (improper output
+// neutralization for logs).
+func auditableActorKey(key string) string {
+	return strings.ReplaceAll(key, "\x00", "|")
+}
+
 // WrapProfileLimit wraps next so any POST /api/v1/profiles or
 // PATCH/DELETE /api/v1/profiles/{id} traffic flows through the
 // per-actor limiter. Every other request (including the GET read
@@ -355,7 +370,7 @@ func WrapProfileLimit(l *ProfileLimiter, next http.Handler) http.Handler {
 		if !ok {
 			rejectProfileCRUD(w, retry)
 			emitAudit(auditEventProfileRateLimited,
-				"key", key,
+				"key", auditableActorKey(key),
 				"method", r.Method,
 				"path", r.URL.Path,
 				"ip", clientIP(r, l.cfg.TrustProxyXFF),

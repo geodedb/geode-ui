@@ -264,6 +264,24 @@ func TestIsProfileCRUDPath(t *testing.T) {
 // a profile_rate_limited event when the wrapper rejects a request --
 // this is the operator-visible signal that someone is hammering the
 // CRUD surface.
+// S-NEW-M (#325): audit emit must replace the NUL separator in the
+// actor key with a printable pipe so SIEM consumers don't silently
+// truncate the prefix. Pre-fix the audit row read like "1.2.3.4" for
+// both the IP fallback ("ip\x001.2.3.4") and the JWT subject path
+// ("u\x001.2.3.4") — operators couldn't disambiguate.
+func TestAuditableActorKey_ReplacesNULSeparator(t *testing.T) {
+	if got := auditableActorKey("ip\x001.2.3.4"); got != "ip|1.2.3.4" {
+		t.Errorf("auditableActorKey(ip\\x001.2.3.4) = %q, want %q", got, "ip|1.2.3.4")
+	}
+	if got := auditableActorKey("u\x00user-123"); got != "u|user-123" {
+		t.Errorf("auditableActorKey(u\\x00user-123) = %q, want %q", got, "u|user-123")
+	}
+	// Idempotent on a NUL-free key.
+	if got := auditableActorKey("safe-key"); got != "safe-key" {
+		t.Errorf("auditableActorKey(safe-key) = %q, want %q", got, "safe-key")
+	}
+}
+
 func TestProfileLimiter_AuditEmittedOn429(t *testing.T) {
 	t.Cleanup(resetAuditRing())
 	clk := newFakeClock()
@@ -296,6 +314,14 @@ func TestProfileLimiter_AuditEmittedOn429(t *testing.T) {
 			}
 			if e.Fields["path"] != "/api/v1/profiles" {
 				t.Errorf("audit path=%v, want /api/v1/profiles", e.Fields["path"])
+			}
+			// S-NEW-M: the key field must not carry a raw NUL — SIEM
+			// ingestors treat it as end-of-record and silently drop
+			// the trailing payload.
+			if key, ok := e.Fields["key"].(string); ok {
+				if strings.ContainsRune(key, 0) {
+					t.Errorf("audit key %q still contains a NUL byte", key)
+				}
 			}
 		}
 	}
