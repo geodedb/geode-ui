@@ -4,7 +4,16 @@ import styled from 'styled-components'
 
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
-import { DataTable, EmptyCell, Field, Input, Stack, TableScroll } from '../ui'
+import {
+  DataTable,
+  DedupedDatalist,
+  EmptyCell,
+  Field,
+  Input,
+  Stack,
+  TableScroll,
+  useUniqueValues,
+} from '../ui'
 import { formatAuditTimestamp } from '../../lib/intl/formatAuditTimestamp'
 import { AuditFieldList } from './AuditFieldList'
 import { AuditRowJsonToggle } from './AuditRowJsonToggle'
@@ -124,6 +133,14 @@ export const AuditLogPage: React.FC = () => {
   )
   const entries = data ?? []
 
+  const eventOptions = useUniqueValues(entries, (e) => e.event)
+  const userOptions = useUniqueValues(entries, (e) => {
+    return typeof e.fields?.user === 'string'
+      ? (e.fields.user as string)
+      : undefined
+  })
+  const sinceOptions = useUniqueValues(entries, (e) => e.timestamp)
+
   useEffect(() => {
     const tick = (): void => {
       // Skip refetches while the tab is hidden; the next visibility
@@ -186,26 +203,32 @@ export const AuditLogPage: React.FC = () => {
         <Field label={t('audit.fieldSince')} htmlFor="al-since">
           <Input
             id="al-since"
+            list="al-since-list"
             placeholder={t('audit.sincePlaceholder')}
             value={filters.since}
             onChange={onSinceChange}
           />
+          <DedupedDatalist id="al-since-list" values={sinceOptions} />
         </Field>
         <Field label={t('audit.fieldEvent')} htmlFor="al-event">
           <Input
             id="al-event"
+            list="al-event-list"
             placeholder={t('audit.eventPlaceholder')}
             value={filters.event}
             onChange={onEventChange}
           />
+          <DedupedDatalist id="al-event-list" values={eventOptions} />
         </Field>
         <Field label={t('audit.fieldUser')} htmlFor="al-user">
           <Input
             id="al-user"
+            list="al-user-list"
             placeholder={t('audit.userPlaceholder')}
             value={filters.user}
             onChange={onUserChange}
           />
+          <DedupedDatalist id="al-user-list" values={userOptions} />
         </Field>
       </FilterBar>
       {err && (

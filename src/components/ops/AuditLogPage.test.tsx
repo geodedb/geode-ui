@@ -193,3 +193,50 @@ test('GAP-audit: timestamps are formatted via Intl, not raw ISO strings', async 
 // window. Keeping a test-local copy avoids exporting the constant from
 // AuditLogPage just for one assertion.
 const AUDIT_FILTER_DEBOUNCE_MS_FOR_TEST = 350
+
+test('GAP-audit: event filter input has a deduplicated datalist of seen events', async () => {
+  render(
+    <MemoryRouter>
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <AuditLogPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    </MemoryRouter>
+  )
+  await waitFor(() => {
+    expect(screen.getAllByText('alice')[0]).toBeInTheDocument()
+  })
+  const input = screen.getByLabelText(/Event/i) as HTMLInputElement
+  const listId = input.getAttribute('list')
+  expect(listId).toBeTruthy()
+  const list = document.getElementById(listId!)
+  expect(list?.tagName.toLowerCase()).toBe('datalist')
+  const options = Array.from(list?.querySelectorAll('option') ?? []).map(
+    (o) => (o as HTMLOptionElement).value
+  )
+  expect(options).toEqual(['login_success', 'query_executed'])
+})
+
+test('GAP-audit: user filter input has a deduplicated datalist of seen users', async () => {
+  render(
+    <MemoryRouter>
+      <LocalizationProvider>
+        <ThemeProvider theme={theme}>
+          <AuditLogPage />
+        </ThemeProvider>
+      </LocalizationProvider>
+    </MemoryRouter>
+  )
+  await waitFor(() => {
+    expect(screen.getAllByText('alice')[0]).toBeInTheDocument()
+  })
+  const input = screen.getByLabelText(/User/i) as HTMLInputElement
+  const listId = input.getAttribute('list')
+  expect(listId).toBeTruthy()
+  const list = document.getElementById(listId!)
+  const options = Array.from(list?.querySelectorAll('option') ?? []).map(
+    (o) => (o as HTMLOptionElement).value
+  )
+  expect(options).toEqual(['alice', 'bob'])
+})
