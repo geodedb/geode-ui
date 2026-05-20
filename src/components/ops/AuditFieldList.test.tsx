@@ -51,3 +51,22 @@ test('orders keys alphabetically for stable diffability', () => {
   expect(items[1]).toHaveTextContent('m')
   expect(items[2]).toHaveTextContent('z')
 })
+
+test('renders null values explicitly as "null"', () => {
+  renderList({ deletedAt: null })
+  expect(screen.getByTestId('audit-field-item')).toHaveTextContent('null')
+})
+
+test('renders BigInt values with the n suffix preserved', () => {
+  renderList({ count: 9007199254740993n })
+  expect(screen.getByTestId('audit-field-item')).toHaveTextContent(
+    '9007199254740993n'
+  )
+})
+
+test('renders Symbol values via Symbol.toString()', () => {
+  renderList({ marker: Symbol('debug-only') })
+  expect(screen.getByTestId('audit-field-item')).toHaveTextContent(
+    'Symbol(debug-only)'
+  )
+})

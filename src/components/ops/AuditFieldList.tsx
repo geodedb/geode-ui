@@ -40,9 +40,15 @@ const Value = styled.span`
 `
 
 function formatValue(v: unknown): string {
-  if (v === null) return 'null'
+  if (v === null || v === undefined) return 'null'
   if (typeof v === 'string') return v
   if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  // BigInt cannot be JSON.stringify-ed (throws TypeError). Preserve the
+  // `n` suffix so the audit row still shows the value as a BigInt.
+  if (typeof v === 'bigint') return `${v.toString()}n`
+  // Symbol cannot be JSON.stringify-ed (returns undefined, which would
+  // render as an empty cell). Surface the Symbol(description) form.
+  if (typeof v === 'symbol') return v.toString()
   try {
     return JSON.stringify(v)
   } catch {
@@ -63,7 +69,7 @@ export const AuditFieldList: React.FC<AuditFieldListProps> = ({ fields }) => {
       {keys.map((k) => (
         <Item key={k} data-testid="audit-field-item">
           <Key>{k}:</Key>
-          <Value>{formatValue(fields[k])}</Value>
+          <Value>{formatValue(fields[k] ?? null)}</Value>
         </Item>
       ))}
     </List>
