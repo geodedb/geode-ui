@@ -85,3 +85,16 @@ coverage.txt
 # by `make generate` to skip a no-op regen when geode.json hasn't
 # changed. Recreated by the next `make generate` after deletion.
 /gen/.sentinel
+
+# Electron-builder output (release/<platform>/*.AppImage|deb|dmg|exe)
+/release/
+
+# Electron e2e Playwright HTML report (e2e/electron.config.ts writes
+# here per-run).
+/e2e/playwright-report-electron/
+
+# Serena MCP cache (per-repo, machine-local).
+/.serena/
+
+# Transient `npm test`/`go test` output redirects.
+/test-output.txt
