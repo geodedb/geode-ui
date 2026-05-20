@@ -16,7 +16,7 @@ edges; bind nodes and relationships to identifiers used downstream.
 MATCH (n:Label)
 MATCH (n:Label)-[r:REL]->(m:Other)
 MATCH path = (n:Label)-[*1..3]->(m)
-```gql
+```
 
 ### Examples
 
@@ -24,13 +24,13 @@ MATCH path = (n:Label)-[*1..3]->(m)
 MATCH (p:Person)
 WHERE p.name = $name
 RETURN p
-```gql
+```
 
 ```gql
 MATCH (p:Person)-[a:ACTED_IN]->(m:Movie)
 RETURN p.name, m.title, a.roles
 LIMIT 25
-```gql
+```
 
 ### Capability
 
@@ -55,7 +55,7 @@ Project columns from the bindings introduced by `MATCH` / `CREATE` /
 RETURN n
 RETURN n.name AS name
 RETURN n.name AS name, count(*) AS hits
-```gql
+```
 
 ---
 
@@ -71,7 +71,7 @@ list / map index access, and parameterised lookups (`$name`).
 MATCH (p:Person)
 WHERE p.born >= 1970 AND p.born < 1990
 RETURN p
-```gql
+```
 
 ---
 
@@ -82,7 +82,7 @@ matches in the pattern are reused.
 
 ```gql
 CREATE (m:Movie {title: 'The Matrix', released: 1999})
-```gql
+```
 
 ---
 
@@ -96,7 +96,7 @@ MATCH (p:Person)
 WITH p, count{(p)-[:ACTED_IN]->()} AS movies
 WHERE movies > 5
 RETURN p.name, movies
-```gql
+```
 
 ---
 
@@ -110,7 +110,7 @@ RETURN m.title
 ORDER BY m.released DESC
 SKIP 10
 LIMIT 10
-```gql
+```
 
 ---
 
@@ -121,7 +121,7 @@ Sort the row set. Multiple columns + `ASC` / `DESC` per column.
 ```gql
 RETURN m.title, m.released
 ORDER BY m.released DESC, m.title ASC
-```gql
+```
 
 ---
 
@@ -134,7 +134,7 @@ context is ambiguous.
 ```gql
 USE GRAPH movies;
 MATCH (m:Movie) RETURN m LIMIT 5
-```gql
+```
 
 ---
 

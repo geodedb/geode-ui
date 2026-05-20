@@ -15,7 +15,7 @@ CREATE POLICY policy_name
   FOR { SELECT | MATCH | UPDATE | DELETE }
   TO role_name
   WITH FILTER 'WHERE n.tenant_id = $current_tenant'
-```gql
+```
 
 ## Intended capability
 

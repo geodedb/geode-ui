@@ -8,7 +8,7 @@
 
 ```gql
 CREATE USER username WITH PASSWORD 'password'
-```gql
+```
 
 The password is hashed with the server's configured KDF (default:
 Argon2id with parameters set in `geode.toml`) before storage.
@@ -29,7 +29,7 @@ Argon2id with parameters set in `geode.toml`) before storage.
 
 ```gql
 DROP USER username
-```gql
+```
 
 Refuses to drop the caller's own account. Granted roles + active
 sessions are revoked as part of the operation.
@@ -40,7 +40,7 @@ sessions are revoked as part of the operation.
 
 ```gql
 CREATE ROLE role_name
-```gql
+```
 
 Roles are flat — no role inheritance in v0.5.19. A user gains
 privileges via `GRANT role_name TO username`.
@@ -51,7 +51,7 @@ privileges via `GRANT role_name TO username`.
 
 ```gql
 GRANT role_name TO username
-```gql
+```
 
 Idempotent; granting a role the user already holds is a no-op.
 
@@ -61,7 +61,7 @@ Idempotent; granting a role the user already holds is a no-op.
 
 ```gql
 REVOKE role_name FROM username
-```gql
+```
 
 The change takes effect on the user's NEXT login. Existing JWTs carry
 the role claim until they expire.
