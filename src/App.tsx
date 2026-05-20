@@ -19,6 +19,7 @@ import { RolesPage } from './components/admin/RolesPage'
 import { PoliciesPage } from './components/admin/PoliciesPage'
 import { GrantsPanel } from './components/admin/GrantsPanel'
 import { ProfilesPage } from './pages/ProfilesPage'
+import { DocsPage } from './pages/DocsPage'
 import { BackupPage } from './components/ops/BackupPage'
 import { RestorePage } from './components/ops/RestorePage'
 import { MigrationsPage } from './components/ops/MigrationsPage'
@@ -184,6 +185,13 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                     <Route path="audit" element={<AuditLogPage />} />
                   </Route>
                   <Route path="profiles" element={<ProfilesPage />} />
+                  {/* GAP-061: in-app docs viewer. /docs lands on the
+                      first page in the bundled list; /docs/:slug deep-
+                      links into a specific page. Markdown is bundled
+                      at build time so the Electron build ships docs
+                      offline. */}
+                  <Route path="docs" element={<DocsPage />} />
+                  <Route path="docs/:slug" element={<DocsPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

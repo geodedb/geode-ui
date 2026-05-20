@@ -263,6 +263,9 @@ export const Shell: React.FC = () => {
           */}
           {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
           <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
+          {/* GAP-061: top-level docs link so the in-app viewer is one
+              click away from every authenticated route. */}
+          <NavLink to="/docs">{t('nav.docs')}</NavLink>
           <Spacer />
           <ThemeSelector />
           <Button variant="ghost" size="sm" onClick={onLogout}>
@@ -291,6 +294,7 @@ export const Shell: React.FC = () => {
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
         {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
         <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
+        <NavLink to="/docs">{t('nav.docs')}</NavLink>
         <ThemeSelector />
         <Button variant="ghost" size="md" fullWidth onClick={onLogout}>
           {t('nav.logout')}

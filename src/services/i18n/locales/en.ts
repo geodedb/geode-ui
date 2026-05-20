@@ -50,6 +50,7 @@ export const en = {
     schema: 'Schema',
     admin: 'Admin',
     profiles: 'Profiles',
+    docs: 'Docs',
     logout: 'Logout',
     // Admin sub-tab labels (rendered inside AdminPage's tab strip).
     // The first four were inline string literals pre-Ops merge; the
@@ -80,6 +81,17 @@ export const en = {
     // managing a security surface should never wonder which is which.
     featureUpcoming:
       'Scheduled for a future Geode release. Read-only listing remains available.',
+  },
+
+  docs: {
+    // GAP-061: in-app documentation viewer.
+    navAria: 'Documentation pages',
+    category: {
+      concept: 'Concepts',
+      reference: 'Reference',
+      operations: 'Operations',
+    },
+    notFound: 'Documentation page "{{slug}}" not found.',
   },
 
   theme: {

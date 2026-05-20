@@ -35,6 +35,12 @@ module.exports = {
       '<rootDir>/__test_utils__/mocks/styleMock.js',
     '^.+\\.(jpg|jpeg|png|gif|webp|avif|svg|eot|otf|ttf|woff|woff2)$':
       '<rootDir>/__test_utils__/mocks/fileMock.js',
+    // GAP-061: in-app docs viewer imports .md files via webpack's
+    // asset/source rule (see webpack.common.js). Jest can't parse the
+    // raw Markdown as JS, so swap in a stub that exports a short
+    // placeholder string. Tests that need real Markdown rendering
+    // import the renderer directly with hand-written source.
+    '^.+\\.md$': '<rootDir>/__test_utils__/mocks/markdownMock.js',
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@api$': '<rootDir>/gen/client/react/index.ts',
     '^@api/(.*)$': '<rootDir>/gen/client/react/$1',

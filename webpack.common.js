@@ -117,6 +117,17 @@ const rules = [
     test: /\.(woff(2)?|ttf|eot|otf)(\?v=\d+\.\d+\.\d+)?$/,
     type: 'asset/resource',
   },
+  {
+    // GAP-061: import in-tree Markdown docs as raw strings so the
+    // in-app /docs viewer ships them with the bundle (Electron build
+    // needs them offline; the browser build avoids a second fetch
+    // round-trip). The custom Markdown renderer lives at
+    // src/lib/docs/markdown.ts and treats the raw text as untrusted
+    // (DOMPurify-wrapped), so no further loader-level escaping is
+    // needed.
+    test: /\.md$/,
+    type: 'asset/source',
+  },
 ]
 
 const SRC_DIR = path.join(__dirname, '/src')
