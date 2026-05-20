@@ -29,7 +29,17 @@ import (
 // segment, /api/v1/auth/login, with the path containing no other
 // disambiguating tokens.
 func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentypes.LoginReq) (*gentypes.LoginResp, error) {
+	// SEC-N10 (#76) + S-NEW-D (#310): start the auth-failure timer
+	// BEFORE any branch — INCLUDING the misconfig 500 paths. Pre-fix
+	// the two `cfg.JWT == nil` / `cfg.Profiles == nil` short-circuits
+	// returned with NO latency floor, so an attacker could probe for
+	// a misconfigured deployment by comparing response times (a 500
+	// returns in ~1 ms; an unknown-user 401 takes ~250 ms). The
+	// information leak is informational — CWE-208 — but the fix is
+	// trivial: include the 500 paths in the same floor.
+	authStart := timeNow()
 	if s.cfg.JWT == nil {
+		respectLoginLatencyFloor(authStart, loginMinFailureLatency)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
 			code:        ErrCodeServerMisconfigured,
@@ -38,6 +48,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		return nil, nil
 	}
 	if s.cfg.Profiles == nil {
+		respectLoginLatencyFloor(authStart, loginMinFailureLatency)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
 			code:        ErrCodeServerMisconfigured,
@@ -45,14 +56,6 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		})
 		return nil, nil
 	}
-	// SEC-N10 (#76): start the auth-failure timer BEFORE any upstream
-	// call so every failure path — unknown user, wrong password, and
-	// transport / profile-lookup failure — observes the same minimum
-	// wall-clock latency. The floor is intentionally generous (250 ms)
-	// to swallow most cross-failure jitter without making successful
-	// logins feel sluggish (success returns immediately when the
-	// upstream answers faster than the floor).
-	authStart := timeNow()
 
 	// SEC-N3 (#65): canonicalise the profile early so audit logs, rate-
 	// limit buckets (loginlimiter.go), and the upstream auth attempt all

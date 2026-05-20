@@ -565,6 +565,53 @@ func TestLogin_FailureBodyIsIdentical_AcrossModes(t *testing.T) {
 // TestLogin_LatencyFloor confirms the constant-time floor: a
 // fast-failing login attempt sleeps for at least the configured
 // minimum so the upstream's intrinsic timing diff cannot leak.
+// S-NEW-D (#310): the 500-misconfig paths used to return BEFORE the
+// latency floor was started, so an attacker could probe for a
+// misconfigured deployment by comparing response timings. Pin the
+// floor onto BOTH misconfig branches so every Login outcome — 200,
+// 401, and 500 — observes the same minimum wall-clock latency.
+func TestLogin_LatencyFloor_AppliesToMisconfig500(t *testing.T) {
+	prev := loginMinFailureLatency
+	loginMinFailureLatency = 20 * time.Millisecond
+	t.Cleanup(func() { loginMinFailureLatency = prev })
+
+	// JWT nil → 500. Must still respect the floor.
+	srv := New(Config{
+		Profiles: fakeProfileLookup{prof: conn.Profile{Name: "default", DSN: "stub://x"}},
+	})
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	start := time.Now()
+	_, _ = srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "p", Profile: "default",
+	})
+	elapsed := time.Since(start)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want 500", w.Code)
+	}
+	if elapsed < loginMinFailureLatency-5*time.Millisecond {
+		t.Fatalf("JWT-nil 500 returned in %v; want ≥ %v floor", elapsed, loginMinFailureLatency)
+	}
+
+	// Profiles nil → 500. Same floor expectation.
+	srv = New(Config{
+		JWT: newTestIssuer(t),
+	})
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	start = time.Now()
+	_, _ = srv.Login(w, r, &gentypes.LoginReq{
+		Username: "alice", Password: "p", Profile: "default",
+	})
+	elapsed = time.Since(start)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want 500", w.Code)
+	}
+	if elapsed < loginMinFailureLatency-5*time.Millisecond {
+		t.Fatalf("Profiles-nil 500 returned in %v; want ≥ %v floor", elapsed, loginMinFailureLatency)
+	}
+}
+
 func TestLogin_LatencyFloor(t *testing.T) {
 	prev := loginMinFailureLatency
 	// Pick a small but observable floor to keep tests fast.
