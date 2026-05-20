@@ -307,10 +307,21 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 
 // buildAdminSet parses the -admin-users CSV into the set newApp hands
 // to server.Config + the sorted slice the SEC-NEW-2 audit log emits.
+//
+// S-NEW-B (#304): names are normalised through NFKC + Unicode case-
+// folding (server.NormaliseAdminLookupKey) before insertion so a
+// deployment that lists "Alice,Charles,Bob,boB" maps every variant
+// ("Bob", "BOB", "bob", "ＢＯＢ" — fullwidth latin) to the same
+// bucket. Without this the upstream username "BOB" wouldn't match a
+// configured "bob" and the bootstrap admin gate would silently fail.
+// CWE-178 (improper case handling in security decisions).
+//
+// The canonicalisation is symmetric: server.adminRolesFor passes its
+// lookup key through the same helper.
 func buildAdminSet(csv string) (map[string]bool, []string) {
 	adminSet := map[string]bool{}
 	for _, u := range strings.Split(csv, ",") {
-		if name := strings.TrimSpace(u); name != "" {
+		if name := server.NormaliseAdminLookupKey(u); name != "" {
 			adminSet[name] = true
 		}
 	}

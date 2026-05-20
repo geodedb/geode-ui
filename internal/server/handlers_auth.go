@@ -159,7 +159,13 @@ func denyLogin(w http.ResponseWriter, authStart time.Time, reason, username, pas
 // admin provisioned via `CREATE USER … ROLE admin` won't actually
 // gain admin gates on next login (no upstream role discovery yet).
 func (s *GraphServer) adminRolesFor(username string, upstreamRoles []string) []string {
-	if s.cfg.AdminUsernames[username] {
+	// S-NEW-B (#304): canonicalise the lookup key through the same
+	// NFKC + case-fold helper buildAdminSet uses on ingestion. Without
+	// the lookup-side normalisation an upstream "BOB" or "ＢＯＢ"
+	// would miss the configured "bob" bucket and silently fall through
+	// to the no-admin branch.
+	key := normaliseAdminLookupKey(username)
+	if s.cfg.AdminUsernames[key] {
 		emitAudit(auditEventRoleResolved,
 			"sub", username,
 			"role", "admin",
