@@ -137,18 +137,26 @@ func csrfCheck(r *http.Request) error {
 }
 
 // csrfExemptPaths is the set of paths the middleware never enforces
-// against. Login is exempt because the user is not yet authenticated;
-// logout is idempotent and clears the cookie either way; /api/v1/csrf
-// is the source of the token. /healthz is unauthenticated read-only.
+// against. Login is exempt because the user is not yet authenticated
+// (no CSRF cookie is in scope yet); /api/v1/csrf is the source of the
+// token. /healthz is unauthenticated read-only.
+//
+// S-NEW-G (#318): `/api/v1/auth/logout` used to live here because the
+// operation is idempotent. SameSite=Strict already blocks the cross-
+// site post for evergreen browsers, but the defense-in-depth contract
+// the rest of the CSRF surface honours is "every authenticated state-
+// changing request carries a CSRF token." The SPA already attaches
+// the token on every non-safe method via src/api/csrf.ts:isCsrfRequired,
+// so the exemption was purely a server-side blind spot. Removing it
+// closes the gap without any client-side change.
 //
 // The map is keyed by exact path; any sub-path under these names is
 // NOT exempt unless added explicitly.
 var csrfExemptPaths = map[string]struct{}{
-	"/api/v1/auth/login":  {},
-	"/api/v1/auth/logout": {},
-	CSRFEndpointPath:      {},
-	"/api/v1/healthz":     {},
-	"/healthz":            {},
+	"/api/v1/auth/login": {},
+	CSRFEndpointPath:     {},
+	"/api/v1/healthz":    {},
+	"/healthz":           {},
 }
 
 // isSafeMethod reports whether the HTTP method is read-only by RFC 9110

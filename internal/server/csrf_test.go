@@ -250,26 +250,60 @@ func TestCSRFMiddleware_EnforcesForCookieAuth(t *testing.T) {
 	}
 }
 
-// TestCSRFMiddleware_SkipsLoginAndLogout — auth/login and auth/logout
-// are exempt: login has no auth yet (no cookie), and logout is
-// idempotent and self-clearing. Without these exemptions, a fresh SPA
-// load could not authenticate.
-func TestCSRFMiddleware_SkipsLoginAndLogout(t *testing.T) {
+// TestCSRFMiddleware_SkipsLogin — auth/login is exempt because the
+// fresh-SPA load has no CSRF cookie yet. Logout USED to be exempt for
+// idempotency but S-NEW-G (#318) closed that defense-in-depth gap;
+// see TestCSRFMiddleware_EnforcesLogout below for the new contract.
+func TestCSRFMiddleware_SkipsLogin(t *testing.T) {
 	called := false
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		called = true
 	})
 	mw := csrfMiddleware(next)
-	for _, p := range []string{"/api/v1/auth/login", "/api/v1/auth/logout"} {
-		called = false
-		r := httptest.NewRequest(http.MethodPost, p, nil)
-		// Simulate cookie auth so the source-check would otherwise enforce.
-		r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: "ignored"})
-		w := httptest.NewRecorder()
-		mw.ServeHTTP(w, r)
-		if !called {
-			t.Fatalf("%s: next not called (expected exempt)", p)
-		}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	// Simulate cookie auth so the source-check would otherwise enforce.
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: "ignored"})
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if !called {
+		t.Fatal("/api/v1/auth/login: next not called (expected exempt)")
+	}
+}
+
+// S-NEW-G (#318): logout is now enforced. The SPA already attaches
+// the CSRF token on every non-safe method via src/api/csrf.ts; the
+// server-side enforcement closes the defense-in-depth gap so an
+// attacker who manages to bypass SameSite=Strict cannot log the user
+// out without holding the matching CSRF cookie/header pair.
+func TestCSRFMiddleware_EnforcesLogout(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	})
+	mw := csrfMiddleware(next)
+
+	// No CSRF token → 403 + next NOT called.
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: "ignored"})
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if called {
+		t.Fatal("/api/v1/auth/logout was reached without a CSRF token")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Errorf("logout without CSRF returned %d, want 403", w.Code)
+	}
+
+	// With matching CSRF cookie + header → passes through.
+	called = false
+	r = httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.AddCookie(&http.Cookie{Name: AuthCookieName, Value: "ignored"})
+	r.AddCookie(&http.Cookie{Name: "geode-ui-csrf", Value: "tok-123"})
+	r.Header.Set("X-CSRF-Token", "tok-123")
+	w = httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if !called {
+		t.Fatal("/api/v1/auth/logout with valid CSRF was blocked")
 	}
 }
 
