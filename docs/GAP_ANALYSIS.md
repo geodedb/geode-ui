@@ -727,3 +727,441 @@ A `/codepros:gap-close` cohort on 2026-05-19 closed **10 GitLab issues** (9 full
 - Issues closed: 10 (9 full + 1 partial). All 10 actionable findings from the 2026-05-19 audit cohort closed.
 - Issues remaining Open from this cohort: 1 — #300 Scope-B (blocked on upstream Geode).
 - Detail: see `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" section.
+
+## Cohort: 2026-05-19 manual UX walkthrough (GAP-046..GAP-058)
+
+A walkthrough of the running app on 2026-05-19 (HEAD `6a3ee78`, geode-ui packaged against geode v0.5.19) surfaced **13 UX/feature gaps** that the automated detector did not catch. They are correctness, terminology, navigability, and design-language issues that only show up when a human actually drives the UI through the dashboard → schema-explorer → query → admin → ops loops. All 13 are filed here in detail; GitLab issue creation is deferred to the next `/codepros:gap-close` round so closure work and tracker creation land together.
+
+### Summary
+
+| Gap-ID  | Title | Severity | Area | Status |
+|---------|-------|----------|------|--------|
+| GAP-046 | Duplicate connections allowed (re-connecting same profile stacks `connectionId`s) | Medium | Connections / Auth | Open |
+| GAP-047 | Hot-key glyphs hard-coded to ⌘/⇧ (presumes macOS for every viewer) | Medium | A11y / I18n / UX | Open |
+| GAP-048 | `dashboard.recentQueries` label is misleading — store is per-device session, not cross-session | Low | UX / Naming | Open |
+| GAP-049 | Staging from schema explorer carries prior `resp` into the new query pane | Medium | UX / Query | Open |
+| GAP-050 | RBAC integration state ambiguous — Policies disabled-vs-missing-vs-unsupported is invisible | High | Security / UX | Open |
+| GAP-051 | Backups + Restore live in two unrelated tabs with divergent design language | Medium | Design / UX | Open |
+| GAP-052 | Migrations "New Migration" is upload-only — no inline editor / save path | Medium | Feature / UX | Open |
+| GAP-053 | Migrations can only run forward — no `down`, no targeted apply-to-version | High | Feature / Ops | Open |
+| GAP-054 | "Profile" terminology is ambiguous — user / persona / preset / connection-bundle? | Low | Docs / UX | Open |
+| GAP-055 | Dashboard `GraphsCard` lists graphs as plain text — names are not clickable | Medium | Navigability / UX | Open |
+| GAP-056 | Schema explorer renders an empty body for ~hundreds of ms on graph switch | Medium | Perf / UX | Open |
+| GAP-057 | Edge-staged queries (`MATCH ()-[r:T]->() RETURN r`) render endpoint nodes as `#<id>` instead of type label | Medium | Graph / UX | Open |
+| GAP-058 | Focusing a placeholder node in the edge-view collapses it to a thin vertical oval | Medium | Graph / Visual | Open |
+
+### Detailed records — GAP-046..GAP-058
+
+#### GAP-046: Duplicate connections allowed
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Feature / UX / Auth
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/api/connections.tsx:39-83` — the `add` reducer keys `byId` on `connectionId` (the server-issued opaque id), not on `profileName`. Re-running `signIn` against the same profile mints a fresh `connectionId` and the dispatch path appends a second `ConnectionState` for the same human-meaningful profile.
+  - `src/api/connections.tsx:56-66` — `sameConn` only short-circuits when **both** the `connectionId` matches AND `token`/`expiresAt`/`profileName` are identical; with a new `connectionId` the dedupe never runs.
+  - `src/components/layout/ConnectionSwitcher.tsx` iterates `byId.values()` — the switcher therefore renders one row per `connectionId`, so the user sees two visually-identical entries for the same profile.
+  - `src/auth/AuthProvider.tsx:163-210` — `connectMore` explicitly keeps the existing active connection focused; it does not detect "same profile already connected" and short-circuit.
+- **Why this is a gap:** A user who clicks "Connect" twice on the same profile gets two indistinguishable rows in the switcher. There is no UX signal that one of them holds a stale token approaching expiry; switching between them looks like a no-op but in fact swaps the `Authorization: Bearer` value. This is also a latent footgun for the audit trail because the two `connectionId`s emit separate `auth_login` events for what the operator believes is a single session.
+- **Impact/Risk:** UX confusion ("why are there two of the same?"), session-management bugs (stale-token row stays clickable until its `expiresAt` passes, surprising 401s mid-action), and audit-event noise.
+- **Recommended fix:**
+  - Reducer-level dedupe by `profileName`: on `add`, look up `existing = [...byId.values()].find(c => c.profileName === conn.profileName)`; if found, replace the existing entry's `connectionId`/`token`/`expiresAt` in-place (single `byId` slot per profile) and keep it active.
+  - Server-side counterpart: have `connectMore` short-circuit when the in-memory store already has a non-expired entry for the same `profileName` (no second `/api/v1/auth/login` round-trip).
+  - Optional: surface a toast ("Re-using existing connection for `<profile>`") so the user knows the second click was idempotent.
+- **Acceptance criteria:**
+  - `ConnectionSwitcher` never renders two rows whose `profileName` matches.
+  - A jest case in `src/api/connections.test.tsx` pins the reducer behaviour: `add({profileName: 'p1', connectionId: 'x'})` followed by `add({profileName: 'p1', connectionId: 'y'})` ends with `byId.size === 1` and `activeId === 'y'`.
+  - An e2e case in `e2e/specs/` walks `Connect → Connect (same profile)` and asserts the switcher menu shows a single row.
+- **Cross-reference:** PSR-G07 (electron bridge type drift) is unrelated; this is a renderer-side reducer issue.
+
+#### GAP-047: UI presumes macOS keyboard glyphs
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** A11y / I18n / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/services/i18n/locales/en.ts:92` — `runHotkey: 'Run (⌘+Enter)'`
+  - `src/services/i18n/locales/en.ts:107` — `formatHotkey: 'Format (⌘⇧F)'`
+  - `src/pages/QueryPage.tsx:582` — inline comment + button copy uses `⌘⇧F`.
+  - `src/components/editor/GqlEditor.tsx:50` — header comment uses `⌘⇧F`.
+  - No platform detection seam (`navigator.platform` / `userAgentData.platform`); no `Ctrl` variant of any hint string.
+- **Why this is a gap:** ~70%+ of likely viewers are on Linux or Windows where `⌘` is a foreign symbol. The Monaco bindings underneath these hints actually accept both `Cmd+Enter` (mac) and `Ctrl+Enter` (Linux/Windows), so the hint is *wrong* on non-mac platforms even though the binding works. This silently degrades discoverability for the majority audience and makes the app feel mac-first.
+- **Impact/Risk:** Discoverability loss + accidental confusion ("I don't have a `⌘` key"); accessibility regression for users relying on hint text rather than experimentation.
+- **Recommended fix:**
+  - New `src/lib/platformKeyHints.ts` exporting `modKeyLabel()` → `'⌘'` on mac, `'Ctrl'` elsewhere; detection via `navigator.userAgentData?.platform ?? navigator.platform`.
+  - Replace `t('query.runHotkey')` and `t('query.formatHotkey')` with interpolated values: `t('query.runHotkey', { mod: modKeyLabel() })`, with the i18n template `'Run ({{mod}}+Enter)'`.
+  - Update the docstring at `GqlEditor.tsx:50` and the inline comment at `QueryPage.tsx:582` to read `Mod+Shift+F` (platform-neutral).
+- **Acceptance criteria:**
+  - On a Linux/Windows UA the Run + Format buttons render `Ctrl+Enter` / `Ctrl+Shift+F`.
+  - A jest test stubs `navigator.userAgentData` for each platform and asserts the rendered hint string.
+  - No hard-coded `⌘` / `⇧` / `⌥` glyph survives outside `platformKeyHints.ts`; a ratchet (`scripts/check-no-mac-glyphs.mjs`) wired into `.pre-commit-config.yaml` enforces it.
+
+#### GAP-048: "Recent queries" naming is misleading
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** UX / Naming / Docs
+- **Severity:** Low
+- **Status:** Open
+- **Evidence:**
+  - `src/lib/useQueryHistory.ts:1-13` — store is described in-source as "a small localStorage-backed log of recently-run queries"; it is per-device, per-browser-profile, scoped to one OS user, and has zero server side.
+  - `src/components/dashboard/RecentQueriesCard.tsx` — title bar reads `dashboard.recentQueries`; the label gives no hint that the list is local-only.
+  - There is no Geode-side `/api/v1/query/history` endpoint — clearing localStorage or switching browsers wipes the list silently.
+- **Why this is a gap:** A "dashboard" is usually backed by server state; the user reasonably presumes "recent queries" is a server-side audit-log slice and that it persists across machines / browsers / re-installs. The current label sets that expectation and then breaks it on a fresh login from another device.
+- **Impact/Risk:** Trust loss ("I ran that query yesterday — why is it gone?"); friction during incident triage where the operator switches between two workstations.
+- **Recommended fix:**
+  - Rename i18n key + UI label to `'Session Query History'` (or `'Local Query History'`). Update `dashboard.recentQueriesTitle` and any sibling strings.
+  - Add a small `<HelpTip>` to the card explaining "Stored on this device only; not synced to the Geode server."
+  - (Optional, larger scope — file as a separate gap) Wire a real server-side history endpoint and reserve the "Recent queries" label for that.
+- **Acceptance criteria:**
+  - The card title no longer claims server-backed persistence.
+  - The tooltip explicitly says "this device only".
+  - jest snapshot of `RecentQueriesCard` updated.
+
+#### GAP-049: Schema-staged queries carry prior `resp` into the new query pane
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** UX / Query
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/lib/queryStore.ts:14-15` — `setStaged` only writes `stagedStatement`; it does not touch `useQueryPageStore`.
+  - `src/pages/QueryPage.tsx:239-255` — the on-mount effect copies `staged → setStmt`, clears the slot, and (optionally) re-runs format. It does **not** call `useQueryPageStore.getState().reset()`, so `resp`, `error`, and `submittedStmt` from the previous query remain visible in the result pane.
+  - Confirmed by hand: navigate `/workspace` → click a label in `LabelList` → land on `/` with a new statement in the editor but the previous query's result table still rendered below it.
+- **Why this is a gap:** The user just asked "show me everything about `Person`" via the schema-explorer click — the result pane should either be blank ("editor ready; run to populate") or in a fresh tab. Showing the previous query's rows under a new statement is actively misleading: a hurried operator could misread it as the answer to the new question.
+- **Impact/Risk:** Mis-interpretation of stale data, ratcheting up the cost of any incident where a wrong answer is accepted as fact. Lower stakes UX-only paths still suffer the "did this even run?" confusion.
+- **Recommended fix:** Two viable shapes — operator picks one:
+  - **Shape A (single-pane reset):** `QueryPage`'s staged-statement effect calls `useQueryPageStore.getState().reset()` before `setStmt(staged)`, so a fresh statement always paints over a blank result pane.
+  - **Shape B (Splunk-style tabs):** `QueryPage` grows a tabbed editor surface where each staged statement opens a new tab; the previous tab (with its result) stays accessible. Much larger scope; track as a follow-up if the operator prefers it.
+- **Acceptance criteria (Shape A — minimum):**
+  - On schema-staged navigation, `useQueryPageStore.getState()` reports `resp === null`, `error === null`, `submittedStmt === null` until the new statement is executed.
+  - jest case in `src/pages/QueryPage.test.tsx` pins it: seed a non-null `resp`, dispatch `setStaged('MATCH (n:X) RETURN n')`, render `QueryPage`, assert the result table is absent.
+
+#### GAP-050: RBAC integration state ambiguous
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Security / UX / Docs
+- **Severity:** High
+- **Status:** Open
+- **Evidence:**
+  - `src/components/admin/PoliciesPage.tsx:8,178` — error handling forks on `wireFeatureMissingDescription(...)`; when the upstream Geode wire op is absent the user sees the `policies.wireFeatureMissing` copy. That copy reads like a permanent capability message; nothing tells the user the feature is *coming*, *disabled*, or *forever missing*.
+  - `e2e/specs/08-admin-roles-policies.spec.ts:10-36` — the policies describe block carries `test.fixme(...)` against the upstream Limitations #3 (CREATE POLICY not yet implemented). That fact is documented in test code only; the Admin UI gives no in-product indicator.
+  - `src/components/admin/GrantsPanel.tsx`, `RolesPage.tsx`, `PoliciesPage.tsx` — three separate admin tabs (`grants`, `roles`, `policies`) treat the RBAC surface as a uniform feature, but only `roles` + `grants` are wired against Geode v0.5.19; `policies` is a degraded-mode stub.
+  - `docs/GQL_AUTH_DDL.md` Limitations #3 (referenced by GAP-003) explicitly carves out CREATE POLICY as upstream-deferred.
+- **Why this is a gap:** From a user's perspective the three RBAC tabs look like a complete RBAC product, but one of them is a stub-against-upstream and one of them (audit) returns 403 against the default test principal (GAP-004). The user cannot tell whether they have misconfigured the deployment, lack a role, hit a real bug, or are looking at a feature that does not exist. For a *security* surface that confusion is itself a risk: an operator may believe their policies are enforced when in fact the create call silently noops.
+- **Impact/Risk:** Real security misconfiguration risk + operator trust loss; this surface is exactly where ambiguous feature-state is least acceptable.
+- **Recommended fix:**
+  - In the Admin shell (`src/pages/AdminPage.tsx`), add a capability gate per tab: query a `/api/v1/capabilities` slice (already shipped per QUALITY-06 #36) and render the `policies` tab in `disabled+tooltip` mode when the wire op is missing, with explicit copy: "Policies are scheduled for Geode v0.6+. Read-only listing remains available."
+  - In `PoliciesPage.tsx`'s error branch, replace `wireFeatureMissing` with a copy that distinguishes upstream-missing vs. role-denied vs. transient-server-error (each maps to a different remedy).
+  - Update `docs/ARCHITECTURE.md` + `docs/SECURITY.md` with a "RBAC current state" matrix (users / roles / grants / policies / audit columns × supported / partial / missing rows) and link it from the Admin tab nav.
+- **Acceptance criteria:**
+  - No Admin tab silently presents a partial feature as complete.
+  - Every "wire feature missing" surface specifies *why* and *what comes next*.
+  - jest case asserts the `policies` tab renders in disabled mode against a capabilities response with `policies: false`.
+- **Cross-reference:** GAP-003 (e2e admin-roles-policies skip), GAP-004 (audit role missing), PSR-G09 (admin posture derives from JWT roles).
+
+#### GAP-051: Backups + Restore UI inconsistent
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Design / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/pages/AdminPage.tsx:68-73` — `Backups` and `Restore` are two separate top-level tabs in the Admin shell.
+  - `src/components/ops/BackupPage.tsx` uses `Stack`/`ToolBar`/`DataTable` primitives and Bootstrap-bridged surfaces.
+  - `src/components/ops/RestorePage.tsx:18-25` uses a `Heading` styled-component with the brand display font + a custom `<form>` layout that no other ops page uses.
+  - The "Restore from this backup" action in `BackupPage.tsx:105-108,169` navigates via `location.state.file` to `/admin/restore` — there is no in-place restore affordance.
+- **Why this is a gap:** Backup and Restore are two halves of the same workflow ("snapshot the graph, get it back"); splitting them across two visually distinct tabs forces a router round-trip for a workflow the operator perceives as one operation, and the divergent design language signals "different feature" when they are tightly coupled.
+- **Impact/Risk:** Disaster-recovery muscle memory degraded; operator hunts for "the restore tab" mid-incident.
+- **Recommended fix:**
+  - Collapse Backups + Restore into a single `Snapshots` tab with two sections: "Existing snapshots" (current `BackupPage` list + "Restore" row action that opens a confirmation drawer on the same page) and "Restore from upload" (the current `RestorePage` form).
+  - Unify on the `BackupPage` primitives (`Stack`, `ToolBar`, `DataTable`, Button) — `RestorePage`'s bespoke `Heading` styled-component is deleted in favour of `<h2 className="display-font">`.
+  - Update `src/pages/AdminPage.tsx` to drop the `restore` tab; keep a redirect from `/admin/restore` → `/admin/snapshots` so deep-links from outside survive.
+- **Acceptance criteria:**
+  - One tab in the Admin shell covers the snapshots workflow.
+  - Both halves share the same heading style and the same table/toolbar primitives.
+  - Existing e2e specs for backups + restore migrate to the merged page.
+
+#### GAP-052: Migrations "New Migration" is upload-only
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Feature / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/ops/MigrationsPage.tsx:258-313` — the "New migration" modal exposes a single `fileInputRef` + `client.migrationUpload(...)` path. There is no inline GQL editor, no "Save as migration" button, no way to draft the migration in the same surface used to run ad-hoc queries.
+  - The hint copy in `migrations.createTitle` describes the workflow as "upload a `.gql` file."
+- **Why this is a gap:** The natural authoring flow for a Geode migration is to draft the GQL in the Query page, iterate against a scratch graph, then save the working statement as a migration. Requiring the user to drop into a local editor, save a `.gql`, then upload it is a context switch that breaks the iterative loop and discourages migration use entirely.
+- **Impact/Risk:** Operators avoid migrations because the authoring path is heavy; schema drift accumulates outside the migration system.
+- **Recommended fix:**
+  - Expand the "New Migration" modal with two tabs: **Upload** (current behaviour) + **Compose** (a `GqlEditor` instance with a name field and a "Save as migration" button that POSTs the editor body to the same `client.migrationUpload` endpoint with a synthesised `multipart/form-data` blob).
+  - Wire a "Save current query as migration" action into the Query page's overflow menu that prefills the Compose tab.
+- **Acceptance criteria:**
+  - The New Migration modal supports both upload and inline compose without leaving the page.
+  - jest case in `src/components/ops/MigrationsPage.test.tsx` pins the compose path (mount, fill name + body, submit, assert `migrationUpload` called with a synthesised blob).
+  - Update `docs/OPERATIONS.md` migrations section with the two authoring paths.
+
+#### GAP-053: Migrations cannot be rolled back
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Feature / Ops
+- **Severity:** High
+- **Status:** Open
+- **Evidence:**
+  - `src/components/ops/MigrationsPage.tsx:19-25,102-116` — the page exposes `list` + `create` + `run` + `sign`; there is no `down` action, no `migrate-to-version` selector, no "rollback last" affordance.
+  - `client.postMigrationsRun({})` in `src/api/client.ts` accepts no `direction`/`target` argument; the server endpoint applies pending forward only.
+  - `migrations.runPending` is the only call-to-action; the applied-migrations table at `MigrationsPage.tsx:200-216` has columns `name`/`appliedAt`/`signedBy` but no per-row action.
+- **Why this is a gap:** Geode's migration semantics include reversibility (every migration file can declare a `down` block). The UI exposes the *forward* half of that contract but not the *reverse*, so an operator who applies a bad migration cannot use the same UI to back it out — they must drop into the geode CLI or hand-craft a corrective forward migration. For an ops surface that is the wrong default.
+- **Impact/Risk:** Incident-response window widens during a bad migration; the UI's "you can apply migrations" promise is functionally one-way.
+- **Recommended fix:**
+  - Plumb `down`/`target` through `geode.json` → genapi → `client.postMigrationsRun({ direction: 'down', target?: string })`.
+  - Add a "Rollback last" button next to the most recent applied-migrations row and a "Migrate to version…" select that lists every known version (forward or reverse from current).
+  - Confirmation dialog distinguishes destructive rollbacks (those that drop columns / data) from idempotent ones.
+- **Acceptance criteria:**
+  - The migrations page exposes both directions.
+  - jest cases pin the new button states (disabled when no applied migration exists; enabled with the latest row pre-selected for "Rollback last").
+  - e2e spec walks apply → rollback → apply round-trip.
+- **Cross-reference:** Confirm the wire surface is actually implemented in upstream Geode v0.5.19 before scheduling; this may need an upstream `blocked-on-upstream-Geode` carve-out.
+
+#### GAP-054: "Profile" terminology is ambiguous
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Docs / UX / Naming
+- **Severity:** Low
+- **Status:** Open
+- **Evidence:**
+  - `src/services/i18n/locales/en.ts:52,78,484-512` — the noun "Profile" is the label for *connection bundles* (DSN + saved username + TLS bundle + default flag), but the same word is used colloquially for "user" and "persona" in adjacent product contexts.
+  - `internal/profilestore/store.go:78` — server-side struct calls these `Profile` records; columns are `name`, `dsn`, `description`, `saved_username`, `is_default`, `tls_*_pem`, conn-pool sizing — which is plainly a connection bundle, not an identity.
+  - No `docs/` page defines the term; the in-app empty-state copy at `profiles.empty: 'No profiles yet.'` is the user's first introduction.
+- **Why this is a gap:** First-time users (especially DBAs coming from psql / pgcli / DataGrip vocabulary) reach for "Profile" expecting either an account/identity or a UI-preferences bundle. The actual meaning ("a named connection definition with optional saved credentials") only becomes clear after creating one. Onboarding suffers.
+- **Impact/Risk:** Cognitive load on first connect; support questions; misclick risk (treating "delete profile" as "delete my user account").
+- **Recommended fix (cheap):**
+  - Rename the noun to "Connection" everywhere it appears in user-facing copy (i18n keys + page titles + button labels). Internal types (`Profile`, `profilestore`) can stay.
+  - Update `docs/USER_GUIDE.md` (or write a new one) with a 1-paragraph glossary entry that explicitly says "A Connection is a named, optionally-credentialed Geode endpoint bundle. It is not a user identity and not a preferences pack."
+- **Recommended fix (deeper, larger scope):**
+  - Promote "Connection" to the public-facing noun; keep `profilestore` as the storage layer and document the seam at `docs/ARCHITECTURE.md`.
+- **Acceptance criteria:**
+  - No user-visible string conflates Profile with user/persona.
+  - Glossary entry shipped; a ratchet (`scripts/check-no-bare-profile-in-ui-copy.mjs`) catches regressions in `src/services/i18n/locales/*.ts`.
+
+#### GAP-055: Dashboard graph names are not clickable
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Navigability / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/dashboard/GraphsCard.tsx:45-56` — each graph name renders as a plain `<li className="text-body">…</li>`; no `<Link>`, no `<button>`, no `onClick`. The card itself has `data-testid="dashboard-graphs-card"` but no row-level interactivity.
+  - The schema-explorer route exists at `/workspace` and accepts a graph selection via its `useActiveGraph` seam; the click→nav contract is trivially expressible.
+- **Why this is a gap:** The dashboard advertises "the graphs your server hosts" as the headline information unit, but the user must then change tabs and re-select the graph manually in the schema explorer. The card pretends to be a navigation surface and isn't one.
+- **Impact/Risk:** Friction on every drill-down; surprised user clicks the graph name three times before realising nothing happens.
+- **Recommended fix:**
+  - Replace `<li>{g}</li>` with `<li><Link to={'/workspace?graph=' + encodeURIComponent(g)} className="link-body-emphasis">{g}</Link></li>`.
+  - Ensure `WorkspacePage` reads `?graph=` on mount and sets the active graph via `useActiveGraph` before the schema-explorer renders (avoids the "click → land → still need to pick the graph" double-step).
+  - Keyboard a11y: each `<Link>` exposes `aria-label='Open schema for {{name}}'`.
+- **Acceptance criteria:**
+  - Clicking any graph name navigates to `/workspace` with the graph pre-selected and the schema-explorer body painted.
+  - jest case in `src/components/dashboard/GraphsCard.test.tsx` asserts the `<a href>` shape.
+  - e2e case in `e2e/specs/22-dashboard.spec.ts` walks click → URL change → schema-explorer body present.
+
+#### GAP-056: Schema explorer delay before content paints
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Perf / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/schema/SchemaExplorer.tsx:185-232` — initial graph fetch + per-graph re-fetch arms an `AbortController` and a `setState` slot. No skeleton / spinner renders during the gap between mount and first paint.
+  - `src/components/schema/EdgeTypeList.tsx:10-22` — the per-graph edge-type set is served via `defaultSchemaCache`; cold-miss requires a full-graph `MATCH ()-[r]->()` scan on the server (`internal/server/schema_cache.go`, 120 s TTL). Cold misses on a non-trivial graph dominate the perceived latency.
+  - Manual repro: open `/workspace`, click `Person` → `EdgeTypeList` body stays empty for several hundred ms; the only UI signal is the page header.
+- **Why this is a gap:** The user has no in-product feedback during the cold-miss window — the empty body is indistinguishable from "no edges exist on this graph" until the data finally arrives. Combined with the on-cold-miss server work, this is a perceived-latency footgun.
+- **Impact/Risk:** Perceived slowness on first visit; misread "no edges" empty state.
+- **Recommended fix:**
+  - Render a `<Skeleton>` block (3 placeholder rows) inside `LabelList` + `EdgeTypeList` while the fetch is in flight (`loading=true`); flip to data on resolve, flip to empty-state on resolve-with-zero-rows.
+  - Surface the cache state in `data-testid` to keep test deterministic: `data-testid="edge-type-list" data-state="loading|loaded|empty"`.
+  - Consider prefetching the edge-type set when the user hovers a graph row in `LabelList` so the panel is warm by the time the click lands.
+  - Optional perf win: bump the `internal/server/schema_cache.go` TTL or warm the cache on connect.
+- **Acceptance criteria:**
+  - During the cold-miss window the body renders a clearly-loading skeleton (not empty / not stale).
+  - jest case asserts `data-state='loading'` immediately after click and `data-state='loaded'` after the mocked fetch resolves.
+  - Lighthouse / `bench-gate` shows no regression on the warm path.
+
+#### GAP-057: Edge view labels endpoint nodes by ID instead of node type
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Graph / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/schema/EdgeTypeList.tsx:129-134` — staging an edge query emits `MATCH ()-[r:Type]->() RETURN r LIMIT 25` (no `RETURN n, r, m`); the server response contains edges with `start_node`/`end_node` numeric IDs but no node labels (the nodes are not in the projection).
+  - `src/lib/graphResult/pushRealElements.ts:39-65` — when an edge endpoint is not in `realNodeIds`, `pushPlaceholderNodes` emits a stub node with `label = placeholderLabels.get(id) ?? '#' + id` and `nodeType = typeLabel ?? label`. Because the projection has no node info, both maps miss, so the stub label is `#123` (the raw node id).
+  - Manual repro: schema-explorer → edge tab → click `ACTED_IN` → graph view renders edges between nodes labelled `#1024`, `#1025`, …
+- **Why this is a gap:** The user picked the *edge type* tab — what they wanted to see is which node types this edge connects (`Person -[ACTED_IN]-> Movie`), not opaque node IDs that change run-to-run. The placeholder label is technically correct (we don't have the node info) but the wrong default for this entry point.
+- **Impact/Risk:** Edge view is unreadable for schema discovery — defeats the entry point's purpose.
+- **Recommended fix:** Two layered options:
+  - **Layer 1 (cheap):** rewrite the staged query in `EdgeTypeList.tsx:129-134` to `MATCH (n)-[r:Type]->(m) RETURN n, r, m LIMIT 25` so the endpoints come back as real nodes with `labels`; `pushRealEdges` + the existing node-projection path then renders the node-type label correctly. The LIMIT 25 cap is preserved.
+  - **Layer 2 (parser-augmented):** when the projection is r-only, ask the schema cache for `(:T)-[r:Type]->(:U)` triples (Geode `MATCH ()-[r:Type]->() RETURN labels(startNode(r))[0] AS s, labels(endNode(r))[0] AS t LIMIT 1` once per edge type, cached); attach the resolved type to `placeholderTypeLabels` so the stub falls through to the type label rather than `#id`.
+- **Acceptance criteria:**
+  - Clicking an edge type in the schema explorer renders a graph where every node bears its type label (or the type name) — no `#<numeric-id>` survives.
+  - jest case in `src/components/schema/EdgeTypeList.test.tsx` pins the staged query shape.
+  - jest case in `src/lib/graphResult/pushRealElements.test.ts` covers the "endpoint with no projection" branch's display label.
+
+#### GAP-058: Edge-view focus collapses placeholder nodes to vertical oval
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Graph / Visual / Cytoscape
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/results/cytoscapeStyle.ts` — node shape/sizing rules size each node by computed dimensions; placeholder nodes (`data.placeholder === true` per `pushPlaceholderNodes` at `src/lib/graphResult/pushRealElements.ts:48-62`) carry an empty `props: {}` and a degenerate `label = '#<id>'`.
+  - Manual repro: edge-view (after GAP-057's staged query) → click any placeholder node → focus interaction (likely the focus animation / `cy.fit(node, ...)` path) re-sizes the now-focused node based on its (empty) data, producing a thin vertical oval shape rather than the expected disc/ellipse.
+  - Suspected cause: the focus-related width/height rules derive from `width = ... * (text-max-width / text-height)` or a `data(degree)` mapper that collapses for a node with 0 incident edges *after* the focus path hides the rest of the graph. Without `props`, several mappers fall back to their minimum.
+- **Why this is a gap:** A focused node should remain visually recognisable. Collapsing to a non-disc shape signals a render glitch and breaks the visual continuity of the focus animation.
+- **Impact/Risk:** Visual polish + perceived stability; reads as a bug to any first-time user.
+- **Recommended fix:**
+  - Reproduce against the bench page (`src/pages/dev/GraphBenchPage.tsx`) with a synthetic edge-only graph; capture the computed style for the focused node.
+  - Audit `cytoscapeStyle.ts` for any width/height mapper that depends on `data(props)`, `data(degree)`, or `label` length without a guard for placeholder nodes; pin the placeholder branch to `width: 40px; height: 40px; shape: ellipse`.
+  - Add a regression test in `src/components/results/cytoscapeStyle.test.ts` building a one-edge two-placeholder-node graph and asserting the focused node's computed width/height ratio stays inside `[0.7, 1.4]` (i.e. not a thin oval).
+- **Acceptance criteria:**
+  - Focused placeholder nodes render as roughly-disc / round-ellipse shapes consistent with non-focused state.
+  - cytoscapeStyle regression test passes.
+- **Cross-reference:** GAP-057 (root cause of why the edge view is full of placeholder nodes in the first place — fixing GAP-057 likely reduces the surface area of GAP-058 but does not eliminate it for legitimately-dangling endpoints).
+
+### Summary — follow-on additions (GAP-059..GAP-063)
+
+| Gap-ID  | Title | Severity | Area | Status |
+|---------|-------|----------|------|--------|
+| GAP-059 | Edges have no hover tooltip and edge clicks don't populate the inspector sidebar reliably | Medium | Graph / UX | Open |
+| GAP-060 | No visual query editor — only the text editor / Monaco surface; node-link drag-build absent | High | Feature / UX | Open |
+| GAP-061 | No in-app documentation view — `/docs/*` and `geode://` GQL+ reference are external/markdown-only | Medium | Docs / UX | Open |
+| GAP-062 | No Geode GQL+ spec library with per-subset docs + LSP-hover/completion deep-links | High | Docs / LSP / Feature | Open |
+| GAP-063 | No snippet support in the query editor — no fillable tab-stops, no in-UI snippet management | Medium | Feature / UX / Editor | Open |
+
+#### GAP-059: Edge hover + edge click — no parity with node interactions
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Graph / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/results/graph/useNodeTooltip.ts:19-72` — the tooltip hook binds `mouseover`/`mouseout` exclusively to `'node'` selectors. There is no symmetric `useEdgeTooltip` and no `cy.on('mouseover', 'edge', …)` anywhere in `src/components/results/graph/`.
+  - `src/components/results/graph/useGraphCytoscape.ts:267-282` — both `tap` handlers exist (`cy.on('tap', 'node', …)` and `cy.on('tap', 'edge', …)`) and both call `setSelected(...)`, but the user reports that hitting an edge does not populate the sidebar consistently. The recent fixes `085347c` ("widen edge stroke 1.5→3px + pin events:yes for reliable click hits") and `a916783` ("edges always carry data.props (default {}) so inspector populates") show the team has been chasing this — the hit-area widening helps but does not address tooltip parity, and synthesised/placeholder edges may still emit objects whose `data.props` is missing in older cached layouts.
+  - `src/components/results/graph/GraphInspector.tsx:200-205,228` — the inspector renders the `kind === 'edge'` header (`graph.selectedEdge`) but the node-only action row is `kind === 'node' && (…)`-gated, so a selected edge produces a sparser inspector than a selected node; combined with the absence of a hover preview, the user perception is "edges don't really have inspector data."
+- **Why this is a gap:** Edges carry their own properties (`type`, `props`, `source`, `target`) and are first-class graph elements; a user that hovers an edge expects the same `data.label` + `data.props` peek that a node hover provides, and a click should populate the inspector with the same fidelity. Lack of hover affordance + spotty click→inspector behaviour also makes edges feel "decorative" rather than queryable.
+- **Impact/Risk:** Inspection workflow is asymmetric; users avoid edge-centric queries because the affordances feel broken; recent fixes (`085347c`, `a916783`) suggest live regression risk.
+- **Recommended fix:**
+  - New `src/components/results/graph/useEdgeTooltip.ts` mirroring `useNodeTooltip.ts` (bind `mouseover`/`mouseout` on `'edge'`; surface `data.type` + `data.props`); render via the existing tooltip overlay with an edge-styled chip (label `:Type`).
+  - Audit `pushSynthesisedRows.ts` + `pushRealEdges` to guarantee every emitted edge carries `data.props` (default `{}`) and `data.label` (default `type`), and add a jest invariant that asserts `out.every(e => e.group !== 'edges' || typeof e.data.props === 'object')`.
+  - Add an e2e case in `e2e/specs/36-graph-canvas-controls.spec.ts` (or a new `37-edge-inspector.spec.ts`) walking: render two-node-one-edge graph → hover edge → assert tooltip visible → tap edge → assert sidebar shows edge inspector with at least `type` and (if present) `data.props` keys.
+  - Optional: extend `GraphInspector.tsx`'s `kind === 'node'` action-row guard with an edge-aware action set (e.g. "Highlight endpoints", "Hide edge type"), so the inspector feels equally populated for both kinds.
+- **Acceptance criteria:**
+  - Hovering an edge surfaces a tooltip with `:Type` + property summary.
+  - Tapping any edge (real, synthesised, placeholder) reliably renders the edge inspector with `data.props` present (even if empty).
+  - jest + e2e cases pin both behaviours.
+
+#### GAP-060: No visual query editor
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Feature / UX
+- **Severity:** High
+- **Status:** Open
+- **Evidence:**
+  - `src/components/editor/GqlEditor.tsx` — the only query authoring surface is a Monaco text editor with GQL syntax (`src/components/editor/gqlLanguage.ts`) + LSP wiring (`src/lib/lsp/client.ts`).
+  - `src/pages/QueryPage.tsx` mounts a single `<GqlEditor>` instance; there is no node-link drag canvas, no "build MATCH visually" panel, no schema-drag-into-query interaction.
+  - The schema explorer (`src/components/schema/SchemaExplorer.tsx`) stages canned `MATCH` strings via `queryStore.setStaged(...)` but offers no further visual composition (e.g. drag two label rows + an edge row to build a path).
+  - Competitor parity: Neo4j Bloom, Memgraph Lab, and TigerGraph GraphStudio all ship a visual query builder alongside the textual editor.
+- **Why this is a gap:** Operators who don't have GQL muscle memory (data analysts, product managers, on-call engineers from an unfamiliar service) are gated by the text editor's blank-page problem. A visual builder lowers the floor without raising the ceiling — the text editor still owns power-user paths. The schema explorer half-implements this (one canned MATCH per click) but doesn't compose.
+- **Impact/Risk:** TAM gated to GQL-fluent users; adoption headwind in mixed-skill teams; on-call response time degrades when the responder isn't a daily GQL author.
+- **Recommended fix:** Phased (smallest first):
+  - **Phase 1 (MVP):** "Query Builder" toggle in `QueryPage`'s overflow menu that opens a side panel: pick a starting label, pick edge type(s), pick terminal label(s), pick return projection. On apply, synthesise the GQL into the editor (replaces or appends) and run.
+  - **Phase 2 (canvas):** Full node-link drag UI where the user drags labels from the schema explorer onto a canvas, links them with edge types, and the editor stays in sync via bidirectional binding (edit GQL → re-layout canvas; drag canvas → re-emit GQL).
+  - **Phase 3 (refinement):** Filter chips (`property = value`), `LIMIT` slider, `ORDER BY` picker, and saved-template support (cross-references GAP-063 snippets).
+- **Acceptance criteria:**
+  - Phase 1 ships behind a `queryBuilder.enabled` capability flag.
+  - The builder always synthesises GQL that the text editor accepts (round-trip parsing test in `src/components/editor/queryBuilder.test.ts`).
+  - jest + e2e specs cover the MVP shape (`38-visual-query-editor.spec.ts`).
+- **Cross-reference:** GAP-049 (carry-over `resp`), GAP-063 (snippet support — share the templating substrate).
+
+#### GAP-061: No in-app documentation view
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Docs / UX
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `docs/` is a flat tree of Markdown files (`docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/I18N.md`, `docs/GQL_AUTH_DDL.md`, …) — they ship in the repo + the source bundle, but the running UI does not surface them.
+  - There is no `/docs/*` SPA route, no `<DocsPage>` component, no `geode://` Electron protocol handler for `docs:` URIs.
+  - LSP completion items (`src/lib/lsp/client.ts`) currently surface short hover text only — no deep-links into a documentation viewer.
+  - `src/App.tsx` route table has no `docs` entry; the only "Help" surface is the keyboard-shortcut comment at `GqlEditor.tsx:50` (developer-only).
+- **Why this is a gap:** A new user landing on the Query page has zero in-app path to "what GQL keywords does this server support?" or "what's the difference between MATCH and OPTIONAL MATCH?". They must context-switch to a browser, hunt for the right doc, and come back. For a developer tool this raises the activation cost dramatically.
+- **Impact/Risk:** Onboarding friction; opaque LSP hover messages; support burden ("where do I find the spec?").
+- **Recommended fix:**
+  - Add a `/docs/*` SPA route mounted on `DocsPage` that renders the existing Markdown tree via a Markdown renderer (e.g. `react-markdown` already pulled in for other surfaces, or `marked` + `DOMPurify`).
+  - Vite-bundle the `docs/` Markdown at build time (`import.meta.glob('../../docs/*.md', { as: 'raw' })`) so Electron builds work offline.
+  - Top-nav "Docs" entry with a search box (client-side `lunr` index built at bundle time).
+  - Every page heading gets a stable slug → URL fragment so external links survive renames.
+  - Cross-reference back: each LSP hover surfaces a `Learn more →` link that opens the relevant fragment in the new docs view (depends on GAP-062 for the index).
+- **Acceptance criteria:**
+  - `/docs/architecture`, `/docs/security`, `/docs/gql-auth-ddl` all render in-app with working anchor links and search.
+  - The Electron build serves the docs offline (no network round-trip).
+  - jest case asserts the docs route mounts and renders a known heading; e2e case walks Top-nav → Docs → search → result click → page scroll.
+
+#### GAP-062: No Geode GQL+ spec library + LSP-hover deep links
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Docs / LSP / Feature
+- **Severity:** High
+- **Status:** Open
+- **Evidence:**
+  - `docs/` has `docs/GQL_AUTH_DDL.md` for the auth DDL subset and scattered admin docs, but no canonical "Geode GQL+ Language Reference" tree (no `docs/gql-spec/` directory; no per-clause / per-function / per-operator pages).
+  - `src/lib/lsp/client.ts:25` — hover provider exists as a Monaco capability; the upstream Geode LSP server (per recent `geode v0.5.19` upgrade) emits MarkupContent strings, but the SPA surfaces them as plain rendered Markdown with no anchor links into a local spec.
+  - No `src/lib/gqlSpecIndex.ts` (or equivalent) that maps LSP completion-item titles → docs anchors.
+  - Skills like `geode:examples`, `geode:syntax`, and `geode:query` exist as Claude Code helpers but their content is not mirrored into a UI-visible spec.
+- **Why this is a gap:** Geode GQL+ extends ISO GQL with subsets (auth DDL, admin DDL, MCP, observability views, etc.); the user needs a single canonical place that documents each subset with examples, BNF excerpts, error-code references, and capability gates. Without that, LSP hover is dead-ended: the user reads the one-line description and has nowhere to go for depth, and the docs are scattered across `docs/`, `geode:` skills, and (historically) the Geode repo's own README.
+- **Impact/Risk:** Power-user adoption stalls; LSP becomes a glorified syntax linter rather than a learning surface; support burden persists.
+- **Recommended fix:**
+  - Create `docs/gql-spec/` with one page per subset: `core.md`, `auth-ddl.md`, `admin-ddl.md`, `policies.md`, `mcp.md`, `observability.md`, `views.md`, `migrations.md`. Each page documents every clause/keyword/function in that subset with grammar (BNF excerpt), examples, capability flag (`/api/v1/capabilities` slice), and the error codes that path can return.
+  - New `src/lib/gqlSpecIndex.ts` exporting `gqlSpecAnchor(itemTitle: string): string | null` — a generated map from spec-page anchors to the LSP completion titles + keyword tokens. Generated at build time from a frontmatter table in each spec Markdown file.
+  - In `src/lib/lsp/client.ts`, intercept incoming `Hover` payloads and append `\n\n[Learn more →](/docs/gql-spec/<page>#<anchor>)` when the index has a match. Render the Markdown via the same component used by the docs viewer (depends on GAP-061).
+  - For completion items, surface a small (i) icon that opens the same anchor in a side panel without leaving the editor.
+- **Acceptance criteria:**
+  - Hovering any keyword that has a spec entry surfaces a `Learn more →` link that opens the matching anchor.
+  - The spec covers all subsets currently shipped by `geode v0.5.19`.
+  - jest case asserts the index resolves a representative sample (`MATCH`, `CREATE USER`, `WITH`, `RETURN`); e2e case walks hover → click → docs panel.
+- **Cross-reference:** GAP-061 (docs view this links into), GAP-039 (FA migration — affects the (i) icon choice), `geode:syntax` skill (source-of-truth for the migration content).
+
+#### GAP-063: No snippet support in the query editor
+
+- **Issue:** (to file in next gap-close round)
+- **Category:** Feature / UX / Editor
+- **Severity:** Medium
+- **Status:** Open
+- **Evidence:**
+  - `src/components/editor/GqlEditor.tsx` + `src/components/editor/gqlLanguage.ts` — Monaco is configured with syntax + LSP; no `CompletionItemKind.Snippet` providers are registered, no `monaco.languages.registerCompletionItemProvider` call carries snippet bodies, and no tab-stop (`$1`, `$2`, `${1:placeholder}`) plumbing exists.
+  - No `src/lib/snippets/` directory, no `useSnippets` zustand store, no Settings entry for snippet management.
+  - Recent feature gaps GAP-060 (visual query editor) imply a "saved templates" need; without a snippet primitive, templates are file-uploads or one-off `localStorage` keys with no UX cohesion.
+- **Why this is a gap:** Operators repeat the same query shapes constantly (`USE GRAPH x; MATCH (n:Label) WHERE n.prop = $value RETURN n`); without snippet support each repetition is a re-type or a copy-paste round-trip. Tab-stop jumps are the difference between "I typed a snippet name and tabbed through the fillable fields" and "I pasted a template and now I'm hunting for the placeholder text."
+- **Impact/Risk:** Slow query authoring loop; teams reinvent snippets in scratch files outside the app.
+- **Recommended fix:**
+  - New `src/lib/snippets/` module:
+    - `snippetStore.ts` — zustand persist-backed store of `{name, prefix, body, scope?: graphName, description?}` entries (localStorage namespace `geode.snippets.v1`, schema-versioned per GAP-041's lesson).
+    - `gqlSnippetProvider.ts` — Monaco `CompletionItemProvider` that maps each snippet to a `CompletionItem` with `kind: monaco.languages.CompletionItemKind.Snippet`, `insertText: snippet.body`, `insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet` (so Monaco honours the `$1`/`${1:placeholder}` syntax and gives the user tab-jump traversal).
+  - Wire the provider into `GqlEditor.tsx`'s Monaco mount (alongside the existing LSP wiring).
+  - New Settings entry (or a sidebar tab in the Query page) listing snippets in a `DataTable` with create/edit/delete actions; the edit dialog hosts a mini Monaco instance so the user can author snippet bodies with the same syntax highlighting they get in the main editor.
+  - Ship a starter pack (5-10 snippets covering common patterns: `match-by-label`, `match-path`, `aggregate-count-by`, `create-user`, `restore-from-backup`, …) — seed the store with these on first run if empty.
+  - Export/import as JSON for sharing across machines.
+- **Acceptance criteria:**
+  - Typing a snippet prefix in the editor triggers Monaco's completion menu with `Snippet`-kind entries; selecting one inserts the body and places the cursor at `$1`; tab advances through subsequent tab-stops.
+  - The Settings/snippets UI supports create/edit/delete/import/export.
+  - jest cases cover (a) provider returns the expected `CompletionItem` shape, (b) `insertTextRules` includes `InsertAsSnippet`, (c) the store survives a localStorage round-trip.
+  - e2e spec (`39-snippets.spec.ts`) walks open settings → create snippet → close → type prefix → tab through placeholders.
+- **Cross-reference:** GAP-041 (LSP settings localStorage versioning — same schema/migration discipline), GAP-060 (visual query editor — saved templates surface), GAP-062 (spec library — every snippet should ideally link to the spec page that documents the clauses it uses).
+
+### Cohort verification (to run during the next gap-close round)
+
+- File 18 GitLab issues, one per gap (GAP-046..GAP-063), with the `Discovered-By: 2026-05-19 manual UX walkthrough` label.
+- Cross-reference GAP-050 to GAP-003 / GAP-004 / PSR-G09 on the tracker.
+- Cross-reference GAP-053 to upstream Geode for wire-side `down`/`target` confirmation before scheduling implementation.
+- Cross-reference GAP-059 to commits `085347c` and `a916783` (the two in-flight edge-interaction fixes) so the closer knows what's already landed.
+- Cross-reference GAP-061 / GAP-062 / GAP-063 to each other — they share a docs-viewer + Markdown bundling substrate and should ideally land in dependency order (061 → 062 → 063).

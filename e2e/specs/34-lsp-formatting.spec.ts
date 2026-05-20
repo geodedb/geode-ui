@@ -27,7 +27,9 @@ import { sel } from '../helpers/selectors'
 const LSP_OPEN_TIMEOUT_MS = 8_000
 const FORMAT_RESPONSE_TIMEOUT_MS = 4_000
 
-async function getMonacoValue(page: import('@playwright/test').Page): Promise<string> {
+async function getMonacoValue(
+  page: import('@playwright/test').Page
+): Promise<string> {
   return page.evaluate(() => {
     const w = window as unknown as {
       monaco?: {
@@ -59,7 +61,9 @@ async function setMonacoValue(
   }, value)
 }
 
-async function waitForLspOpen(page: import('@playwright/test').Page): Promise<void> {
+async function waitForLspOpen(
+  page: import('@playwright/test').Page
+): Promise<void> {
   // Wait for the GqlEditor's onStateChange seam to flip `__geode_lsp_state`
   // to 'open'. Pre-fix this would never happen because the geode-ui
   // container's default `-lsp-upstream 127.0.0.1:3142` dials a dead
