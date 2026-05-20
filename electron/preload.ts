@@ -20,8 +20,16 @@ import type {
 // app version, system theme) must funnel through an explicit IPC call
 // here.
 
+// Synchronous handshake with main to fetch the configured HTTP(S)
+// server origin. The SPA's `resolveBaseUrl` (src/api/client.ts) calls
+// `new URL(baseUrl)` at module-import time, so the value must be a
+// plain string sitting on the bridge by the time `contextBridge.expose
+// InMainWorld` returns — there's no async window before bootstrap.
+const SERVER_URL = ipcRenderer.sendSync('geode:get-server-url-sync') as string
+
 const bridge: GeodeBridge = {
   isElectron: true,
+  serverUrl: SERVER_URL,
   getVersion: () => ipcRenderer.invoke('geode:get-version') as Promise<string>,
   openExternal: (url: string) =>
     ipcRenderer.invoke('geode:open-external', url) as Promise<boolean>,

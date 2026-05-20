@@ -4,11 +4,29 @@ import { auth } from './auth'
 import { getLatestToken } from './connections'
 import { getCsrfToken, isCsrfRequired, refreshCsrfToken } from './csrf'
 
-function resolveBaseUrl(): string {
+// Exported for unit tests (src/api/client.test.ts). Not part of the
+// public API — call sites use the constructed `client` below.
+export function resolveBaseUrl(): string {
+  // Under Electron the renderer is hosted on the privileged `geode://`
+  // scheme, which the generated client refuses ("base URL must use
+  // http or https"). The preload exposes a separate operator-supplied
+  // HTTP(S) origin on window.geode.serverUrl — use that whenever it's
+  // present so the same SPA bundle works for both the browser-served
+  // build and the desktop wrapper.
+  if (
+    typeof window !== 'undefined' &&
+    window.geode &&
+    typeof window.geode.serverUrl === 'string' &&
+    window.geode.serverUrl.length > 0
+  ) {
+    return window.geode.serverUrl
+  }
   if (
     typeof window !== 'undefined' &&
     window.location &&
-    window.location.origin
+    window.location.origin &&
+    (window.location.origin.startsWith('http:') ||
+      window.location.origin.startsWith('https:'))
   ) {
     return window.location.origin
   }

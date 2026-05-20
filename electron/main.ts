@@ -20,6 +20,7 @@ import {
 } from './lib/safety'
 import { AssetCache, defaultCacheOptions } from './lib/cache'
 import { createSecureStore, SecureStore } from './lib/secure-store'
+import { resolveServerUrl } from './lib/server-url'
 import {
   safeReadPemFile,
   sanitizeConnections,
@@ -77,7 +78,27 @@ const assetCache = new AssetCache(defaultCacheOptions())
 // ../../internal/ui/dist/ relative to that.
 const DIST_DIR = path.resolve(__dirname, '..', 'dist')
 const PROTOCOL_NAME = 'geode'
-const APP_URL = `${PROTOCOL_NAME}://app/index.html`
+// Load the SPA from the protocol root so `location.pathname` is `/`,
+// which is what BrowserRouter expects as the initial route. Loading
+// `geode://app/index.html` made the renderer's pathname `/index.html`,
+// which React Router treats as an unknown route ("No routes matched
+// location /index.html") — the SPA renders the catch-all instead of
+// the Login page. The protocol handler falls back to index.html when
+// the requested path doesn't resolve to a file on disk, so the root
+// path still serves the SPA shell.
+const APP_URL = `${PROTOCOL_NAME}://app/`
+
+// SPA → geode-ui server origin. The renderer's window.location.origin
+// is `geode://app` (the privileged custom scheme), which the SPA's
+// generated API client rejects ("base URL must use http or https").
+// Operators point at their geode-ui server via the GEODE_SERVER_URL
+// env var; the http://localhost:8080 default matches the docker-
+// compose stack a developer runs side-by-side with the desktop build.
+// Read once at main-process startup and surfaced to the renderer
+// through the preload (see `geode:get-server-url-sync`). The actual
+// validation lives in ./lib/server-url.ts so it can be unit-tested
+// without `electron` in the import graph.
+const SERVER_URL = resolveServerUrl(process.env)
 
 // Persist window state across launches. The store lives next to the
 // userData dir so it travels with the user's profile.
@@ -350,6 +371,15 @@ async function createWindow(): Promise<void> {
   await win.loadURL(APP_URL)
 }
 
+// Synchronous IPC: preload reads this at bridge construction time so
+// `window.geode.serverUrl` is a plain string the SPA can consume from
+// its synchronous bootstrap (resolveBaseUrl in src/api/client.ts).
+// sendSync is intentional — the value is fixed at process start and
+// the preload has no async window before contextBridge.exposeInMainWorld
+// is called.
+ipcMain.on('geode:get-server-url-sync', (evt) => {
+  evt.returnValue = SERVER_URL
+})
 ipcMain.handle('geode:get-version', () => app.getVersion())
 ipcMain.handle('geode:get-stored-connections', async () => {
   const doc = await secureStore().read()

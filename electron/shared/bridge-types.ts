@@ -33,6 +33,14 @@ export interface ConnectionRecord {
 
 export interface GeodeBridge {
   readonly isElectron: true
+  // Operator-configured HTTP(S) origin of the geode-ui server the
+  // desktop app talks to. The SPA's API client refuses geode:// (the
+  // privileged scheme the renderer is hosted under) so we surface a
+  // separate, http(s)-only origin here. Sourced from the
+  // GEODE_SERVER_URL env var at main-process startup; defaults to
+  // http://localhost:8080 to match the docker-compose stack a
+  // developer runs locally beside the desktop build.
+  readonly serverUrl: string
   getVersion(): Promise<string>
   openExternal(url: string): Promise<boolean>
   getSystemTheme(): Promise<ThemeVariant>
