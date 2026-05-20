@@ -471,6 +471,18 @@ export const en = {
     staged: 'Staged: {{name}}',
     fieldName: 'Name',
     fieldDescription: 'Description',
+    // GAP-052: inline-compose authoring path. The modal grows two
+    // tabs (Upload + Compose); the compose path synthesises a Blob
+    // from the editor body and pipes it through the same upload
+    // endpoint so the server-side validation (filename charset, size
+    // cap) stays in one place.
+    createTabsAria: 'Migration source',
+    tabUpload: 'Upload',
+    tabCompose: 'Compose',
+    composeLabel: 'Migration body',
+    composeHint:
+      'Write the GQL statement(s) here. Filename is derived from the migration name.',
+    composePlaceholder: 'CREATE INDEX ON :Person(name);',
   },
 
   audit: {

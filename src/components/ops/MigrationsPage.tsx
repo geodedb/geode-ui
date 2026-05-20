@@ -249,6 +249,14 @@ export const MigrationsPage: React.FC = () => {
   )
 }
 
+// GAP-052: the modal grew a second authoring path. `mode` toggles
+// between the original upload flow and an inline compose surface so
+// operators can draft migrations beside the Query page without
+// dropping into a local editor. The compose path synthesises the
+// upload blob from the editor body and reuses the same
+// `client.migrationUpload` endpoint.
+type CreateMode = 'upload' | 'compose'
+
 const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
   onClose,
 }) => {
@@ -260,6 +268,8 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [mode, setMode] = useState<CreateMode>('upload')
+  const [composeBody, setComposeBody] = useState('')
 
   // Stage the migration content via the typed multipart endpoint
   // (GAP-Q5 #34: `client.migrationUpload` is generated from the
@@ -295,11 +305,31 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
     }
   }
 
+  // GAP-052: in compose mode build a synthesised Blob from the
+  // editor body and reuse the same `client.migrationUpload` endpoint
+  // the file picker drives. The server validates the filename
+  // (alphanumeric+._- only) so we strip everything else from the
+  // operator-typed name before appending `.gql`. The endpoint then
+  // returns the canonical filename, which the subsequent
+  // postMigrations call records in the migration row.
+  const composeUpload = async (): Promise<string> => {
+    const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const filename = safe.endsWith('.gql') ? safe : `${safe}.gql`
+    const blob = new Blob([composeBody], { type: 'text/plain' })
+    const resp = await client.migrationUpload({
+      file: { blob, filename, contentType: 'text/plain' },
+    })
+    return resp.file
+  }
+
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
+      if (mode === 'compose' && composeBody.trim().length > 0) {
+        await composeUpload()
+      }
       await client.postMigrations({ name, description })
       onClose()
     } catch (e2: unknown) {
@@ -340,22 +370,76 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
         onSubmit={submit}
         style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
       >
-        <Field
-          label={t('migrations.uploadLabel')}
-          htmlFor="migration-upload-input"
+        {/* GAP-052: tab strip toggles between upload (existing flow)
+            and compose (inline authoring). Composed bodies funnel
+            through the same migrationUpload endpoint via a Blob so
+            the server-side validation (filename charset, 64 MiB cap)
+            stays in one place. */}
+        <div
+          role="tablist"
+          aria-label={t('migrations.createTabsAria')}
+          className="d-flex gap-2 border-bottom"
         >
-          <input
-            id="migration-upload-input"
-            ref={fileInputRef}
-            type="file"
-            onChange={onUpload}
-            disabled={uploading || busy}
-          />
-        </Field>
-        {uploadedFile && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'upload'}
+            data-testid="migration-mode-upload"
+            className={`btn btn-sm ${
+              mode === 'upload' ? 'btn-primary' : 'btn-link'
+            }`}
+            onClick={() => setMode('upload')}
+          >
+            {t('migrations.tabUpload')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'compose'}
+            data-testid="migration-mode-compose"
+            className={`btn btn-sm ${
+              mode === 'compose' ? 'btn-primary' : 'btn-link'
+            }`}
+            onClick={() => setMode('compose')}
+          >
+            {t('migrations.tabCompose')}
+          </button>
+        </div>
+        {mode === 'upload' && (
+          <Field
+            label={t('migrations.uploadLabel')}
+            htmlFor="migration-upload-input"
+          >
+            <input
+              id="migration-upload-input"
+              ref={fileInputRef}
+              type="file"
+              onChange={onUpload}
+              disabled={uploading || busy}
+            />
+          </Field>
+        )}
+        {mode === 'upload' && uploadedFile && (
           <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>
             {t('migrations.staged', { name: uploadedFile })}
           </span>
+        )}
+        {mode === 'compose' && (
+          <Field
+            label={t('migrations.composeLabel')}
+            htmlFor="migration-compose-body"
+            hint={t('migrations.composeHint')}
+          >
+            <Textarea
+              id="migration-compose-body"
+              data-testid="migration-compose-body"
+              value={composeBody}
+              onChange={(e) => setComposeBody(e.target.value)}
+              rows={10}
+              style={{ fontFamily: 'monospace' }}
+              placeholder={t('migrations.composePlaceholder')}
+            />
+          </Field>
         )}
         <Field label={t('migrations.fieldName')} htmlFor="cm-name" required>
           <Input

@@ -167,6 +167,46 @@ test('create-migration modal: file upload posts via client.migrationUpload, then
   })
 })
 
+// GAP-052: the create-migration modal now has a Compose tab. The
+// inline-author path synthesises a Blob from the editor body and
+// reuses the same migrationUpload endpoint so the server-side
+// validation (filename charset + size cap) stays in one place.
+test('GAP-052: compose mode synthesises a Blob and submits via migrationUpload', async () => {
+  renderPage()
+  await screen.findByText('0002_add_index')
+  fireEvent.click(screen.getByRole('button', { name: '+ New migration' }))
+  const dialog = await screen.findByRole('dialog')
+
+  // Switch to Compose mode.
+  fireEvent.click(within(dialog).getByTestId('migration-mode-compose'))
+
+  // Fill the migration name and the inline body.
+  const nameInput = within(dialog).getByLabelText('Name') as HTMLInputElement
+  fireEvent.change(nameInput, { target: { value: '0003_inline' } })
+  const body = within(dialog).getByTestId(
+    'migration-compose-body'
+  ) as HTMLTextAreaElement
+  fireEvent.change(body, {
+    target: { value: 'CREATE INDEX ON :Person(name);' },
+  })
+
+  // Submit -> upload synthesised blob, then postMigrations.
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }))
+  await waitFor(() => {
+    expect(migrationUpload).toHaveBeenCalledTimes(1)
+  })
+  const callArg = migrationUpload.mock.calls[0]?.[0] as {
+    file: { filename: string }
+  }
+  expect(callArg.file.filename).toBe('0003_inline.gql')
+  await waitFor(() => {
+    expect(postMigrations).toHaveBeenCalledWith({
+      name: '0003_inline',
+      description: '',
+    })
+  })
+})
+
 test('error-envelope: an upload_failed HTTPError from migrationUpload renders in role="alert"', async () => {
   migrationUpload.mockRejectedValue(
     new HTTPError(400, '{"error":{"code":"migration_upload_failed"}}')
