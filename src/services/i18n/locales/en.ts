@@ -75,12 +75,22 @@ export const en = {
   auth: {
     signIn: 'Sign in',
     signInButton: 'Sign in',
-    profile: 'Profile',
-    profileList: 'Available profiles',
+    // GAP-054: "Profile" was the original label for connection bundles
+    // (DSN + saved-username + TLS bundle + default flag), but the
+    // noun is ambiguous — first-time DBAs from psql / DataGrip / pgcli
+    // contexts reach for it expecting an account or a preferences pack.
+    // The user-facing copy now says "Connection" everywhere this matters
+    // most (the login picker is the very first introduction). The
+    // i18n KEYS keep their original names — they're internal and a
+    // mass-rename would churn every locale + test for no user gain.
+    // Internal types (`Profile`, `profilestore`) stay; see
+    // docs/CONNECTIONS_VS_PROFILES.md for the seam.
+    profile: 'Connection',
+    profileList: 'Available connections',
     username: 'Username',
     password: 'Password',
     loginFailed: 'login failed',
-    savePassword: 'Save password for this profile',
+    savePassword: 'Save password for this connection',
     // PSR-F14 (#111): explicit opt-in to fetching a previously saved
     // password from the secure store. Pre-fix the renderer auto-fired
     // getStoredPassword on every keystroke; the gate avoids that
