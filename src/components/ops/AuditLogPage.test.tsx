@@ -240,3 +240,133 @@ test('GAP-audit: user filter input has a deduplicated datalist of seen users', a
   )
   expect(options).toEqual(['alice', 'bob'])
 })
+
+// Bug: the user column is empty for audit events whose wire payload
+// puts the actor identifier under a key OTHER than "user" or
+// "username", or for system-level events that legitimately have no
+// actor (e.g. access_token_query fires from middleware before auth
+// context is set). The previous pickFieldFromFields() only looked at
+// ['user', 'username'] which is too narrow:
+//
+//   - handlers_auth.go's `auth_role_resolved` row emits `sub: <user>`.
+//   - handlers_profiles_crud.go's profile events emit `actor: <user>`.
+//   - security_headers.go's `access_token_query` emits NO actor at
+//     all — it's a system event and should render as "system" rather
+//     than a blank cell that looks like a missing data field.
+describe('audit user column resolves sub/actor and falls back to system', () => {
+  function renderWith(entries: unknown[]): void {
+    auditMock.mockResolvedValueOnce({ entries })
+    render(
+      <MemoryRouter>
+        <LocalizationProvider>
+          <ThemeProvider theme={theme}>
+            <AuditLogPage />
+          </ThemeProvider>
+        </LocalizationProvider>
+      </MemoryRouter>
+    )
+  }
+
+  test('auth_role_resolved (fields.sub) renders the sub identifier in the User column', async () => {
+    renderWith([
+      {
+        timestamp: '2025-01-01T00:00:00Z',
+        event: 'auth_role_resolved',
+        fields: { sub: 'carol', role: 'admin', source: 'bootstrap' },
+      },
+    ])
+    await waitFor(() => {
+      expect(screen.getByText('auth_role_resolved')).toBeInTheDocument()
+    })
+    // The User column must surface "carol" -- the sub is the subject of
+    // the JWT that triggered the role resolution, i.e. the operator we
+    // want to attribute the event to.
+    const rows = screen.getAllByRole('row')
+    const dataRow = rows[1]
+    expect(dataRow).toHaveTextContent('carol')
+  })
+
+  test('profile event (fields.actor) renders the actor identifier in the User column', async () => {
+    renderWith([
+      {
+        timestamp: '2025-01-01T00:00:00Z',
+        event: 'profile_created',
+        fields: { actor: 'dave', profile_id: 'p-1' },
+      },
+    ])
+    await waitFor(() => {
+      expect(screen.getByText('profile_created')).toBeInTheDocument()
+    })
+    const rows = screen.getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('dave')
+  })
+
+  test('access_token_query (no actor) renders "system" in the User column', async () => {
+    // security_headers.go emits this from middleware that runs before
+    // any auth context exists. There is no real actor; default to a
+    // visible "system" sentinel so the operator can tell at a glance
+    // that the blank cell isn't a UI bug -- it's a system-initiated
+    // event with no user attached.
+    renderWith([
+      {
+        timestamp: '2025-01-01T00:00:00Z',
+        event: 'access_token_query',
+        fields: { path: '/api/v1/auth/me', user_agent: 'curl/8' },
+      },
+    ])
+    await waitFor(() => {
+      expect(screen.getByText('access_token_query')).toBeInTheDocument()
+    })
+    const rows = screen.getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('system')
+  })
+
+  test('entry with no fields at all renders "system" in the User column', async () => {
+    renderWith([
+      {
+        timestamp: '2025-01-01T00:00:00Z',
+        event: 'mysterious_event',
+      },
+    ])
+    await waitFor(() => {
+      expect(screen.getByText('mysterious_event')).toBeInTheDocument()
+    })
+    const rows = screen.getAllByRole('row')
+    expect(rows[1]).toHaveTextContent('system')
+  })
+
+  test('user-filter datalist surfaces sub/actor/system values too', async () => {
+    auditMock.mockResolvedValueOnce({
+      entries: [
+        { event: 'login_success', fields: { user: 'alice' } },
+        { event: 'auth_role_resolved', fields: { sub: 'carol' } },
+        { event: 'profile_updated', fields: { actor: 'dave' } },
+        { event: 'access_token_query', fields: { path: '/x' } },
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <LocalizationProvider>
+          <ThemeProvider theme={theme}>
+            <AuditLogPage />
+          </ThemeProvider>
+        </LocalizationProvider>
+      </MemoryRouter>
+    )
+    await waitFor(() => {
+      expect(screen.getByText('login_success')).toBeInTheDocument()
+    })
+    const input = screen.getByLabelText(/User/i) as HTMLInputElement
+    const list = document.getElementById(input.getAttribute('list')!)
+    const values = Array.from(list?.querySelectorAll('option') ?? []).map(
+      (o) => (o as HTMLOptionElement).value
+    )
+    // The order matches first-seen-wins (insertion order from
+    // useUniqueValues); "system" appears for the access_token_query
+    // row because it had no actor identifier.
+    expect(values).toContain('alice')
+    expect(values).toContain('carol')
+    expect(values).toContain('dave')
+    expect(values).toContain('system')
+  })
+})

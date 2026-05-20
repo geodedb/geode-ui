@@ -77,8 +77,39 @@ const pickFieldFromFields = (e: AuditEntry, names: string[]): string => {
   if (!e.fields) return ''
   const found = names
     .map((n) => e.fields?.[n])
-    .find((v) => typeof v === 'string') as string | undefined
+    .find((v) => typeof v === 'string' && v.length > 0) as string | undefined
   return found ?? ''
+}
+
+// AUDIT_USER_KEYS lists every field name an emitAudit() call in the
+// Geode server uses for the actor identifier, in the order we want to
+// surface them. The server isn't consistent (history: SEC #300 added
+// `sub` for JWT-driven events, the profile CRUD handlers use `actor`
+// for cross-tenant operations, and most other handlers use `user`).
+// Until the upstream emit calls are normalised, the UI resolves
+// across all three so the User column never blanks out for events
+// whose payload IS attributed but under a different key.
+//
+// Source map (internal/server):
+//   - handlers_query.go, handlers_tx.go, handlers_grants.go,
+//     handlers_roles.go, handlers_policies.go, handlers_migrations.go,
+//     handlers_backups.go            → "user"
+//   - handlers_auth.go (auth_role_resolved, refresh, etc.)     → "sub"
+//   - handlers_profiles_crud.go (profile_created/_updated/_deleted) → "actor"
+const AUDIT_USER_KEYS = ['user', 'username', 'sub', 'actor'] as const
+
+// SYSTEM_ACTOR is the sentinel rendered when an audit entry truly has
+// no human actor attached. The middleware emitter for
+// `access_token_query` runs BEFORE any auth context is set, so the
+// payload carries `path` + `user_agent` but no user — "system" makes
+// the row attributable at a glance instead of looking like a UI bug.
+const SYSTEM_ACTOR = 'system'
+
+function resolveAuditUser(e: AuditEntry): string {
+  return (
+    pickFieldFromFields(e, AUDIT_USER_KEYS as unknown as string[]) ||
+    SYSTEM_ACTOR
+  )
 }
 
 export const AuditLogPage: React.FC = () => {
@@ -134,11 +165,12 @@ export const AuditLogPage: React.FC = () => {
   const entries = data ?? []
 
   const eventOptions = useUniqueValues(entries, (e) => e.event)
-  const userOptions = useUniqueValues(entries, (e) => {
-    return typeof e.fields?.user === 'string'
-      ? (e.fields.user as string)
-      : undefined
-  })
+  // Drive the user-filter datalist off the same resolver the User
+  // column uses so a search for "system" actually narrows the table
+  // to system-emitted events, and "carol" matches the sub on a JWT
+  // event. Otherwise the filter would propose only the "user"-keyed
+  // names and the operator couldn't find their own system rows.
+  const userOptions = useUniqueValues(entries, (e) => resolveAuditUser(e))
   const sinceOptions = useUniqueValues(entries, (e) => e.timestamp)
 
   useEffect(() => {
@@ -178,7 +210,7 @@ export const AuditLogPage: React.FC = () => {
       entries.map((e, i) => ({
         key: i,
         ts: formatAuditTimestamp(e.timestamp),
-        user: pickFieldFromFields(e, ['user', 'username']),
+        user: resolveAuditUser(e),
         event: e.event ?? '',
         fields: e.fields,
         raw: e,
