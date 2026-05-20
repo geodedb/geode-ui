@@ -175,6 +175,43 @@ test('F8: cached graphs do not refetch on re-select', async () => {
   expect(constraintsCallArgs.length).toBe(alphaCallCount)
 })
 
+// GAP-055: dashboard cards now deep-link via /schema?graph=<name>. The
+// explorer must honour the URL preselect on mount instead of forcing
+// the first server-returned graph; otherwise the dashboard click looks
+// inert (lands on /schema but stuck on graph[0]).
+test('GAP-055: ?graph= preselects the matching graph on mount', async () => {
+  render(
+    <ThemeProvider theme={theme}>
+      <MemoryRouter initialEntries={['/schema?graph=beta']}>
+        <SchemaExplorer cache={createSchemaExplorerCache()} />
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+  await waitFor(() => {
+    // The picker fires labels() once per active-graph change; we lean
+    // on indexes() calls instead because they are predictable wire
+    // calls captured by the mock. The first call must be for beta,
+    // not the first-server-returned alpha.
+    expect(indexesCallArgs[0]?.graph).toBe('beta')
+  })
+})
+
+// Defensive: a stale URL pointing at a graph the server no longer
+// serves must fall through to the first-graph auto-select rather than
+// leaving the panes empty.
+test('GAP-055: ?graph= falls through when the named graph is missing', async () => {
+  render(
+    <ThemeProvider theme={theme}>
+      <MemoryRouter initialEntries={['/schema?graph=ghost']}>
+        <SchemaExplorer cache={createSchemaExplorerCache()} />
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+  await waitFor(() => {
+    expect(indexesCallArgs[0]?.graph).toBe('alpha')
+  })
+})
+
 test('F8: cache LRU eviction respects maxEntries', () => {
   const cache = createSchemaExplorerCache(3)
   cache.put('a', { indexes: [], constraints: [] })

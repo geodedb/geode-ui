@@ -244,6 +244,7 @@ export const en = {
     title: 'Overview',
     graphsTitle: 'Graphs ({{count}})',
     graphsEmpty: 'No graphs.',
+    graphsOpenAria: 'Open schema for {{name}}',
     recentTitle: 'Session query history',
     recentEmpty: 'No queries yet — run one on the Query page.',
     recentFailed: 'failed',

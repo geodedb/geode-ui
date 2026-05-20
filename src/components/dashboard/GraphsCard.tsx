@@ -1,5 +1,6 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router-dom'
 
 import { Card } from './Card'
 
@@ -50,7 +51,18 @@ export const GraphsCard: React.FC<GraphsCardProps> = ({
         >
           {graphs.map((g) => (
             <li key={g} className="text-body" style={{ fontSize: '14px' }}>
-              {g}
+              {/* GAP-055: each graph name deep-links into /schema?graph=…
+                  so the dashboard card behaves as the navigation surface
+                  the user expects. SchemaExplorer reads the query param
+                  on mount and skips its first-graph auto-select. */}
+              <Link
+                to={`/schema?graph=${encodeURIComponent(g)}`}
+                className="link-body-emphasis"
+                aria-label={t('dashboard.graphsOpenAria', { name: g })}
+                data-testid="dashboard-graphs-link"
+              >
+                {g}
+              </Link>
             </li>
           ))}
         </ul>

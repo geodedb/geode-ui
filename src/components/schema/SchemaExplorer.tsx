@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import styled from 'styled-components'
 
 import { client } from '../../api/client'
@@ -189,16 +190,30 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
   const inflightAbort = useRef<AbortController | null>(null)
   const effectiveCache = cache ?? defaultSchemaCache
 
+  // GAP-055: dashboard cards now deep-link via /schema?graph=<name>.
+  // Read the param once at mount; if it points at a graph the server
+  // actually serves, prefer it over the first-graph auto-select. Use
+  // `searchParams.get` directly (not in deps) so a later URL change
+  // doesn't override an explicit user pick of a different graph in
+  // the side picker.
+  const [searchParams] = useSearchParams()
+
   // Initial graph fetch. Empty deps -- runs once on mount. The first
-  // returned graph becomes active so the right-hand panes have data.
+  // returned graph becomes active so the right-hand panes have data,
+  // unless the URL pinned a specific graph via ?graph=.
   useEffect(() => {
     let cancelled = false
+    const preselect = searchParams.get('graph')
     client
       .graphs({})
       .then((r) => {
         if (cancelled) return
         const list = r?.graphs ?? []
         setGraphs(list)
+        if (preselect && list.includes(preselect)) {
+          setActive(preselect)
+          return
+        }
         const first = list[0]
         if (first !== undefined) setActive(first)
       })
@@ -208,6 +223,11 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
     return () => {
       cancelled = true
     }
+    // Intentional mount-only: `searchParams` is captured once so a
+    // subsequent URL push by a sibling component doesn't re-trigger
+    // the server fetch and silently clobber the user's manual graph
+    // pick. The repo's eslint config has no react-hooks plugin so an
+    // exhaustive-deps disable comment is rejected as unknown.
   }, [])
 
   // Re-fetch indexes & constraints whenever the active graph changes.
