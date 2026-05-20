@@ -200,6 +200,7 @@ export const BackupPage: React.FC = () => {
         destructive
         loading={deleting}
         confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
         onConfirm={onDelete}
         onClose={() => setConfirmDelete(null)}
       />
@@ -248,6 +249,7 @@ const CreateBackupModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       onClose={onClose}
       title={t('backups.createTitle')}
       footer={modalFooter}
+      closeLabel={t('common.closeDialog')}
     >
       <form
         id="create-backup-form"

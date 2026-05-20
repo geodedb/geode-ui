@@ -142,6 +142,7 @@ export const RolesPage: React.FC = () => {
         destructive
         loading={page.deleting}
         confirmLabel={t('roles.deleteConfirm')}
+        cancelLabel={t('common.cancel')}
         onConfirm={page.onDelete}
         onClose={page.closeConfirm}
       />
@@ -223,6 +224,7 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       onClose={onClose}
       title={t('roles.createTitle')}
       footer={modalFooter}
+      closeLabel={t('common.closeDialog')}
     >
       <form
         id="create-role-form"

@@ -16,7 +16,6 @@ export const en = {
   common: {
     cancel: 'Cancel',
     delete: 'Delete',
-    confirm: 'Confirm',
     create: 'Create',
     apply: 'Apply',
     revoke: 'Revoke',

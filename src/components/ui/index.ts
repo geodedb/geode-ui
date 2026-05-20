@@ -31,8 +31,8 @@ export type { DedupedDatalistProps } from '@geodedb/ui-core'
 
 export { DataTable, TableScroll, EmptyCell } from '@geodedb/ui-core'
 
-export { Modal, ConfirmModal } from './Modal'
-export type { ModalProps, ConfirmModalProps } from './Modal'
+export { Modal, ConfirmModal } from '@geodedb/ui-core'
+export type { ModalProps, ConfirmModalProps } from '@geodedb/ui-core'
 
 export { Icon } from '@geodedb/ui-core'
 export type { IconProps, IconStyle } from '@geodedb/ui-core'

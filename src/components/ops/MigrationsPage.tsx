@@ -364,6 +364,7 @@ const CreateMigrationModal: React.FC<{ onClose: () => void }> = ({
       onClose={onClose}
       title={t('migrations.createTitle')}
       footer={modalFooter}
+      closeLabel={t('common.closeDialog')}
     >
       <form
         id="create-migration-form"

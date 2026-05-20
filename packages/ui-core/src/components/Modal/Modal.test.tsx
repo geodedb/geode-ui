@@ -55,6 +55,26 @@ test('clicking the backdrop closes the modal', () => {
   expect(onClose).toHaveBeenCalledTimes(1)
 })
 
+test('close button has accessible name from closeLabel prop', () => {
+  const onClose = jest.fn()
+  wrap(
+    <Modal open onClose={onClose} title="X" closeLabel="Dismiss">
+      body
+    </Modal>
+  )
+  expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
+})
+
+test('close button defaults to "Close" accessible name', () => {
+  const onClose = jest.fn()
+  wrap(
+    <Modal open onClose={onClose} title="X">
+      body
+    </Modal>
+  )
+  expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+})
+
 test('ConfirmModal wires confirm/cancel buttons', () => {
   const onConfirm = jest.fn()
   const onClose = jest.fn()
@@ -71,4 +91,22 @@ test('ConfirmModal wires confirm/cancel buttons', () => {
   expect(onClose).toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
   expect(onConfirm).toHaveBeenCalled()
+})
+
+test('ConfirmModal uses custom confirmLabel and cancelLabel', () => {
+  const onConfirm = jest.fn()
+  const onClose = jest.fn()
+  wrap(
+    <ConfirmModal
+      open
+      title="Delete?"
+      body="permanent"
+      confirmLabel="Delete"
+      cancelLabel="Keep"
+      onConfirm={onConfirm}
+      onClose={onClose}
+    />
+  )
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Keep' })).toBeInTheDocument()
 })

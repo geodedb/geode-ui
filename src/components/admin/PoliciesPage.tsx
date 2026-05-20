@@ -124,6 +124,7 @@ export const PoliciesPage: React.FC = () => {
         destructive
         loading={page.deleting}
         confirmLabel={t('policies.deleteConfirm')}
+        cancelLabel={t('common.cancel')}
         onConfirm={page.onDelete}
         onClose={page.closeConfirm}
       />
@@ -202,6 +203,7 @@ const CreatePolicyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       onClose={onClose}
       title={t('policies.createTitle')}
       footer={modalFooter}
+      closeLabel={t('common.closeDialog')}
     >
       <form
         id="create-policy-form"

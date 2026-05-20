@@ -171,6 +171,7 @@ export const UsersPage: React.FC = () => {
         destructive
         loading={page.deleting}
         confirmLabel={t('users.deleteConfirm')}
+        cancelLabel={t('common.cancel')}
         onConfirm={page.onDelete}
         onClose={page.closeConfirm}
       />
@@ -293,6 +294,7 @@ const CreateUserModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       onClose={onClose}
       title={t('users.createTitle')}
       footer={modalFooter}
+      closeLabel={t('common.closeDialog')}
     >
       <form
         id="create-user-form"

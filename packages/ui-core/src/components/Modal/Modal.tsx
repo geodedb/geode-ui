@@ -1,9 +1,9 @@
 import React from 'react'
-import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 import { createPortal } from 'react-dom'
 
-import { Icon, Button } from '@geodedb/ui-core'
+import { Icon } from '../Icon'
+import { Button } from '../Button'
 
 export interface ModalProps {
   open: boolean
@@ -17,6 +17,8 @@ export interface ModalProps {
   // returns to this element on close. Defaults to document.activeElement
   // at the time of opening.
   initialFocusRef?: React.RefObject<HTMLElement>
+  /** Accessible label for the close (×) button. Defaults to "Close". */
+  closeLabel?: string
 }
 
 const Backdrop = styled.div`
@@ -140,8 +142,8 @@ export const Modal: React.FC<ModalProps> = ({
   size = 'md',
   initialFocusRef,
   children,
+  closeLabel = 'Close',
 }) => {
-  const { t } = useTranslation()
   const dialogRef = React.useRef<HTMLDivElement>(null)
   const lastFocusedRef = React.useRef<HTMLElement | null>(null)
 
@@ -213,10 +215,10 @@ export const Modal: React.FC<ModalProps> = ({
           </TitleBlock>
           <CloseBtn
             type="button"
-            aria-label={t('common.closeDialog')}
+            aria-label={closeLabel}
             onClick={onClose}
           >
-            <Icon name="xmark" label={t('common.closeDialog')} />
+            <Icon name="xmark" label={closeLabel} />
           </CloseBtn>
         </header>
         <div className="p-4" style={{ overflowY: 'auto' }}>
@@ -239,7 +241,9 @@ export interface ConfirmModalProps {
   open: boolean
   title: React.ReactNode
   body: React.ReactNode
+  /** Confirm button label. Defaults to "Confirm". */
   confirmLabel?: string
+  /** Cancel button label. Defaults to "Cancel". */
   cancelLabel?: string
   destructive?: boolean
   loading?: boolean
@@ -251,25 +255,24 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   open,
   title,
   body,
-  confirmLabel,
-  cancelLabel,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
   destructive,
   loading,
   onConfirm,
   onClose,
 }) => {
-  const { t } = useTranslation()
   const footer = (
     <>
       <Button variant="ghost" onClick={onClose} disabled={loading}>
-        {cancelLabel ?? t('common.cancel')}
+        {cancelLabel}
       </Button>
       <Button
         variant={destructive ? 'danger' : 'primary'}
         onClick={onConfirm}
         loading={loading}
       >
-        {confirmLabel ?? t('common.confirm')}
+        {confirmLabel}
       </Button>
     </>
   )
