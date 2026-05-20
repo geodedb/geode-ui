@@ -167,3 +167,44 @@ key (e.g. created between Step 1 and Step 3) passes through unchanged.
 |---|---|---|
 | `profile store rewrap: decode legacy key` | `-profilestore-rewrap-from` was malformed | re-pass the OLD key as base64-encoded 32 bytes |
 | `profile store rewrap: cipher mismatch` | a row in the DB was not sealed under the supplied OLD key | restore from the pre-rotation snapshot, audit which row drifted, and re-run |
+
+---
+
+## Geode metrics dashboard
+
+The Dashboard page surfaces the upstream geode database's Prometheus
+metrics when the operator enables the metrics listener on the geode
+server AND points geode-ui at it. When either is missing the metric
+cards drop out of the grid entirely — there is no broken/half-rendered
+state.
+
+### Configuration
+
+Two environment variables wire the data path:
+
+| Service  | Env var              | Value                              | Effect |
+|----------|----------------------|------------------------------------|--------|
+| `geode`  | `GEODE_METRICS_PORT` | `9090` (or any free port)          | Starts the geode prometheus HTTP listener on the named port. |
+| `geode-ui` | `GEODE_METRICS_URL` | `http://geode:9090/metrics`        | Tells the proxy where to scrape. Empty disables `/api/v1/metrics` (the SPA hides the cards). |
+
+The `deploy/docker-compose.test.yml` stack already wires both for the
+Playwright suite — see `37-dashboard-metrics.spec.ts`.
+
+### What each card shows
+
+| Card | Source families | Notes |
+|---|---|---|
+| Query throughput | `geode_queries_total` (per-second derivative for the sparkline), `geode_queries_failed_total`, `geode_query_duration_seconds` (histogram, p95 via linear interpolation) | The "p95 latency" badge degrades to "—" when the histogram has fewer than two non-empty buckets. |
+| Connections | `geode_connections_active` (live gauge), `geode_connections_total` | Sparkline shows the last 5 minutes of `active`. |
+| Storage | `geode_nodes_total`, `geode_edges_total`, `geode_memory_bytes` | Memory is humanised (KB / MB / GB / TB). |
+| Server | `geode_server_uptime`, `geode_server_health{component=server}`, `geode_transactions_total` | Health pill flips red when `healthy != 1`. |
+
+### Troubleshooting
+
+| Symptom | Probable cause | Fix |
+|---|---|---|
+| Cards do not render | `GEODE_METRICS_URL` is empty on the `geode-ui` server. | Set the env var and restart. |
+| 503 `METRICS_DISABLED` in browser devtools | Same as above — explicit "feature off" signal. | As above. |
+| 502 `METRICS_UPSTREAM` | `geode-ui` can reach the URL but the upstream is down or non-200. | Verify `geode` is running with `GEODE_METRICS_PORT` set; `curl http://geode:9090/metrics` from inside the geode-ui container. |
+| 502 `METRICS_PARSE_ERROR` | An upstream geode update broke the prom-text shape. | Capture a fresh `/metrics` sample, compare against `internal/server/testdata/prom-geode-sample.txt`, file an upstream issue. |
+| Cards render with `—` everywhere | Polling hook hasn't received a sample yet, OR the upstream returned 200 but with no `geode_*` families (geode build was compiled without the monitoring module). | Wait 5s for the next poll; if persistent, run `geode --version` and confirm v0.5.19+. |

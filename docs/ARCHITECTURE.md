@@ -227,3 +227,41 @@ git add bench-baseline.txt && git commit
 `Observability.EnableDebug` is set; they are not exposed in the production
 configuration. Profiling in prod therefore requires an explicit opt-in, not a
 default-on endpoint.
+
+### Geode metrics proxy
+
+`GET /api/v1/metrics` is a JWT-gated proxy fronting the upstream
+`http://<geode>:<GEODE_METRICS_PORT>/metrics` endpoint:
+
+```text
+SPA (DashboardPage)
+  └─ useMetricsPolling() — 5s poll, 5-minute history ring
+       └─ fetchMetrics() (src/api/metrics.ts)
+            └─ geode-ui /api/v1/metrics (auth chain)
+                 └─ HandleMetrics (internal/server/handlers_metrics.go)
+                      ├─ http.Get(cfg.MetricsURL, 2s timeout)
+                      ├─ ParseProm (internal/server/promparse.go, stdlib)
+                      └─ projectSnapshot → typed MetricsSnapshot JSON
+```
+
+Decisions:
+
+- The parser is hand-rolled (≈280 LoC, stdlib only) rather than
+  `github.com/prometheus/common/expfmt` (a ≈2 MB transitive blob).
+  Supports counter, gauge, histogram only — sufficient for every
+  family the upstream emits today.
+- The proxy projects per-family scalars into a typed
+  `MetricsSnapshot` so the SPA never sees free-form
+  `MetricFamily[]`; a renamed upstream metric is a Go compile
+  error, not a SPA-runtime parse failure.
+- The route is registered directly on the `mux` (not via genapi)
+  because adding a single endpoint isn't worth the
+  regenerate-all-clients cost. When metrics joins genapi.json this
+  can collapse into the generated surface without changing the
+  wire shape.
+- Capability flagging is implicit: the SPA's first fetch either
+  returns 200 (cards render) or 503 `METRICS_DISABLED` (cards drop
+  out, polling stops). No separate `metrics_enabled` field on
+  `/capabilities` — the runtime probe is more truthful since it
+  also catches the "GEODE_METRICS_URL set but server is down"
+  branch.

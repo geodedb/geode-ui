@@ -53,11 +53,21 @@ services:
     - 0.0.0.0:3141
     - --log-level
     - info
+    environment:
+      # Enables the upstream geode Prometheus /metrics listener on
+      # port 9090 (src/monitoring/metrics_server.zig). The geode-ui
+      # container scrapes this via GEODE_METRICS_URL below so the
+      # Dashboard metrics cards can render real data in the e2e stack.
+      GEODE_METRICS_PORT: '9090'
     volumes:
     - geode-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
     ports:
     - 3141:3141/udp
+    # Expose the prometheus listener so a host-side curl can grab
+    # /metrics for ad-hoc debugging; the Playwright spec drives it
+    # through the geode-ui proxy at /api/v1/metrics instead.
+    - 9090:9090/tcp
     # The wire is up well before any password rotation has happened, so
     # we cannot use a normal `geode query 'RETURN 1'` probe — pre-
     # rotation, every authenticated query rejects with status_class=08P01
@@ -127,6 +137,12 @@ services:
       # `deploy/.env.test` (gitignored) on first run; `make e2e-up`
       # loads it via `--env-file`.
       GEODE_PROFILESTORE_KEY: ${GEODE_PROFILESTORE_KEY:?GEODE_PROFILESTORE_KEY must be set; run `make e2e-env` to generate deploy/.env.test or export your own (base64 of 32 random bytes; `openssl rand -base64 32`)}
+      # Scrape target for the dashboard metrics proxy. Must match the
+      # GEODE_METRICS_PORT exposed on the geode service above. Empty
+      # disables the /api/v1/metrics route (the Dashboard cards drop
+      # out of the grid), but for the e2e suite we want them ON so
+      # 22-dashboard-metrics.spec.ts can assert real values.
+      GEODE_METRICS_URL: http://geode:9090/metrics
     command:
     - -listen
     - :8080
