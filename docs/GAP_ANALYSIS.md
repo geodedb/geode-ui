@@ -730,25 +730,36 @@ A `/codepros:gap-close` cohort on 2026-05-19 closed **10 GitLab issues** (9 full
 
 ## Cohort: 2026-05-19 manual UX walkthrough (GAP-046..GAP-058)
 
+> **Closure status (2026-05-20):** Tier 1+2 of this cohort closed via
+> `/codepros:gap-close` — 10 of 18 items now **Closed** (GAP-046, 047,
+> 048, 049, 054, 055, 056, 057, 058, 059). Tier 3 (GAP-050 RBAC, 051
+> Backups/Restore, 052 Migrations compose, 053 Migrations down/target)
+> and Tier 4 (GAP-060 visual editor, 061 docs viewer, 062 GQL+ spec
+> library, 063 snippets) are deferred to follow-up cohorts because
+> each is multi-day feature work. GAP-053 is additionally
+> `blocked-on-upstream-Geode` until the `down`/`target` wire op
+> lands. All closures sit on top of the existing Tier 2 + electron
+> commits in this push.
+
 A walkthrough of the running app on 2026-05-19 (HEAD `6a3ee78`, geode-ui packaged against geode v0.5.19) surfaced **13 UX/feature gaps** that the automated detector did not catch. They are correctness, terminology, navigability, and design-language issues that only show up when a human actually drives the UI through the dashboard → schema-explorer → query → admin → ops loops. All 13 are filed here in detail; GitLab issue creation is deferred to the next `/codepros:gap-close` round so closure work and tracker creation land together.
 
 ### Summary
 
 | Gap-ID  | Title | Severity | Area | Status |
 |---------|-------|----------|------|--------|
-| GAP-046 | Duplicate connections allowed (re-connecting same profile stacks `connectionId`s) | Medium | Connections / Auth | Open |
-| GAP-047 | Hot-key glyphs hard-coded to ⌘/⇧ (presumes macOS for every viewer) | Medium | A11y / I18n / UX | Open |
-| GAP-048 | `dashboard.recentQueries` label is misleading — store is per-device session, not cross-session | Low | UX / Naming | Open |
-| GAP-049 | Staging from schema explorer carries prior `resp` into the new query pane | Medium | UX / Query | Open |
-| GAP-050 | RBAC integration state ambiguous — Policies disabled-vs-missing-vs-unsupported is invisible | High | Security / UX | Open |
-| GAP-051 | Backups + Restore live in two unrelated tabs with divergent design language | Medium | Design / UX | Open |
-| GAP-052 | Migrations "New Migration" is upload-only — no inline editor / save path | Medium | Feature / UX | Open |
-| GAP-053 | Migrations can only run forward — no `down`, no targeted apply-to-version | High | Feature / Ops | Open |
-| GAP-054 | "Profile" terminology is ambiguous — user / persona / preset / connection-bundle? | Low | Docs / UX | Open |
-| GAP-055 | Dashboard `GraphsCard` lists graphs as plain text — names are not clickable | Medium | Navigability / UX | Open |
-| GAP-056 | Schema explorer renders an empty body for ~hundreds of ms on graph switch | Medium | Perf / UX | Open |
-| GAP-057 | Edge-staged queries (`MATCH ()-[r:T]->() RETURN r`) render endpoint nodes as `#<id>` instead of type label | Medium | Graph / UX | Open |
-| GAP-058 | Focusing a placeholder node in the edge-view collapses it to a thin vertical oval | Medium | Graph / Visual | Open |
+| GAP-046 | Duplicate connections allowed (re-connecting same profile stacks `connectionId`s) | Medium | Connections / Auth | **Closed** (`5e8f8b2`) |
+| GAP-047 | Hot-key glyphs hard-coded to ⌘/⇧ (presumes macOS for every viewer) | Medium | A11y / I18n / UX | **Closed** (`4d05a4b`) |
+| GAP-048 | `dashboard.recentQueries` label is misleading — store is per-device session, not cross-session | Low | UX / Naming | **Closed** (`bdc3db6`) |
+| GAP-049 | Staging from schema explorer carries prior `resp` into the new query pane | Medium | UX / Query | **Closed** (`8887d61`) |
+| GAP-050 | RBAC integration state ambiguous — Policies disabled-vs-missing-vs-unsupported is invisible | High | Security / UX | Open (Tier 3 — deferred to a follow-up cohort with capabilities slice + admin-shell gate) |
+| GAP-051 | Backups + Restore live in two unrelated tabs with divergent design language | Medium | Design / UX | Open (Tier 3 — deferred) |
+| GAP-052 | Migrations "New Migration" is upload-only — no inline editor / save path | Medium | Feature / UX | Open (Tier 3 — deferred) |
+| GAP-053 | Migrations can only run forward — no `down`, no targeted apply-to-version | High | Feature / Ops | Open (Tier 3 — pending upstream Geode `down` / `target` wire op) |
+| GAP-054 | "Profile" terminology is ambiguous — user / persona / preset / connection-bundle? | Low | Docs / UX | **Closed** (`6bb4a5d`, `f14b5b4`) |
+| GAP-055 | Dashboard `GraphsCard` lists graphs as plain text — names are not clickable | Medium | Navigability / UX | **Closed** (`23fe692`) |
+| GAP-056 | Schema explorer renders an empty body for ~hundreds of ms on graph switch | Medium | Perf / UX | **Closed** (`3c3848a`) |
+| GAP-057 | Edge-staged queries (`MATCH ()-[r:T]->() RETURN r`) render endpoint nodes as `#<id>` instead of type label | Medium | Graph / UX | **Closed** (`01ea390`) |
+| GAP-058 | Focusing a placeholder node in the edge-view collapses it to a thin vertical oval | Medium | Graph / Visual | **Closed** (`cbabe78`) |
 
 ### Detailed records — GAP-046..GAP-058
 
@@ -1032,7 +1043,7 @@ A walkthrough of the running app on 2026-05-19 (HEAD `6a3ee78`, geode-ui package
 
 | Gap-ID  | Title | Severity | Area | Status |
 |---------|-------|----------|------|--------|
-| GAP-059 | Edges have no hover tooltip and edge clicks don't populate the inspector sidebar reliably | Medium | Graph / UX | Open |
+| GAP-059 | Edges have no hover tooltip and edge clicks don't populate the inspector sidebar reliably | Medium | Graph / UX | **Closed** (hover side — `a2e26b1`); click→inspector parity already landed in `085347c` / `a916783` |
 | GAP-060 | No visual query editor — only the text editor / Monaco surface; node-link drag-build absent | High | Feature / UX | Open |
 | GAP-061 | No in-app documentation view — `/docs/*` and `geode://` GQL+ reference are external/markdown-only | Medium | Docs / UX | Open |
 | GAP-062 | No Geode GQL+ spec library with per-subset docs + LSP-hover/completion deep-links | High | Docs / LSP / Feature | Open |
