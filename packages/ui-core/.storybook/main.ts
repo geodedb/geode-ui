@@ -35,17 +35,11 @@ const config: StorybookConfig = {
     webpackConfig.module = webpackConfig.module ?? { rules: [] }
     webpackConfig.module.rules = webpackConfig.module.rules ?? []
     webpackConfig.module.rules.push({
-      test: /\.[jt]sx?$/,
+      test: /\.(ts|tsx)$/,
       exclude: /node_modules/,
       use: {
         loader: 'babel-loader',
-        options: {
-          presets: [
-            ['@babel/preset-env', { targets: { browsers: ['last 2 versions'] } }],
-            ['@babel/preset-react', { runtime: 'automatic' }],
-            '@babel/preset-typescript',
-          ],
-        },
+        options: { configFile: true },
       },
     })
     return webpackConfig
