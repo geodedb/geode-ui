@@ -86,6 +86,8 @@ function categoryLabel(t: (k: string) => string, category: string): string {
       return t('docs.category.reference')
     case 'operations':
       return t('docs.category.operations')
+    case 'spec':
+      return t('docs.category.spec')
     default:
       return category
   }

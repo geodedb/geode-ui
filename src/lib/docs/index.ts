@@ -16,11 +16,18 @@ import electronMd from '../../../docs/ELECTRON.md'
 import operationsMd from '../../../docs/OPERATIONS.md'
 import connectionsVsProfilesMd from '../../../docs/CONNECTIONS_VS_PROFILES.md'
 import i18nMd from '../../../docs/I18N.md'
+// GAP-062: GQL+ spec pages — one per subset. The slugs (`gql-core`,
+// `gql-auth-ddl`, …) are referenced by the LSP-hover deep-link map at
+// src/lib/docs/gqlSpecIndex.ts.
+import gqlCoreMd from '../../../docs/gql-spec/core.md'
+import gqlAuthDdlMd from '../../../docs/gql-spec/auth-ddl.md'
+import gqlPoliciesMd from '../../../docs/gql-spec/policies.md'
+import gqlMigrationsMd from '../../../docs/gql-spec/migrations.md'
 
 export interface DocPage {
   slug: string
   title: string
-  category: 'concept' | 'reference' | 'operations'
+  category: 'concept' | 'reference' | 'operations' | 'spec'
   body: string
 }
 
@@ -54,6 +61,33 @@ export const DOC_PAGES: DocPage[] = [
     title: 'Internationalisation',
     category: 'reference',
     body: i18nMd as unknown as string,
+  },
+  // GAP-062: GQL+ spec library. Each entry's slug matches an anchor
+  // in src/lib/docs/gqlSpecIndex.ts so the LSP hover deep-link
+  // resolves to the right place.
+  {
+    slug: 'gql-core',
+    title: 'GQL+ — Core',
+    category: 'spec',
+    body: gqlCoreMd as unknown as string,
+  },
+  {
+    slug: 'gql-auth-ddl',
+    title: 'GQL+ — Auth DDL',
+    category: 'spec',
+    body: gqlAuthDdlMd as unknown as string,
+  },
+  {
+    slug: 'gql-policies',
+    title: 'GQL+ — Policies',
+    category: 'spec',
+    body: gqlPoliciesMd as unknown as string,
+  },
+  {
+    slug: 'gql-migrations',
+    title: 'GQL+ — Migrations',
+    category: 'spec',
+    body: gqlMigrationsMd as unknown as string,
   },
 ]
 

@@ -90,6 +90,7 @@ export const en = {
       concept: 'Concepts',
       reference: 'Reference',
       operations: 'Operations',
+      spec: 'GQL+ spec',
     },
     notFound: 'Documentation page "{{slug}}" not found.',
   },
