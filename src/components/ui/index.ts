@@ -35,4 +35,4 @@ export type { LogoProps } from './Logo'
 export { Icon } from './Icon'
 export type { IconProps, IconStyle } from './Icon'
 
-export { useUniqueValues } from './useUniqueValues'
+export { useUniqueValues } from '@geodedb/ui-core'

@@ -1,2 +1,3 @@
-// @geodedb/ui-core — entry barrel. Populated incrementally by extraction tasks.
-export const UI_CORE_VERSION = '0.1.0'
+// @geodedb/ui-core — entry barrel.
+export * from './hooks'
+export { UI_CORE_VERSION } from './version'
