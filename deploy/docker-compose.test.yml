@@ -59,6 +59,14 @@ services:
       # container scrapes this via GEODE_METRICS_URL below so the
       # Dashboard metrics cards can render real data in the e2e stack.
       GEODE_METRICS_PORT: '9090'
+      # SECURITY S10 default in upstream geode binds the metrics
+      # listener to 127.0.0.1 so a network scrape can't pull
+      # unauthenticated metrics. In the e2e compose the geode-ui
+      # sibling has to reach :9090 across the docker network, so
+      # rebind to 0.0.0.0. Production deployments should keep the
+      # default and front geode-ui's /api/v1/metrics with the JWT
+      # auth chain instead.
+      GEODE_METRICS_BIND: 0.0.0.0
     volumes:
     - geode-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
@@ -66,8 +74,12 @@ services:
     - 3141:3141/udp
     # Expose the prometheus listener so a host-side curl can grab
     # /metrics for ad-hoc debugging; the Playwright spec drives it
-    # through the geode-ui proxy at /api/v1/metrics instead.
-    - 9090:9090/tcp
+    # through the geode-ui proxy at /api/v1/metrics instead. The
+    # in-container port stays 9090 so GEODE_METRICS_URL on geode-ui
+    # never has to know about the host-side remap; we pick a host
+    # port well clear of the Prometheus / Pushgateway / Alertmanager
+    # default cluster (9090 / 9091 / 9092).
+    - 9093:9090/tcp
     # The wire is up well before any password rotation has happened, so
     # we cannot use a normal `geode query 'RETURN 1'` probe — pre-
     # rotation, every authenticated query rejects with status_class=08P01
