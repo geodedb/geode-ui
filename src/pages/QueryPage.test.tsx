@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import React from 'react'
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -156,6 +157,51 @@ describe('B4: QueryPage prefills the editor from ?statement=', () => {
         'MATCH (x) RETURN x'
       )
     )
+  })
+})
+
+// GAP-049: navigating from the schema explorer to QueryPage with a
+// freshly staged query must NOT carry over the previous run's resp /
+// err / submittedStmt. Pre-fix the result table from the prior query
+// stayed rendered under the new statement, which a hurried operator
+// could mis-read as the answer to the new question.
+describe('GAP-049: schema-staged navigation resets per-run state', () => {
+  test('staging a new statement clears resp / err / submittedStmt', async () => {
+    // Arrange: seed the page store as if a query had just run.
+    /* eslint-disable global-require */
+    const { useQueryStore } = require('../lib/queryStore') as {
+      useQueryStore: typeof import('../lib/queryStore').useQueryStore
+    }
+    /* eslint-enable global-require */
+    useQueryPageStore.setState({
+      resp: {
+        rows: [['stale-row']],
+        columns: ['c'],
+      } as unknown as import('../lib/queryPageStore').QueryPageState['resp'],
+      err: 'stale-error',
+      submittedStmt: 'MATCH (old) RETURN old',
+    })
+
+    // Act: mount the page, then stage a new statement (simulating the
+    // schema explorer's click → setStaged → navigate flow). The
+    // setStaged call propagates through the zustand subscription into a
+    // re-render → useEffect → setStmt/setResp chain, so wrap it in
+    // act() to keep React's update batching observable.
+    renderPage()
+    act(() => {
+      useQueryStore.getState().setStaged('MATCH (n:NewLabel) RETURN n')
+    })
+
+    // Assert: the staged effect copied the statement AND cleared the
+    // stale per-run fields. Use waitFor because the effect runs after
+    // mount; the assertion races the React effect queue.
+    await waitFor(() => {
+      const s = useQueryPageStore.getState()
+      expect(s.resp).toBeNull()
+      expect(s.err).toBeNull()
+      expect(s.submittedStmt).toBe('')
+      expect(s.stmt).toBe('MATCH (n:NewLabel) RETURN n')
+    })
   })
 })
 

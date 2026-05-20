@@ -236,10 +236,25 @@ export const QueryPage: React.FC = () => {
   // navigates here. Pull it once on mount, copy it into local editor
   // state, and clear the slot so a later route change doesn't replay
   // the same query.
+  //
+  // GAP-049: a staged query is a brand-new question. Pre-fix the
+  // previous run's `resp` / `err` / `submittedStmt` stayed visible
+  // under the freshly-installed statement, so the user could mis-read
+  // the stale result table as the answer to the new query. Clear the
+  // per-run state alongside the statement copy so the result pane
+  // paints blank until the user actively runs the new statement.
   const staged = useQueryStore((s) => s.stagedStatement)
   const clearStaged = useQueryStore((s) => s.setStaged)
   useEffect(() => {
     if (staged != null) {
+      // Clear leftover state from the previous query BEFORE installing
+      // the new statement so there is no render frame in which the old
+      // resp pairs visually with the new editor body. `submittedStmt`
+      // is `string` (not `string | null`); '' is the no-submission
+      // sentinel checked by ResultPanel / GraphView.
+      setResp(null)
+      setErr(null)
+      setSubmittedStmt('')
       setStmt(staged)
       clearStaged(null)
       // Queries staged from the schema explorer arrive as a single line
@@ -252,7 +267,15 @@ export const QueryPage: React.FC = () => {
         editorRef.current?.requestFormatWhenReady()
       }
     }
-  }, [staged, clearStaged, autoFormatEnabled])
+  }, [
+    staged,
+    clearStaged,
+    autoFormatEnabled,
+    setStmt,
+    setResp,
+    setErr,
+    setSubmittedStmt,
+  ])
 
   // The dashboard's recent-queries card deep-links here with
   // `?statement=<query>` so a click re-loads the editor with that text.
