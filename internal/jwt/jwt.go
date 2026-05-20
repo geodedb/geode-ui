@@ -190,6 +190,38 @@ func (i *Issuer) TTL() time.Duration { return i.ttl }
 // all of a user's tokens. Never nil for an Issuer built via NewIssuer.
 func (i *Issuer) Revocation() *RevocationSet { return i.revoked }
 
+// RotateAndRevokeAll swaps the active signing secret AND removes every
+// other kid from the verification set, so any token issued before the
+// rotation hard-fails verification on the next request. The atomic
+// "rotate + mass-revoke" contract is what an operator typically wants
+// when they suspect the prior secret was leaked.
+//
+// S-NEW-E (#313): Issuers historically supported additive kid rotation
+// (NewIssuerWithKeys threads a {previous, current} map and Parse falls
+// back to `activeKID`), which is the right behaviour for ZERO-downtime
+// rotation under normal ops but is the wrong default during incident
+// response — an operator running "rotate the JWT secret because of a
+// suspected leak" reasonably expects every in-flight token to break,
+// not just newly-issued ones. RotateAndRevokeAll makes that semantic
+// explicit: a single call replaces the keys map with {newKID: secret},
+// sets activeKID = newKID, and every token signed under any prior kid
+// now hits the "unknown kid" hard-fail branch in Parse.
+//
+// Returns the previous activeKID so the caller can include it in audit
+// output ("rotated 'previous' out, 'incident-2026-05-20' in").
+func (i *Issuer) RotateAndRevokeAll(newKID string, secret []byte) (string, error) {
+	if newKID == "" {
+		return "", errors.New("jwt: new kid must be non-empty")
+	}
+	if len(secret) == 0 {
+		return "", errors.New("jwt: new secret must be non-empty")
+	}
+	priorKID := i.activeKID
+	i.keys = map[string][]byte{newKID: append([]byte(nil), secret...)}
+	i.activeKID = newKID
+	return priorKID, nil
+}
+
 // Issue mints a new HS256-signed token. connID identifies a single
 // authenticated connection so multi-session SPAs can hold multiple
 // tokens at once and the server can disambiguate them in audit logs.

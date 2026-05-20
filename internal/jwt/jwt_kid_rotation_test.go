@@ -222,3 +222,79 @@ func TestParse_LegacyTokensWithoutKidStillVerify(t *testing.T) {
 		t.Fatalf("Parse claims.Subject=%q want legacy", c.Subject)
 	}
 }
+
+// S-NEW-E (#313): rotation under incident response. The operator-
+// expectation is "every existing token is invalid after this call."
+// RotateAndRevokeAll replaces the keys map atomically so tokens signed
+// under any prior kid hit the unknown-kid hard-fail in Parse.
+func TestRotateAndRevokeAll_InvalidatesPriorTokens_S_NEW_E(t *testing.T) {
+	previous := make([]byte, 32)
+	for i := range previous {
+		previous[i] = byte(i + 1)
+	}
+	iss, err := NewIssuerWithKeys(
+		map[string][]byte{PreviousKID: previous},
+		PreviousKID,
+		time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("NewIssuerWithKeys: %v", err)
+	}
+	// Mint a token under the previous secret.
+	preToken, _, err := iss.Issue("alice", "p", []string{"r"}, "")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	// Sanity: the pre-rotation token parses.
+	if _, err := iss.Parse(preToken); err != nil {
+		t.Fatalf("pre-rotation Parse: %v", err)
+	}
+
+	// Rotate.
+	newSecret := make([]byte, 32)
+	for i := range newSecret {
+		newSecret[i] = byte(0xff - i)
+	}
+	priorKID, err := iss.RotateAndRevokeAll("incident-2026-05-20", newSecret)
+	if err != nil {
+		t.Fatalf("RotateAndRevokeAll: %v", err)
+	}
+	if priorKID != PreviousKID {
+		t.Fatalf("priorKID = %q, want %q", priorKID, PreviousKID)
+	}
+
+	// Every prior-kid token must now fail.
+	if _, err := iss.Parse(preToken); err == nil {
+		t.Fatal("RotateAndRevokeAll did not invalidate the prior-kid token")
+	}
+
+	// Freshly-issued tokens under the new kid parse cleanly.
+	postToken, _, err := iss.Issue("alice", "p", []string{"r"}, "")
+	if err != nil {
+		t.Fatalf("post-rotation Issue: %v", err)
+	}
+	if _, err := iss.Parse(postToken); err != nil {
+		t.Fatalf("post-rotation Parse: %v", err)
+	}
+}
+
+func TestRotateAndRevokeAll_RejectsEmptyArgs_S_NEW_E(t *testing.T) {
+	current := make([]byte, 32)
+	for i := range current {
+		current[i] = byte(i + 1)
+	}
+	iss, err := NewIssuerWithKeys(
+		map[string][]byte{DefaultKID: current},
+		DefaultKID,
+		time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("NewIssuerWithKeys: %v", err)
+	}
+	if _, err := iss.RotateAndRevokeAll("", []byte("x")); err == nil {
+		t.Error("RotateAndRevokeAll accepted empty kid")
+	}
+	if _, err := iss.RotateAndRevokeAll("k", nil); err == nil {
+		t.Error("RotateAndRevokeAll accepted empty secret")
+	}
+}
