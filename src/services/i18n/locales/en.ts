@@ -341,6 +341,8 @@ export const en = {
     metricsServerTransactions: 'transactions',
     metricsSparklineQpsAria: 'Queries per second over time',
     metricsSparklineActiveAria: 'Active connections over time',
+    metricsAuditMixTitle: 'Audit events ({{count}})',
+    metricsAuditMixEmpty: 'No audit entries yet.',
   },
 
   schema: {

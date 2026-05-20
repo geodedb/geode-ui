@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/json/v2"
 	"errors"
@@ -169,6 +170,68 @@ func TestGetCapabilities_PopulatesFromShowCapabilities(t *testing.T) {
 	}
 	if aw["policies"] {
 		t.Errorf("admin_writable.policies=true; want false (CREATE POLICY still upstream-deferred)")
+	}
+}
+
+// TestGetCapabilities_MetricsEnabled — the proxy capability flag.
+// cfg.MetricsURL is empty by default (the SPA hides the metric
+// cards); setting it to a non-empty URL flips the flag to true so
+// the SPA can render the cards eagerly even before the first
+// /api/v1/metrics fetch lands.
+func TestGetCapabilities_MetricsEnabled(t *testing.T) {
+	d := &fakeDriver{rows: map[string]fakeResult{
+		"SHOW VERSION": {
+			cols: []string{"version"},
+			rows: [][]driver.Value{{"0.5.19"}},
+		},
+		"SHOW CAPABILITIES": {
+			cols: []string{"feature", "supported"},
+			rows: [][]driver.Value{},
+		},
+	}}
+	registerFakeDriver("fake_caps_metrics_off", d)
+	dbOff, err := sql.Open("fake_caps_metrics_off", "")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = dbOff.Close() })
+	srvOff := New(Config{
+		Version: "test",
+		Pool:    &stubPool{db: dbOff},
+	})
+	respOff, err := srvOff.GetCapabilities(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil),
+		&gentypes.Empty{},
+	)
+	if err != nil {
+		t.Fatalf("GetCapabilities (off): %v", err)
+	}
+	if respOff.MetricsEnabled {
+		t.Error("metrics_enabled=true with empty MetricsURL; want false")
+	}
+
+	registerFakeDriver("fake_caps_metrics_on", d)
+	dbOn, err := sql.Open("fake_caps_metrics_on", "")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = dbOn.Close() })
+	srvOn := New(Config{
+		Version:    "test",
+		Pool:       &stubPool{db: dbOn},
+		MetricsURL: "http://geode:9090/metrics",
+	})
+	respOn, err := srvOn.GetCapabilities(
+		httptest.NewRecorder(),
+		httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil),
+		&gentypes.Empty{},
+	)
+	if err != nil {
+		t.Fatalf("GetCapabilities (on): %v", err)
+	}
+	if !respOn.MetricsEnabled {
+		t.Error("metrics_enabled=false with non-empty MetricsURL; want true")
 	}
 }
 

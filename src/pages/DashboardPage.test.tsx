@@ -56,6 +56,15 @@ jest.mock('../lib/useMetricsPolling', () => ({
   useMetricsPolling: (): typeof metricsFixture => metricsFixture,
 }))
 
+// AuditEventMixCard pulls from /api/v1/audit via useApiResource, which
+// async-resolves setState calls after render(). The act-gate treats
+// those microtask-driven dispatches as fatal, so mock the card to a
+// static stub for these DashboardPage layout assertions; the card's
+// own behavior is exercised in its dedicated test below.
+jest.mock('../components/dashboard/AuditEventMixCard', () => ({
+  AuditEventMixCard: (): JSX.Element | null => null,
+}))
+
 import { DashboardPage } from './DashboardPage'
 import { useQueryHistory } from '../lib/useQueryHistory'
 

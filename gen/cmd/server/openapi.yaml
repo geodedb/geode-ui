@@ -307,6 +307,9 @@ components:
                     maxLength: 256
                     pattern: ^.*$
                     type: string
+                metricsEnabled:
+                    example: true
+                    type: boolean
             required:
                 - geodeVersion
                 - adminWritable

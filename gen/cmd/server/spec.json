@@ -661,7 +661,8 @@
             "policies": { "type": "boolean" },
             "grants":   { "type": "boolean" }
           }
-        }
+        },
+        "metrics_enabled": { "type": "boolean" }
       }
     },
     "TxBeginReq": {

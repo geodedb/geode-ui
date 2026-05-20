@@ -86,6 +86,21 @@ func (s *GraphServer) GetCapabilities(_ http.ResponseWriter, r *http.Request, _ 
 	return &gentypes.Capabilities{
 		GeodeVersion:  geodeVersion,
 		AdminWritable: jsontext.Value(adminWritable),
+		// metrics_enabled is derived purely from cfg.MetricsURL (set
+		// via GEODE_METRICS_URL at server startup; see
+		// cmd/server/app.go). Non-empty == the /api/v1/metrics proxy
+		// will return a real snapshot; empty == the proxy returns 503
+		// METRICS_DISABLED and the SPA should hide the cards. We
+		// surface the flag here for two reasons even though the SPA
+		// also probes /api/v1/metrics directly:
+		//
+		//   1. Tests / fixtures can mock Capabilities to deterministically
+		//      drive the cards on/off without standing up the
+		//      metrics surface.
+		//   2. Operators reading the capabilities endpoint via curl
+		//      get an unambiguous flag instead of having to infer
+		//      from a probe response.
+		MetricsEnabled: s.cfg.MetricsURL != "",
 	}, nil
 }
 

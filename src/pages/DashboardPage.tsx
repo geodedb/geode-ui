@@ -21,6 +21,7 @@ import {
   StorageCard,
   metricsHidden,
 } from '../components/dashboard/MetricsCards'
+import { AuditEventMixCard } from '../components/dashboard/AuditEventMixCard'
 
 // Grid — Bootstrap-migrated to a plain <div>. The auto-fill grid track
 // expression has no Bootstrap utility equivalent so it stays inline,
@@ -90,6 +91,13 @@ export const DashboardPage: React.FC = () => {
             <ServerHealthCard polling={metrics} />
           </>
         )}
+        {/* AuditEventMix is independent of the metrics-proxy gate —
+            the donut is computed client-side from /api/v1/audit which
+            exists regardless of whether the geode metrics listener is
+            wired. Render unconditionally so operators always have a
+            sense of activity mix, even when GEODE_METRICS_URL is
+            empty. */}
+        <AuditEventMixCard />
       </div>
     </div>
   )

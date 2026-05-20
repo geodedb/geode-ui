@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -20,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	_ "embed"
 
 	genapi "geodedb.com/geode-ui/gen/api"
 	genmcp "geodedb.com/geode-ui/gen/mcp"
@@ -107,23 +107,15 @@ func main() {
 	if *unsafeLegacy {
 		if v := strings.TrimSpace(*legacyShared); v != "" {
 			log.Printf("WARN --unsafe-legacy-apikey is enabled: -apikey seeds missing secrets. This mode is deprecated; set GENAPI_API_KEY_SECRET and GENAPI_JWT_SECRET to distinct values.")
-			if os.Getenv("GENAPI_API_KEY_SECRET") == "" {
-				_ = os.Setenv("GENAPI_API_KEY_SECRET", v)
-			}
-			if os.Getenv("GENAPI_JWT_SECRET") == "" {
-				_ = os.Setenv("GENAPI_JWT_SECRET", v)
-			}
+			if os.Getenv("GENAPI_API_KEY_SECRET") == "" { _ = os.Setenv("GENAPI_API_KEY_SECRET", v) }
+			if os.Getenv("GENAPI_JWT_SECRET") == "" { _ = os.Setenv("GENAPI_JWT_SECRET", v) }
 		}
 	}
 	if v := strings.TrimSpace(*apiKeySecret); v != "" {
-		if os.Getenv("GENAPI_API_KEY_SECRET") == "" {
-			_ = os.Setenv("GENAPI_API_KEY_SECRET", v)
-		}
+		if os.Getenv("GENAPI_API_KEY_SECRET") == "" { _ = os.Setenv("GENAPI_API_KEY_SECRET", v) }
 	}
 	if v := strings.TrimSpace(*jwtSecret); v != "" {
-		if os.Getenv("GENAPI_JWT_SECRET") == "" {
-			_ = os.Setenv("GENAPI_JWT_SECRET", v)
-		}
+		if os.Getenv("GENAPI_JWT_SECRET") == "" { _ = os.Setenv("GENAPI_JWT_SECRET", v) }
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -159,9 +151,7 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 	}
 
 	rc, err := configx.DecodeRuntimeConfig(apiSpec)
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 
 	mux := http.NewServeMux()
 
@@ -172,13 +162,9 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 
 	seen := &sync.Map{}
 	apiSecretBytes, err := resolveSecret("GENAPI_API_KEY_SECRET", "GENAPI_API_KEY_SECRET_FILE", "")
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	jwtSecretBytes, err := resolveSecret("GENAPI_JWT_SECRET", "GENAPI_JWT_SECRET_FILE", "")
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 	if rc.Security.Auth.APIKey && len(apiSecretBytes) == 0 {
 		return fmt.Errorf("missing API key secret: set GENAPI_API_KEY_SECRET or GENAPI_API_KEY_SECRET_FILE")
 	}
@@ -285,10 +271,7 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 		pp.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		pp.HandleFunc("/debug/pprof/trace", pprof.Trace)
 		mux.Handle("/debug/pprof/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if authSurface(r) != nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
+			if authSurface(r) != nil { w.WriteHeader(http.StatusUnauthorized); return }
 			pp.ServeHTTP(w, r)
 		}))
 	}
@@ -317,25 +300,19 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 
 	addr := hcfg.Bind
 	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
+	if err != nil { return err }
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13}
 	if rc.Server.TLS.CertPath != "" && rc.Server.TLS.KeyPath != "" {
 		crt, err := tls.LoadX509KeyPair(rc.Server.TLS.CertPath, rc.Server.TLS.KeyPath)
-		if err != nil {
-			return err
-		}
+		if err != nil { return err }
 		cfg.Certificates = []tls.Certificate{crt}
 	} else {
 		return fmt.Errorf("missing TLS cert/key paths; refusing to start with insecure defaults")
 	}
 	if rc.Server.TLS.MTLSCAPath != nil && *rc.Server.TLS.MTLSCAPath != "" {
 		pool, err := loadCertPool(*rc.Server.TLS.MTLSCAPath)
-		if err != nil {
-			return err
-		}
+		if err != nil { return err }
 		cfg.ClientCAs = pool
 		cfg.ClientAuth = tls.RequireAndVerifyClientCert
 	}
@@ -360,13 +337,9 @@ func Serve(ctx context.Context, opts ...ServerOption) error {
 
 func loadCertPool(path string) (*x509.CertPool, error) {
 	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(b) {
-		return nil, fmt.Errorf("failed to parse CA bundle")
-	}
+	if !pool.AppendCertsFromPEM(b) { return nil, fmt.Errorf("failed to parse CA bundle") }
 	return pool, nil
 }
 

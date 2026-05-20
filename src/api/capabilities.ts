@@ -24,6 +24,12 @@ export interface AdminWritable {
 export interface Capabilities {
   geodeVersion: string
   adminWritable: AdminWritable
+  // metricsEnabled reflects whether the server has GEODE_METRICS_URL
+  // configured (== the /api/v1/metrics proxy will return real data
+  // rather than 503 METRICS_DISABLED). The Dashboard's metric cards
+  // gate on this so the first render is correct even before the
+  // metrics-polling hook has issued its first probe.
+  metricsEnabled: boolean
 }
 
 // ADMIN_WRITABLE_NONE is the conservative default applied before the
@@ -55,6 +61,9 @@ export async function fetchCapabilities(): Promise<Capabilities> {
       policies: asBool(aw.policies),
       grants: asBool(aw.grants),
     },
+    metricsEnabled: asBool(
+      (raw as unknown as Record<string, unknown>).metrics_enabled
+    ),
   }
 }
 

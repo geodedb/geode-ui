@@ -136,6 +136,7 @@ export interface BackupUploadReq {
 export interface Capabilities {
   admin_writable: Record<string, unknown>;
   geode_version: string;
+  metrics_enabled?: boolean;
 }
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;

@@ -24,9 +24,9 @@ test.describe('dashboard metrics (geode prometheus proxy)', () => {
     // The first poll fires on mount; with the e2e stack's metrics
     // enabled it should land in under a second on the host. Wait for
     // the throughput card's testid to confirm the gate flipped.
-    await expect(
-      page.getByTestId('dashboard-metrics-throughput')
-    ).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByTestId('dashboard-metrics-throughput')).toBeVisible({
+      timeout: 10_000,
+    })
 
     // Every card from the plan's File-Structure table should be
     // mounted; the gate is all-or-nothing.

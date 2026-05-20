@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
 	"geodedb.com/geode-ui/gen/types"
 )
 
@@ -16,9 +15,7 @@ func Test_Generated_NotImplemented(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != 501 {
-		t.Fatalf("expected 501 Not Implemented, got %d", w.Code)
-	}
+	if w.Code != 501 { t.Fatalf("expected 501 Not Implemented, got %d", w.Code) }
 }
 
 type testServer struct{ UnimplementedServer }
@@ -34,14 +31,10 @@ func Test_Generated_Validators(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code == 200 {
-		t.Fatalf("expected reject for invalid payload")
-	}
+	if w.Code == 200 { t.Fatalf("expected reject for invalid payload") }
 	req2, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`password=x&username=x`))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w2 := httptest.NewRecorder()
 	mux.ServeHTTP(w2, req2)
-	if w2.Code != 200 {
-		t.Fatalf("expected accept got %d", w2.Code)
-	}
+	if w2.Code != 200 { t.Fatalf("expected accept got %d", w2.Code) }
 }
