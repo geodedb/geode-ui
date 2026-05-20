@@ -58,7 +58,10 @@ test('renders null values explicitly as "null"', () => {
 })
 
 test('renders BigInt values with the n suffix preserved', () => {
-  renderList({ count: 9007199254740993n })
+  // BigInt(...) constructor instead of the 9007199254740993n literal so
+  // the project's es2015 tsconfig target stays satisfied. Same runtime
+  // value, no literal-syntax dependency.
+  renderList({ count: BigInt('9007199254740993') })
   expect(screen.getByTestId('audit-field-item')).toHaveTextContent(
     '9007199254740993n'
   )
