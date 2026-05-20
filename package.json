@@ -3,6 +3,11 @@
   "version": "0.1.1",
   "description": "Geode graph database admin & query UI",
   "private": true,
+  "main": "internal/ui/electron-dist/main.js",
+  "author": {
+    "name": "Geode Database",
+    "email": "support@geodedb.com"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://gitlab.com/devnw/react/ui.git"
@@ -39,7 +44,9 @@
     "electron:tsc": "tsc --project electron/tsconfig.json",
     "electron:build": "npm run build && npm run electron:tsc && cp -r internal/ui/dist internal/ui/electron-dist/dist",
     "electron:dev": "npm run electron:build && electron internal/ui/electron-dist/main.js",
-    "electron:package": "electron-builder --config electron-builder.yml"
+    "electron:package": "electron-builder --config electron-builder.yml",
+    "electron:e2e": "xvfb-run -a playwright test --config=e2e/electron.config.ts",
+    "electron:e2e:headed": "playwright test --config=e2e/electron.config.ts"
   },
   "engines": {
     "node": ">=22.14.0"
@@ -103,6 +110,7 @@
     "css-loader": "^6.11.0",
     "css-minimizer-webpack-plugin": "^6.0.0",
     "electron": "^42.0.1",
+    "electron-builder": "^25.1.8",
     "eslint": "^8.57.0",
     "eslint-config-airbnb": "^19.0.0",
     "eslint-config-prettier": "^10.1.8",

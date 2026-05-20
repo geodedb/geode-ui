@@ -51,6 +51,11 @@ linux:
     arch: [x64, arm64]
   category: Development
   # icon: build/icon.png
+  # The npm package name `@geodedb/ui` contains an `@/` which fpm tries
+  # to treat as a directory boundary when synthesising the .deb filename.
+  # Pin an artifact name so the output lands at release/linux/geode_...deb.
+  artifactName: geode_${version}_${arch}.${ext}
+  executableName: geode
 
 win:
   target:
