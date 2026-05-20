@@ -15,7 +15,7 @@ BIN := bin/geode-ui
 # Update this list when a new top-level Go directory is added.
 GO_PKGS := ./cmd/... ./gen/... ./internal/...
 
-.PHONY: all help generate go-build go-test go-cover go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
+.PHONY: all help generate go-build go-test go-cover go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci electron-build electron-package electron-e2e
 
 all: lint test build
 
@@ -257,3 +257,25 @@ e2e-ci: e2e-up
 	$(MAKE) e2e-down
 
 pre-commit: fmt go-tidy lint test
+
+# ----- Electron desktop build -----
+#
+# `electron-build` compiles the main + preload processes and copies the
+# SPA dist/ into internal/ui/electron-dist/dist. `electron-package`
+# bundles that into platform installers under release/<platform>/ via
+# electron-builder. The packaging step picks the host platform's
+# targets from electron-builder.yml (linux: AppImage + deb, mac: dmg,
+# win: nsis).
+electron-build:
+	npm run electron:build
+
+electron-package: electron-build
+	npm run electron:package
+
+# Electron e2e: launches the compiled main.js via Playwright's _electron
+# API and runs e2e/electron-specs/. Headless via xvfb-run; the
+# electron:e2e npm script wraps the xvfb invocation so CI doesn't need
+# its own DISPLAY. Requires `make electron-build` first (the specs
+# point at internal/ui/electron-dist/main.js).
+electron-e2e: electron-build
+	npm run electron:e2e
