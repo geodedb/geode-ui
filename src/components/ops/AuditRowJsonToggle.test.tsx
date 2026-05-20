@@ -40,3 +40,13 @@ test('the raw JSON body pretty-prints with two-space indent', () => {
     /\n {2}"event"/
   )
 })
+
+test('the View raw JSON anchor is right-aligned via Bootstrap utilities', () => {
+  renderToggle({ event: 'login', fields: { user: 'alice' } })
+  const summary = screen.getByTestId('audit-json-summary')
+  // Right-aligned within its column via Bootstrap's d-block + text-end
+  // responsive utility stack — these classes apply at every breakpoint
+  // so the toggle hugs the right edge on mobile and desktop alike.
+  expect(summary.className).toContain('d-block')
+  expect(summary.className).toContain('text-end')
+})

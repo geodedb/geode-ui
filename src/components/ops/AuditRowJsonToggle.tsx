@@ -23,7 +23,15 @@ const Details = styled.details`
   margin-top: ${({ theme }) => theme.spacing.xs};
 `
 
-const Summary = styled.summary`
+// The toggle anchor itself is right-aligned within its column so the
+// JSON disclosure sits flush with the right edge of the row's Fields
+// cell while the key/value list stays left-aligned. d-block strips
+// the default <summary> list-item marker so `text-end` lands the
+// link cleanly on the right; Bootstrap's responsive utility stack
+// applies the same alignment at every breakpoint.
+const Summary = styled.summary.attrs({
+  className: 'd-block text-end',
+})`
   cursor: pointer;
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.link};
