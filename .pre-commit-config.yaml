@@ -252,6 +252,18 @@ repos:
     files: ^deploy/docker-compose\.test\.yml$
     always_run: true
 
+      # GAP-047: refuse mac-only keyboard glyphs (⌘ / ⌥ / ⇧ / ⌃) outside
+      # the single src/lib/platformKeyHints.ts seam. Hotkey hints must
+      # funnel through modKeyLabel() / shiftKeyLabel() so Linux / Windows
+      # users see "Ctrl" / "Shift" instead of foreign symbols.
+  - id: check-no-mac-glyphs
+    name: check:no-mac-glyphs
+    entry: node scripts/check-no-mac-glyphs.mjs
+    language: system
+    pass_filenames: false
+    files: ^src/(services/i18n/locales|components|pages|lib)/.*\.tsx?$
+    always_run: true
+
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
       # QUALITY #174: explicit GO_PKGS list so neither golangci-lint nor
       # go test walks `node_modules/flatted/golang/`. Mirrors the
@@ -330,6 +342,7 @@ ci:
   - check-doc-routes
   - check-changelog
   - check-compose-secrets
+  - check-no-mac-glyphs
   - golangci-lint
   - go-mod-tidy
   - ts-typecheck

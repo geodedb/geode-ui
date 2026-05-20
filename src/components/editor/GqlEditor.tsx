@@ -47,7 +47,7 @@ type Props = {
 /**
  * Imperative handle exposed via React.forwardRef. QueryPage uses it to
  * (a) ask the editor to run textDocument/formatting on demand
- * (toolbar button, ⌘⇧F) and (b) request a one-shot format that runs
+ * (toolbar button, Mod+Shift+F) and (b) request a one-shot format that runs
  * the next time the LSP becomes ready — used when a query arrives from
  * outside the editor (schema-explorer click, deep link, history).
  */

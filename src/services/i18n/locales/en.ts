@@ -89,7 +89,7 @@ export const en = {
   },
 
   query: {
-    runHotkey: 'Run (⌘+Enter)',
+    runHotkey: 'Run ({{mod}}+Enter)',
     cancel: 'Cancel',
     streamMode: 'Stream',
     expandGraphCells: 'Expand graph cells',
@@ -104,7 +104,7 @@ export const en = {
     exitFullscreen: 'Exit fullscreen',
     optionsLabel: 'Options',
     formatLabel: 'Format',
-    formatHotkey: 'Format (⌘⇧F)',
+    formatHotkey: 'Format ({{mod}}{{shift}}F)',
     formatAriaLabel: 'Format query',
     autoFormatInserted: 'Auto-format inserted queries',
     streamRetentionBanner:

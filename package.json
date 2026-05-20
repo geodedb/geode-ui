@@ -33,6 +33,7 @@
     "check:security-md": "node scripts/check-security-md.mjs",
     "check:chunk-budget": "node scripts/check-chunk-budget.mjs",
     "check:compose-secrets": "node scripts/check-compose-secrets.mjs",
+    "check:no-mac-glyphs": "node scripts/check-no-mac-glyphs.mjs",
     "prettier:check": "prettier --check 'src/**/*.{ts,tsx,json,css}'",
     "prettier:fix": "prettier --write 'src/**/*.{ts,tsx,json,css}'",
     "clean": "rm -rf dist build coverage",

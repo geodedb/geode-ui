@@ -19,6 +19,7 @@ import { useQueryHistory } from '../lib/useQueryHistory'
 import { useQueryStore } from '../lib/queryStore'
 import { useQueryPageStore } from '../lib/queryPageStore'
 import { useLspSettings } from '../lib/lspSettings'
+import { modKeyLabel, shiftKeyLabel } from '../lib/platformKeyHints'
 import type { GqlEditorHandle } from '../components/editor/GqlEditor'
 import { Dropdown, DropdownItem } from '../services/webawesome/components'
 import {
@@ -585,7 +586,7 @@ export const QueryPage: React.FC = () => {
           disabled={busy ? true : undefined}
           loading={busy ? true : undefined}
         >
-          {t('query.runHotkey')}
+          {t('query.runHotkey', { mod: modKeyLabel() })}
         </wa-button>
         {streamMode && busy && (
           <wa-button
@@ -602,13 +603,16 @@ export const QueryPage: React.FC = () => {
             `d-none d-sm-inline-flex` would hide it on phones; instead
             keep it visible everywhere but at a smaller size so the Bar
             wraps within the 80 px mobile budget). The keyboard shortcut
-            ⌘⇧F continues to work regardless of button size. */}
+            Mod+Shift+F continues to work regardless of button size. */}
         <wa-button
           appearance="outlined"
           size="s"
           role="button"
           data-testid="query-format-btn"
-          title={t('query.formatHotkey')}
+          title={t('query.formatHotkey', {
+            mod: modKeyLabel(),
+            shift: shiftKeyLabel(),
+          })}
           aria-label={t('query.formatAriaLabel')}
           onClick={() => {
             editorRef.current?.formatDocument().catch(() => {
