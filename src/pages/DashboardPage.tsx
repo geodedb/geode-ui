@@ -9,10 +9,18 @@ import { useTranslation } from 'react-i18next'
 
 import { useOverviewData } from '../lib/useOverviewData'
 import { useQueryHistory } from '../lib/useQueryHistory'
+import { useMetricsPolling } from '../lib/useMetricsPolling'
 import { GraphsCard } from '../components/dashboard/GraphsCard'
 import { RecentQueriesCard } from '../components/dashboard/RecentQueriesCard'
 import { ConnectionCard } from '../components/dashboard/ConnectionCard'
 import { GraphStatsCard } from '../components/dashboard/GraphStatsCard'
+import {
+  ConnectionsCard,
+  QueryThroughputCard,
+  ServerHealthCard,
+  StorageCard,
+  metricsHidden,
+} from '../components/dashboard/MetricsCards'
 
 // Grid — Bootstrap-migrated to a plain <div>. The auto-fill grid track
 // expression has no Bootstrap utility equivalent so it stays inline,
@@ -43,6 +51,12 @@ export const DashboardPage: React.FC = () => {
   const entries = useQueryHistory((s) => s.entries)
   const clear = useQueryHistory((s) => s.clear)
   const defaultGraph = pickDefaultGraph(ov.graphs)
+  // Geode-metrics polling. The hook returns state='disabled' the first
+  // time the proxy reports METRICS_DISABLED (the operator hasn't set
+  // GEODE_METRICS_URL on the geode-ui server); in that case metricsHidden
+  // is true and the metrics cards drop out of the grid entirely.
+  const metrics = useMetricsPolling()
+  const showMetrics = !metricsHidden(metrics)
   return (
     <div>
       <h1>{t('dashboard.title')}</h1>
@@ -68,6 +82,14 @@ export const DashboardPage: React.FC = () => {
             if (defaultGraph) ov.loadStats(defaultGraph)
           }}
         />
+        {showMetrics && (
+          <>
+            <QueryThroughputCard polling={metrics} />
+            <ConnectionsCard polling={metrics} />
+            <StorageCard polling={metrics} />
+            <ServerHealthCard polling={metrics} />
+          </>
+        )}
       </div>
     </div>
   )
