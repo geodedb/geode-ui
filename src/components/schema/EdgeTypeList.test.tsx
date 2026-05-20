@@ -78,9 +78,28 @@ test('clicking an edge type stages a MATCH with USE GRAPH prefix', async () => {
   // Regression: must include `USE GRAPH <graph>;` prefix so Geode runs
   // the MATCH against the active graph. Without the prefix the query
   // executes against no graph and silently returns 0 rows.
+  //
+  // GAP-057: the projection MUST include the endpoint nodes (n, m) so
+  // the graph view renders their type labels instead of "#<id>"
+  // placeholders. The pre-GAP-057 shape was `()-[r:T]->() RETURN r`
+  // which returned edges with start/end node IDs but no labels.
   expect(setStaged).toHaveBeenCalledWith(
-    'USE GRAPH movies; MATCH ()-[r:ACTED_IN]->() RETURN r LIMIT 25'
+    'USE GRAPH movies; MATCH (n)-[r:ACTED_IN]->(m) RETURN n, r, m LIMIT 25'
   )
+})
+
+test('GAP-057: every staged edge query projects both endpoints', async () => {
+  renderEdge({ graph: 'movies', cache: createSchemaCache() })
+  await waitFor(() => {
+    expect(screen.getByText('DIRECTED')).toBeInTheDocument()
+  })
+  fireEvent.click(screen.getByText('DIRECTED'))
+  const staged = setStaged.mock.calls[0]?.[0] as string
+  // Both (n) and (m) must appear in the MATCH pattern, and the RETURN
+  // projection must surface them so the cytoscape pipeline can paint
+  // their type labels.
+  expect(staged).toMatch(/MATCH \(n\)-\[r:DIRECTED\]->\(m\)/)
+  expect(staged).toMatch(/RETURN n, r, m/)
 })
 
 test('PERF-#154: re-selecting the same graph serves edge types from cache (zero extra wire calls)', async () => {

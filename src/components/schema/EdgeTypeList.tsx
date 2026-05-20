@@ -126,12 +126,23 @@ export const EdgeTypeList: React.FC<{
               // against the active graph when the operator clicks Run.
               // Without it Geode executes against no graph context
               // and silently returns 0 rows.
+              //
+              // GAP-057: project the endpoint NODES (n, m) alongside
+              // the edge (r) so the graph view can render their type
+              // labels. Pre-fix the query projected `r` only, which
+              // returned edges with `start_node`/`end_node` numeric
+              // IDs but no node info — pushPlaceholderNodes then
+              // labelled every endpoint "#<id>" because both the type
+              // label and display label maps missed. The edge tab
+              // entry point exists to surface "which node types this
+              // edge connects" (Person -[ACTED_IN]-> Movie); the
+              // n + m projection makes that contract observable.
               setStaged(
                 'USE GRAPH ' +
                   graph +
-                  '; MATCH ()-[r:' +
+                  '; MATCH (n)-[r:' +
                   t +
-                  ']->() RETURN r LIMIT 25'
+                  ']->(m) RETURN n, r, m LIMIT 25'
               )
               nav('/')
             }}
