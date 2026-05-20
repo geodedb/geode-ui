@@ -76,12 +76,24 @@ export const RecentQueriesCard: React.FC<RecentQueriesCardProps> = ({
   const clearAction = (
     <ClearButton onClick={onClear}>{t('dashboard.clearHistory')}</ClearButton>
   )
+  // The card describes itself as "session query history" rather than
+  // the prior "recent queries" because the store (useQueryHistory) is
+  // localStorage-only — clearing the browser, switching devices, or
+  // signing in from a fresh OS user wipes it silently. The scope-hint
+  // line keeps that contract visible alongside the title so a hurried
+  // operator doesn't mistake it for a server-backed audit slice.
   return (
     <Card
       title={t('dashboard.recentTitle')}
       action={clearAction}
       data-testid="dashboard-recent-card"
     >
+      <p
+        className="mb-2 small text-body-secondary fst-italic"
+        data-testid="dashboard-recent-scope-hint"
+      >
+        {t('dashboard.recentScopeHint')}
+      </p>
       {entries.length ? (
         <ul className="list-unstyled m-0 p-0 d-flex flex-column gap-1">
           {entries.map((e) => (

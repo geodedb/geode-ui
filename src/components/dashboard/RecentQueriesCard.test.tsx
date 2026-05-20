@@ -53,3 +53,19 @@ test('shows an empty state when there are no entries', () => {
   renderCard(<RecentQueriesCard entries={[]} onClear={() => {}} />)
   expect(screen.getByRole('note')).toBeInTheDocument()
 })
+
+// GAP-048: the card header used to read "Recent queries", which the
+// user reasonably read as a server-backed audit slice. It is in fact
+// a per-device localStorage log (see useQueryHistory.ts). Rename +
+// scope-hint pin the contract so a hurried operator does not mistake
+// it for cross-machine history.
+test('GAP-048: title reflects session-only scope', () => {
+  renderCard(<RecentQueriesCard entries={[]} onClear={() => {}} />)
+  expect(screen.getByText(/session query history/i)).toBeInTheDocument()
+})
+
+test('GAP-048: surfaces a scope hint explaining device-only storage', () => {
+  renderCard(<RecentQueriesCard entries={[]} onClear={() => {}} />)
+  const hint = screen.getByTestId('dashboard-recent-scope-hint')
+  expect(hint).toHaveTextContent(/this device only/i)
+})

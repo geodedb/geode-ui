@@ -244,9 +244,11 @@ export const en = {
     title: 'Overview',
     graphsTitle: 'Graphs ({{count}})',
     graphsEmpty: 'No graphs.',
-    recentTitle: 'Recent queries',
+    recentTitle: 'Session query history',
     recentEmpty: 'No queries yet — run one on the Query page.',
     recentFailed: 'failed',
+    recentScopeHint:
+      'Stored on this device only; not synced to the Geode server.',
     clearHistory: 'Clear',
     connectionTitle: 'Connection',
     version: 'Geode {{version}}',
