@@ -754,7 +754,7 @@ A walkthrough of the running app on 2026-05-19 (HEAD `6a3ee78`, geode-ui package
 | GAP-050 | RBAC integration state ambiguous — Policies disabled-vs-missing-vs-unsupported is invisible | High | Security / UX | Open (Tier 3 — deferred to a follow-up cohort with capabilities slice + admin-shell gate) |
 | GAP-051 | Backups + Restore live in two unrelated tabs with divergent design language | Medium | Design / UX | Open (Tier 3 — deferred) |
 | GAP-052 | Migrations "New Migration" is upload-only — no inline editor / save path | Medium | Feature / UX | Open (Tier 3 — deferred) |
-| GAP-053 | Migrations can only run forward — no `down`, no targeted apply-to-version | High | Feature / Ops | Open (Tier 3 — pending upstream Geode `down` / `target` wire op) |
+| GAP-053 | Migrations can only run forward — no `down`, no targeted apply-to-version | High | Feature / Ops | **Blocked** (`blocked-on-upstream-Geode` — wire op missing, see detail) |
 | GAP-054 | "Profile" terminology is ambiguous — user / persona / preset / connection-bundle? | Low | Docs / UX | **Closed** (`6bb4a5d`, `f14b5b4`) |
 | GAP-055 | Dashboard `GraphsCard` lists graphs as plain text — names are not clickable | Medium | Navigability / UX | **Closed** (`23fe692`) |
 | GAP-056 | Schema explorer renders an empty body for ~hundreds of ms on graph switch | Medium | Perf / UX | **Closed** (`3c3848a`) |
@@ -918,7 +918,7 @@ A walkthrough of the running app on 2026-05-19 (HEAD `6a3ee78`, geode-ui package
 - **Issue:** (to file in next gap-close round)
 - **Category:** Feature / Ops
 - **Severity:** High
-- **Status:** Open
+- **Status:** **Blocked (blocked-on-upstream-Geode)** — 2026-05-20 verification: `gen/client/react/client.ts:1220` shows `postMigrationsRun(req: Empty): Promise<MigrationRunResp>` accepts an empty payload, no `direction`/`target` field in the generated client and no corresponding field in `geode.json` for genapi to surface. The wire op required to drive a UI rollback does not exist in upstream Geode v0.5.19. UI work is on hold until the upstream `down` / `target` parameters land. Track via the `blocked-on-upstream-Geode` label on the GitLab tracker so this row auto-recovers when the wire surface ships.
 - **Evidence:**
   - `src/components/ops/MigrationsPage.tsx:19-25,102-116` — the page exposes `list` + `create` + `run` + `sign`; there is no `down` action, no `migrate-to-version` selector, no "rollback last" affordance.
   - `client.postMigrationsRun({})` in `src/api/client.ts` accepts no `direction`/`target` argument; the server endpoint applies pending forward only.
