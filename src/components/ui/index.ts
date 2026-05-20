@@ -21,6 +21,9 @@ export { Stack, Inline, Container, Grid, Spacer } from './Stack'
 
 export { Card, CardHeader, CardTitle, CardSubtitle } from './Card'
 
+export { DedupedDatalist } from './DedupedDatalist'
+export type { DedupedDatalistProps } from './DedupedDatalist'
+
 export { DataTable, TableScroll, EmptyCell } from './DataTable'
 
 export { Modal, ConfirmModal } from './Modal'
@@ -31,3 +34,5 @@ export type { LogoProps } from './Logo'
 
 export { Icon } from './Icon'
 export type { IconProps, IconStyle } from './Icon'
+
+export { useUniqueValues } from './useUniqueValues'
