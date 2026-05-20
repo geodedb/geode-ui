@@ -18,6 +18,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -292,6 +293,53 @@ func TestInjectAuthIntoInitialize_MalformedBypass(t *testing.T) {
 	out := injectAuthIntoInitialize(in, "tok")
 	if string(out) != string(in) {
 		t.Fatalf("expected passthrough for malformed body, got %s", out)
+	}
+}
+
+// S-NEW-I (#321): authenticated DoS guard on initialize re-emit. A
+// pathologically large or deeply nested initialize body must short-
+// circuit before the json.Unmarshal alloc. Both gates return the
+// original body unchanged so the downstream LSP gets to enforce its
+// own size limits.
+func TestInjectAuthIntoInitialize_RejectsOversizedBody_S_NEW_I(t *testing.T) {
+	// Build a >64KiB initialize body (valid JSON, just huge params).
+	big := make([]byte, 0, 70*1024)
+	big = append(big, []byte(`{"jsonrpc":"2.0","method":"initialize","params":{"x":"`)...)
+	// Pad with as many bytes as we need to exceed the cap.
+	for len(big) < 70*1024 {
+		big = append(big, 'a')
+	}
+	big = append(big, []byte(`"}}`)...)
+
+	out := injectAuthIntoInitialize(big, "tok")
+	if len(out) != len(big) {
+		t.Fatalf("expected unmodified body for oversized input; got %d vs %d", len(out), len(big))
+	}
+	// And critically: the auth token must NOT have been injected, so
+	// the body passes through to the LSP for its own size rejection.
+	if bytes.Contains(out, []byte(`"authToken":"tok"`)) {
+		t.Fatal("auth token leaked into oversized body — size gate skipped")
+	}
+}
+
+func TestInjectAuthIntoInitialize_RejectsDeepNesting_S_NEW_I(t *testing.T) {
+	// Build a JSON body whose nesting depth exceeds maxInitJSONDepth.
+	// 100 levels of nested objects keeps the body small while still
+	// tripping the depth gate.
+	deep := []byte(`{"jsonrpc":"2.0","method":"initialize","params":`)
+	for i := 0; i < 100; i++ {
+		deep = append(deep, '{')
+		deep = append(deep, []byte(`"a":`)...)
+	}
+	deep = append(deep, []byte(`1`)...)
+	for i := 0; i < 100; i++ {
+		deep = append(deep, '}')
+	}
+	deep = append(deep, '}')
+
+	out := injectAuthIntoInitialize(deep, "tok")
+	if string(out) != string(deep) {
+		t.Fatal("pathologically deep body should pass through unchanged")
 	}
 }
 

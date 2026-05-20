@@ -241,7 +241,64 @@ func proxyTcpToWs(tcp net.Conn, ws *wsx.Conn) error {
 // when the caller is exempt via --no-auth on the LSP side); in that
 // case the field is still set so the field's presence cannot leak the
 // allow/deny decision.
+//
+// S-NEW-I (#321): cap the input size + JSON nesting depth so an
+// authenticated WS client cannot send a megabyte-sized or
+// pathologically-nested initialize message that exhausts the
+// connection goroutine's CPU/memory budget. A real LSP initialize is
+// typically a few KB (params, capabilities, root URI, workspace
+// folders); 64 KiB is two orders of magnitude over that and matches
+// the body cap the genapi handler enforces elsewhere on the auth
+// surface.
+const maxInitBodySize = 64 * 1024
+const maxInitJSONDepth = 32
+
 func injectAuthIntoInitialize(body []byte, token string) []byte {
+	// Size gate first — short-circuit before unmarshalling. The
+	// downstream LSP will see the original (unmodified) body and
+	// reject it on its own size limits.
+	if len(body) > maxInitBodySize {
+		return body
+	}
+	// Depth gate — cheap pre-flight over the raw bytes. Counts the
+	// max nesting depth of '{' / '['; refuses to allocate Go maps
+	// for an object tree deeper than maxInitJSONDepth, which keeps
+	// the JSON-RPC initialize within the surface area an honest
+	// client would ever produce.
+	depth := 0
+	maxDepth := 0
+	inString := false
+	escape := false
+	for _, b := range body {
+		if escape {
+			escape = false
+			continue
+		}
+		if inString {
+			switch b {
+			case '\\':
+				escape = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch b {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		case '}', ']':
+			depth--
+		}
+	}
+	if maxDepth > maxInitJSONDepth {
+		return body
+	}
+
 	var msg map[string]any
 	if err := json.Unmarshal(body, &msg); err != nil {
 		return body
