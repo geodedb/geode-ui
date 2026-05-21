@@ -30,6 +30,16 @@ jest.mock('../../lib/queryStore', () => ({
     selector({ stagedStatement: null, setStaged }),
 }))
 
+// Pin the post-Bug-1 navigation target (QueryPage moved from `/` to
+// `/query`). The actual react-router-dom MemoryRouter still handles
+// route resolution; we only override useNavigate so the assertions
+// can introspect the called path.
+const navigate = jest.fn()
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useNavigate: () => navigate,
+}))
+
 import { EdgeTypeList } from './EdgeTypeList'
 import { createSchemaCache } from './schemaCache'
 
@@ -40,6 +50,7 @@ beforeEach(() => {
   edgeTypesCall.mockClear()
   edgeTypeResolvers.length = 0
   edgeTypesAutoResolve = ['ACTED_IN', 'DIRECTED']
+  navigate.mockClear()
 })
 
 function renderEdge(props: {
@@ -86,6 +97,10 @@ test('clicking an edge type stages a MATCH with USE GRAPH prefix', async () => {
   expect(setStaged).toHaveBeenCalledWith(
     'USE GRAPH movies; MATCH (n)-[r:ACTED_IN]->(m) RETURN n, r, m LIMIT 25'
   )
+  // 2026-05-21 follow-up to Bug 1: post-routing-flip the navigate
+  // target must be /query (the dedicated QueryPage route) rather
+  // than `/` (which redirects to /dashboard).
+  expect(navigate).toHaveBeenCalledWith('/query')
 })
 
 test('GAP-057: every staged edge query projects both endpoints', async () => {

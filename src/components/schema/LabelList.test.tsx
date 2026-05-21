@@ -38,6 +38,16 @@ jest.mock('../../lib/queryStore', () => ({
     selector({ stagedStatement: null, setStaged }),
 }))
 
+// Capture nav target so the regression test for the post-Bug-1
+// routing change (QueryPage moved off `/` to `/query`) can pin the
+// click behaviour to the new path instead of the old index route
+// (which now redirects to /dashboard).
+const navigate = jest.fn()
+jest.mock('react-router-dom', () => ({
+  ...jest.requireActual('react-router-dom'),
+  useNavigate: () => navigate,
+}))
+
 import { LabelList } from './LabelList'
 import { createSchemaCache } from './schemaCache'
 
@@ -48,6 +58,7 @@ beforeEach(() => {
   labelsCall.mockClear()
   labelResolvers.length = 0
   labelsAutoResolve = ['Person', 'Movie']
+  navigate.mockClear()
 })
 
 function renderList(props: {
@@ -83,6 +94,11 @@ test('renders fetched labels and stages a MATCH query on click', async () => {
   expect(setStaged).toHaveBeenCalledWith(
     'USE GRAPH default; MATCH (n:Person) RETURN n LIMIT 25'
   )
+  // 2026-05-21 follow-up to Bug 1: QueryPage moved off `/` to
+  // `/query`. The click must land on /query, NOT the index route
+  // (which now redirects to /dashboard and would dump the staged
+  // statement on the metrics overview).
+  expect(navigate).toHaveBeenCalledWith('/query')
 })
 
 test('passes the active graph through to the staged statement', async () => {

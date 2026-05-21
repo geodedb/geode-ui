@@ -188,7 +188,12 @@ export const EdgeTypeList: React.FC<{
                   t +
                   ']->(m) RETURN n, r, m LIMIT 25'
               )
-              nav('/')
+              // Bug fix (2026-05-21 follow-up to Bug 1): QueryPage
+              // moved off the index route to /query; the index now
+              // redirects to /dashboard, so the prior nav('/') landed
+              // the operator on the metrics overview instead of the
+              // editor that just received the staged statement.
+              nav('/query')
             }}
           >
             {t}
