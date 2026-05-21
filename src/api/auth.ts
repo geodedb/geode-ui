@@ -196,6 +196,53 @@ export async function fetchPublicProfiles(): Promise<PublicProfile[]> {
   return body.profiles ?? []
 }
 
+export interface OnboardRequest {
+  name: string
+  dsn: string
+  description?: string
+  admin_username: string
+  admin_password: string
+}
+
+export interface OnboardResponse {
+  profile_id: string
+  profile_name: string
+  access_token: string
+  token_type: string
+  expires_in: number
+  connection_id?: string
+}
+
+/**
+ * onboardProfile creates a new system-scope profile against the
+ * unauthenticated POST /api/v1/profiles/onboard endpoint. The server
+ * validates the supplied admin credentials against the supplied DSN
+ * before persisting; on success it returns a JWT so the SPA can roll
+ * straight into an authenticated session.
+ *
+ * Direct fetch (NOT through the generated `client`) — the endpoint is
+ * unauthenticated, so dragging the bearer-token guard along is wrong.
+ */
+export async function onboardProfile(
+  req: OnboardRequest
+): Promise<OnboardResponse> {
+  const res = await fetch('/api/v1/profiles/onboard', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as {
+      error?: string
+      error_description?: string
+    }
+    const detail = err.error_description || err.error
+    throw new Error(detail || `onboardProfile failed (${res.status})`)
+  }
+  return (await res.json()) as OnboardResponse
+}
+
 export const auth = {
   // getToken returns the legacy bearer token only when the operator
   // has explicitly enabled the backout flag. In normal cookie-mode
