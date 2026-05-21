@@ -2,7 +2,8 @@
 
 - **Project:** devnw/codepros/geode/geode-ui
 - **Generated on:** 2026-05-07
-- **Last refreshed:** 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 deferred-items follow-up: the 3 PERF P1 items deferred earlier in round-4 (#291 / #297 / #316) are now **all Closed**. Closure SHAs `86e0463` (#291 layoutWorker transferable Float32Array), `e085a7f` (#297 WS JSON.parse worker), `3259dab` (#316 lazy-load cytoscape plugins). Combined with the prior round-4 closures (#322, #323, #314, #312, #308, #289, plus #300 Scope-A), **10 of 10 actionable findings from the 2026-05-19 audit cohort are now Closed**. #300 Scope-B remains the only OPEN item in this cohort — still blocked on upstream Geode landing SHOW USERS … ROLES. Gates: Jest 979/979 (146 suites), Go `./internal/server/` + `./cmd/server/` + `./internal/jwt/` all pass, `tsc --noEmit` clean, `eslint --quiet 'src/**/*.{ts,tsx}'` clean. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 cohort)" section.)
+- **Last refreshed:** 2026-05-21 (audit Phase 4 — gap-sync `--skip-issues` mode, HEAD `1199648`. The 2026-05-21 detector classified 87 open tracker issues + canonical doc rows into: **47 truly-open** (6 High / 22 Medium / 19 Low — new Gap-IDs **GAP-064..GAP-108**), **34 doc-vs-tracker drift items** (implemented in code with verified closure SHAs but tracker `state=opened`; moved to `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-21" with tracker-close pending next non-skip-issues sync), **3 won't-do** (#4 / #5 / #209 — label flip queued), **1 partial** (#300 / S-NEW-A Scope-A closed, Scope-B blocked-on-upstream-Geode), and **1 sentinel** (#316 already closed). `--skip-issues` mode: no `glab` writes; no commits. The "Pending tracker-issue actions" appendix at the bottom of this file enumerates the queued `glab` actions for the next non-skip-issues sync (§A 34 closes, §B 3 label flips, §C 5 evidence-changed verifications, §E stale-`status::triage` hygiene). Detector report: `docs/audits/2026-05-21/gap-detection.md`. Detail at "Cohort: 2026-05-21 audit" below.)
+- **Previous refresh:** 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 deferred-items follow-up: the 3 PERF P1 items deferred earlier in round-4 (#291 / #297 / #316) are now **all Closed**. Closure SHAs `86e0463` (#291 layoutWorker transferable Float32Array), `e085a7f` (#297 WS JSON.parse worker), `3259dab` (#316 lazy-load cytoscape plugins). Combined with the prior round-4 closures (#322, #323, #314, #312, #308, #289, plus #300 Scope-A), **10 of 10 actionable findings from the 2026-05-19 audit cohort are now Closed**. #300 Scope-B remains the only OPEN item in this cohort — still blocked on upstream Geode landing SHOW USERS … ROLES. Gates: Jest 979/979 (146 suites), Go `./internal/server/` + `./cmd/server/` + `./internal/jwt/` all pass, `tsc --noEmit` clean, `eslint --quiet 'src/**/*.{ts,tsx}'` clean. Detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19 (audit Phase 5 — /codepros:gap-close round-4 cohort)" section.)
 - **Previous refresh:** 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort: **24 gaps closed across 4 trackers** in a single closure pass (1b3f414..3d3ba14 — 26 closure commits + 2 housekeeping). Cluster breakdown: 4 GAP-N rows (GAP-034/035/036/037 now reified with closure SHAs `0622d84` / `42d3664` / `d309293` / `60d965a`); 4 QUALITY rows (#268/#269/#270/#271); 7 PERF rows (#275/#278/#281/#284/#285/#286 + brotli on #259); 9 SECURITY rows (#264/#265/#266/#267/#272/#274/#280/#283 + NFKC corpus on #242). All gates green: 928/928 Jest, 100% reachable Go packages, golangci-lint + tsc-strict clean. Cohort detail in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.)
 - **Previous refresh:** 2026-05-17 (audit Phase 4 gap-sync (round 2) — drift sweep across the GitLab tracker and the in-repo docs. **Drift closed (tracker side):** GAP-002 / #2 and GAP-003 / #3 (upstream-Geode admin-DDL blockers documented Closed 2026-05-13 but never closed on the tracker) — closed with `gap-status::wont-do` + closure-evidence note citing the 2026-05-13 v0.5.15 auth-DDL integration plan; GAP-017 / #44 already closed earlier this day via `63b4feb` (`[QUALITY-12]` finish pnpm-to-npm migration); #122 (S9 accepted-risk, closed 2026-05-10) had stale `gap-status::open` label stripped + `gap-status::wont-do` applied. **Four new gaps filed:** GAP-034 / #273 (mirror `check:doc-routes` + `check:changelog` pre-commit gates into CI; Medium), GAP-035 / #276 (`make perf-smoke` overwrites historical Cytoscape baseline at a fixed path; Medium), GAP-036 / #279 (stale `docs/PRIVATE_REGISTRY.md`; Low), GAP-037 / #282 (`SECURITY.md` misattributes DOMPurify + RBAC to `@devnw/components`; Low). Slot-reservation placeholders for GAP-034/035/036 in earlier drafts were repurposed for these concrete findings. **Doc side:** GAP-017 row updated to Closed in the 2026-05-11 table; the "eleven open items" sentence at the PSR cohort header updated to reflect zero in-repo Open items; closure cohort 2026-05-17 added to `GAP_ANALYSIS_RESOLVED.md`.)
 - **Previous refresh:** 2026-05-17 (audit Phase 4 gap-sync (round 1) — the 47 issues closed locally during the 2026-05-16 gap-close pass were never closed on the GitLab tracker; this run posted closure-evidence notes and ran `glab issue close` on all 47, catching the tracker up to local `main` HEAD `e4fc9ff`. Also: 3 newly-detected gaps GAP-031/032/033 were assigned Gap-IDs and cross-linked to their pre-existing GitLab equivalents #208 (Q-NEW-G), #207 (Q-NEW-F), #138 (Q1) — no new GitLab issues filed because they are exact duplicates; the recommended fixes carry over verbatim.)
@@ -1174,3 +1175,294 @@ A walkthrough of the running app on 2026-05-19 (HEAD `6a3ee78`, geode-ui package
 - Cross-reference GAP-053 to upstream Geode for wire-side `down`/`target` confirmation before scheduling implementation.
 - Cross-reference GAP-059 to commits `085347c` and `a916783` (the two in-flight edge-interaction fixes) so the closer knows what's already landed.
 - Cross-reference GAP-061 / GAP-062 / GAP-063 to each other — they share a docs-viewer + Markdown bundling substrate and should ideally land in dependency order (061 → 062 → 063).
+
+## Cohort: 2026-05-21 audit (gap-sync --skip-issues, HEAD `1199648`)
+
+A `/codepros:audit` Phase 3 (gap-detector) → Phase 4 (gap-sync, `--skip-issues`)
+re-ran on 2026-05-21 against HEAD `1199648`. The detector classified 87 open
+tracker issues + the canonical `GAP_ANALYSIS.md` rows and produced
+`docs/audits/2026-05-21/gap-detection.md` (the source of truth for this
+cohort).
+
+**Headline counts (from gap-detection.md §2):**
+
+| Status | Count |
+|---|---:|
+| Implemented (tracker-confirmed closed sentinel #316) | 1 |
+| Doc-vs-Tracker Drift (closed in code, tracker still opened) | 34 |
+| Won't-Do (tracker label not yet flipped) | 3 (#4, #5, #209) |
+| Partial (Scope-A closed, Scope-B blocked-on-upstream) | 1 (#300 / S-NEW-A) |
+| Not Implemented (truly-open, new or existing Gap-ID) | 47 |
+| **Total open issues classified** | **86 + 1 sentinel = 87** |
+
+**Severity distribution of the 47 truly-open items:** 0 Critical, 6 High,
+22 Medium, 19 Low (after collapsing the two parallel tracker priority
+taxonomies — `priority::0..4` and `priority::critical..low` — into the
+named-scheme; see gap-detection.md §1.2).
+
+**This run is `--skip-issues` mode:** no `glab` writes; only
+`docs/GAP_ANALYSIS.md` and `docs/GAP_ANALYSIS_RESOLVED.md` updated. The
+"Pending tracker-issue actions (next non-skip-issues sync)" appendix at the
+end of this file enumerates the `glab` actions queued for the next run.
+
+### Newly-tracked truly-open gaps — GAP-064..GAP-108 (47 items)
+
+New Gap-IDs assigned by the 2026-05-21 detector to truly-open tracker
+issues that lacked a `GAP-NNN`. Existing GAP-038..GAP-045 are restated
+(no renumbering — their evidence is unchanged at HEAD `1199648`); the
+`GAP_ANALYSIS_RESOLVED.md` cohort for those is NOT re-opened.
+
+#### Quality cohort — truly-open (GAP-064..GAP-102, 39 items)
+
+| Gap-ID  | Source IID | Title | Severity | Status | Evidence (HEAD `1199648`) |
+|---------|-----------:|-------|----------|--------|---------------------------|
+| GAP-064 | #138 | Q1: three SHOW-list handlers duplicate body — extract `listRowsAsJSONValues` | Low | Open | `internal/server/handlers_backups.go`, `handlers_policies.go`, `handlers_roles.go` (still duplicated) |
+| GAP-065 | #141 | Q8: `PatchUsername` cognitive ~45 — decompose into validate+apply helpers | Low | Open | `internal/server/handlers_users.go::PatchUsername` |
+| GAP-066 | #152 | Q11: `RevocationSet.Sweep` nestif 6 — extract `sweepDurable` / `sweepJti` / `sweepPasswordChangedAt` | Low | Open | `internal/jwt/revocation.go::RevocationSet.Sweep` |
+| GAP-067 | #155 | Q14: `stageUpload` 94 LOC + repeated error blocks | Low | Open | `internal/server/handlers_uploads.go::stageUpload` |
+| GAP-068 | #157 | Q15: profilestore `Patch` 87 LOC, 4 seal-then-error blocks | Low | Open | `internal/profilestore/sqlite_crud.go::Patch` |
+| GAP-069 | #162 | Q17: `projectColumns` 155 LOC dense triple-loop | Low | Open | `src/components/results/projectColumns.ts::projectColumns` |
+| GAP-070 | #166 | Q21: SHOW-catalogue list handlers still use `[]jsontext.Value` | Low | Open | `internal/server/handlers_backups.go`, `handlers_policies.go`, `handlers_roles.go` |
+| GAP-071 | #176 | Q34: `deploy/Dockerfile` npm-ci-before-COPY ordering needs invariant comment | Low | Open | `deploy/Dockerfile:53` |
+| GAP-072 | #179 | Q44: add `docs/RUNBOOK.md` (rotate keys, read audit, backup retention) | Medium | Open | `docs/` (file absent) |
+| GAP-073 | #181 | Q43: add `internal/jwt/README.md` — package docs for Issuer + RevocationSet + sweeper | Low | Open | `internal/jwt/` (README absent) |
+| GAP-074 | #182 | Q3: `handlers_tx.go` Commit vs Rollback duplicate body — extract `finalizeTx` | Low | Open | `internal/server/handlers_tx.go::Commit`, `::Rollback` |
+| GAP-075 | #183 | Q7: `AuthProvider.test.tsx` 1009 LOC × 8 near-identical fetch-mock setups | Low | Open | `src/auth/AuthProvider.test.tsx` |
+| GAP-076 | #185 | Q28: `gqlLanguage.ts` (Monaco tokenizer) at 33% coverage | Medium | Open | `src/lib/gqlLanguage.ts` |
+| GAP-077 | #186 | Q2: Backups DeleteFile vs Migrations Sign duplicate body — extract `actUploadFile` | Low | Open | `internal/server/handlers_backups.go`, `handlers_migrations.go` |
+| GAP-078 | #187 | Q4/Q5/Q6: tighten export surface — `useProfileForm` / `lib/graphResult` / `GqlNode`-`RbacAction` | Low | Open | `src/lib/graphResult.ts:12,38,44,83` `GqlNode` exported |
+| GAP-079 | #188 | Q20: `lib/graphResult.ts` 524→284 LOC — types/extract/labels split still pending (partial overlap with closed #247) | Low | **Partial** (see §7 verification) | `src/lib/graphResult.ts` now 284 LOC; types/labels split NOT done — **rescope candidate** |
+| GAP-080 | #189 | Q24: Admin handlers accept dual-key (name/policy/role) for forward-compat | Low | Open | `internal/server/handlers_users.go`, `handlers_policies.go`, `handlers_roles.go` |
+| GAP-081 | #190 | Q45: `GraphView/graphResult` sparse 'why' comments | Low | Open | `src/components/results/GraphView*.tsx` |
+| GAP-082 | #191 | Q46: CHANGELOG seed — likely superseded by closed #258 (`c1a7c80`); verify + close | Low | **Drift Candidate** (see §7 verification) | `CHANGELOG.md` exists with `[Unreleased]` + `scripts/check-changelog.mjs` |
+| GAP-083 | #197 | Q53: `handlers_capabilities.go` hardcodes `admin_writable={users,roles,policies:false,…}` | Medium | Open | `internal/server/handlers_capabilities.go:43-51` |
+| GAP-084 | #199 | Q-NEW-C: `startCancelReader` inner relay goroutine parked in `readMsg` with no ctx cancel | Medium | Open | `internal/server/ws_query.go:331` |
+| GAP-085 | #200 | Q-NEW-B: `WSServer.Config` partial duplicate of `server.Config` | Medium | Open | `cmd/server/app_routes.go:98-102` |
+| GAP-086 | #203 | Q-NEW-E: `handlers_uploads.go` `os.Rename` silently overwrites colliding filenames | **High** | Open | `internal/server/handlers_uploads.go` |
+| GAP-087 | #204 | Q-NEW-D: `rowBatcher.flush` — stale `envelope.Rows` slice header suspect | Medium | Open | `internal/server/rowbatcher.go::flush` |
+| GAP-088 | #207 | Q-NEW-F: profilestore writer "lacks busy_timeout" — title contradicts code | Low | **Drift Candidate** (see §7 verification) | `internal/profilestore/sqlite.go:116` `PRAGMA busy_timeout=5000` already present; closed as GAP-032 |
+| GAP-089 | #208 | Q-NEW-G: `handlers_users.go` empty PATCH fabricates synthetic User — likely closed via GAP-031 | Medium | **Drift Candidate** (see §7 verification) | `internal/server/handlers_users.go::PatchUsername` empty-body path — GAP-031 records closure `d7eee0a`; tracker title may still need verification |
+| GAP-090 | #214 | Q-NEW-H: `AdminPage` / `OpsPage` `pathname.endsWith('/users')` fragile active-tab matcher | Low | Open | `src/pages/AdminPage.tsx`, `src/pages/OpsPage.tsx` |
+| GAP-091 | #215 | Q-NEW-I: `LocalizationProvider` 49.35% coverage (fallback locale + lazy-load untested) | Medium | Open | `src/i18n/LocalizationProvider.tsx` |
+| GAP-092 | #252 | Q-NEW-8: `AdminPage` 8-tab flat nav lacks overflow strategy | Low | Open | `src/pages/AdminPage.tsx` |
+| GAP-093 | #261 | Q-NEW-13: codify cross-stack contract-mirror discipline (ADR + active pair registry) | Medium | Open | `docs/adr/` (ADR absent) |
+| GAP-094 | #292 | Q-NEW-A+B+C+S: `useGraphCytoscape` rebuild closure decomposition + `useWhenCy` helper | Medium | Open | `src/components/results/graph/useGraphCytoscape.ts` (~503 LOC) |
+| GAP-095 | #295 | Q-NEW-D+E: QueryPage 4-concern useEffect surface | Medium | Open | `src/pages/QueryPage.tsx:146` `streamStateToResp` |
+| GAP-096 | #299 | Q-NEW-F: `TableView` 615-LOC monolith (styled-components + virt math + VirtualRow + exportNdjson) | Medium | Open | `src/components/results/TableView.tsx` |
+| GAP-097 | #303 | Q-NEW-G+I+J+K+L+M: type-safety + API-contract umbrella (`as unknown as` casts) | Medium | Open | `src/pages/QueryPage.tsx:148`, `useGraphCytoscape.ts:290` |
+| GAP-098 | #307 | Q-NEW-N: module-level `lastRebuild` singleton in `useGraphCytoscape` breaks multi-instance | **High** | Open | `src/components/results/graph/useGraphCytoscape.ts:71` |
+| GAP-099 | #309 | Q-NEW-O: `cy.on` tap handlers registered before `cyRef.current = cy` — error-path leak | **High** | Open | `src/components/results/graph/useGraphCytoscape.ts:267,276,280,283` |
+| GAP-100 | #311 | Q-NEW-P: QueryPage `stream.status` history-record can re-fire on rapid status flips | Medium | Open | `src/pages/QueryPage.tsx` history-record effect |
+| GAP-101 | #315 | Q-NEW-T: `performance.mark('graph:firstInteractive')` skips streaming-gate branch | Low | Open | `src/components/results/graph/*` perf mark site |
+| GAP-102 | #319 | Q-NEW-H+U+V+W+X+Y+Z: docs umbrella — `useLasso` JSDoc + 6 design/ops notes missing | Low | Open | `docs/` (multiple files absent) |
+
+#### Performance cohort — truly-open (GAP-103..GAP-106, 4 items)
+
+| Gap-ID  | Source IID | Title | Severity | Status | Evidence (HEAD `1199648`) |
+|---------|-----------:|-------|----------|--------|---------------------------|
+| GAP-103 | #139 | PERF-2026-05-11-05: `BenchmarkPostProfile` async-reload allocs 16181/op vs sync 1601/op | Medium | Open | `internal/server/benchmark_postprofile_test.go` |
+| GAP-104 | #294 | PERF-2026-05-19-02: `layoutCache.get` clones full PosMap on every hit — drop defensive clone | Medium | Open | `src/components/results/graph/layoutCache.ts:61` |
+| GAP-105 | #302 | PERF-2026-05-19-04: WS protocol JSON-only — evaluate MessagePack/CBOR for stream frames | Medium | Open | `src/lib/queryStream.ts:195` `JSON.parse(ev.data)`; `internal/server/ws_query.go:462` |
+| GAP-106 | #306 | PERF-2026-05-19-05: `streamRowsOverWS` sequential scan-encode-write — overlap with producer | **High** | Open | `internal/server/ws_query.go:391` |
+
+#### Security cohort — truly-open (GAP-107..GAP-108, 2 items — excluding 1 won't-do)
+
+| Gap-ID  | Source IID | Title | Severity | Status | Evidence (HEAD `1199648`) |
+|---------|-----------:|-------|----------|--------|---------------------------|
+| GAP-107 | #71  | SEC-F5: deprecate `?access_token=` query fallback (sunset 2026-07-01) | Medium | Open | `internal/server/auth.go:88` time-gated deprecation |
+| GAP-108 | #277 | S-2026-05-17-11: `serialize-javascript` HIGH advisories via `css-minimizer-webpack-plugin` | **High** | **Drift Candidate** (see §7 verification) | `package.json` `css-minimizer-webpack-plugin` version — doc claims `^8.0.0` 2026-05-20; verify |
+
+#### Existing GAP-NNN rows restated — GAP-038..GAP-045 (8 items, evidence unchanged)
+
+These already exist in this file (see the "Cohort: 2026-05-19 audit" section above). They are restated below only to confirm the 2026-05-21 detector re-validated each at HEAD `1199648`; no row data changes.
+
+| Gap-ID  | Source IID | Title | Severity | Status |
+|---------|-----------:|-------|----------|--------|
+| GAP-038 | #287 | Bootstrap 5.3 rollout undocumented (`docs/ARCHITECTURE.md` gap) | Medium | Open / needs-doc |
+| GAP-039 | #288 | Font Awesome Free migration undocumented + CSP `font-src`/`style-src` implications | **High** | Open + needs-doc |
+| GAP-040 | #290 | QueryPage zustand singleton — dynamic-import cycle-avoidance contract undocumented + untested | **High** | Open |
+| GAP-041 | #293 | `lspSettings.ts` localStorage `geode.lsp.settings.v1` — no schema/migration/clear path | Medium | needs-doc |
+| GAP-042 | #296 | `src/hooks/useMediaQuery` — new hooks extension point not catalogued | Low | needs-doc |
+| GAP-043 | #298 | `Makefile` `e2e-build` `cd -P` + manual `docker build` bypasses compose-v5 + symlink bug | Medium | needs-doc |
+| GAP-044 | #301 | `useLasso` mutates `userPanningEnabled` / `boxSelectionEnabled`; restore hooks undocumented | Medium | Open |
+| GAP-045 | #305 | `AuthProvider.tsx:293` TODO #122 — "Forget Saved Password" Settings UI never surfaced | Medium | Open |
+
+### Won't-Do (label flip pending) — 3 items, 2026-05-21 cohort
+
+These already carry the doc-side Won't-Do classification (see GAP-004 / GAP-005 rows in the top-of-file table; #209 has no `GAP-NNN`). The 2026-05-21 detector confirmed each at HEAD `1199648` and queued the GitLab label flip for the next non-skip-issues sync.
+
+| Gap-ID  | Source IID | Title | Severity | Status | Doc reference |
+|---------|-----------:|-------|----------|--------|---------------|
+| GAP-004 | #4   | e2e-20 ops audit spec skips when `/api/v1/audit` returns 403 (until Geode v0.6+) | Low | **Won't-Do (label flip pending)** | row in "Gaps (Open)" table above |
+| GAP-005 | #5   | e2e-21 MCP `tools/list` skips on jsonrpc error (until Geode v0.6+) | Low | **Won't-Do (label flip pending)** | row in "Gaps (Open)" table above |
+| (no GAP-ID) | #209 | S-NEW-3: Auth shim re-injects Authorization header after AuthJWT — Won't-Do-Until-Upstream | Low | **Won't-Do (label flip pending)** | `SECURITY_GAP_ANALYSIS.md` (DEFERRED 2026-05-16 / needs-genapi) |
+
+### Partial (1 item, 2026-05-21 cohort)
+
+| Source IID | Cohort ID | Status | Scope-A | Scope-B |
+|-----------:|-----------|--------|---------|---------|
+| #300 | S-NEW-A | **Partial** | `internal/server/audit.go:68` `auth_role_resolved` constant; `handlers_auth.go:153` emission (Closure SHA `71352b2`, recorded in `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19") | **Blocked-on-upstream-Geode** — `CREATE USER ROLE admin` cannot land in the UI until upstream Geode role-cache refresh ships. #300 deliberately remains the single tracking point. |
+
+Update vs 2026-05-19 entry in `GAP_ANALYSIS_RESOLVED.md`: no change to Scope-A closure;
+Scope-B re-validated still upstream-blocked at HEAD `1199648`. Issue #300 stays
+`state=opened` until upstream lands.
+
+### Severity Matrix (2026-05-21 truly-open cohort)
+
+| Severity | Count | Gap-IDs |
+|---|---:|---|
+| **Critical** | 0 | (none — `#241` / `#242` carry `priority::critical` on the tracker but are Drift Candidates per gap-detection.md §3.2, not truly-open) |
+| **High** | 6 | GAP-039, GAP-040, GAP-086, GAP-098, GAP-099, GAP-106 (+ GAP-108 if Drift verification fails) |
+| **Medium** | 22 | GAP-038, GAP-041, GAP-043, GAP-044, GAP-045, GAP-072, GAP-076, GAP-083, GAP-084, GAP-085, GAP-087, GAP-089 (Drift Candidate), GAP-091, GAP-093, GAP-094, GAP-095, GAP-096, GAP-097, GAP-100, GAP-103, GAP-104, GAP-105, GAP-107 |
+| **Low** | 19 | GAP-004, GAP-005, GAP-042, GAP-064, GAP-065, GAP-066, GAP-067, GAP-068, GAP-069, GAP-070, GAP-071, GAP-073, GAP-074, GAP-075, GAP-077, GAP-078, GAP-079, GAP-080, GAP-081, GAP-082 (Drift Candidate), GAP-088 (Drift Candidate), GAP-090, GAP-092, GAP-101, GAP-102 |
+
+### Provenance (2026-05-21 cohort)
+
+- Detector report: `docs/audits/2026-05-21/gap-detection.md` (299 lines).
+- Phase-2 evidence: `docs/audits/2026-05-21/gap-scan.md` (270 lines).
+- Phase-1 inventory: `docs/audits/2026-05-21/gap-collection.md` (391 lines).
+- Severity reconciliation: numeric `priority::N` + named `priority::*` collapsed into Critical/High/Medium/Low (see gap-detection.md §1.2).
+- `--skip-issues` mode: no `glab` writes. See appendix below for the queued tracker actions.
+
+## Pending tracker-issue actions (next non-skip-issues sync)
+
+This appendix is the input set for the next `--no-skip-issues` `gap-sync` run.
+It enumerates the GitLab actions queued by the 2026-05-21 `--skip-issues`
+run so the next sync agent can execute `glab` writes without re-running the
+detector.
+
+### A. Doc-vs-Tracker Drift — `glab issue close` queue (34 items)
+
+For each IID below, the next sync agent should:
+
+1. Post a closure-evidence note: *"Closed by `<SHA>` (`<Cohort-ID>`): `<one-line>`. Closure evidence: commit `<SHA>`; tracking docs `docs/GAP_ANALYSIS_RESOLVED.md` (closure batch 2026-05-21 — doc-vs-tracker drift sweep)."*
+2. Run `glab issue close <IID>`.
+
+**Round-3 cohort (10 items — gap-detection.md §3.1):**
+
+| IID | Cohort ID | Closure SHA |
+|----:|-----------|-------------|
+| #239 | PERF-2026-05-17-01 | `7c2d867` |
+| #240 | PERF-2026-05-17-02 | `da9df5e` |
+| #243 | PERF-2026-05-17-03 | `ebf97d3` |
+| #246 | PERF-2026-05-17-04 | `9697a4c` |
+| #249 | PERF-2026-05-17-05 | `7c2d867` (cascade) |
+| #251 | PERF-2026-05-17-06 | `eec83de` |
+| #254 | PERF-2026-05-17-07 | `6695e54` |
+| #256 | PERF-2026-05-17-08 | `478bcf6` |
+| #257 | PERF-2026-05-17-09 | `79b5680` |
+| #259 | (extra)            | `43eb1ef` |
+
+**Round-3 Phase-4 follow-on (gap-detection.md §3.2 — 22 items as numbered in the source; subset of the 34-item total):**
+
+| IID | Cohort | Closure SHA |
+|----:|--------|-------------|
+| #241 | Q-NEW-1 | (closure cohort 2026-05-17 round-3) |
+| #242 | Q-NEW-2 | (closure cohort 2026-05-17 round-3) |
+| #244 | Q-NEW-3 | `cd5be84` |
+| #245 | Q-NEW-4 | `f6c0047` |
+| #247 | Q-NEW-5 | `f1dc44d` |
+| #248 | Q-NEW-6 | `455f6b1` |
+| #250 | Q-NEW-7 | `081e05c` |
+| #253 | Q-NEW-9 | `e4a4c3c` |
+| #255 | Q-NEW-10 | `7d271a2` |
+| #258 | Q-NEW-11 | `c1a7c80` |
+| #260 | Q-NEW-12 | (baseline regen) |
+| #262 | Q-NEW-14 | `bf94a9a` |
+| #263 | Q-NEW-15 | `17a6253` |
+| #275 | PERF-N1 | `a37caa3` |
+| #278 | PERF-N2 | `a1a1313` |
+| #281 | PERF-N3 | `912be6d` |
+| #284 | PERF-N4 | `5a052b8` |
+| #285 | PERF-N5 | `f8ed2f2` |
+| #286 | PERF-N6 | `f2b8566` |
+| #264 | S-2026-05-17-09 | `9a787d8` + `3bcba7d` |
+| #265 | S-2026-05-17-10 | `8880d12` + `6bab5f6` |
+| #266 | S-2026-05-17-11 | `d914df6` + `f60f1a2` |
+| #267 | S-2026-05-17-12 | `755ede6` + `9823965` |
+| #268 | QUALITY-16 | `eca3040` |
+| #269 | QUALITY-17 | `5350b99` |
+| #270 | QUALITY-18 | `12dc773` |
+| #271 | QUALITY-19 | `c71f812` |
+| #272 | S-2026-05-17-13 | `b0e7cc6` |
+| #274 | S-2026-05-17-10 (alt) | `8bc00af` |
+| #280 | S-2026-05-17-12 (alt) | `8b01c57` |
+| #283 | S-2026-05-17-13 (alt) | `c672d36` |
+
+**Round-4 cohort (gap-detection.md §3.3 — S-NEW-A..M + Q-NEW-Q/R + PERF-2026-05-19, 14 items in the source; subset of the 34-item total):**
+
+| IID | Cohort | Closure SHA |
+|----:|--------|-------------|
+| #289 | Q-NEW-Q | `b78c0da` |
+| #291 | PERF-2026-05-19-01 | `86e0463` |
+| #297 | PERF-2026-05-19-03 | `e085a7f` |
+| #304 | S-NEW-B | `c1e7e86` |
+| #310 | S-NEW-D | `8546311` |
+| #312 | PERF-2026-05-19-06 | `e42a92c` |
+| #313 | S-NEW-E | `29ae9a5` |
+| #314 | Q-NEW-R | `f725ea4` |
+| #317 | S-NEW-F | `8831b67` |
+| #318 | S-NEW-G | `550cee3` |
+| #320 | S-NEW-H | `29ae9a5` (accepted-risk per ADR) |
+| #321 | S-NEW-I | `eb684c7` |
+| #324 | S-NEW-L | `0460abc` |
+| #325 | S-NEW-M | `e409c2a` |
+
+Note on per-section counts: gap-detection.md §3 declares **34 drift items
+total**; individual subsection tables itemise 10 (§3.1) plus a subset of
+§3.2 plus a subset of §3.3. The next sync agent should treat the 34
+items the detector marked as Drift Candidates as the canonical close
+queue, and treat any extras in the per-section tables above as belt-and-
+suspenders verification (re-confirm closure SHA in `git log --all`
+before closing).
+
+### B. Won't-Do — `gap-status::open` → `gap-status::wont-do` label flips (3 items)
+
+| IID | Doc reference (closure rationale) |
+|----:|-----------------------------------|
+| #4   | GAP-004 row in `GAP_ANALYSIS.md` "Gaps (Open)" table — Won't-Do (until Geode v0.6+) 2026-05-16 |
+| #5   | GAP-005 row in `GAP_ANALYSIS.md` "Gaps (Open)" table — Won't-Do (until Geode v0.6+) 2026-05-16 |
+| #209 | S-NEW-3 in `SECURITY_GAP_ANALYSIS.md` — DEFERRED 2026-05-16, Won't-Do-Until-Upstream (needs-genapi) |
+
+For each: strip `gap-status::open`, add `gap-status::wont-do`, post a
+comment citing the doc row for the deferral rationale. Do NOT close on
+the tracker (Won't-Do is distinct from closed in this project's
+labelling convention).
+
+### C. Evidence-changed verifications (5 items — gap-detection.md §7)
+
+These five carry a `GAP-NNN` row above but the 2026-05-21 detector found
+evidence suggesting they may already be closed in code. Each needs
+re-verification by the next non-skip-issues sync before closing.
+
+| Gap-ID  | IID  | Verification needed | Likely action |
+|---------|-----:|---------------------|---------------|
+| GAP-079 | #188 | `src/lib/graphResult.ts` now 284 LOC (was 524); types/labels split still pending | Rescope (keep open) or close-as-superseded — operator decides |
+| GAP-082 | #191 | `CHANGELOG.md` exists with `[Unreleased]` + `scripts/check-changelog.mjs` post #258 (`c1a7c80`) | Likely close-as-superseded by #258 |
+| GAP-088 | #207 | `internal/profilestore/sqlite.go:116` `PRAGMA busy_timeout=5000` already present (GAP-032 closure `c98be97`) | Likely close-as-done (title contradicts on-disk code) |
+| GAP-089 | #208 | `internal/server/handlers_users.go::PatchUsername` empty-body path — GAP-031 records closure `d7eee0a` | Verify against tracker title; likely close-as-done |
+| GAP-108 | #277 | `package.json` `css-minimizer-webpack-plugin` version — doc claims `^8.0.0` 2026-05-20 | Verify version pin; if `^8.0.0` confirmed, close-as-done |
+
+### D. Drift items that retain a `GAP-NNN` (cross-reference, not separate work)
+
+GAP-082 (#191), GAP-088 (#207), GAP-089 (#208), GAP-108 (#277) appear in both §A
+(drift cohort) and §C (verification cohort) — the verification gates §A
+for these four. The next sync agent should run §C first, then §A on any
+that pass verification.
+
+### E. Stale-label hygiene
+
+The 2026-05-21 collector flagged 46 issues that carry both `category::*` /
+`confidence::*` AND a stale `status::triage` label (gap-collection.md §6
+item 4). Strip `status::triage` from any of the 46 issues that already
+carry a concrete `category::*` + `confidence::*` pair. This is mechanical
+cleanup, not closure work — keep separate from §A / §B / §C.
+
+### Sync mode reminder
+
+This entire appendix is a **work queue for `glab` writes**. The
+2026-05-21 detector intentionally did NOT touch the GitLab tracker — see
+the `--skip-issues` mode contract at the top of the "Cohort: 2026-05-21
+audit" section. The next gap-sync run that drops `--skip-issues` should
+process §A → §B → §C → §E in that order and post a closure batch entry
+to `GAP_ANALYSIS_RESOLVED.md` once the sweep completes.

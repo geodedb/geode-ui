@@ -1,6 +1,10 @@
 # Security Gap Analysis — geode-ui
 
-**Last updated:** 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: S-NEW-J / #322 + S-NEW-K / #323 Closed via `1cde6ba` (`${VAR:?msg}` required form + per-checkout `.env.test` random generation + pre-commit gate); S-NEW-C / #308 Closed via `36661d7` (`extractTokenForRevoke` sunset-exempt); S-NEW-A / #300 **Partial — Scope-A Closed** via `71352b2` (`auth_role_resolved` audit event with `source=bootstrap`); Scope-B remains Open — blocked on upstream Geode (real SHOW USERS ROLES discovery). 9 of 13 2026-05-19 security items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
+**Last updated:** 2026-05-21 (gap-close pass — 2 of the 2026-05-21 cohort items CLOSED in this session: `A1` BOLA on POST /users/{u}/password via `ad4fe56` (in-handler subject-equality gate against `actor.Subject`; `auditEventUserPasswordForbidden` records rejected attempts; 4 new tests pin self / admin / non-admin / anonymous matrix); `S1` dev-machine npm cluster via `6835660` (`electron-builder 25.1.8 → 26.8.1` + `webpack-dev-server 5.0 → 5.2.4`, `ws` follows via dedup to 8.20.1; `npm audit --omit=dev` reports 0 production-tree vulnerabilities). Authenticode validation on a Windows release host is OUTSTANDING and must be run before tagging the next electron build. Remaining 2026-05-21 items: S2 + 11 Low + 5 Info.)
+
+**Previous:** 2026-05-21 (Phase 1–3 inputs against HEAD `1199648`; `--skip-issues` mode — docs-only. Phase 4 docs-only consolidation of `docs/audits/2026-05-21/security-{inventory,scan,review}.md`. **No GitLab writes** in this run; confidential issues recorded here instead. Cohort: 13 items (A1, A2, A4, A5, W4, W6, W7, I1, I2, I3, I7, I9, I10) + 4 supply/CI items (S1, S2, S3, S4, S5) + 5 Info (W2, W5, O3, O4, O8). Severity counts: Critical 0 / High 0 / Medium 2 / Low 11 / Info 5. Scanner cross-check: gitleaks 2 non-actionable; govulncheck 0; gosec/semgrep 0 actionable; npm prod 0; npm full-tree 15 dev-only (tar / webpack-dev-server / ws cluster, **MEDIUM at dev-machine boundary**, LOW at CI). Top action: atomic MR bumping `electron-builder 25.1.8 → 26.8.1` + `webpack-dev-server@latest` (ws follows via npm dedup). See [2026-05-21 audit cohort](#2026-05-21-audit-cohort) below.)
+
+**Previous:** 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: S-NEW-J / #322 + S-NEW-K / #323 Closed via `1cde6ba` (`${VAR:?msg}` required form + per-checkout `.env.test` random generation + pre-commit gate); S-NEW-C / #308 Closed via `36661d7` (`extractTokenForRevoke` sunset-exempt); S-NEW-A / #300 **Partial — Scope-A Closed** via `71352b2` (`auth_role_resolved` audit event with `source=bootstrap`); Scope-B remains Open — blocked on upstream Geode (real SHOW USERS ROLES discovery). 9 of 13 2026-05-19 security items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
 
 **Previous:** 2026-05-19 (Phase 4 — /codepros:audit 2026-05-19 cohort: 13 new findings filed (#300, #304, #308, #310, #313, #317, #318, #320, #321, #322, #323, #324, #325); 3 confidential (#300, #322, #323); 0 Critical, 1 High, 5 Medium, 4 Low, 3 Info; top risk is S-NEW-A / #300 (Risk 48 — authenticateUpstream returns nil roles); supply-chain hardening: S-NEW-J / #322 + S-NEW-K / #323 remove operator-misuse hardcoded defaults from `deploy/docker-compose.test.yml`. Prior content below preserved verbatim.)
 
@@ -9,6 +13,8 @@
 **Repository:** `devnw/codepros/geode/geode-ui`
 **Branch reviewed:** `main` @ `d5c47da`
 
+> **Audit-2026-05-21 Phase 4 jump-link (docs-only, `--skip-issues`):** see [2026-05-21 audit cohort](#2026-05-21-audit-cohort) for the **13 in-doc findings** consolidated from `docs/audits/2026-05-21/security-{inventory,scan,review}.md`. **No GitLab writes** in this run; items that would normally be confidential GitLab issues are tracked in-doc only. 0 Critical, 0 High, 2 Medium (A1 BOLA on `POST /api/v1/users/{u}/password` + S1 dev-machine npm cluster), 11 Low, 5 Info. Top recommended action: atomic MR `electron-builder 25.1.8 → 26.8.1` + `webpack-dev-server@latest` (ws follows via dedup).
+>
 > **Audit-2026-05-19 Phase 4 jump-link:** see [2026-05-19 audit cohort](#2026-05-19-audit-cohort) for the **13 newly-filed `S-NEW-A..M` findings** (issues #300, #304, #308, #310, #313, #317, #318, #320, #321, #322, #323, #324, #325). Three confidential (#300, #322, #323). 0 Critical, 1 High, 5 Medium, 4 Low, 3 Info. Top risk: S-NEW-A / #300 (Risk 48 — `authenticateUpstream` returns nil roles).
 >
 > **Audit-2026-05-17 Phase 4 follow-on jump-link:** see [2026-05-17 audit cohort](#2026-05-17-audit-cohort) for the **9 cohort-resident findings**: the original 8 from earlier in the day (S-2026-05-17-01..08, mapped to #264-#267 + cross-links to #241/#242/#71/#233) PLUS the Phase-4 follow-on **5 newly-filed `S-2026-05-17-09..13`** findings (issues #272, #274, #277, #280, #283 — all public, no confidential filings) and **two Phase-4 update comments** on existing issues (#233 enumerated phased remediation; #242 missing-case classification). Two findings from Phase 2 dropped as not-a-gap (see Dropped subsection). No findings warrant CVE filing.
@@ -607,3 +613,153 @@ The cohort is **smaller and lower-impact than the 2026-05-13 cohort**. The domin
 ### 2026-05-19 — verdict
 
 The 2026-05-19 cohort is **smaller than the 2026-05-17 cohort** and dominated by **defense-in-depth tightening + operator-misuse hardening** on already-mitigated surfaces. No novel vulnerability classes. The single High finding (S-NEW-A / #300) is an architectural authority-source clarification rather than an active exploit. No active RCE, no live leaked production secrets, no auth-bypass-without-operator-action. No findings warrant CVE filing.
+
+---
+
+## 2026-05-21 audit cohort
+
+**Audit:** /codepros:audit Phase 1–3 → Phase 4 tracking (Audit-2026-05-21 cohort, **`--skip-issues` mode**)
+**Branch reviewed:** `main` @ HEAD `1199648`
+**Inputs:** `docs/audits/2026-05-21/security-inventory.md` · `docs/audits/2026-05-21/security-scan.md` · `docs/audits/2026-05-21/security-review.md`
+**Scope:** Adversarial security review against the post-2026-05-19 closure tree. STRIDE-per-element + OWASP API 2023→2025 overlay.
+
+> **Mode caveat.** This is a **docs-only** tracking pass. **No GitLab writes** were made. Items that would normally be filed as confidential GitLab issues (e.g. exploit-chain BOLA paths) are tracked in-doc only; no separate confidential filing exists for this cohort. If/when this is re-run without `--skip-issues`, the rows below become the canonical issue bodies.
+
+### Scoring framework (codepros security-scoring)
+
+`Risk Score = Impact (1–5) × Likelihood (1–5) × 4` (range 4–100). Confidentiality gate: any finding involving secrets, auth bypass, RCE, priv-esc, or a detailed exploit path would normally be filed `--confidential`; in this docs-only run those rows are marked **`would-be-confidential`** in the Confidential column.
+
+### Scanner cross-check (Phase 2)
+
+| Tool | Result | Confidence |
+|---|---|---|
+| gitleaks | 2 matches — both non-actionable (test literal + docs placeholder) | confirmed |
+| govulncheck (Go, source) | 0 reachable across 251 OSV candidates | confirmed |
+| npm audit `--omit=dev` | 0 advisories across 226 prod deps | confirmed |
+| npm audit (full tree) | **15** dev-only (tar / webpack-dev-server / ws cluster) — see S1 | confirmed |
+| gosec `./...` | 7 findings; 0 actionable (RFC 6455 SHA-1 nolint-tagged, LOW-conf string false-positives, operator-supplied paths in `gen/cmd/server`) | confirmed |
+| semgrep (`p/security-audit p/golang p/javascript p/typescript p/react`) | 6 warnings; 0 actionable (config-gated `Secure`, intentional CSRF non-HttpOnly, HIBP/RFC SHA-1) | confirmed |
+| shellcheck / hadolint / trivy / grype / syft / osv-scanner | not installed locally; CI pipeline runs SBOM-generate + SBOM-scan via `ci-catalog@v1.7.1` | n/a |
+
+**Reclassification:** the dev-only npm cluster (tar / webpack-dev-server / ws — 15 advisories) is reclassified **MEDIUM at the dev-machine boundary** (open-LAN webpack-dev-server attack window + electron-builder release-host tar-extraction window) and **LOW at the CI boundary** (single-tenant per-pipeline; would require already-compromised CI variables to exploit). Production runtime image is unaffected (npm prod tree clean).
+
+### 2026-05-21 findings — stack ranked by Risk Score
+
+| Rank | ID | Severity | Risk (I × L × 4) | Title | Confidential | File:Line | OWASP / CWE | Confidence | Status |
+|------|----|----------|------------------|-------|--------------|-----------|-------------|------------|--------|
+| 1 | **A1** | Medium | **24** (3 × 2 × 4) | `POST /api/v1/users/{u}/password` not subject-bound — relies on upstream Geode RBAC alone | **would-be-confidential** (BOLA exploit path) | `internal/server/handlers_users.go:403-438`; `geode.json:204-210` | OWASP API1:2023 (BOLA) / CWE-639 | confirmed | **Open** — defense-in-depth fix: `if username != actr.Subject && !isAdmin { 403 }` gate at `handlers_users.go:404`. Issue creation deferred (`--skip-issues`). SLA: **30 days** (Medium) — by 2026-06-20. |
+| 2 | **S1** | Medium (dev-machine) / LOW (CI) | **24** (3 × 2 × 4) dev-machine; **8** (2 × 1 × 4) CI | Dev-only npm cluster — `tar` <7.5.7 + `webpack-dev-server` <=5.2.3 + `ws` ≥8.0.0 <8.20.1 (15 advisories) | no | `package.json` devDependencies; scan §npm-audit (GHSA-34x7-hfp2-rc4v / GHSA-8qq5-rm4j-mr97 / GHSA-83g3-92jg-28cx / GHSA-79cf-xcqc-c78w / GHSA-58qx-3vcg-4xpx) | OWASP A06:2021 / CWE-22 (tar) + CWE-749 (webpack-dev-server) + CWE-908 (ws) | confirmed | **Open** — **recommended atomic MR**: bump `electron-builder 25.1.8 → 26.8.1` (semver-major; re-validate Authenticode signing pipeline on ssl.com side) + `webpack-dev-server@latest` (ws follows via npm dedup); `jest-environment-jsdom → 30.4.1` rides along. Reclassified UP from scanner default at dev-machine boundary. SLA: **90 days** (Medium dev-machine) — by 2026-08-19. |
+| 3 | **S2** | Medium | **16** (2 × 2 × 4) | `ci-catalog/codesign-windows-ssl@~latest` floating ref in `.gitlab-ci.yml` | no | `.gitlab-ci.yml:34` | OWASP A06:2021 / CWE-829 | confirmed | **Open — mitigated** by `tag_only: true` + `allow_failure: true` on the job (codesign never gates a pipeline pass). Allowlisted via `scripts/check-ci-pins.sh` + TODO #127. **Unblock condition:** upstream ci-catalog publishes a tagged release of `codesign-windows-ssl` — flip the pin then. Cross-link [F-SUP-3 / #153](#audit-2026-05-11-cohort--full-tree-security-pass). |
+| 4 | **A2** | Low | **8** (2 × 1 × 4) | WebSocket `AllowEmptyOrigin: true` on every WS route | no | `gen/ws/ws_handlers.gen.go:55,65`; `internal/server/ws_lsp.go:147` | OWASP A05:2021 / CWE-346 | confirmed | **Open** — defense-in-depth: refuse empty Origin on `/ws/query` (SPA is the only legitimate client). `/ws/lsp` operator-pinned upstream; same recommendation. JWT remains the actual authority. Cross-link [S-2026-05-17-02 / #265](#2026-05-17-audit-cohort) (closed). |
+| 5 | **A4** | Low | **8** (2 × 1 × 4) | JWT revocation latency is best-effort on SQLite write failure | no | `internal/jwt/revocation.go:140-156` | OWASP A07:2021 / CWE-613 | confirmed | **Open — accepted-risk candidate.** Exposure bounded by TTL (default 8h, max 24h). Action: document in operator runbook (`docs/OPERATIONS.md`). |
+| 6 | **A5** | Low | **8** (2 × 1 × 4) | Admin-bootstrap audit emits bare `-admin-users` list verbatim | no | `cmd/server/app.go:257-260` | CWE-532 | confirmed | **Open** — `admin_users` value is not in `obsx.DefaultSensitiveKeyFragments`; audit log becomes a registry of admin accounts. Action: extend the sensitive-key list OR hash the list before emit. |
+| 7 | **W4** | Low | **8** (2 × 1 × 4) | HSTS `preload` emitted unconditionally — even on plaintext deployments | no | `gen/pkg/httpx/server.go:187` | OWASP A05:2021 / CWE-1004 (adjacent) | suspected (operationally documented) | **Open — genapi follow-up.** Recommendation: condition HSTS emission on `r.TLS != nil \|\| cfg.behindTrustedProxy`, or drop `preload` from default. Production deploys are expected to terminate TLS upstream (documented). |
+| 8 | **W6** | Low | **8** (2 × 1 × 4) | `/api/v1/metrics` has no per-route rate limit | no | `internal/server/handlers_metrics.go:141`; `cmd/server/app_routes.go:90` | OWASP API4:2023 / CWE-770 | confirmed | **Open** — global per-IP 50 rps applies (≈50 rps amplifies upstream Prom load). Cheap fix: declare `rateLimit` in `geode.json` for the metrics route. |
+| 9 | **W7** | Low | **8** (2 × 1 × 4) | Global per-IP limiter is `RemoteAddr`-only — collapses to proxy IP when `-trust-proxy-xff=true` | no | `cmd/server/app_csrf.go:42-44` | CWE-307 (adjacent) | confirmed | **Open — documented.** Action: align `PerIPSource` with `-trust-proxy-xff` setting OR document the asymmetry (login limiter trusts XFF, global per-IP does not). |
+| 10 | **I1** | Low | **8** (2 × 1 × 4) | `sanitizeGraphName` silently strips disallowed runes (no rejection) | no | `internal/server/quoting.go:12-25` | CWE-20 / CWE-89 (adjacent, mitigated upstream) | confirmed | **Open** — silent strip masks caller intent. Action: make `sanitizeGraphName` strict (return error on disallowed rune). |
+| 11 | **I2** | Low | **8** (2 × 1 × 4) | `promparse.ParseProm` has no per-family count or total-byte cap | no | `internal/server/promparse.go:85-125` | OWASP A05:2021 / CWE-400 + CWE-770 | confirmed | **Open** — defense-in-depth on operator-controlled `GEODE_METRICS_URL`. Action: cap family count (~1024) + cumulative bytes (~4 MiB). |
+| 12 | **I3** | Low | **8** (2 × 1 × 4) | `splitCSVRespectingQuotes` doesn't handle backslash escapes | no | `internal/server/promparse.go:304-323` | CWE-1287 | confirmed | **Open** — limited impact (only `le` label is read), but a future use of label values inherits the bug. Documented in source as "escapes not handled". |
+| 13 | **I7** | Low | **8** (2 × 1 × 4) | WS / REST query params accept arbitrary key names with no validation | no | `internal/server/ws_query.go:525-534`; `internal/server/sqlexec.go:71-87` | CWE-20 / CWE-89 (adjacent) | confirmed | **Open** — validate keys against `[A-Za-z_][A-Za-z0-9_]*` before forwarding to `sql.Named`. Cross-cuts I10 (size cap). |
+| 14 | **I9** | Low | **8** (2 × 1 × 4) | Error responses leak driver `err.Error()` verbatim on query + metrics paths | no | `internal/server/handlers_query.go:118-138`; `handlers_metrics.go:171,179` | CWE-209 | suspected (depends on caller log handling) | **Open** — for MCP path specifically, consider redacting the statement bytes from error responses (agent-mediated callers may surface to end-users). |
+| 15 | **I10** | Low | **8** (2 × 1 × 4) | `mapToNamedArgs` has no key-count / nesting-depth cap on WS params | no | `internal/server/ws_query.go:525-534`; `internal/server/sqlexec.go:71-87` | OWASP A05:2021 / CWE-400 + CWE-770 | confirmed | **Open** — 16 MiB WS frame cap is the upper bound; a 100k-key params blob still allocates aggressively. Combined remediation with I7. |
+| 16 | **S3** | Low | **8** (2 × 1 × 4) | `zig build`-from-clone in e2e job has OR-fallback to less-specific repo path | no | `.gitlab-ci.yml:534-536` | OWASP A06:2021 / CWE-829 | suspected (depends on GitLab namespace control) | **Open** — recommendation: drop the OR-fallback; let pipeline fail-fast if canonical tag URL is unavailable. |
+| 17 | **S4** | Low | **8** (2 × 1 × 4) | Test-fixture `JWT_SECRET_HEX` committed in `.gitlab-ci.yml` (allowlisted) | no | `.gitlab-ci.yml:525` | CWE-798 | confirmed | **Open** — pragma-allowlisted but the same hex is reused across every pipeline run. Recommendation: generate per-pipeline via `openssl rand -hex 32` through the `make e2e-env` mechanism that production-style runs already use. Cross-link [S-NEW-K / #323](#2026-05-19-audit-cohort) (closed for compose). |
+| 18 | **S5** | Low | **8** (2 × 1 × 4) | `docker-compose.example.yml` ships HTTP-only on `:8080` with legacy `JWT_SECRET_HEX` env var | no | `deploy/docker-compose.example.yml:38-53` | CWE-319 | confirmed | **Open** — recommendation: add explicit `# REQUIRES upstream HTTPS terminator; see docs/OPERATIONS.md` banner; migrate example to the rotation-aware `JWT_SECRET_HEX_CURRENT` env var. |
+| 19 | **W2** | Info | **4** (1 × 1 × 4) | CSRF token unbound to JTI / session | no | `internal/server/csrf.go:36-42,93-118` | CWE-352 (residual) | confirmed | **Open — accepted-risk.** Acknowledged follow-up (SEC-N2 historical). SameSite=Strict on both auth + CSRF cookies makes the cross-origin attach impossible; practical residual is "compromised same-origin renderer" which is already game over. |
+| 20 | **W5** | Info | **4** (1 × 1 × 4) | CSP retains `style-src 'unsafe-inline'` for styled-components | no | `internal/server/security_headers.go:60` | CWE-1336 (adjacent) | confirmed | **Open — roadmap.** Roadmap to migrate to nonces is acknowledged in source. No user-controlled `<style>` content rendered today. |
+| 21 | **O3** | Info | **4** (1 × 1 × 4) | `docker exec` / `kubectl exec` insider risk on `JWT_SECRET_HEX_CURRENT` + `GEODE_PROFILESTORE_KEY` env vars | no | `deploy/docker-compose.{example,test}.yml` | CWE-526 | confirmed | **Open — deployment-time.** Compensating control: source secrets from k8s Secret / Docker secret / external secret manager, not docker-compose env. Documented. |
+| 22 | **O4** | Info | **4** (1 × 1 × 4) | Audit ring in-memory only (10k FIFO, process-local) | no | `internal/server/audit.go:109-118` | CWE-778 (adjacent) | confirmed | **Open — by design.** `slog` still writes to stdout; durable shipping is operator-owned. No code change required. |
+| 23 | **O8** | Info | **4** (1 × 1 × 4) | `/api/v1/profiles/public` is anonymous; returns system-profile names + descriptions | no | `internal/server/handlers_profiles_public.go:21` | CWE-200 (residual, by design) | confirmed | **Open — by design.** Enables unauthenticated login UI to enumerate available profiles. Trade-off accepted by design. |
+
+**Severity counts (2026-05-21 cohort, excluding "good practice; verified"):** Critical 0 | High 0 | Medium 2 | Low 11 | Info 5 | **Total 18 rows** (consolidating dev-machine vs CI views of S1 onto one row; the cohort's net adversarial findings are the 18 rows above).
+
+**Would-be-confidential (`--skip-issues`):** A1 — recorded in-doc only. No GitLab confidential filing exists for this cohort.
+
+### 2026-05-21 — dev-machine vs CI-host boundary note
+
+The 15 dev-only npm advisories (S1 — `tar` / `webpack-dev-server` / `ws` cluster) have **two distinct exploit boundaries**:
+
+| Boundary | Exploit window | Severity here |
+|---|---|---|
+| **Dev-machine** | `npm run dev` spawns `webpack-dev-server` on the developer LAN; a lure page on an open network can exploit GHSA-79cf-xcqc-c78w (CWE-749) to read `/sockjs-node`-mediated source maps or land XSS on `localhost:8080`. Coffee-shop / hot-desk environment is the bad case; trusted home/office LAN is fine. | **MEDIUM** |
+| **CI release-host** | `tar` symlink-escape CVEs fire only when `electron-builder` extracts an archive at packaging time. Exploit requires landing a malicious archive into the electron-builder cache, which in turn requires already-compromised CI variables. Single-tenant per-pipeline. | **LOW** |
+
+Production runtime image is **not affected** by either boundary — `npm audit --omit=dev` reports 0 advisories across 226 production deps (Monaco, Cytoscape, monaco-languageclient, vscode-ws-jsonrpc, React, Zustand, DOMPurify), confirmed in scan §npm-audit.
+
+### 2026-05-21 — recommended atomic remediation MR (S1)
+
+Single focused MR that closes the dev-machine + release-host residuals:
+
+1. `package.json`: `electron-builder ^25.1.8` → `^26.8.1` (semver-major).
+2. `package.json`: `webpack-dev-server` → `@latest`.
+3. (Optional but rides along) `jest-environment-jsdom` → `^30.4.1`.
+4. `package-lock.json`: regenerate via `npm install`.
+5. Re-run `npm audit --omit=dev` → must report **0** advisories.
+6. Re-validate the Authenticode signing pipeline end-to-end on the ssl.com side (electron-builder 26 has signing-flow changes vs 25).
+7. The `ws` cluster (GHSA-58qx-3vcg-4xpx) **resolves transitively via npm dedup** once webpack-dev-server is current — no separate change required.
+
+Acceptance criteria: `npm audit --omit=dev` and `npm audit` (full tree) both report 0 advisories; Authenticode signing job exits green on the next tag-only release; no production-runtime delta detectable in `internal/ui/dist/main.*.js`.
+
+### 2026-05-21 — top 10 by Risk Score
+
+1. **A1 (would-be-confidential)** — `POST /api/v1/users/{u}/password` not subject-bound. Risk 24 / Medium. CWE-639 / OWASP API1:2023 BOLA. Fix: subject-equality gate at `handlers_users.go:404`.
+2. **S1** — dev-only npm cluster (tar / webpack-dev-server / ws — 15 advisories). Risk 24 / Medium **(dev-machine boundary)**, 8 / Low (CI). CWE-22 / CWE-749 / CWE-908. Fix: atomic 2-bump MR described above.
+3. **S2** — `ci-catalog/codesign-windows-ssl@~latest` floating ref. Risk 16 / Medium (pin-on-tagged-release mitigates). CWE-829. Blocked on upstream tagged release.
+4. **A2** — WS `AllowEmptyOrigin: true`. Risk 8 / Low. CWE-346.
+5. **A4** — Revocation SQLite write-failure exposure. Risk 8 / Low. CWE-613.
+6. **A5** — Admin-bootstrap audit list emitted verbatim. Risk 8 / Low. CWE-532.
+7. **W4** — HSTS `preload` on plaintext. Risk 8 / Low. CWE-1004 adjacent.
+8. **W6** — `/api/v1/metrics` no per-route limiter. Risk 8 / Low. CWE-770 / OWASP API4:2023.
+9. **W7** — Global per-IP limiter collapses to proxy IP under XFF trust. Risk 8 / Low. CWE-307 adjacent.
+10. **I1** — `sanitizeGraphName` silent strip. Risk 8 / Low. CWE-20.
+
+### 2026-05-21 — findings by area
+
+- **Auth / Authorization:** A1, A2, A4, A5
+- **Web / API:** W2, W4, W5, W6, W7
+- **Input handling:** I1, I2, I3, I7, I9, I10
+- **Deserialization / Dynamic execution:** (all "good practice; verified" — no new findings; encoding/json/v2 throughout; no template engine; audit cannot escalate to 500)
+- **Supply chain / CI/CD:** S1, S2, S3, S4, S5
+- **Infrastructure / Operations:** O3, O4, O8 (O1 pprof loopback, O2 DEK lifecycle, O5 redaction list, O6 Electron hardening, O7 healthz — all "good practice; verified")
+
+### 2026-05-21 — roadmap
+
+**Quick wins (< 1 day):**
+
+- A5 — add `admin_users` to `obsx.DefaultSensitiveKeyFragments` (or hash the list before emit) in `cmd/server/app.go:257-260`.
+- A4 — operator-runbook doc note in `docs/OPERATIONS.md` about TTL-bounded exposure window on SQLite write failure.
+- W6 — declare `rateLimit` for `/api/v1/metrics` in `geode.json`.
+- I1 — flip `sanitizeGraphName` to strict-reject in `internal/server/quoting.go:12-25`.
+- I2 — add family-count + total-byte caps in `internal/server/promparse.go:85-125`.
+- S5 — add `# REQUIRES upstream HTTPS terminator` banner to `deploy/docker-compose.example.yml`; migrate to `JWT_SECRET_HEX_CURRENT`.
+- S3 — drop the OR-fallback in `.gitlab-ci.yml:534-536`.
+
+**Medium (1–5 days):**
+
+- **A1** — subject-equality gate at `handlers_users.go:404`. **Defense-in-depth release-blocker for any future Geode RBAC regression. SLA 2026-06-20.**
+- **S1** — atomic 2-bump MR (`electron-builder` + `webpack-dev-server`). **SLA 2026-08-19** (90d Medium dev-machine). Re-validate Authenticode pipeline.
+- A2 — refuse empty Origin on `/ws/query` (cross-link upstream genapi change for `ws_handlers.gen.go`).
+- I7 + I10 — validate WS/REST param key shape + add per-key count cap.
+- I9 — redact statement bytes from MCP-path error responses.
+- S4 — switch CI `JWT_SECRET_HEX` to per-pipeline `openssl rand -hex 32`.
+
+**Strategic (> 5 days):**
+
+- W4 — upstream genapi PR to condition HSTS emission on `r.TLS != nil`.
+- W7 — align global per-IP limiter source with `-trust-proxy-xff` setting.
+- W5 — migrate styled-components to CSP nonces (long-standing SEC-F4 follow-up).
+- S2 — pin `codesign-windows-ssl` to an immutable ci-catalog tag once one ships (cross-link Q32 / #127).
+
+### 2026-05-21 — immediate actions
+
+- **None requiring secret rotation.** No live credentials surfaced. The 2 gitleaks matches are a test-literal (`Password: "wrong"`) and a documentation placeholder (`<GENERATE_WITH_openssl_rand_hex_32>`). The `.gitlab-ci.yml` test JWT secret (S4) is pragma-allowlisted by intent; recommendation is per-pipeline generation, not rotation.
+- **None requiring immediate code change for active exploit mitigation.** No active RCE, no live leaked production secrets, no auth-bypass-without-operator-action.
+- **Coordinate (within 30 days, by 2026-06-20):** **A1 subject-equality gate** at `handlers_users.go:404`. Filed in-doc only this run (`--skip-issues`). If the upstream Geode `ALTER USER` RBAC broadens silently, this defense-in-depth gate becomes the last line.
+- **Coordinate (within 90 days, by 2026-08-19):** **S1 atomic 2-bump MR** (`electron-builder 25.1.8 → 26.8.1` + `webpack-dev-server@latest`; `ws` follows via dedup). Re-validate the Authenticode signing pipeline against the ssl.com side after the bump.
+- **Cross-cohort observation:** A1 is the natural extension of [S-NEW-A / #300](#2026-05-19-audit-cohort) (`authenticateUpstream` returns nil roles) and [S-2026-05-17-04 / #264](#2026-05-17-audit-cohort) (RoleGate). All three trace to the admin-authority surface: #300 documents the bootstrap-only authority source, #264 closed the client-side admin chrome gate, and A1 surfaces a server-side subject-check gap on the password-change route. Sequencing of these three closures (S-NEW-A Scope-B, #264 already closed, A1 new) should be considered together when expanding the admin model upstream.
+
+### 2026-05-21 — verdict
+
+The 2026-05-21 cohort is **smaller than the 2026-05-19 cohort and dominated by defense-in-depth tightening on already-mitigated surfaces** (HSTS scheme handling, WS empty-origin tighten, metrics rate-limit, graph-name strictness, prom-parser size caps). The single notable new finding is **A1 — `POST /api/v1/users/{u}/password` not subject-bound** — which is bracketed by upstream Geode RBAC today but is a clean defense-in-depth one-line gate. The dev-only npm cluster (S1) reclassifies UP to **MEDIUM at the dev-machine boundary** because of the open-LAN webpack-dev-server attack window — production runtime image remains clean.
+
+No active RCE. No live leaked production secrets. No privilege-escalation path open without operator action. No findings warrant CVE filing. This cohort is in-doc only — no GitLab issues filed in this run.

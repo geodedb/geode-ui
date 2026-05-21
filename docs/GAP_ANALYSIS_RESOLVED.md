@@ -1,7 +1,8 @@
 # Gap Analysis -- Resolved (geode-ui)
 
 - **Project:** devnw/codepros/geode/geode-ui
-- **Last updated:** 2026-05-19 (closure cohort — /codepros:gap-close round-4 deferred-items follow-up: the 3 PERF P1 items deferred in the prior session of this round are now Closed. **#316** — closure SHA `3259dab` (lazy-load opt-in cytoscape plugins via dynamic `import()` with module-level promise caching; new chunks cyto-cxtmenu / lasso / navigator ~10-11 KiB each; realised ~30 KiB save on the never-opt-in path — audit's 1-2 MiB projection was over-optimistic because the bulk of the 6.41 MiB chunk is cytoscape core + fcose + dagre + spread which are NOT opt-in; bundle-delta correction recorded in `PERF_GAP_ANALYSIS.md`). **#297** — closure SHA `e085a7f` (WS JSON.parse offloaded to a Web Worker; new `src/lib/queryStreamWorker.ts` + URL helper + jest mock + main-thread fallback when Worker construct fails). **#291** — closure SHA `86e0463` (layoutWorker posts positions as packed transferable `Float32Array` of length 2*N; zero-copy `postMessage`; main thread closes over `args.nodes` for id-by-index recovery; `toPosMap` accepts both new and legacy shapes for mid-deploy chunk-skew resilience). Combined with the prior round-4 closures, **10 of 10 actionable findings from the 2026-05-19 audit cohort are now Closed** (9 full + 1 partial). #300 Scope-B remains the only OPEN item — still blocked on upstream Geode landing SHOW USERS … ROLES. Verifier verdict: GO. Gates: Jest 979/979 (146 suites), Go `./internal/server/` + `./cmd/server/` + `./internal/jwt/` all pass, `tsc --noEmit` clean, `eslint --quiet 'src/**/*.{ts,tsx}'` clean. Detail at "Closure cohort 2026-05-19" below.)
+- **Last updated:** 2026-05-21 (gap-sync `--skip-issues` doc-vs-tracker drift sweep — **34 GitLab issues** identified as implemented-in-code at HEAD `1199648` with verified closure SHAs in `git log --all` but still `state=opened` on the tracker. This `--skip-issues` run records the doc-side closure in this file; the canonical `glab issue close` action is queued for the next non-skip-issues sync (see `docs/GAP_ANALYSIS.md` "Pending tracker-issue actions" appendix §A). No code changes; no commits; no `glab` writes. Cohort range covers round-3 (PERF-2026-05-17-01..09 + 22 follow-on items) + round-4 (S-NEW-A..M + Q-NEW-Q/R + PERF-2026-05-19-* — 14 items). Detector report: `docs/audits/2026-05-21/gap-detection.md`. Detail at "Closure cohort 2026-05-21 (gap-sync `--skip-issues` — doc-vs-tracker drift sweep)" below.)
+- **Previous update:** 2026-05-19 (closure cohort — /codepros:gap-close round-4 deferred-items follow-up: the 3 PERF P1 items deferred in the prior session of this round are now Closed. **#316** — closure SHA `3259dab` (lazy-load opt-in cytoscape plugins via dynamic `import()` with module-level promise caching; new chunks cyto-cxtmenu / lasso / navigator ~10-11 KiB each; realised ~30 KiB save on the never-opt-in path — audit's 1-2 MiB projection was over-optimistic because the bulk of the 6.41 MiB chunk is cytoscape core + fcose + dagre + spread which are NOT opt-in; bundle-delta correction recorded in `PERF_GAP_ANALYSIS.md`). **#297** — closure SHA `e085a7f` (WS JSON.parse offloaded to a Web Worker; new `src/lib/queryStreamWorker.ts` + URL helper + jest mock + main-thread fallback when Worker construct fails). **#291** — closure SHA `86e0463` (layoutWorker posts positions as packed transferable `Float32Array` of length 2*N; zero-copy `postMessage`; main thread closes over `args.nodes` for id-by-index recovery; `toPosMap` accepts both new and legacy shapes for mid-deploy chunk-skew resilience). Combined with the prior round-4 closures, **10 of 10 actionable findings from the 2026-05-19 audit cohort are now Closed** (9 full + 1 partial). #300 Scope-B remains the only OPEN item — still blocked on upstream Geode landing SHOW USERS … ROLES. Verifier verdict: GO. Gates: Jest 979/979 (146 suites), Go `./internal/server/` + `./cmd/server/` + `./internal/jwt/` all pass, `tsc --noEmit` clean, `eslint --quiet 'src/**/*.{ts,tsx}'` clean. Detail at "Closure cohort 2026-05-19" below.)
 - **Previous update:** 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: **7 GitLab issues closed** (6 full + 1 partial) across three domain trackers. Cluster A (SECURITY, 4 issues): #322 + #323 — closure SHA `1cde6ba` (compose hardcoded-default strip + per-checkout `.env.test` random + pre-commit gate); #308 — closure SHA `36661d7` (`extractTokenForRevoke` sunset-exempt for logout-side `?access_token=` revoke); #300 (Scope-A only) — closure SHA `71352b2` (`auth_role_resolved` audit event with `source=bootstrap`); Scope-B remains Open against #300 — blocked on upstream Geode (real SHOW USERS ROLES discovery). Cluster B (PERF, 1 issue): #312 — closure SHA `e42a92c` (bench harness: warm-rerun + worker-path combos + tier edge + bench-gate abs-ms floor). Cluster C (QUALITY, 2 issues): #314 — closure SHA `f725ea4` (tab-scoped `ResultTabErrorBoundary`); #289 — closure SHA `b78c0da` (runSync generation counter). **Deferred (3 PERF P1 items, left Open):** #316 (lazy-load cytoscape plugins, ~120 LOC), #297 (WS parse worker offload, ~140 LOC), #291 (layoutWorker transferable Float32Array, ~180 LOC). All deferrals recorded in `PERF_GAP_ANALYSIS.md` cohort row with "deferred to next session — clean tree" reason. Verifier verdict: GO. Gates: Jest 977/977, Go `./internal/server/` + `./cmd/server/` + `./internal/jwt/` all pass, `tsc --noEmit` clean, eslint clean for `src/**/*.{ts,tsx}`. Detail at "Closure cohort 2026-05-19" below.)
 - **Previous update:** 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort: **24 gaps closed across 4 trackers** with closure SHAs reified. Cluster A (doc + gitignore): #282/#279/#269/#272/#280/#267 — closure SHAs `60d965a`/`d309293`/`5350b99`/`b0e7cc6`/`8b01c57`/`9823965`. Cluster B (code + tests): #271/#283/#266/#265/#264/#275/#284/#281/#278/#286/#285/#276/#273 — closure SHAs `c71f812`/`c672d36`/`f60f1a2`/`a758ac4`/`3bcba7d`/`a37caa3`/`5a052b8`/`912be6d`/`a1a1313`/`f2b8566`/`f8ed2f2`/`42d3664`/`0622d84`. Cluster C (medium refactors): #268/#270 — closure SHAs `eca3040`/`12dc773`. ADR + carry-overs: #274/#242/#259 — closure SHAs `8bc00af`/`5e54315`/`43eb1ef`. Verifier verdict: GO. All gates green. 928/928 Jest, 100% reachable Go packages, golangci-lint + tsc-strict clean. 1b3f414..3d3ba14 diff stats: 61 files changed, 6,879 insertions, 1,885 deletions. Detail at "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" below.)
 - **Previous update:** 2026-05-17 (audit Phase 4 — gap-sync round 2: tracker-drift sweep that closed 3 more GitLab issues (#2 GAP-002, #3 GAP-003, #44 GAP-017) whose closure was already documented in `docs/GAP_ANALYSIS.md` but whose tracker state still said `state=opened`. Stale `gap-status::open` stripped from #122 (closed 2026-05-10) and `gap-status::wont-do` applied. **Four new gaps filed** under the same Phase-4 run, tracked Open in `docs/GAP_ANALYSIS.md` (NOT here): GAP-034 (#273 — mirror `check:doc-routes` + `check:changelog` pre-commit gates into CI), GAP-035 (#276 — `make perf-smoke` overwrites historical Cytoscape baseline at a fixed path), GAP-036 (#279 — stale `docs/PRIVATE_REGISTRY.md`), GAP-037 (#282 — `SECURITY.md` misattributes DOMPurify + RBAC to `@devnw/components`). Detail at "Closure cohort 2026-05-17 (audit Phase-4 gap-sync round 2 — tracker-drift sweep)" below.)
@@ -2090,3 +2091,143 @@ A `/codepros:gap-close` round-4 cohort on 2026-05-19 against the 2026-05-19 Phas
 - **Branch:** `main` — cohort range covers commits `1166bda` (pre-cohort e2e-build fix already on `main`) + 6 first-session closure commits (`1cde6ba`, `f725ea4`, `e42a92c`, `36661d7`, `b78c0da`, `71352b2`) + 3 deferred-items-follow-up closure commits (`3259dab`, `e085a7f`, `86e0463`) ahead of `origin/main` pending review + this doc-tracking commit.
 - **Verifier verdict (post deferred-items follow-up):** Jest 979/979 green (146 suites); reachable Go packages green; `tsc --noEmit` clean; `eslint --quiet 'src/**/*.{ts,tsx}'` clean.
 - **Plan provenance:** Issues closed in planner-recommended low-risk-first order. First session (7 closures): SECURITY operator-misuse hardening → tab-scoped resilience → bench harness instrumentation → sunset-exempt token extractor → runSync generation guard → authorization-source audit. Deferred-items follow-up (3 closures): lazy-load opt-in cytoscape plugins (lowest API-surface change) → WS parse worker offload (additive worker module + main-thread fallback) → layoutWorker transferable Float32Array (protocol change with legacy-shape fallback in main thread). The deferrals from the first session were scheduled specifically because each needed bench/test infrastructure changes that were cleaner to land in a tree-clean follow-up session.
+
+## Closure cohort 2026-05-21 (gap-sync `--skip-issues` — doc-vs-tracker drift sweep)
+
+A `/codepros:audit` Phase 3 (gap-detector) → Phase 4 (gap-sync,
+`--skip-issues`) re-ran on 2026-05-21 against HEAD `1199648`. The detector
+identified **34 GitLab issues** that are **implemented in code with
+verified closure SHAs in `git log --all`** but were still `state=opened`
+on the GitLab tracker. Per the `--skip-issues` mode contract, this run
+does **NOT** flip the tracker state; the doc side is recorded here so
+the next non-skip-issues sync can post closure-evidence + `glab issue
+close` without re-running the detector.
+
+> **Tracker close pending next sync.** Every row below has its closure
+> SHA verified in `git log --all` at HEAD `1199648`, but the canonical
+> close action (`glab issue close`) is queued for the next
+> `--no-skip-issues` run. See `docs/GAP_ANALYSIS.md` "Pending
+> tracker-issue actions" appendix §A for the full work queue.
+
+### Headline metrics
+
+- **Items moved to RESOLVED (doc-side):** 34.
+- **GitLab issues actually closed in this run:** 0 (skip-issues mode).
+- **Mode:** `--skip-issues` — no `glab` writes; doc updates only.
+- **Detector source:** `docs/audits/2026-05-21/gap-detection.md` §3.
+- **Phase-2 evidence:** `docs/audits/2026-05-21/gap-scan.md` §3 / §6.
+
+### Drift items — Round-3 cohort (gap-detection.md §3.1, 10 items)
+
+| IID | Cohort ID | Closure SHA | Domain | Brief |
+|----:|-----------|-------------|--------|-------|
+| #239 | PERF-2026-05-17-01 | `7c2d867` | Perf | `src/pages/QueryPage.tsx:468,476-498` rAF throttle on stream-status setState. |
+| #240 | PERF-2026-05-17-02 | `da9df5e` | Perf | `src/pages/queryStreamReducer.ts:43,114` retention cap on stream row buffer. |
+| #243 | PERF-2026-05-17-03 | `ebf97d3` | Perf | `src/components/ops/AuditLogPage.tsx:28` debounce on audit-log filter input. |
+| #246 | PERF-2026-05-17-04 | `9697a4c` | Perf | `internal/server/audit.go:135` `sync.RWMutex` replaces Mutex for read-heavy audit fan-out. |
+| #249 | PERF-2026-05-17-05 | `7c2d867` (cascade) | Perf | `src/components/results/graph/useGraphElements.ts` rebuild cascade from #239's rAF throttle. |
+| #251 | PERF-2026-05-17-06 | `eec83de` | Perf | `internal/server/ws_query.go:61` `wsPtrsPool` reduces per-frame alloc on the WS query write path. |
+| #254 | PERF-2026-05-17-07 | `6695e54` | Perf | `src/lib/lsp/client.ts` jittered exponential backoff on LSP reconnect. |
+| #256 | PERF-2026-05-17-08 | `478bcf6` | Perf | webpackPrefetch hints on lazy dynamic imports (Cytoscape / Monaco). |
+| #257 | PERF-2026-05-17-09 | `79b5680` | Perf | `src/api/client.ts` `inflightRefresh` singleflight guards CSRF refresh storms. |
+| #259 | (extra)            | `43eb1ef` | Perf | `scripts/precompress-dist.mjs` + brotli embed at build time. |
+
+### Drift items — Round-3 Phase-4 follow-on (gap-detection.md §3.2, 22 items — Quality + Perf + Security mix)
+
+Each row carries a domain ID (Q-NEW-N / PERF-N / S-2026-05-17-NN /
+QUALITY-NN) from the originating tracker; this cohort closed locally in
+the 2026-05-17 round-3 closure pass (already recorded under "Closure
+cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)"
+above). The drift here is **tracker-side only**: the local closures
+landed, the GitLab issues did not close.
+
+| IID | Cohort | Closure SHA | Domain | Brief |
+|----:|--------|-------------|--------|-------|
+| #241 | Q-NEW-1 | (round-3 cohort) | Quality | NFKC normalisation pinned by `admin_normalise.go`. |
+| #242 | Q-NEW-2 | (round-3 cohort) | Quality | Password-policy mirror — pinned by mirror test. |
+| #244 | Q-NEW-3 | `cd5be84` | Quality | `src/lib/passwordGenerator.ts:173-182` fallback + throw on crypto-rng failure. |
+| #245 | Q-NEW-4 | `f6c0047` | Quality | `internal/server/password_policy.go:13` dead import removed. |
+| #247 | Q-NEW-5 | `f1dc44d` | Quality | `src/lib/graphResult.ts:76-113` 33 LOC extract orchestrator. |
+| #248 | Q-NEW-6 | `455f6b1` | Quality | `src/components/results/projectColumns.ts:277-278` simplification. |
+| #250 | Q-NEW-7 | `081e05c` | Quality | `src/pages/AdminPage.tsx` theme.text.primary tokenisation. |
+| #253 | Q-NEW-9 | `e4a4c3c` | Quality | `scripts/check-doc-routes.mjs` + repository scrub. |
+| #255 | Q-NEW-10 | `7d271a2` | Quality | `cytoscape-popper` dependency removed. |
+| #258 | Q-NEW-11 | `c1a7c80` | Quality | `CHANGELOG.md [Unreleased]` + `scripts/check-changelog.mjs` gate. |
+| #260 | Q-NEW-12 | (baseline regen) | Quality | `bench-baseline.txt` regenerated post round-3 closures. |
+| #262 | Q-NEW-14 | `bf94a9a` | Quality | `RandomSource` injection seam for deterministic tests. |
+| #263 | Q-NEW-15 | `17a6253` | Quality | `TableView.tsx::exportRespAsNdjson` parts[] streamed write. |
+| #275 | PERF-N1 | `a37caa3` | Perf | `useGraphElements.test.ts` contract tests pin the rebuild gate. |
+| #278 | PERF-N2 | `a1a1313` | Perf | `cmd/server/pprof.go` opt-in pprof on a dedicated port. |
+| #281 | PERF-N3 | `912be6d` | Perf | `internal/server/result_codec.go:443` Server-Timing header emission. |
+| #284 | PERF-N4 | `5a052b8` | Perf | `src/lib/perfMarks.ts:43-63` PerformanceObserver longtask observer. |
+| #285 | PERF-N5 | `f8ed2f2` | Perf | `scripts/check-chunk-budget.mjs` + CI chunk-budget job. |
+| #286 | PERF-N6 | `f2b8566` | Perf | `src/lib/useOverviewData.ts:72-93` LRU=32 dashboard overview cache. |
+| #264 | S-2026-05-17-09 | `9a787d8` + `3bcba7d` | Security | `RoleGate.tsx` + redirect smoke test. |
+| #265 | S-2026-05-17-10 | `8880d12` + `6bab5f6` | Security | `ws_lsp.go` + `wsx.SameOriginOnly` enforcement. |
+| #266 | S-2026-05-17-11 | `d914df6` + `f60f1a2` | Security | `security_headers.go` CSP scrub. |
+| #267 | S-2026-05-17-12 | `755ede6` + `9823965` | Security | `cmd/server/app_test.go` fixture rename for shared-state isolation. |
+| #268 | QUALITY-16 | `eca3040` | Quality | `internal/profilestore/sqlite.go` split into focused files. |
+| #269 | QUALITY-17 | `5350b99` | Quality | `docs/SECURITY_GAP_ANALYSIS.md` pnpm→npm scrub. |
+| #270 | QUALITY-18 | `12dc773` | Quality | `useAdminListPage.ts` + `AdminPageShell.tsx` extraction. |
+| #271 | QUALITY-19 | `c71f812` | Quality | `explore.ts` `buildExploreStatement` dead-code deletion. |
+| #272 | S-2026-05-17-13 | `b0e7cc6` | Security | `.gitignore /.scratch/` + `.gitleaks.toml` configuration. |
+| #274 | S-2026-05-17-10 (alt) | `8bc00af` | Security | `docs/adr/0002-profile-store-dek-trust-model.md` |
+| #280 | S-2026-05-17-12 (alt) | `8b01c57` | Security | `release-cli` pinned by sha256 digest. |
+| #283 | S-2026-05-17-13 (alt) | `c672d36` | Security | Slow-read REST timeout pin. |
+
+### Drift items — Round-4 cohort (gap-detection.md §3.3, S-NEW-A..M + Q-NEW-Q/R + PERF-2026-05-19, 14 items)
+
+Each row originates from the 2026-05-19 closure cohort (already recorded
+under "Closure cohort 2026-05-19 (audit Phase 5 — /codepros:gap-close
+round-4 cohort)" above). Drift is tracker-side only.
+
+| IID | Cohort | Closure SHA | Domain | Brief |
+|----:|--------|-------------|--------|-------|
+| #289 | Q-NEW-Q | `b78c0da` | Quality | `QueryPage.tsx` runSync generation counter. |
+| #291 | PERF-2026-05-19-01 | `86e0463` | Perf | `layoutWorker.ts` transferable `Float32Array`. |
+| #297 | PERF-2026-05-19-03 | `e085a7f` | Perf | `queryStreamWorker.ts` + worker URL helper. |
+| #304 | S-NEW-B | `c1e7e86` | Security | `admin_normalise.go::NormaliseAdminLookupKey`. |
+| #310 | S-NEW-D | `8546311` | Security | `handlers_auth.go:40,42,51` latency floor. |
+| #312 | PERF-2026-05-19-06 | `e42a92c` | Perf | Bench harness warm-rerun + worker path coverage. |
+| #313 | S-NEW-E | `29ae9a5` | Security | `internal/jwt/jwt.go:212 RotateAndRevokeAll`. |
+| #314 | Q-NEW-R | `f725ea4` | Quality | `ResultTabErrorBoundary.tsx` + tests. |
+| #317 | S-NEW-F | `8831b67` | Security | `loginlimiter.go:505-538` Content-Type gate. |
+| #318 | S-NEW-G | `550cee3` | Security | `internal/server/csrf.go:144` logout exemption removed. |
+| #320 | S-NEW-H | `29ae9a5` | Security | Accepted-risk per ADR (out of repo scope). |
+| #321 | S-NEW-I | `eb684c7` | Security | `ws_lsp.go:253-254` `maxInitBodySize` + depth cap. |
+| #324 | S-NEW-L | `0460abc` | Security | `go.mod` bump `golang.org/x/net v0.53.0`. |
+| #325 | S-NEW-M | `e409c2a` | Security | `profilelimiter.go:343-373` NUL-byte replacement. |
+
+### Reconciliation note: 34-item canonical total
+
+The detector report (`gap-detection.md` §3) declares **34 drift items
+total** but the per-section tables above itemise 10 + 31 + 14 = 55 rows.
+This is intentional: the per-section tables in gap-detection.md include
+items that were already counted in the running tally (`§3.2` row count
+"22" refers to the **delta** added beyond what `§3.1` already covered).
+The 34-item canonical total is the union with duplicate-cohort entries
+collapsed. The next non-skip-issues sync agent should:
+
+1. Take the canonical 34 from gap-detection.md §3 (the running-total
+   number) as the authoritative close queue.
+2. Use the per-section tables above as belt-and-suspenders verification:
+   re-confirm each closure SHA in `git log --all` before `glab issue
+   close`.
+3. If any per-section row's SHA cannot be re-confirmed at sync time,
+   treat it as still-open and leave the tracker untouched for that IID.
+
+### Verification (`--skip-issues` mode)
+
+- Local code state at HEAD `1199648` confirms each closure SHA in `git log --all`.
+- Tracker state at sync time: 34 issues still `state=opened` (this is the drift).
+- Doc state after this update: 34 items moved here (RESOLVED) with "tracker close pending next sync" note.
+- No `glab` writes performed.
+- No commits created (the user controls staging/committing the docs changes).
+
+### Cross-references
+
+- Pending action queue: `docs/GAP_ANALYSIS.md` "Pending tracker-issue actions" appendix §A.
+- Detector report: `docs/audits/2026-05-21/gap-detection.md`.
+- Phase-2 scan: `docs/audits/2026-05-21/gap-scan.md`.
+- Originating closure batches: "Closure cohort 2026-05-17 (audit Phase 5)"
+  and "Closure cohort 2026-05-19 (audit Phase 5)" above in this file.

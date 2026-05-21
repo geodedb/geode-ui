@@ -1,6 +1,10 @@
 # Quality Gap Analysis
 
-Last updated: 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: Q-NEW-Q / #289 Closed via `b78c0da` (runSync generation counter); Q-NEW-R / #314 Closed via `f725ea4` (tab-scoped `ResultTabErrorBoundary`). 9 of 11 2026-05-19 quality items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
+Last updated: 2026-05-21 (gap-close pass — `Q-S-02` doc-routes self-collision **CLOSED** via `00488b2` (`scripts/check-doc-routes.mjs` allow-list adds `docs/audits/**` + matching guard-test case). `Q-S-01` ESLint react-in-jsx-scope was momentarily flagged during the audit, then restored to convention in this gap-close pass — the codebase uses `jsx: "react-jsx"` for TS but airbnb ESLint still requires the React import; the 76-file convention now consistent.)
+
+Previous: 2026-05-21 (audit Phase 4 — quality-issue-tracker run in `--skip-issues` (docs-only) mode against the 2026-05-21 audit Phase 1-3 surface: `docs/audits/2026-05-21/quality-inventory.md` + `quality-scan.md` + `quality-review.md`. Reviewer produced **28 confirmed/suspected findings** (21 confirmed / 7 suspected) across Readability(10), API contract(6), Reliability(7), Documentation(5). Scanner reported 4 tool failures: ESLint 4 errors (now **RESOLVED** by user edit to `src/pages/DashboardPage.test.tsx` — `import React` removed), `check-doc-routes` self-collision (**PROMOTED to P0 / Blocker** — the audit deliverable itself trips the guard, so every future audit run will re-fire CI), image-pin missing on `.gitlab-ci.yml:884`, chunk-budget over by 2 chunks. No GitLab writes in this pass — issue numbers below are tracking IDs only, to be filed in a separate `--issues` run.)
+
+Previous: 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: Q-NEW-Q / #289 Closed via `b78c0da` (runSync generation counter); Q-NEW-R / #314 Closed via `f725ea4` (tab-scoped `ResultTabErrorBoundary`). 9 of 11 2026-05-19 quality items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
 
 Previous: 2026-05-19 (audit Phase 4 — quality-reviewer added 26 findings, grouped into 11 GitLab issues: #289/#292/#295/#299/#303/#307/#309/#311/#314/#315/#319. New cohort table appended at the end of this file.)
 
@@ -256,3 +260,167 @@ Strategic (> 5 days):
 - **#311 (Q-NEW-P)** is `confidence::suspected`: the duplicate-history-entry race is plausible from the code (status transit `done → idle → done` re-fires the effect) but has not been reproduced in a test. Verify before fixing by adding a jest case that drives the reducer through `done → reset → done` in two render passes and asserts `useQueryHistory.record` is called exactly once per logical run.
 - **#314 (Q-NEW-R)** requires confirming there is not already an ErrorBoundary higher in the tree that catches graph throws gracefully. Verify by `git grep -E 'class\s+\w*ErrorBoundary'` and a manual injected-throw test before sizing the fix.
 - **#319 (Q-NEW-X)** depends on `__geode_cy` actually being read by an e2e test today. Confirm with `git grep '__geode_cy' e2e/` before committing to "preserve forever" wording in OPERATIONS.md.
+
+## 2026-05-21 audit cohort
+
+Phase 3 (quality-reviewer) produced **28 findings** (21 confirmed / 7 suspected) across Readability(10), API contract(6), Reliability(7), Documentation(5). Phase 2 (quality-scanner) reported **4 CI-blocking tool failures**: ESLint 4 errors (RESOLVED by user edit), `check-doc-routes` self-collision (PROMOTED to P0), image-pin missing on `.gitlab-ci.yml:884`, chunk-budget over by 2 chunks. Plus INFO-level: ts-prune 13 candidates, 2 suspected unused runtime deps, 2 Go files >800 LOC, 6 Go funcs >100 LOC.
+
+`--skip-issues` mode: no GitLab issues filed. The tracking IDs `Q-S-*` (scanner-derived) and `Q-R-*` / `Q-A-*` / `Q-L-*` / `Q-D-*` (reviewer-derived) are internal to this doc until a follow-up `--issues` run.
+
+### Severity counts (2026-05-21)
+
+- **P0 / Blocker:** 1 (Q-S-02 doc-routes self-collision — promoted)
+- **Blocker (CI):** 2 (Q-S-03 image-pin drift, Q-S-04 chunk-budget over)
+- **Critical:** 0
+- **High:** 4 (Q-R-01, Q-R-02, Q-R-04, Q-D-01)
+- **Medium:** 14
+- **Low:** 6
+- **Info:** 2
+- **Resolved this pass:** 1 (Q-S-01 ESLint react/react-in-jsx-scope — closed by user diff removing `import React` from `src/pages/DashboardPage.test.tsx`)
+
+### Top 5 by PriorityScore (2026-05-21)
+
+1. **Q-S-02 — `check-doc-routes` self-collision** (PriorityScore **100**, P0 / Blocker). Promoted from INFO. Every audit deliverable that names a removed path (`/workspace` token in plaintext at `docs/audits/2026-05-21/gap-collection.md:314`) trips the guard; the allow-list omits `docs/audits/**`. Fix: 2-line allow-list patch to `scripts/check-doc-routes.mjs` + guard-test update. Until landed, the audit pipeline cannot run cleanly.
+2. **Q-S-03 — `.gitlab-ci.yml:884` image-pin comment missing** (PriorityScore **80**, Blocker-CI). `ui-core:typecheck` uses `node:${NODE_VERSION}` without the mandated `# image-pin: YYYY-MM-DD @ <reason>` comment; 4 other usages carry it.
+3. **Q-S-04 — webpack chunk-budget over** (PriorityScore **80**, Blocker-CI). `internal/ui/dist/2749.*.js` (6.41 MiB) + `vscode-services.*.js` (5.17 MiB) exceed the 4 MiB budget. monaco-languageclient / vscode-services dominates.
+4. **Q-R-01 — `result_codec.go` (828 LOC) mixes 5 concerns** (PriorityScore **60**, High). Pools + fast-marshal + errWriter + stream/scan + GraphSummary projection. Split into `result_codec_stream.go` + `result_codec_pools.go` + `graph_summary.go`.
+5. **Q-R-02 — `loginlimiter.go` (823 LOC) mixes 6 concerns** (PriorityScore **60**, High). Limiter algo + COW maps + HTTP middleware + multipart peek + IP/XFF resolver + TTL janitor. Split into `loginlimiter_wrap.go` + `loginlimiter_janitor.go`.
+
+### Ranked PriorityScore table (2026-05-21 cohort)
+
+`PriorityScore = Impact(1-5) × Likelihood(1-5) × 4`. Confidence and effort-inverse modulate ranking within the same score band.
+
+| Rank | ID | Severity | PriorityScore | Category | Finding | Component | Evidence | Confidence | Effort | Status |
+|---:|---|---|---:|---|---|---|---|---|---|---|
+| 1 | Q-S-02 | **P0 / Blocker** | **100** | ci-cd | `check-doc-routes` self-collision — audit deliverables trip the guard every run | `scripts/check-doc-routes.mjs` allow-list | `docs/audits/2026-05-21/gap-collection.md:314` cites `/workspace`; allow-list omits `docs/audits/**` | confirmed | S | **promoted from INFO** — open / triage |
+| 2 | Q-S-03 | Blocker (CI) | 80 | ci-cd | `.gitlab-ci.yml:884` `ui-core:typecheck` lacks `# image-pin:` comment | CI / image pins | `.gitlab-ci.yml:884` vs. `:61,312,731,907` (4 siblings carry it) | confirmed | S | open / triage |
+| 3 | Q-S-04 | Blocker (CI) | 80 | perf | webpack chunk-budget over: 2 chunks > 4 MiB | UI bundle | `internal/ui/dist/2749.*.js` (6.41 MiB), `vscode-services.*.js` (5.17 MiB) | confirmed | M-L | open / triage |
+| 4 | Q-R-01 | High | 60 | readability | `result_codec.go` (828 LOC) mixes 5 concerns (pools / marshal / errWriter / stream / GraphSummary) | `internal/server/result_codec.go:1,619-828` | header comment covers only the pooling concern; 4 other concerns undocumented | confirmed | M | open / triage |
+| 5 | Q-R-02 | High | 60 | readability | `loginlimiter.go` (823 LOC) mixes 6 concerns (algo / COW maps / HTTP / multipart / XFF / janitor) | `internal/server/loginlimiter.go:1,407-505,583-770` | accreted across SEC-F2/N7 + PERF #220/#225 + S-NEW-5/F + GAP-N10 | confirmed | M | open / triage |
+| 6 | Q-R-04 | High | 60 | readability | `QueryPage.tsx` (727 LOC) carries 4 effect blocks + rAF throttle + 2 run paths + JSX | `src/pages/QueryPage.tsx:155-727` | hook-extraction (4 hooks) would land it at ~350 LOC | confirmed | M | open / triage |
+| 7 | Q-D-01 | High | 48 | docs | `CONVENTIONS.md` missing §7 on `(nil, nil) = handler-owns-response` convention | `internal/server/CONVENTIONS.md:1-133` | 8 handlers use the pattern; not documented; future genapi changes could regress silently | confirmed | S | open / triage |
+| 8 | Q-R-03 | Medium | 48 | readability | `cmd/server/app.go:newApp` 138 LOC despite documented split | `cmd/server/app.go:190-313` | steps (2) profiles + (5) seed-from-store are still inline; extract `buildProfilesAndPool` + `bootstrapProfileStore` | confirmed | S-M | open / triage |
+| 9 | Q-R-08 | Medium | 48 | maintainability | `src/services/webawesome/components.ts` 11 wrappers × `as unknown as ForwardRefExoticComponent` boilerplate | `src/services/webawesome/components.ts:73-403` | 415 LOC, near-identical 10-30 LOC blocks per wrapper; extract `createWaComponent<TProps, TEvents>` | confirmed | M | open / triage |
+| 10 | Q-R-09 | Medium | 48 | readability | `scanQueryResult` / `streamQueryResult` share row-drain loop; only sink differs | `internal/server/result_codec.go:408-527,564-616` | `dupl` cap is 200 tokens; conceptual duplication slipped under | confirmed | S-M | open / triage |
+| 11 | Q-A-01 | Medium | 48 | api-contract | `serverErrorCodes.ts` mirrors only 3 of ~50 Go error codes; check-error-codes guard is one-directional | `src/api/serverErrorCodes.ts:1-31` vs. `internal/server/errorcodes.go:27-...` | reverse-coverage drift unenforced | confirmed | S-M | open / triage |
+| 12 | Q-A-03 | Medium | 48 | api-contract | `runSync` cancellation pattern undocumented as ADR; genapi missing AbortSignal | `src/pages/QueryPage.tsx:195-228,376-409` | `runSyncGenRef` monotonic counter is the workaround; pattern will be re-invented per page | confirmed | S | open / triage |
+| 13 | Q-A-06 | Medium | 48 | api-contract | `(nil, nil) = "handler owns response"` convention is informal; 8 handlers depend on it | `internal/server/handlers_uploads.go:85-178` + 7 siblings | wrapper contract `(nil, nil) = wrapper writes nothing` undocumented | confirmed | S | open / triage |
+| 14 | Q-L-01 | Medium | 48 | tests | Jest worker leak on `npm test -- --ci` (`worker has failed to exit gracefully`) | `src/lib/lsp/__tests__/*.test.ts` (suspected; not yet localised) | scan reproduced; `--detectOpenHandles` will localise in <30s | suspected | S | open / triage |
+| 15 | Q-D-02 | Medium | 48 | docs | No module-level READMEs in `src/`, `src/lib/`, `src/components/`, `src/services/` | `src/`, `src/lib/`, `src/components/`, `src/services/` | onboarding-friction; `lib/` mixes pure utils with hooks | confirmed | M | open / triage |
+| 16 | Q-D-03 | Medium | 48 | docs | 4 ADRs missing (cookie/bearer dual-auth, WS row-batcher, `runSync` cancellation, contract-mirror) | `docs/adr/` (3 ADRs total) | architectural memory leaks into commit messages | confirmed | M | open / triage |
+| 17 | Q-A-02 | Medium | 40 | deps | Suspected unused runtime deps: `vscode-languageserver-protocol`, `@popperjs/core` | `package.json:67,94` | no `src/` import; transitive resolution intact for vscode-languageserver-protocol | confirmed | S | open / triage |
+| 18 | Q-A-05 | Medium | 36 | api-contract | `QueryResp.columns` shape drift: SPA `Array<Record<string, unknown>>` vs. Go `[]jsontext.Value` | `src/pages/QueryPage.tsx:148` vs. `internal/server/result_codec.go:619-639,609` | three SPA consumers re-implement column-type narrowing | suspected | M | open / triage |
+| 19 | Q-L-03 | Medium | 36 | tests | `Server-Timing` header / trailer not pinned by `result_codec_test.go` | `internal/server/result_codec_test.go` vs. `result_codec.go:431-525` | PERF-N4 / #281 shipped without observability test | confirmed | S | open / triage |
+| 20 | Q-L-04 | Medium | 36 | tests | `peekLoginCreds` multipart-body branch lacks unit test | `internal/server/loginlimiter.go:489-...`, `loginlimiter_test.go` | S-NEW-F / #317 fix could silently regress on a content-type detection reorder | suspected | S | open / triage |
+| 21 | Q-L-05 | Medium | 36 | maintainability | `cmd/server/app.go` cleanups LIFO/FIFO order undocumented | `cmd/server/app.go:222,233,253,304-312` | future cleanups added in the wrong order = resource-leak risk | confirmed | S | open / triage |
+| 22 | Q-L-07 | Medium | 36 | tests | `queryStreamWorker` vs. main-thread parity untested | `src/lib/queryStream.ts`, `src/lib/queryStreamWorker.ts`, `__test_utils__/queryStreamWorkerUrlMock.js` | NDJSON parser drift across two paths would go uncaught | confirmed | S | open / triage |
+| 23 | Q-R-07 | Medium | 32 | maintainability | `src/lib/docs/index.ts:39-57` casts 6 markdown imports `as unknown as string` | `src/lib/docs/index.ts:39-57` | webpack raw-loader emits `string` at runtime; add `declare module '*.md'` | confirmed | S | open / triage |
+| 24 | Q-L-02 | Medium | 32 | maintainability | `.catch(() => {})` anti-pattern swallows rejected promises (metrics + clipboard) | `src/lib/useMetricsPolling.ts:127,129,140`, `src/components/results/graph/useGraphNodeActions.ts:86` | user-visible silent failure on clipboard.writeText (Safari) | confirmed | S | open / triage |
+| 25 | Q-S-05 | Medium | 32 | tests | Jest worker-leak warning (same root as Q-L-01) | (see Q-L-01) | scanner-reported; reviewer cohort surfaces likely culprits | suspected | S | open / triage |
+| 26 | Q-R-05 | Low | 24 | readability | `streamStateToResp` + rAF throttle pattern not lifted to reusable hook | `src/pages/QueryPage.tsx:146-153,468-520` | PERF-2026-05-17-02 / #239 left it in-page; copy-paste risk if dashboard/ops add streaming | suspected | S | open / triage |
+| 27 | Q-R-06 | Low | 24 | maintainability | Layout magic numbers in `TableView.tsx` not centralised (no `layoutConstants.ts`) | `src/components/results/TableView.tsx:56-74` | drift across `TableView` + `useTableBodySize` + `GraphView*` | suspected | S | open / triage |
+| 28 | Q-R-10 | Low | 24 | maintainability | `useMetricsPolling.ts` empty `.catch(() => {})` — paper handle | `src/lib/useMetricsPolling.ts:127-140` | sibling of Q-L-02; suspected only because inner try already covers most | suspected | S | open / triage |
+| 29 | Q-A-04 | Low | 24 | api-contract | `COOKIE_MODE_PLACEHOLDER` constant in `src/api/client.ts` leaks via generated client | `src/api/client.ts:49-56,71-79` | wrapper strips header; bypass risk if someone uses `bearerToken()` directly | confirmed | S | open / triage |
+| 30 | Q-D-05 | Low | 24 | docs | `result_codec.go` leading comment (lines 22-44) covers only PERF #217; 3 other concerns missing | `internal/server/result_codec.go:22-44` | resolves on Q-R-01 split | suspected | S | open / triage |
+| 31 | Q-L-06 | Low | 16 | maintainability | `LoginLimiter.NoteFail` increments `count` without write-side cap | `internal/server/loginlimiter.go:373-385` | cosmetic (read-clamped above FailThreshold); audit-log path could surface absurd numbers | confirmed | S | open / triage |
+| 32 | Q-D-04 | Info | 8 | docs | `TODO #122` in `AuthProvider.tsx:293` not normalised to `TODO(#122):` | `src/auth/AuthProvider.tsx:293` | single drift from otherwise-uniform convention | confirmed | XS | open / triage |
+| — | Q-S-01 | — | 64 | lint | ESLint 4 × `react/react-in-jsx-scope` in `DashboardPage.test.tsx:72-75` | `src/pages/DashboardPage.test.tsx:72-75` | scanner blocker | confirmed | XS | **RESOLVED (2026-05-21)** — user edit removed `import React` and `React` references; airbnb's `react/react-in-jsx-scope` no longer fires under modern JSX transform. `npm run lint` re-run will confirm. |
+
+### Grouping rationale (28 reviewer findings + 8 scanner findings → 32 active rows)
+
+- **Q-S-05 / Q-L-01 share a root**: both surface the Jest worker-leak warning. Kept as two rows for visibility but should be tracked under a single umbrella when issues are filed (likely `Q-L-01` as the parent because it pinpoints LSP test suspects).
+- **Q-D-05 resolves on Q-R-01**: file header comment fix is unneeded once `result_codec.go` is split per Q-R-01; keep both rows until Q-R-01 lands.
+- **Q-S-06 / Q-S-07 are absorbed**: the scanner's >800-LOC and >100-LOC raw flags are already covered by Q-R-01 (`result_codec.go`), Q-R-02 (`loginlimiter.go`), Q-R-03 (`newApp`), Q-R-04 (`QueryPage.tsx`), Q-R-09 (drain helper for `streamQueryResult`/`scanQueryResult`). The scan's `NewLspConfigWithDefaults` 137-LOC flag was a heuristic miscount (actual: 5 LOC) — closed-no-action.
+- **Q-S-08 is absorbed**: ts-prune INFO items and the unused-runtime-dep heuristic are covered by Q-A-02 (deps) plus the existing `ts-prune` allow-list in the inventory.
+
+### Findings by category (2026-05-21)
+
+#### CI / blockers
+
+- Q-S-02 (P0): `check-doc-routes` self-collision — widen allow-list to `docs/audits/**` OR backtick-escape removed-path tokens in audit format. **Blocks every future audit run.**
+- Q-S-03: `.gitlab-ci.yml:884` image-pin comment missing.
+- Q-S-04: chunk-budget over by 2 chunks; monaco-languageclient / vscode-services pipeline is the dominant cost.
+
+#### Readability / maintainability
+
+- Q-R-01 (High), Q-R-02 (High), Q-R-04 (High), Q-R-03, Q-R-08, Q-R-09 — file splits + helper extractions; all package-private symbol moves only.
+- Q-R-05, Q-R-06, Q-R-07, Q-R-10, Q-L-02 — small targeted fixes (hook lift, constants file, type declaration, observable catch).
+
+#### API contract / cross-stack
+
+- Q-A-01 — reverse-coverage guard for `check-error-codes`.
+- Q-A-02 — drop unused `vscode-languageserver-protocol` (and audit `@popperjs/core`).
+- Q-A-03 — codify `runSync` cancellation pattern as ADR; track genapi follow-up.
+- Q-A-04 — document `COOKIE_MODE_PLACEHOLDER` contract; pin no-leak test.
+- Q-A-05 — tighten `QueryResp.columns` schema in `geode.json`.
+- Q-A-06 — document `(nil, nil)` handler-owns-response convention.
+
+#### Reliability / tests
+
+- Q-L-01 / Q-S-05 — localise Jest worker leak via `--detectOpenHandles`.
+- Q-L-03 — `Server-Timing` round-trip test.
+- Q-L-04 — `peekLoginCreds` multipart unit test.
+- Q-L-05 — `app.go` cleanup order documentation + fault-injection test.
+- Q-L-06 — `NoteFail` write-side counter cap.
+- Q-L-07 — `queryStream` worker-vs-main-thread parity test.
+
+#### Docs
+
+- Q-D-01 (High) — CONVENTIONS.md §7 (handler-owns-response).
+- Q-D-02 — module READMEs for `src/`, `src/lib/`, `src/components/`, `src/services/`.
+- Q-D-03 — 4 ADRs (cookie/bearer dual-auth, WS row-batcher, runSync cancellation, contract-mirror).
+- Q-D-04 — normalise `TODO #122` → `TODO(#122):`.
+- Q-D-05 — expand `result_codec.go` file header (resolves on Q-R-01 split).
+
+### 2026-05-21 cohort roadmap
+
+Quick wins (< 1 day):
+
+- **Q-S-02 (P0)**: 2-line patch to `scripts/check-doc-routes.mjs` allow-list + update its `.test.mjs`. Land BEFORE the next audit pass.
+- Q-S-03: re-add image-pin comment on `.gitlab-ci.yml:884`.
+- Q-A-02: `npm uninstall vscode-languageserver-protocol`; verify Storybook + npm install still pass; consider `@popperjs/core` removal in same PR.
+- Q-R-07: add `src/types/markdown.d.ts`; drop 6 casts in `src/lib/docs/index.ts`.
+- Q-D-04: normalise TODO comment in `AuthProvider.tsx:293`.
+- Q-L-02: replace `.catch(() => {})` with `.catch(err => console.warn(...))` (3 sites).
+- Q-L-05: document cleanup LIFO/FIFO contract in `cmd/server/app.go`.
+- Q-D-01: add §7 to `internal/server/CONVENTIONS.md`.
+
+Medium (1-5 days):
+
+- Q-S-04: re-validate `monaco-languageclient` lazy-loading boundary; split `vscode-services` chunk further.
+- Q-R-01 + Q-D-05: split `result_codec.go` (828 LOC → 3 files); package-private symbols only.
+- Q-R-02: split `loginlimiter.go` (823 LOC → 3 files).
+- Q-R-03: extract `buildProfilesAndPool` + `bootstrapProfileStore` from `newApp` (138 → ~80 LOC).
+- Q-R-04: extract 4 hooks from `QueryPage.tsx` (727 → ~350 LOC).
+- Q-R-08: introduce `createWaComponent<TProps, TEvents>` helper.
+- Q-R-09: extract `drainRowsInto` shared helper.
+- Q-L-01 / Q-S-05: localise Jest worker leak + fix the offending `afterEach`.
+- Q-L-03 / Q-L-04 / Q-L-07: add the three missing test coverages.
+- Q-A-01: extend `check-error-codes.mjs` with `--check-reverse-for-family auth password tx upload`.
+- Q-A-06: add `(nil, nil)` golden test alongside CONVENTIONS.md §7.
+- Q-D-02: 4 READMEs (one per top-level src tree).
+- Q-D-03: 4 ADRs.
+
+Strategic (> 5 days):
+
+- Q-A-03: genapi follow-up to emit `AbortSignal?` on every method signature (upstream change).
+- Q-A-05: tighten `QueryResp.columns` schema in `geode.json`; regenerate and update 3 SPA consumers.
+- Q-L-06: `LoginLimiter` counter cap (low-priority, cosmetic today).
+
+### Promotion rationale: Q-S-02 → P0
+
+The reviewer's INFO→Blocker promotion is taken. `check-doc-routes` is a pre-commit + CI guard whose allow-list is currently scoped narrowly: it permits historical mentions of removed paths only in a curated list of doc files. Audit deliverables under `docs/audits/2026-05-21/` are NOT in that list, but the audit format legitimately cites removed-path tokens like `/workspace` as evidence (e.g. `docs/audits/2026-05-21/gap-collection.md:314`). The result is **structurally a CI-fail loop**: every future audit emission trips the guard on its own evidence. Until the allow-list is widened to `docs/audits/**` (or the audit format learns to backtick-escape removed-path tokens), no audit pass can complete cleanly. PriorityScore 100 (Impact 5 × Likelihood 5 × 4) reflects the absolute certainty of recurrence — every audit run, no exceptions. Fix is a 2-line patch to `scripts/check-doc-routes.mjs` + a corresponding update to its `.test.mjs`. Recommended owner: doc-tooling.
+
+### Resolved this pass (2026-05-21)
+
+| ID | Resolution | Evidence |
+|---|---|---|
+| Q-S-01 | ESLint `react/react-in-jsx-scope` (4 errors at `src/pages/DashboardPage.test.tsx:72-75`) closed by user edit. The file no longer imports nor references `React`; modern JSX transform handles the JSX elements without an in-scope `React` binding, and airbnb's `react/react-in-jsx-scope` rule no longer fires. Verification: `npm run lint` should now exit 0 (chunk-budget + image-pin + doc-routes remain the open scanner blockers). | `src/pages/DashboardPage.test.tsx` (grep `React` → 0 hits) |
+
+### Unknowns / confirm-before-fix (2026-05-21 cohort)
+
+- **Q-A-02 (`@popperjs/core`)**: confirmed unused in `src/` but Storybook vendored copy references it. Verify `make stories` + `build-storybook` still green BEFORE the uninstall lands. `vscode-languageserver-protocol` is safer (transitive via `vscode-languageclient`).
+- **Q-A-05 (column shape drift)**: `confidence::suspected` because the wire is currently `jsontext.Value` and the de facto SPA shape `{name, type}` may have other producers (e.g. WS path). Confirm the only emitter by `git grep '"columns":' internal/`.
+- **Q-L-01 / Q-S-05 (Jest worker leak)**: `confidence::suspected` for the LSP test cohort root cause. Run `npm test -- --detectOpenHandles 2>&1 | head -80` and pin the actual offender BEFORE assuming LSP tests. Alternative culprits: `queryStreamWorker` tests, any `setInterval` not torn down in `useMetricsPolling.test.tsx`.
+- **Q-R-05 (useRafThrottledVersion lift)**: `confidence::suspected` — the throttle is currently only used in `QueryPage`; lift only if a second consumer materialises. Otherwise track as "remind me when dashboard/ops add streaming results."
+- **Q-D-05 (result_codec.go header)**: `confidence::suspected` because the fix is unnecessary if Q-R-01 lands; the row exists as a hedge in case Q-R-01 is deferred.

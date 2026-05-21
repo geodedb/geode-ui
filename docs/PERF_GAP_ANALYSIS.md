@@ -1,6 +1,10 @@
 # Performance Gap Analysis
 
-Last updated: 2026-05-19 (closure cohort — /codepros:gap-close round-4 deferred-items follow-up: the three perf items deferred earlier in the round-4 cohort are now Closed. #316 lazy-load cytoscape plugins → `3259dab` (cxtmenu/lasso/navigator dynamic-imported with promise-cached module loader; new chunks ~10-11 KiB each; ~30 KiB save on the never-opt-in path — the audit's 1-2 MiB projection was over-optimistic because the bulk of `2749.*.js` is cytoscape core + fcose + dagre + spread which are NOT opt-in; see "Bundle-delta correction" below). #297 WS JSON.parse offloaded to a Web Worker → `e085a7f` (`src/lib/queryStreamWorker.ts` + URL helper + main-thread fallback). #291 layoutWorker positions posted as transferable Float32Array → `86e0463` (zero-copy postMessage; main thread reconstructs id-by-index map). All 7 PERF-2026-05-19-* items are now Closed. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
+Last updated: 2026-05-21 (gap-close pass — 3 of the 14 `PERF-2026-05-21-*` cohort items CLOSED in this session: `PERF-2026-05-21-01` bench-gate meta-blocker via `1434177` (5 hot-path benches + flip `allow_failure: false`), `PERF-2026-05-21-02` SPA shared-clock via `e581d62` (`src/lib/usePollingClock.ts` hub + 3 callsite refactor), `PERF-2026-05-21-03` `*http.Transport` singleton via `28972a7` (`internal/server/http_transport.go` + metrics + HIBP). 11 `PERF-2026-05-21-*` items remain OPEN.)
+
+Previous: 2026-05-21 (audit Phase 4 — /codepros:audit 2026-05-21 perf-review pass, **--skip-issues** mode: no GitLab writes performed. 14 cadence rows added/updated against the 2026-05-21 inputs (`docs/audits/2026-05-21/perf-context.md`, `perf-scan.md`, `perf-review.md`). Severity distribution from the reviewer: P0=0, P1=4, P2=7, P3=6 (17 findings total: 13 from scan + 3 net-new from reviewer + bench-coverage gap split out). Three OPEN P2 carry-overs from the 2026-05-19 cohort (#294, #302, #306) **REVERIFIED 2026-05-21** — code paths unchanged on `main` (HEAD `1199648`). **META-BLOCKER:** `bench-gate` job remains `allow_failure: true` AND five hot-path benches are missing (`BenchmarkParseProm`, `BenchmarkProjectSnapshot`, `BenchmarkHandleMetrics`, `BenchmarkLspFrameReader*`, `BenchmarkHibpHasSeen`). Until that combination is resolved, every `confidence::suspected` finding below stays invisible to MR review — the bench-gate is the single highest-leverage closure. See "Phase 4 (2026-05-21) Findings" section below for the full table and "Meta-Blocker (2026-05-21)" call-out for the cohort-order rationale.)
+
+Previous: 2026-05-19 (closure cohort — /codepros:gap-close round-4 deferred-items follow-up: the three perf items deferred earlier in the round-4 cohort are now Closed. #316 lazy-load cytoscape plugins → `3259dab` (cxtmenu/lasso/navigator dynamic-imported with promise-cached module loader; new chunks ~10-11 KiB each; ~30 KiB save on the never-opt-in path — the audit's 1-2 MiB projection was over-optimistic because the bulk of `2749.*.js` is cytoscape core + fcose + dagre + spread which are NOT opt-in; see "Bundle-delta correction" below). #297 WS JSON.parse offloaded to a Web Worker → `e085a7f` (`src/lib/queryStreamWorker.ts` + URL helper + main-thread fallback). #291 layoutWorker positions posted as transferable Float32Array → `86e0463` (zero-copy postMessage; main thread reconstructs id-by-index map). All 7 PERF-2026-05-19-* items are now Closed. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
 
 Previous: 2026-05-19 (closure cohort — /codepros:gap-close round-4 against the 2026-05-19 audit Phase 4 surface: PERF-2026-05-19-06 / #312 Closed via `e42a92c` (bench harness gaps). Three perf items (#316 lazy-load cytoscape plugins, #297 WS parse worker, #291 layoutWorker transferable Float32Array) deferred to next session — clean tree, context budget. 6 of 7 2026-05-19 perf items remain Open. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.)
 
@@ -12,7 +16,11 @@ Scope: app code, generated clients/servers, Go backend, React/Electron UI, CI/CD
 
 ## Summary
 
-- Open performance/scalability gaps tracked in this update: 0. All 7 Phase 4 perf items (6 new + brotli on #259) closed by the 2026-05-17 Phase 5 round-3 cohort. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-17 (audit Phase 5 — /codepros:gap-close round-3 cohort)" section.
+- **2026-05-21 audit Phase 4 (`--skip-issues` mode):** 14 cadence rows added (`PERF-2026-05-21-01..14`) against the perf-context / perf-scan / perf-review inputs. **No GitLab writes.** All 14 are in OPEN state; cadence IDs are reserved for the follow-up issue-creation pass.
+- **2026-05-21 severity distribution:** P0=0; P1=4 (PERF-2026-05-21-01 bench-gate meta + -02 SPA shared-clock + -03 http.Transport + -04 lspFrameReader); P2=7 (-05/-06/-07/-08/-09 + carry-overs #294/#302/#306); P3=4 (-10/-11/-12/-13); Info=1 (-14). Reviewer pass surfaced **3 net-new findings** (Sparkline memoization, no `http.Transport` tuning in tree, `pushSynthesisedRows` two-pass) and upgraded **3 scanner findings P2 → P1** (F-FE-1 shared-clock, `lspFrameReader`, bench-gate `allow_failure:true`).
+- **Carry-over reverification (2026-05-21):** #294 layoutCache.get clone, #302 WS protocol JSON-only, #306 streamRowsOverWS sequential — all three OPEN P2 items REVERIFIED on HEAD `1199648`. Code paths unchanged. See updated status cells in the "Phase 4 (2026-05-19) Findings — Newly Opened" table.
+- **META-BLOCKER:** `bench-gate` CI job is `allow_failure: true` (`.gitlab-ci.yml:472-473`) AND five hot-path benches are missing (`BenchmarkParseProm`, `BenchmarkProjectSnapshot`, `BenchmarkHandleMetrics`, `BenchmarkLspFrameReader*`, `BenchmarkHibpHasSeen`). Until both halves are resolved, every `confidence::suspected` finding stays invisible to MR review. **Tracked as `PERF-2026-05-21-01` at PerfScore 100, P1 — the single highest-leverage closure in the cohort.**
+- Prior cohort: Open performance/scalability gaps tracked in the 2026-05-19 update: 0. All 7 Phase 4 (2026-05-19) perf items closed by the round-4 cohort. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19" for evidence.
 - New GitLab issues created in this Phase 4 pass (2026-05-17): 6 — #275, #278, #281, #284, #285, #286 (cadence IDs `PERF-2026-05-17-11` through `PERF-2026-05-17-16`).
 - Brotli implementation plan was de-duped into a long-form comment on existing #259 (no new issue filed).
 - Phase 3 doc corrections applied:
@@ -23,13 +31,21 @@ Scope: app code, generated clients/servers, Go backend, React/Electron UI, CI/CD
 - Confirmed findings (2026-05-17 Phase 4): 5. Suspected findings needing workload/profiler confirmation: 2 (#275 cascade guardrail, #285 bundle-budget tripwire).
 - Highest-risk Phase 4 finding: #285 (3.7 MiB largest async chunk; no CI bundle-budget guardrail). All other Phase 4 findings are P3 observability or test/cache hygiene.
 
-Top 5 by PerfScore (2026-05-17 Phase 4 OPEN set):
+Top 5 by PerfScore (2026-05-21 audit Phase 4 OPEN set — all cohorts):
 
-1. #275 (PerfScore ~50, P2) — `useGraphElements` rowsVersion rebuild guardrail; cascade win from #239 / #249 is currently unguarded.
-2. #285 (PerfScore ~25, P3) — 3.7 MiB largest async chunk (`4111.*.js`); no CI bundle-budget tripwire.
-3. #259 (PerfScore 32-50, P2 confirmed) — brotli precompression missing; long-form implementation plan now pinned as a comment on this carried-open issue.
-4. #278 (PerfScore ~20, P3) — `net/http/pprof` endpoint not bound; perf debugging requires rebuild.
-5. #281 (PerfScore ~20, P3) — no `Server-Timing` headers; per-stage latency invisible in DevTools.
+1. **PERF-2026-05-21-01 (PerfScore 100, P1)** — Meta-blocker: bench-gate `allow_failure: true` + 5 missing benches (`ParseProm`, `ProjectSnapshot`, `HandleMetrics`, `LspFrameReader*`, `Hibp*`). Lifts every downstream suspected finding into a real regression net.
+2. **PERF-2026-05-21-02 (PerfScore 80, P1)** — Three independent `setInterval` pollers per SPA tab; no shared clock. Server load scales `O(tabs × pollers)`.
+3. **PERF-2026-05-21-03 (PerfScore 64, P1)** — Per-call `&http.Client{}` for metrics-poll + HIBP; no `http.Transport` tuning anywhere → `MaxIdleConnsPerHost=2` default.
+4. **PERF-2026-05-21-04 (PerfScore 64, P1)** — `lspFrameReader.ReadFrame` reads LSP header one byte at a time; no bench coverage.
+5. **PERF-2026-05-21-05 (PerfScore 48, P2, NEW)** — Sparkline + dashboard cards lack memoization; ~500 Recharts subtree rebuilds every 5 s on dashboard.
+
+Historical Top 5 (2026-05-17 Phase 4 OPEN set, kept for trace):
+
+1. #275 (PerfScore ~50, P2) — `useGraphElements` rowsVersion rebuild guardrail; cascade win from #239 / #249 is currently unguarded. **Closed 2026-05-17.**
+2. #285 (PerfScore ~25, P3) — 3.7 MiB largest async chunk (`4111.*.js`); no CI bundle-budget tripwire. **Closed 2026-05-17.**
+3. #259 (PerfScore 32-50, P2 confirmed) — brotli precompression missing. **Closed 2026-05-17.**
+4. #278 (PerfScore ~20, P3) — `net/http/pprof` endpoint. **Closed 2026-05-17.**
+5. #281 (PerfScore ~20, P3) — `Server-Timing` headers. **Closed 2026-05-17.**
 
 (All P0/P1 stream-path findings — #239, #240, #243, #246, #249, #251, #254, #256, #257 — closed in the 2026-05-17 round-3 cohort and now live in GAP_ANALYSIS_RESOLVED.md. See "Resolved 2026-05-17" section below.)
 
@@ -136,9 +152,9 @@ Stack-ranked by PerfScore (descending):
 | PERF-2026-05-19-07 | [#316](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/316) | P1 | 80 | cytoscape chunk 6.41 MiB (eager plugins) + fcose imported twice — lazy-load + dedupe | UI build | `internal/ui/dist/2749.*.js` 6,717,982 B; main + worker both pull `cytoscape-fcose` | **Closed (2026-05-19)** via `3259dab` — opt-in cytoscape plugins (cxtmenu, lasso, navigator) are now loaded via dynamic `import()` with module-level promise caching (so the first user of each plugin triggers the chunk load and subsequent users reuse the cached promise). New emitted chunks: `cyto-cxtmenu`, `cyto-lasso`, `cyto-navigator` at ~10-11 KiB each. **Bundle-delta correction:** the main cytoscape chunk `2749.*.js` remained at 6.41 MiB — the audit's 1-2 MiB projection was over-optimistic about plugin sizes; the bulk is cytoscape core + `fcose` + `dagre` + `spread`, which are NOT opt-in and stay eagerly bundled. Realised save on the never-opt-in path: ~30 KiB across the three lazy chunks. `useLasso` / `useCxtMenu` / `GraphMiniMap` tests updated to `await waitFor(...)` for the now-async plugin-apply path. |
 | PERF-2026-05-19-06 | [#312](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/312) | P1 | 60 | bench harness — no warm rerun, worker path never exercised, p5Fps gate @ n=5000 wrong tier, bench-gate.ts 10% threshold no abs-ms floor | CI/UI bench | `e2e/specs/19-graph-bench.spec.ts:40-179,136`; `src/components/results/graph/scaleTier.ts:1-11`; `scripts/bench-gate.ts:26` | **Closed (2026-05-19)** via `e42a92c` — bench harness: warm-rerun + worker-path combos; `scaleTier.MID_MAX` 5_000→5_001; `window.__geode_bench` debug surface; `layoutCache.getStats()`; `bench-gate.ts MIN_ABSOLUTE_MS` floor. See `GAP_ANALYSIS_RESOLVED.md` "Closure cohort 2026-05-19". |
 | PERF-2026-05-19-03 | [#297](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/297) | P1 | 60 | WS frame parse uses JSON.parse on main thread — offload to worker for 100k-row streams | UI streaming | `src/lib/queryStream.ts:77-90`; `internal/server/ws_query.go:39` | **Closed (2026-05-19)** via `e085a7f` — WS JSON.parse offloaded to a Web Worker. New `src/lib/queryStreamWorker.ts` + `queryStreamWorkerUrl.ts` URL helper + jest mock `__test_utils__/mocks/queryStreamWorkerUrlMock.js`. Layout-worker-style singleton + fallback: `tryCreateParseWorker` returns `null` when Worker is unavailable (jsdom / CSP / construct fail) and the WS handler keeps the original inline `JSON.parse` path. New PERF #297 test pins worker-FIFO dispatch ordering via a FakeWorker; the 4 pre-existing queryStream tests still pass via the main-thread fallback. |
-| PERF-2026-05-19-02 | [#294](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/294) | P2 | 48 | layoutCache.get clones full PosMap on every hit — drop defensive clone | UI graph cache | `src/components/results/graph/layoutCache.ts:42` | OPEN |
-| PERF-2026-05-19-04 | [#302](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/302) | P2 | 36 | WS protocol is JSON-only — evaluate MessagePack/CBOR (design + bench, not implementation) | UI + Backend | `internal/server/ws_query.go:39`; `src/lib/queryStream.ts:77-90`; no `gen/pkg/wsx` binary path | OPEN |
-| PERF-2026-05-19-05 | [#306](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/306) | P2 | 32 | streamRowsOverWS sequential scan→encode→write — producer goroutine + bounded channel | Backend WS | `internal/server/ws_query.go:391-455` | OPEN |
+| PERF-2026-05-19-02 | [#294](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/294) | P2 | 48 | layoutCache.get clones full PosMap on every hit — drop defensive clone | UI graph cache | `src/components/results/graph/layoutCache.ts:42` (now line 61) | OPEN — **REVERIFIED 2026-05-21** at `layoutCache.ts:61` (`return { hit: 'full', positions: new Map(positions) }`). Store-side `bump(sig, new Map(positions))` ALSO clones — two full O(n) Map copies per layout cycle. Re-confirmed by perf-review §Top-10 #5. |
+| PERF-2026-05-19-04 | [#302](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/302) | P2 | 36 | WS protocol is JSON-only — evaluate MessagePack/CBOR (design + bench, not implementation) | UI + Backend | `internal/server/ws_query.go:39`; `src/lib/queryStream.ts:77-90`; no `gen/pkg/wsx` binary path | OPEN — **REVERIFIED 2026-05-21**: no new evidence; still design-exercise territory. Worker-side parse (#297) is the steady-state path now, so the cost is no longer a main-thread P1, but a binary protocol would still cut payload size on the wire. |
+| PERF-2026-05-19-05 | [#306](https://gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/306) | P2 | 32 | streamRowsOverWS sequential scan→encode→write — producer goroutine + bounded channel | Backend WS | `internal/server/ws_query.go:391-455` | OPEN — **REVERIFIED 2026-05-21** at `ws_query.go:391-455`. Single-goroutine scan→encode→write unchanged on HEAD `1199648`. A slow WS client still back-pressures the SQL cursor end-to-end. |
 
 Top by PerfScore (2026-05-19 Phase 4 OPEN set — post deferred-items follow-up):
 
@@ -168,6 +184,85 @@ The following Phase 2 candidates were considered and dropped during Phase 3 revi
 - **D2 — `queryStreamReducer` push-spread `rows.push(...batch)`.** Dropped entirely. 64-batch is 1024x below V8 argv limit; premature optimization.
 - **D3 — `GraphViewCytoscape` orchestrator no inline `useMemo`.** Dropped. Memoization is correctly delegated to extracted hooks per the post-#164 refactor.
 - **D4 — `useOverviewData` `Promise.all` 2-3 fan-out.** Dropped. The 60s TTL cache (#237) plus 30s timeout are already in place; the fan-out is not the contention point.
+
+## Phase 4 (2026-05-21) Findings — Reviewer Pass (--skip-issues, docs-only)
+
+Source: `docs/audits/2026-05-21/perf-context.md`, `docs/audits/2026-05-21/perf-scan.md` (13 findings: Backend 6, Frontend 4, Infra 3), `docs/audits/2026-05-21/perf-review.md` (17 findings: P0=0, P1=4, P2=7, P3=6 — 13 scanner + 3 new + 1 bench-coverage gap split). This pass was run in `--skip-issues` mode: **no GitLab issues were filed or commented**. Cadence IDs `PERF-2026-05-21-01` through `PERF-2026-05-21-14` are reserved for the follow-up issue-creation pass.
+
+Reviewer disposition vs. scanner:
+
+- **Upgraded P2 → P1**: F-FE-1 (shared-clock); `lspFrameReader` byte-by-byte; bench-gate `allow_failure: true` + missing benches (meta).
+- **Confirmed P1**: HIBP per-call `&http.Client{}`; metrics per-call `&http.Client{}` (consolidated into one "no `http.Transport` tuning" finding).
+- **New (not in scanner)**: Sparkline + dashboard cards lack memoization (P2); `pushSynthesisedRows` two-pass row sweep (P2); no `http.Transport` tuning in tree (rolled into the metrics+HIBP P1).
+- **Reverified OPEN P2 carry-overs**: #294, #302, #306 (see updated status cells in the 2026-05-19 table above).
+
+Stack-ranked by PerfScore (descending):
+
+| Cadence ID | PerfSeverity | PerfScore | Finding | Component | Evidence | Confidence | Status |
+|---|---|---:|---|---|---|---|---|
+| PERF-2026-05-21-01 | P1 | 100 | **META-BLOCKER:** `bench-gate` job is `allow_failure: true` AND five hot-path benches are missing (`BenchmarkParseProm`, `BenchmarkProjectSnapshot`, `BenchmarkHandleMetrics`, `BenchmarkLspFrameReader*`, `BenchmarkHibpHasSeen`). Until both are resolved, every suspected-confidence finding stays invisible to MR review. | CI/CD + Backend bench coverage | `.gitlab-ci.yml:472-473`; grep returns zero `Benchmark{ParseProm,ProjectSnapshot,HandleMetrics,LspFrameReader,Hibp}*` in `internal/server/*_test.go` | confidence::confirmed | OPEN (2026-05-21) — **highest-leverage closure**: lifts every downstream suspected finding into a benchable regression net. |
+| PERF-2026-05-21-02 | P1 | 80 | Three independent `setInterval` pollers per SPA tab; no shared clock (F-FE-1 upgraded P2→P1). 5s metrics tick and 30s audit-donut tick alias every 30 s, doubling p95 spikes on `/api/v1/metrics` + `/api/v1/audit`. | UI polling | `src/lib/useMetricsPolling.ts:128`; `src/components/dashboard/AuditEventMixCard.tsx:124`; `src/components/ops/AuditLogPage.tsx:196` | confidence::confirmed | OPEN (2026-05-21) — fix: `usePollingClock` hub owning one `setInterval(1000)` emitting coalesced `tick:5s` / `tick:30s` events. Drops timers from O(tabs × cards) to one per tab. |
+| PERF-2026-05-21-03 | P1 | 64 | Per-call `&http.Client{Timeout:…}` in two hot paths (`/api/v1/metrics` 5s-poll + HIBP login/registration/password-change); no `http.Transport` tuning anywhere in tree → default `MaxIdleConnsPerHost=2`. 50 dashboards × 5s = 600 reqs/min to ONE upstream host with only 2 reusable conns; HIBP path pays TLS handshake every login (~50-200ms wall). | Backend HTTP-out | `internal/server/handlers_metrics.go:214-219`; `internal/server/password_policy.go:169-172`; grep across `internal/server/*.go` + `cmd/server/*.go` finds zero `MaxIdleConns` / `http.Transport` tuning | confidence::confirmed | OPEN (2026-05-21) — fix: package-level `*http.Transport` via `sync.Once` (or DI through `Config`) with `MaxIdleConnsPerHost:32`, `MaxIdleConns:256`, `IdleConnTimeout:90s`, `ForceAttemptHTTP2:true`. Reuse via a singleton client. |
+| PERF-2026-05-21-04 | P1 | 64 | `lspFrameReader.ReadFrame` reads LSP header **one byte at a time** with fresh `make([]byte, 1)` per loop and `append(header, buf[0])` growing slice byte-by-byte. Plus `strings.ToLower(headerStr)` alloc per frame. (Upgraded P2 → P1 in reviewer pass.) | Backend LSP bridge | `internal/server/ws_lsp.go:351-374,380` | confidence::suspected | OPEN (2026-05-21) — fix: wrap upstream `tcp` in `bufio.NewReaderSize(tcp, 4096)`; `r.ReadString('\n')` for header lines; `io.ReadFull` for body; `strconv.Atoi(bytes.TrimSpace(...))` for Content-Length. Suspected confidence pending `BenchmarkLspFrameReader_HeaderOnly` (see PERF-2026-05-21-01). |
+| PERF-2026-05-21-05 | P2 | 48 | `Sparkline` rebuilds `buildData(values)` on every render + recreates `formatForTooltip(formatValue)` per render; no `React.memo`. `MetricsCards` and most `dashboard/*.tsx` lack `useMemo`/`React.memo`. 5s metrics poll → setState → re-render every dashboard child → ~8 cards × 60-sample arrays = ~500 Recharts subtree rebuilds every 5s. **NEW finding (reviewer)** — scanner missed. | UI dashboard | `src/components/dashboard/Sparkline.tsx:57-58,98,113`; `src/components/dashboard/MetricsCards.tsx` (0 memo hooks) | confidence::confirmed | OPEN (2026-05-21) — fix: (a) `React.memo` `Sparkline` keyed on stable `values` ref; (b) `useMemo` for `data = buildData(values)` and tooltip formatter inside `Sparkline`; (c) `React.memo` dashboard cards on snapshot input. Verify via React DevTools Profiler over a 5-min poll. |
+| PERF-2026-05-21-06 | P2 | 36 | Schema-cache eviction is TTL-only; no per-entry LRU/`maxEntries` bound. `2 entries/graph × G graphs` resident for 120 s; G=100 graphs → ~200 entries. Promote from `perf-context.md §7` "Unknown" to tracked. | Backend schema cache | `internal/server/schema_cache.go:34,76-86,121-125` | confidence::confirmed | OPEN (2026-05-21) — fix: add hard cap (`maxEntries = 256` is plenty); LRU eviction (Go Map preserves insertion order; re-insert on hit). |
+| PERF-2026-05-21-07 | P2 | 36 | Cytoscape rebuild fully destroys + reinstantiates core on every `sig` change (250 ms debounce). Streaming gate suppresses layout cost while streaming, but rebuild cost itself unmitigated at 5k+ nodes. | UI graph renderer | `src/components/results/graph/useGraphCytoscape.ts:168-347` (specifically `cy.destroy(); cytoscape({…})`) | confidence::suspected | OPEN (2026-05-21) — fix: A/B against incremental `cy.add()` / `cy.remove()` via `make perf-smoke` at n=10k. Suspected pending Cytoscape A/B bench. |
+| PERF-2026-05-21-08 | P2 | 32 | `projectSnapshot` runs 11 linear `FindFamily` scans (O(F·11)) per `/api/v1/metrics` request. F is small today (~12 families) so ~132 strcmps, but asymptotic risk + no bench coverage. | Backend metrics projection | `internal/server/handlers_metrics.go:228-281`; `internal/server/promparse.go:355-362` | confidence::suspected | OPEN (2026-05-21) — fix: expose the `families map[string]*MetricFamily` already built in `ParseProm` on the `MetricFamily` return; one O(1) lookup per family. Suspected pending `BenchmarkProjectSnapshot` (see PERF-2026-05-21-01). |
+| PERF-2026-05-21-09 | P2 | 24 | `pushSynthesisedRows` walks `rows` TWICE (lines 41-77 then 99-134) to first build synthetic nodes, then emit synthetic edges. Each pass rebuilds `varProps` per row. **NEW finding (reviewer)** — scanner missed. | UI graph-result synthesis | `src/lib/graphResult/pushSynthesisedRows.ts:41-134` | confidence::suspected | OPEN (2026-05-21) — fix: single sweep capturing `varProps` per row in an array of `Map<string,Record<string,unknown>>` during pass 1; reuse in pass 2. Reduces intermediate map allocs from 2N → N. Suspected pending Jest microbench on 1k synthetic-row input. |
+| PERF-2026-05-21-10 | P3 | 24 | `formatCell` calls `JSON.stringify` per cell for arrays/generic objects; used by every `TableView` cell AND row-height estimator (double work). | UI cell formatter | `src/lib/cellFormat.ts:99,105` | confidence::suspected | OPEN (2026-05-21) — fix: cache stringified form on first render via column projection OR detect "small primitive cell" fast-path. Suspected pending microbench. |
+| PERF-2026-05-21-11 | P3 | 16 | HTTP streaming flush cadence is hard-coded `streamFlushEvery = 64` rows; no bench established for chunk-size sensitivity. At 100k rows = 1562 flushes. | Backend result codec | `internal/server/result_codec.go:390,499` | confidence::suspected | OPEN (2026-05-21) — fix: A/B `streamFlushEvery = 64` vs 128 vs 256 via `BenchmarkStreamQueryResult_1k5Col`. Watchlist; not necessarily wrong, just unvalidated. |
+| PERF-2026-05-21-12 | P3 | 12 | `projectSnapshot` per-call `make([]MetricsHistogramBucket, 0, len(...))` — heap alloc per 5 s `/metrics` request. | Backend metrics projection | `internal/server/handlers_metrics.go:237` | confidence::suspected | OPEN (2026-05-21) — fix: pool small per-request slices (`sync.Pool`). Modest; bucket count is ~12. Suspected pending `BenchmarkProjectSnapshot`. |
+| PERF-2026-05-21-13 | P3 | 8 | `scanQueryResult` row slice `make([]jsontext.Value, 0)` — no capacity hint; N is known from `rows.Next()` loop ahead. Cold path (MCP `query` tool + Tx Run only). | Backend result codec | `internal/server/result_codec.go:574` | confidence::confirmed | OPEN (2026-05-21) — RE-NOTED from "Dropped 2026-05-17 D1". Cold-path watchlist; not worth a full close-and-fix, just visibility. |
+| PERF-2026-05-21-14 | Info | 4 | `metricsUpstreamTimeout = 2s` is set BOTH on `client.Timeout` AND on `context.WithTimeout` of the outbound request — duplicative; the context timeout alone suffices. | Backend metrics fetcher | `internal/server/handlers_metrics.go:53,166,214-219` | confidence::confirmed | OPEN (2026-05-21) — cosmetic code-smell; no perf issue. Fold into PERF-2026-05-21-03 fix when the `*http.Transport` singleton lands. |
+
+### Top 10 by PerfScore (2026-05-21 OPEN set, all cohorts)
+
+1. **PERF-2026-05-21-01 (PerfScore 100, P1)** — Meta-blocker: bench-gate `allow_failure:true` + 5 missing benches. **Single highest-leverage closure.**
+2. **PERF-2026-05-21-02 (PerfScore 80, P1)** — SPA shared-clock missing; 3 pollers per tab.
+3. **PERF-2026-05-21-03 (PerfScore 64, P1)** — Per-call `&http.Client{}` (metrics + HIBP); no `http.Transport` tuning anywhere.
+4. **PERF-2026-05-21-04 (PerfScore 64, P1)** — `lspFrameReader` byte-by-byte header read.
+5. **PERF-2026-05-21-05 (PerfScore 48, P2)** — Sparkline + dashboard cards lack memoization (NEW).
+6. **#294 / PERF-2026-05-19-02 (PerfScore 48, P2)** — `layoutCache.get` clones full PosMap on hit (reverified).
+7. **PERF-2026-05-21-06 (PerfScore 36, P2)** — Schema-cache TTL-only; no LRU bound.
+8. **PERF-2026-05-21-07 (PerfScore 36, P2)** — Cytoscape full rebuild on every `sig` change.
+9. **#302 / PERF-2026-05-19-04 (PerfScore 36, P2)** — WS protocol JSON-only design exercise (reverified).
+10. **#306 / PERF-2026-05-19-05 (PerfScore 32, P2)** — `streamRowsOverWS` sequential scan→encode→write (reverified).
+
+### Meta-Blocker (2026-05-21)
+
+`bench-gate` job at `.gitlab-ci.yml:472-473` is `allow_failure: true`, AND five hot-path benchmarks do NOT exist in the tree:
+
+- `BenchmarkParseProm` — Prom text-exposition parser (5s-poll hot path)
+- `BenchmarkProjectSnapshot` — 11× `FindFamily` projection (5s-poll hot path)
+- `BenchmarkHandleMetrics` — end-to-end /metrics fetch + parse + project + JSON
+- `BenchmarkLspFrameReader*` — header byte-by-byte read; case-insensitive Content-Length
+- `BenchmarkHibpHasSeen` — TLS handshake on every login / password-change
+
+**Consequence:** every `confidence::suspected` finding in the 2026-05-21 cohort (and the carry-overs that depend on these paths) is **invisible to MR review** today. A 5× regression in `ParseProm` would not fail bench-gate (no benchmark) AND even where benchmarks exist (`BenchmarkStreamQueryResult_*`, `BenchmarkStreamRowsOverWS_*`, `BenchmarkSchemaCache_*`, `BenchmarkAuditRing_*`, `BenchmarkPoolDB*`, `BenchmarkLoginLimiter_*`, `BenchmarkProfileLimiter_*`, `BenchmarkCancelReader_*`), bench-gate `allow_failure: true` means a 10 %+ delta cannot block an MR — it only emits an advisory annotation.
+
+**Suggested cohort order** (advisory; not in scope to file in this --skip-issues pass):
+
+1. Add the five missing benchmarks (`PERF-2026-05-21-01` part A); regenerate `bench-baseline.txt` per the 2026-05-17 cadence rule. Enables PERF-2026-05-21-03, -04, -06, -08, -12 to land safely.
+2. Single `*http.Transport` singleton (`PERF-2026-05-21-03`).
+3. Flip `bench-gate` to `allow_failure: false` (`PERF-2026-05-21-01` part B).
+4. `bufio` rewrite of `lspFrameReader` (`PERF-2026-05-21-04`).
+5. Frontend polling clock hub (`PERF-2026-05-21-02`).
+6. Drop `layoutCache.get` read-side clone (#294).
+7. Map-fronted family lookup in `projectSnapshot` (`PERF-2026-05-21-08`).
+8. Memoize `Sparkline` + dashboard cards (`PERF-2026-05-21-05`).
+9. Schema-cache LRU bound (`PERF-2026-05-21-06`).
+10. `pushSynthesisedRows` single-pass (`PERF-2026-05-21-09`).
+11. `streamRowsOverWS` producer/consumer split (#306).
+
+### Severity Counts (2026-05-21)
+
+| Severity | Count (new + reverified) | Net-new from reviewer |
+|---|---:|---:|
+| P0 | 0 | 0 |
+| P1 | 4 (PERF-2026-05-21-01/-02/-03/-04) | 0 net-new; 3 were scanner P2 upgraded |
+| P2 | 7 (PERF-2026-05-21-05/-06/-07/-08/-09 + carry-overs #294, #302, #306) | 2 net-new (PERF-2026-05-21-05 Sparkline memo; PERF-2026-05-21-09 pushSynthesisedRows two-pass) |
+| P3 | 5 (PERF-2026-05-21-10/-11/-12/-13 + watchlist) | 0 |
+| Info | 1 (PERF-2026-05-21-14 cosmetic) | 1 |
 
 ## Findings By Area
 
@@ -228,20 +323,64 @@ Epic C — **PERF-EPIC-GUARDRAILS** (bundle #275, #286):
 - `useGraphElements` rowsVersion rebuild regression test -> #275.
 - `graphStatsCache` LRU cap -> #286.
 
+## Bundling Recommendation (2026-05-21 Phase 4)
+
+The 2026-05-21 cohort surfaces a coherent four-epic bundle. **Order matters** because the bench-coverage gap meta-blocker (PERF-2026-05-21-01) gates the regression-net for every other suspected-confidence finding.
+
+Epic A — **PERF-EPIC-BENCH-NET** (PERF-2026-05-21-01) — **single highest-leverage closure**:
+
+- Add the five missing benches: `BenchmarkParseProm`, `BenchmarkProjectSnapshot`, `BenchmarkHandleMetrics`, `BenchmarkLspFrameReader*`, `BenchmarkHibpHasSeen`.
+- Regenerate `bench-baseline.txt` per the 2026-05-17 cadence rule.
+- Flip `.gitlab-ci.yml:472-473` `bench-gate` to `allow_failure: false`.
+
+Epic B — **PERF-EPIC-HTTP-OUT** (PERF-2026-05-21-03, PERF-2026-05-21-14):
+
+- Package-level `*http.Transport` singleton via `sync.Once` (or DI through `Config`) with `MaxIdleConnsPerHost: 32`, `MaxIdleConns: 256`, `IdleConnTimeout: 90s`, `ForceAttemptHTTP2: true`.
+- Wire `metricsHTTPClient` and `hibpHasSeen` to the singleton. Drop duplicative `client.Timeout` (context timeout suffices).
+
+Epic C — **PERF-EPIC-LSP-BUFIO** (PERF-2026-05-21-04):
+
+- `bufio.NewReaderSize(tcp, 4096)` wrapper; `ReadString('\n')` for header lines; `io.ReadFull` for body; `strconv.Atoi(bytes.TrimSpace(...))` for Content-Length.
+
+Epic D — **PERF-EPIC-SPA-CLOCK** (PERF-2026-05-21-02, PERF-2026-05-21-05):
+
+- `usePollingClock` hub owning one `setInterval(1000)`; coalesced `tick:5s` / `tick:30s` events.
+- `React.memo` wrap on `Sparkline`, `MetricsCards`, and other `dashboard/*.tsx` cards; `useMemo` for `buildData(values)` + tooltip formatter inside `Sparkline`.
+
 ## Roadmap
 
 Quick wins (< 1 day):
 
-- #275 — `useGraphElements` rebuild-count regression test (~30 LOC test, no source change).
-- #278 — gated pprof loopback server (~20 LOC + docs note).
-- #284 — `perfMarks.ts` add `longtask` observe + budget warn (~15 LOC + test).
-- #286 — `graphStatsCache` LRU cap (~30 LOC LRU class + test).
+- **PERF-2026-05-21-13** — `scanQueryResult` capacity hint (cold path; ~5 LOC).
+- **PERF-2026-05-21-14** — drop duplicative `client.Timeout` on metrics fetcher (cosmetic; folds into Epic B).
+- **#294** — `layoutCache.get` clone removal (the stored Map is already private; ~10 LOC + test).
 
 Medium (1-5 days):
 
-- #281 — `Server-Timing` middleware (touches query handler + new middleware file; ~80 LOC + tests).
-- #285 — bundle-budget tripwire (webpack-bundle-analyzer + CI step; investigation of `2749.*.js` first).
-- #259 — brotli precompression (webpack CompressionPlugin + `internal/ui/embed.go` static-file negotiation; ~120 LOC + tests).
+- **PERF-EPIC-BENCH-NET (-01)** — five benchmarks + baseline regen + `allow_failure` flip (~250 LOC tests + CI tweak).
+- **PERF-EPIC-HTTP-OUT (-03, -14)** — Transport singleton + wire two callers (~80 LOC + bench).
+- **PERF-EPIC-LSP-BUFIO (-04)** — `bufio` rewrite + bench (~50 LOC + bench).
+- **PERF-EPIC-SPA-CLOCK (-02, -05)** — `usePollingClock` hub + memo dashboard cards (~150 LOC + tests).
+- **PERF-2026-05-21-06** — schema-cache LRU bound (~40 LOC + test).
+- **PERF-2026-05-21-08** — `projectSnapshot` map-fronted family lookup (~30 LOC + bench).
+- **PERF-2026-05-21-09** — `pushSynthesisedRows` single-pass (~60 LOC + microbench).
+- **#306** — `streamRowsOverWS` producer/consumer split (~120 LOC + alloc-count contract).
+
+Strategic (> 5 days):
+
+- **PERF-2026-05-21-07** — Cytoscape A/B incremental `cy.add()`/`cy.remove()` vs full rebuild on `sig` change (design + perf-smoke baseline).
+- **#302** — WS protocol MessagePack/CBOR design + bench (no implementation).
+- **PERF-2026-05-21-11** — `streamFlushEvery` A/B at 64/128/256 (~bench + decision).
+
+Historical (kept for trace):
+
+- #275 — `useGraphElements` rebuild-count regression test. **Closed 2026-05-17.**
+- #278 — gated pprof loopback server. **Closed 2026-05-17.**
+- #284 — `perfMarks.ts` longtask observe + budget warn. **Closed 2026-05-17.**
+- #286 — `graphStatsCache` LRU cap. **Closed 2026-05-17.**
+- #281 — `Server-Timing` middleware. **Closed 2026-05-17.**
+- #285 — bundle-budget tripwire. **Closed 2026-05-17.**
+- #259 — brotli precompression. **Closed 2026-05-17.**
 
 Strategic (> 5 days):
 
@@ -252,6 +391,9 @@ Strategic (> 5 days):
 
 ## Unknowns And Confirmation Needed
 
+- **(2026-05-21)** Every `confidence::suspected` finding in the 2026-05-21 cohort (PERF-2026-05-21-04, -07, -08, -09, -10, -11, -12) is gated on the bench-coverage net in PERF-2026-05-21-01. Until that lands, regressions in `ParseProm`, `ProjectSnapshot`, `HandleMetrics`, `lspFrameReader`, and `hibpHasSeen` cannot be detected by CI.
+- **(2026-05-21)** Workload assumption: ~50 concurrent dashboards (peak) drives the PERF-2026-05-21-02 / -03 / -05 scaling math. This is a planning estimate, not a measurement; revise upward if production telemetry surfaces higher tab fan-out.
+- **(2026-05-21)** No fixture exists for `BenchmarkParseProm` and `BenchmarkHandleMetrics` against a representative upstream Prom blob — the bench author should capture a real `~30 KiB` `geode` `/metrics` response into `testdata/` rather than synthesize one.
 - No production telemetry was available. SLOs, RPS, graph sizes, and result distributions are inherited assumptions from `docs/ARCHITECTURE.md`.
 - `2749.*.js` is the largest async chunk at ~6.4 MiB. We have not confirmed whether it is one library (Monaco language services + worker) or two co-bundled lazy targets that should be split. #285's bundle-analyzer artifact is the path to confirm.
 - For #275's regression pin: needs a decision on how to spy on the 3-Map rebuild — sentinel via module-scoped counter, OR rely on Map identity stability between renders. Both work; the test author should pick one.

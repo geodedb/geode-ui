@@ -71,7 +71,7 @@ repos:
   hooks:
   - id: markdownlint
     args: [--config, .markdownlint.json]
-    exclude: ^(CHANGELOG\.md|docs/superpowers/plans/.*|gen/.*)$
+    exclude: ^(CHANGELOG\.md|docs/superpowers/plans/.*|docs/audits/.*|gen/.*)$
 
   # ── YAML formatting ────────────────────────────────────────────────────
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
