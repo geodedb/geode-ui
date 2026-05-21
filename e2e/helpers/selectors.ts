@@ -17,13 +17,6 @@ export const sel = {
     p.getByTestId('login-username').locator('input'),
   loginPassword: (p: Page): Locator =>
     p.getByTestId('login-password').locator('input'),
-  // Post-Plan-C the profile field is a clickable list of <button>s
-  // populated from /api/v1/profiles/public. The text input variant
-  // is the fallback when the public-list fetch fails. Tests that
-  // need to "select default" should use the button-by-name selector;
-  // this fallback-path locator targets the wa-input's shadow <input>.
-  loginProfile: (p: Page): Locator =>
-    p.getByTestId('login-profile-input').locator('input'),
   // Login submit button — migrated to <wa-button data-testid="login-submit-btn">.
   // Both the host element and its shadow-DOM <button part="base"> carry
   // role="button" with the same accessible name, so role+name strict-mode

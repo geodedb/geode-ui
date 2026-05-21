@@ -18,25 +18,29 @@ test.describe('auth', () => {
 
   test('login flow: fill, submit, land on /', async ({ page }) => {
     await page.goto('/login')
-    // LoginPage renders a profile-list picker fed by /api/v1/profiles/public
-    // (Plan C). The first profile auto-selects on mount and the seed has
-    // 'default' as the only system profile, so we just confirm the
-    // picker is showing and proceed.
-    //
-    // The profile button is a <wa-button> whose shadow root contains a
-    // nested <button part="base"> with the same accessible name. After
-    // moving ProfileDescription OUT of the wa-button (so the form card
-    // no longer overflows — see 25-ui-health.spec.ts), both elements
-    // resolve to `getByRole('button', { name: /^default$/i })` in
-    // strict mode. Scope to the wa-button host via test-id to pin the
-    // outer element. Same pattern used elsewhere in the suite for
-    // wa-button locators (see helpers/selectors.ts loginSubmit).
-    await expect(page.getByTestId('login-profile-default')).toBeVisible()
+    // LoginPage renders a filterable profile picker fed by
+    // /api/v1/profiles/public (2026-05-21 login profile UX, Task 5/7).
+    // Each row in the picker carries a stable
+    // `profile-filter-row-{name}` testid. The first row in the list
+    // auto-selects on mount, but other specs (notably
+    // 39-profile-onboarding.spec.ts) persist new profiles in the same
+    // compose stack — by the time this test runs the `default` row may
+    // no longer be first. Click it explicitly so the submit always
+    // targets the seed profile rather than relying on list ordering.
+    const defaultRow = page.getByTestId('profile-filter-row-default')
+    await expect(defaultRow).toBeVisible()
+    await defaultRow.click()
     await sel.loginUsername(page).fill(USER)
     await sel.loginPassword(page).fill(PASS)
     await sel.loginSubmit(page).click()
-    await expect(page).toHaveURL(/\/$/)
-    // The query editor is the index of the protected shell.
+    // Post-login the SPA's IndexRoute redirects through `/` to
+    // `/dashboard` (Bug 1 fix in 6808b04). Assert "no longer on /login"
+    // rather than matching a specific landing path so future routing
+    // tweaks don't churn this test. Then navigate to /query to confirm
+    // the protected shell is reachable (preserves the original test's
+    // queryRunBtn visibility check).
+    await expect(page).not.toHaveURL(/\/login$/)
+    await sel.navQuery(page).click()
     await expect(sel.queryRunBtn(page)).toBeVisible()
   })
 
@@ -65,20 +69,34 @@ test.describe('auth', () => {
     // longer "remembers" the session across reload in browser mode.
     // (Electron mode auto-restores from safeStorage; tested separately.)
     await page.goto('/login')
+    // Pin the profile to `default` — see the comment in "login flow"
+    // for why we don't rely on the auto-selected first row.
+    await page.getByTestId('profile-filter-row-default').click()
     await sel.loginUsername(page).fill(USER)
     await sel.loginPassword(page).fill(PASS)
     await sel.loginSubmit(page).click()
-    await expect(page).toHaveURL(/\/$/)
+    // Post-login the SPA's IndexRoute redirects through `/` to
+    // `/dashboard` (Bug 1 fix in 6808b04). Assert "no longer on /login"
+    // rather than matching a specific landing path so future routing
+    // tweaks don't churn this test.
+    await expect(page).not.toHaveURL(/\/login$/)
     await page.reload()
     await expect(page).toHaveURL(/\/login$/)
   })
 
   test('logout clears auth cookie and redirects', async ({ page, context }) => {
     await page.goto('/login')
+    // Pin the profile to `default` — see the comment in "login flow"
+    // for why we don't rely on the auto-selected first row.
+    await page.getByTestId('profile-filter-row-default').click()
     await sel.loginUsername(page).fill(USER)
     await sel.loginPassword(page).fill(PASS)
     await sel.loginSubmit(page).click()
-    await expect(page).toHaveURL(/\/$/)
+    // Post-login the SPA's IndexRoute redirects through `/` to
+    // `/dashboard` (Bug 1 fix in 6808b04). Assert "no longer on /login"
+    // rather than matching a specific landing path so future routing
+    // tweaks don't churn this test.
+    await expect(page).not.toHaveURL(/\/login$/)
     await sel.logout(page).click()
     await expect(page).toHaveURL(/\/login$/)
     // Auth cookie cleared (Set-Cookie with Max-Age=0 from /auth/logout).
