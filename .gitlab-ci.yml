@@ -452,13 +452,17 @@ go:test:
 # `benchstat`. The job fails if any benchmark regressed > 10% in ns/op, B/op,
 # or allocs/op with a statistically significant delta.
 #
-# `allow_failure: true` on purpose: shared CI runners are noisy. The high
-# -count + benchstat's significance test suppress most false positives, but
-# not all — treat a red gate as "go investigate", not "you broke prod". After
-# a deliberate, accepted perf change, regenerate the baseline with
-# `make bench-baseline` and commit `bench-baseline.txt`. See docs/ARCHITECTURE.md
-# ("Performance SLOs"). Promote to `allow_failure: false` once runner noise is
-# characterised on real telemetry.
+# Promoted to a real gate (PERF-2026-05-21-01, 2026-05-21 audit):
+# `allow_failure: false`. The high -count + benchstat's significance
+# test plus the >10% threshold suppress runner noise; the audit's
+# meta-blocker was that with `allow_failure: true` every confidence::
+# suspected perf finding stayed invisible to MR review. Five hot-path
+# benchmarks were added in lockstep (ParseProm, ProjectSnapshot,
+# HandleMetrics, LspFrameReader_ReadFrame, HIBPHasSeen) so the gate
+# now covers the previously-uncovered metrics-poll and LSP/HIBP
+# paths. After a deliberate, accepted perf change, regenerate the
+# baseline with `make bench-baseline` and commit `bench-baseline.txt`.
+# See docs/ARCHITECTURE.md ("Performance SLOs").
 bench-gate:
   <<: *go_defaults
   stage: test
@@ -470,7 +474,7 @@ bench-gate:
     - go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260409210113-8e83ce0f7b1c
     - export PATH="$(go env GOPATH)/bin:$PATH"
     - make bench-gate
-  allow_failure: true
+  allow_failure: false
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
