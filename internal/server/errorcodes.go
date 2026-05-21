@@ -56,6 +56,16 @@ const (
 	// hand-rolled handlers that enforce AuthJWT themselves rather than
 	// going through the genapi middleware chain.
 	ErrCodeUnauthorized = "unauthorized"
+	// ErrCodeInvalidRequest: malformed request body or invalid arguments
+	// to an unauthenticated endpoint. Used by HandleOnboard and any future
+	// pre-auth handlers; distinct from ErrCodeInvalidPassword (password-
+	// policy violations) and ErrCodeForbidden (authorisation failures).
+	ErrCodeInvalidRequest = "invalid_request"
+	// ErrCodeNotImplemented: handler accepted the request but the path
+	// has not been wired yet (501). Used transiently while a multi-task
+	// handler is being landed slice-by-slice (HandleOnboard task 1 → 2).
+	// Removed once the success path lands.
+	ErrCodeNotImplemented = "not_implemented"
 
 	// --- password policy ---
 
@@ -250,6 +260,8 @@ var allErrorCodes = []string{
 	ErrCodeServerMisconfigured,
 	ErrCodeInvalidCredentials,
 	ErrCodeUnauthorized,
+	ErrCodeInvalidRequest,
+	ErrCodeNotImplemented,
 	ErrCodePasswordTooShort,
 	ErrCodePasswordTooWeak,
 	ErrCodePasswordContainsUsername,
