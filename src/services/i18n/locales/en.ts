@@ -139,6 +139,18 @@ export const en = {
     // getStoredPassword on every keystroke; the gate avoids that
     // implicit safeStorage.decrypt round-trip.
     useSavedPassword: 'Use saved password',
+    // 2026-05-21 login-profile-ux Task 5: ProfileFilter component
+    // strings. The picker replaces the prior list-of-N-buttons
+    // rendering on LoginPage so dozens of public profiles stay usable
+    // inside the 380px form card. profileFilterPlaceholder is the
+    // input's `placeholder`, profileFilterAria its `aria-label` (kept
+    // separate so screen readers get a verb-phrase even when the
+    // placeholder is masked by typed text), profileFilterEmpty is the
+    // empty-state shown when the filter narrows the list to zero
+    // matches.
+    profileFilterPlaceholder: 'Filter profiles…',
+    profileFilterAria: 'Filter profiles',
+    profileFilterEmpty: 'No profiles match the filter.',
   },
 
   query: {
