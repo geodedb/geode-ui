@@ -152,6 +152,15 @@ type Config struct {
 	// stays package-private; tests in the same package can set it
 	// directly on a Config literal.
 	testAuthenticate func(ctx context.Context, profile, username, password string) (bool, []string, error)
+	// testAuthenticateOnboard is the onboarding twin of testAuthenticate.
+	// HandleOnboard cannot route through the connection Pool the way
+	// Login does (no profile is registered yet), so it opens a one-shot
+	// `sql.Open("geode", probeDSN)` against the supplied DSN. Tests that
+	// don't want that real driver round-trip set this field to short-
+	// circuit the probe. nil in production. Lower-case so the field
+	// stays package-private; same-package tests can populate it on a
+	// Config literal.
+	testAuthenticateOnboard func(ctx context.Context, dsn, username, password string) ([]string, error)
 }
 
 // GraphServer implements gen/api.ServerInterface.

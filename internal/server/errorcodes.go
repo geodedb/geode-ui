@@ -61,11 +61,6 @@ const (
 	// pre-auth handlers; distinct from ErrCodeInvalidPassword (password-
 	// policy violations) and ErrCodeForbidden (authorisation failures).
 	ErrCodeInvalidRequest = "invalid_request"
-	// ErrCodeNotImplemented: handler accepted the request but the path
-	// has not been wired yet (501). Used transiently while a multi-task
-	// handler is being landed slice-by-slice (HandleOnboard task 1 → 2).
-	// Removed once the success path lands.
-	ErrCodeNotImplemented = "not_implemented"
 
 	// --- password policy ---
 
@@ -261,7 +256,6 @@ var allErrorCodes = []string{
 	ErrCodeInvalidCredentials,
 	ErrCodeUnauthorized,
 	ErrCodeInvalidRequest,
-	ErrCodeNotImplemented,
 	ErrCodePasswordTooShort,
 	ErrCodePasswordTooWeak,
 	ErrCodePasswordContainsUsername,
