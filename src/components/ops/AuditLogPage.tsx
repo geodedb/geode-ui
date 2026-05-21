@@ -15,6 +15,7 @@ import {
 import { client } from '../../api/client'
 import { useApiResource } from '../../hooks/useApiResource'
 import { formatAuditTimestamp } from '../../lib/intl/formatAuditTimestamp'
+import { usePollingClock } from '../../lib/usePollingClock'
 import { AuditFieldList } from './AuditFieldList'
 import { AuditRowJsonToggle } from './AuditRowJsonToggle'
 
@@ -173,37 +174,12 @@ export const AuditLogPage: React.FC = () => {
   const userOptions = useUniqueValues(entries, (e) => resolveAuditUser(e))
   const sinceOptions = useUniqueValues(entries, (e) => e.timestamp)
 
-  useEffect(() => {
-    const tick = (): void => {
-      // Skip refetches while the tab is hidden; the next visibility
-      // change will trigger a poll on the visibility listener path.
-      if (
-        typeof document !== 'undefined' &&
-        document.visibilityState === 'hidden'
-      ) {
-        return
-      }
-      refetch()
-    }
-    const onVisibility = (): void => {
-      if (
-        typeof document !== 'undefined' &&
-        document.visibilityState === 'visible'
-      ) {
-        refetch()
-      }
-    }
-    const id = window.setInterval(tick, 5000)
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', onVisibility)
-    }
-    return () => {
-      window.clearInterval(id)
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', onVisibility)
-      }
-    }
-  }, [refetch])
+  // PERF-2026-05-21-02 (Item 5, 2026-05-21 audit): replaced the
+  // per-page window.setInterval + visibilitychange listener pair
+  // with the shared usePollingClock hub. The hub already gates on
+  // document.visibilityState and fires a catch-up tick on resume,
+  // so the visibility plumbing here collapses to a single line.
+  usePollingClock(5000, refetch)
 
   const rows = useMemo(
     () =>

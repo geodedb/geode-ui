@@ -28,6 +28,7 @@ import { Tooltip } from 'recharts/es6/component/Tooltip'
 import { Card } from './Card'
 import { useApiResource } from '../../hooks/useApiResource'
 import { client } from '../../api/client'
+import { usePollingClock } from '../../lib/usePollingClock'
 
 // AUDIT_DONUT_LIMIT — how many recent audit entries we sample for the
 // mix view. 200 matches the server-side default cap on
@@ -117,20 +118,12 @@ export const AuditEventMixCard: React.FC = () => {
     },
     []
   )
-  // Loose-cadence refresh. The audit log is append-only and grows
-  // slowly; 30 s is fast enough to feel live without hammering
-  // /api/v1/audit on every dashboard mount.
-  React.useEffect(() => {
-    const id = window.setInterval(() => {
-      if (
-        typeof document === 'undefined' ||
-        document.visibilityState === 'visible'
-      ) {
-        refetch()
-      }
-    }, AUDIT_DONUT_INTERVAL_MS)
-    return () => window.clearInterval(id)
-  }, [refetch])
+  // Loose-cadence refresh via the shared polling clock — one
+  // window.setInterval is multiplexed across every poller on the
+  // page (PERF-2026-05-21-02 / Item 5, 2026-05-21 audit). The clock
+  // already gates on document.visibilityState, so the per-card check
+  // is no longer needed here.
+  usePollingClock(AUDIT_DONUT_INTERVAL_MS, refetch)
 
   const entries = (data ?? []).slice(0, AUDIT_DONUT_LIMIT)
   const slices = computeMix(entries)

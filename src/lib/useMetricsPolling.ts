@@ -27,6 +27,7 @@ import {
   MetricsError,
   type MetricsSnapshot,
 } from '../api/metrics'
+import { subscribe as subscribePollingClock } from './usePollingClock'
 
 const DEFAULT_INTERVAL_MS = 5000
 const DEFAULT_HISTORY_MS = 5 * 60 * 1000 // 5 min
@@ -120,35 +121,20 @@ export function useMetricsPolling(
 
   useEffect(() => {
     aliveRef.current = true
-    // Fire once on mount; the interval is the steady-state cadence.
+    // Fire once on mount; the shared polling clock drives the
+    // steady-state cadence and visibility gating from there.
     // tick() is async-fire-and-forget — failures are swallowed into
     // setError/setState inside the function itself, so awaiting would
     // just block the effect synchronously without changing behavior.
+    // PERF-2026-05-21-02 (Item 5): subscribePollingClock multiplexes
+    // one window.setInterval across every poller in the SPA.
     tick().catch(() => {})
-    const id = window.setInterval(() => {
+    const unsubscribe = subscribePollingClock(intervalMs, () => {
       tick().catch(() => {})
-    }, intervalMs)
-    // Catch up the moment the tab becomes visible again — without this
-    // a user returning after `intervalMs` would wait up to the next
-    // tick to see fresh data.
-    const onVisibility = (): void => {
-      if (
-        typeof document !== 'undefined' &&
-        document.visibilityState === 'visible' &&
-        !disabledRef.current
-      ) {
-        tick().catch(() => {})
-      }
-    }
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', onVisibility)
-    }
+    })
     return () => {
       aliveRef.current = false
-      window.clearInterval(id)
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', onVisibility)
-      }
+      unsubscribe()
       if (inflightRef.current) inflightRef.current.abort()
     }
   }, [intervalMs, tick])
