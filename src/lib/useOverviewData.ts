@@ -3,6 +3,14 @@ import { client } from '../api/client'
 import { fetchCapabilities, type AdminWritable } from '../api/capabilities'
 import { useActiveConnection } from '../api/connections'
 
+export interface PerGraphStats {
+  graph: string
+  nodes: number | null
+  edges: number | null
+  loading: boolean
+  error: string | null
+}
+
 export interface OverviewData {
   graphs: string[] | null
   geodeVersion: string | null
@@ -15,6 +23,16 @@ export interface OverviewData {
   statsLoading: boolean
   statsError: string | null
   loadStats: (graph: string) => void
+  // Bug 4 (2026-05-21 bug-fix bundle): multi-graph view for the
+  // Dashboard's graph-stats card. allGraphStats is a snapshot keyed
+  // by graph name; entries materialise as loadAllStats fans out node-
+  // and edge-count scans across the graph list (bounded concurrency
+  // so a server with many graphs is never hit with a thundering herd).
+  // reloadStats invalidates a single graph's cache and re-runs its
+  // counts — used by per-row refresh affordances in the card.
+  allGraphStats: ReadonlyMap<string, PerGraphStats>
+  loadAllStats: () => void
+  reloadStats: (graph: string) => void
 }
 
 function errMsg(e: unknown): string {
@@ -232,6 +250,132 @@ export function useOverviewData(): OverviewData {
   const activeConn = useActiveConnection()
   const connectionId = activeConn?.connectionId ?? null
 
+  // Bug 4 (2026-05-21 bug-fix bundle): per-graph stats map for the
+  // Dashboard multi-graph view. Stored as a Map so callers iterating
+  // in graph-list order produce a stable render order; updates clone
+  // the Map so React sees a new identity.
+  const [allGraphStats, setAllGraphStats] = useState<
+    ReadonlyMap<string, PerGraphStats>
+  >(new Map())
+
+  const setOneStat = useCallback(
+    (graph: string, patch: Partial<PerGraphStats>) => {
+      if (!aliveRef.current) return
+      setAllGraphStats((prev) => {
+        const next = new Map(prev)
+        const current = next.get(graph) ?? {
+          graph,
+          nodes: null,
+          edges: null,
+          loading: false,
+          error: null,
+        }
+        next.set(graph, { ...current, ...patch, graph })
+        return next
+      })
+    },
+    []
+  )
+
+  const fetchOneGraphStats = useCallback(
+    async (graph: string): Promise<void> => {
+      // Cache fast-path. Skip the two full-graph count() scans when a
+      // fresh entry is on hand (60s TTL by default, see writeGraphStats
+      // Cache).
+      const cached = readGraphStatsCache(connectionId, graph)
+      if (cached) {
+        setOneStat(graph, {
+          nodes: cached.nodes,
+          edges: cached.edges,
+          loading: false,
+          error: null,
+        })
+        return
+      }
+      setOneStat(graph, { loading: true, error: null })
+      try {
+        const [nodesResp, edgesResp] = await Promise.all([
+          client.query({
+            statement: 'MATCH (n) RETURN count(n) AS c',
+            page_size: 1000,
+            timeout_ms: 30000,
+            graph,
+          }),
+          client.query({
+            statement: 'MATCH ()-[r]->() RETURN count(r) AS c',
+            page_size: 1000,
+            timeout_ms: 30000,
+            graph,
+          }),
+        ])
+        const stats = {
+          nodes: scalarCount(nodesResp),
+          edges: scalarCount(edgesResp),
+        }
+        writeGraphStatsCache(connectionId, graph, stats)
+        setOneStat(graph, {
+          nodes: stats.nodes,
+          edges: stats.edges,
+          loading: false,
+          error: null,
+        })
+      } catch (e) {
+        setOneStat(graph, { loading: false, error: errMsg(e) })
+      }
+    },
+    [connectionId, setOneStat]
+  )
+
+  // Bounded-concurrency fan-out across the graph list. Picked 3 as a
+  // conservative default: a single full-graph count(n) scan is already
+  // an upstream load spike, and the dashboard runs in parallel with
+  // every other panel the user opens, so 3 inflight node-+edge-count
+  // pairs (= 6 wire-level queries) is the practical ceiling before
+  // /api/v1/query queueing tail latency drowns the rest of the page.
+  const FAN_OUT_LIMIT = 3
+  const loadAllStats = useCallback(() => {
+    if (!aliveRef.current) return
+    const list = graphs ?? []
+    if (list.length === 0) return
+    let cursor = 0
+    const next = (): Promise<void> => {
+      if (cursor >= list.length) return Promise.resolve()
+      const i = cursor
+      cursor += 1
+      const g = list[i]
+      if (g === undefined) return Promise.resolve()
+      return fetchOneGraphStats(g).then(next)
+    }
+    // Spawn up to FAN_OUT_LIMIT walkers; each pulls the next graph
+    // off the shared cursor when its current query pair settles.
+    const workers = Array.from(
+      { length: Math.min(FAN_OUT_LIMIT, list.length) },
+      next
+    )
+    Promise.all(workers).catch(() => undefined)
+  }, [graphs, fetchOneGraphStats])
+
+  const reloadStats = useCallback(
+    (graph: string) => {
+      // Per-row refresh: drop the cached entry so the cache check in
+      // fetchOneGraphStats falls through, then re-run.
+      graphStatsCache.delete(graphStatsCacheKey(connectionId, graph))
+      fetchOneGraphStats(graph).catch(() => undefined)
+    },
+    [connectionId, fetchOneGraphStats]
+  )
+
+  // Auto-load stats once the graph list lands. Reuses the cache, so a
+  // remount within the TTL window is free.
+  useEffect(() => {
+    if (graphs && graphs.length > 0) {
+      loadAllStats()
+    }
+    // graphs identity changes on each fetch; loadAllStats is memoised
+    // on graphs+fetchOneGraphStats so this effect fires once per real
+    // graph-list change.
+  }, [graphs, loadAllStats])
+
   const loadStats = useCallback(
     (graph: string) => {
       // PERF #237: cache check FIRST. A cached entry returns the
@@ -298,5 +442,8 @@ export function useOverviewData(): OverviewData {
     statsLoading,
     statsError,
     loadStats,
+    allGraphStats,
+    loadAllStats,
+    reloadStats,
   }
 }

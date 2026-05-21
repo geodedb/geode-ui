@@ -315,10 +315,22 @@ export const en = {
     capGrants: 'Grants',
     capYes: 'enabled',
     capNo: 'disabled',
-    statsTitle: '{{graph}} stats',
-    statsLoad: 'Load stats',
-    statsNodes: 'Nodes',
-    statsEdges: 'Edges',
+    // Bug 4 (2026-05-21 bug-fix bundle): multi-graph stats view.
+    // (The legacy single-graph statsTitle/statsLoad/statsNodes/
+    // statsEdges keys were removed along with their consumer card —
+    // the multi-graph rewrite replaces both the data model and the
+    // user-facing surface.)
+    graphStatsTitle: 'Graph stats',
+    graphStatsFilterAria: 'Filter graphs',
+    graphStatsFilterPlaceholder: 'Filter…',
+    graphStatsRefreshAll: 'Refresh all',
+    graphStatsRefreshOneAria: 'Refresh stats for {{graph}}',
+    graphStatsEmpty: 'No graphs to summarise.',
+    graphStatsNoMatch: 'No graphs match the filter.',
+    graphStatsHeaderGraph: 'Graph',
+    graphStatsHeaderNodes: 'Nodes',
+    graphStatsHeaderEdges: 'Edges',
+    graphStatsPending: '…',
     loading: 'Loading…',
     metricsThroughputTitle: 'Query throughput',
     metricsThroughputTotal: 'total',

@@ -33,25 +33,11 @@ const gridStyle: React.CSSProperties = {
   gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
 }
 
-// The graph whose stats the GraphStatsCard offers to load. Geode
-// auto-provisions an empty graph literally named "default" on first
-// boot — the previous heuristic preferred that name, so any operator
-// whose real data lived in another graph saw "default stats — Nodes 0
-// / Edges 0" no matter what. Prefer the FIRST non-"default" graph in
-// the server's list order; only fall back to "default" when it is the
-// only graph the operator has. Returns null when the list is empty.
-function pickDefaultGraph(graphs: string[] | null): string | null {
-  if (!graphs || graphs.length === 0) return null
-  const realGraph = graphs.find((g) => g !== 'default')
-  return realGraph ?? graphs[0] ?? null
-}
-
 export const DashboardPage: React.FC = () => {
   const { t } = useTranslation()
   const ov = useOverviewData()
   const entries = useQueryHistory((s) => s.entries)
   const clear = useQueryHistory((s) => s.clear)
-  const defaultGraph = pickDefaultGraph(ov.graphs)
   // Geode-metrics polling. The hook returns state='disabled' the first
   // time the proxy reports METRICS_DISABLED (the operator hasn't set
   // GEODE_METRICS_URL on the geode-ui server); in that case metricsHidden
@@ -62,10 +48,20 @@ export const DashboardPage: React.FC = () => {
     <div>
       <h1>{t('dashboard.title')}</h1>
       <div className="gap-3 mt-3" style={gridStyle}>
+        {/* Bug 4 (2026-05-21 bug-fix bundle): the multi-graph stats
+            card now lives next to GraphsCard so the operator gets the
+            list and its node/edge counts in the same neighbourhood.
+            Auto-loads on mount, filterable, refreshable per-row. */}
         <GraphsCard
           graphs={ov.graphs}
           loading={ov.loading}
           error={ov.graphsError}
+        />
+        <GraphStatsCard
+          graphs={ov.graphs}
+          stats={ov.allGraphStats}
+          onRefreshAll={ov.loadAllStats}
+          onRefreshOne={ov.reloadStats}
         />
         <RecentQueriesCard entries={entries} onClear={clear} />
         <ConnectionCard
@@ -73,15 +69,6 @@ export const DashboardPage: React.FC = () => {
           adminWritable={ov.adminWritable}
           loading={ov.loading}
           error={ov.capsError}
-        />
-        <GraphStatsCard
-          defaultGraph={defaultGraph}
-          stats={ov.defaultGraphStats}
-          loading={ov.statsLoading}
-          error={ov.statsError}
-          onLoad={() => {
-            if (defaultGraph) ov.loadStats(defaultGraph)
-          }}
         />
         {showMetrics && (
           <>

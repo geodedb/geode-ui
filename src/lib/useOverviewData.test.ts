@@ -425,8 +425,17 @@ describe('useOverviewData', () => {
     graphsMock.mockResolvedValue({ graphs: ['default'] })
     capsMock.mockResolvedValue(rawCaps)
     const originalTTL = testOnlyGetGraphStatsCacheTTL()
-    testOnlySetGraphStatsCacheTTL(10) // 10ms for fast test
+    // Bug 4 (2026-05-21 bug-fix bundle): the auto-load fan-out
+    // populates the cache before the manual loadStats() runs. A 10ms
+    // TTL is too tight to survive the awaits below — bump to 200ms
+    // so the cache-hit window is reliable, then sleep past it for
+    // the expiry phase.
+    testOnlySetGraphStatsCacheTTL(200)
     try {
+      // Bug 4 (2026-05-21 bug-fix bundle): useOverviewData now
+      // auto-loads stats for every graph in the list once the graphs
+      // settles. Provide enough mocks for the auto-load AND seed the
+      // loadStats cache, then re-run after TTL expiry.
       queryMock
         .mockResolvedValueOnce({
           columns: [{ name: 'c', type: 'INT' }],
@@ -442,13 +451,19 @@ describe('useOverviewData', () => {
         })
       const { result } = renderHook(() => useOverviewData())
       await waitFor(() => expect(result.current.loading).toBe(false))
+      // Wait for the auto-load to populate the cache so the manual
+      // loadStats below hits cache and does not consume more mocks.
+      await waitFor(() =>
+        expect(result.current.allGraphStats.get('default')?.nodes).toBe(5)
+      )
       act(() => result.current.loadStats('default'))
       await waitFor(() => expect(result.current.statsLoading).toBe(false))
+      // Auto-load fired 2 queries; manual loadStats was a cache hit.
       expect(queryMock).toHaveBeenCalledTimes(2)
 
-      // Wait past the TTL.
+      // Wait past the TTL (200ms).
       await new Promise<void>((resolve) => {
-        setTimeout(resolve, 30)
+        setTimeout(resolve, 250)
       })
       queryMock.mockClear()
       queryMock

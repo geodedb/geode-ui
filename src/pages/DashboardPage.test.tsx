@@ -28,6 +28,10 @@ const overviewFixture: OverviewData = {
   statsLoading: false,
   statsError: null,
   loadStats: jest.fn(),
+  // Bug 4 (2026-05-21 bug-fix bundle): multi-graph view.
+  allGraphStats: new Map(),
+  loadAllStats: jest.fn(),
+  reloadStats: jest.fn(),
 }
 jest.mock('../lib/useOverviewData', () => ({
   useOverviewData: (): OverviewData => overviewFixture,
@@ -108,50 +112,38 @@ describe('DashboardPage', () => {
 
   it('shows the graph list, a recent-query row, and the connection version', () => {
     renderPage()
-    expect(screen.getByText('movies')).toBeInTheDocument()
+    // "movies" appears in both the GraphsCard list and the
+    // GraphStatsCard table row (Bug 4 multi-graph view), so we
+    // assert by container rather than getByText.
+    expect(screen.getByTestId('dashboard-graphs-card')).toHaveTextContent(
+      'movies'
+    )
     expect(screen.getByTestId('dashboard-recent-row')).toBeInTheDocument()
     expect(screen.getByTestId('dashboard-connection-card')).toHaveTextContent(
       'v0.5.11'
     )
   })
 
-  // Regression: Geode auto-provisions an empty graph named "default"
-  // on first boot. The stats card used to prefer that name unconditionally,
-  // so an operator whose real data lived in any other graph saw the
-  // card title "default stats" with Nodes 0 / Edges 0 and no way to
-  // pick the real graph. The card MUST now title itself with the
-  // first non-"default" graph in the list — if every graph the user
-  // has is empty by name we still fall back to "default", but real
-  // data takes precedence.
-  it('prefers a non-default graph when both "default" and a real graph are present', () => {
-    overviewFixture.graphs = ['default', 'movies']
-    renderPage()
-    expect(screen.getByTestId('dashboard-stats-card')).toHaveTextContent(
-      'movies stats'
-    )
-    expect(screen.getByTestId('dashboard-stats-card')).not.toHaveTextContent(
-      'default stats'
-    )
-  })
-
-  it('falls back to "default" when it is the only graph available', () => {
-    overviewFixture.graphs = ['default']
-    renderPage()
-    expect(screen.getByTestId('dashboard-stats-card')).toHaveTextContent(
-      'default stats'
-    )
-  })
-
-  it('prefers a non-default graph regardless of position in the list', () => {
-    // The SHOW GRAPHS driver-order may return "default" first or
-    // anywhere in the middle; the picker must scan the whole list
-    // rather than treat any specific index as authoritative.
-    overviewFixture.graphs = ['movies', 'default', 'vulndb']
+  // Bug 4 (2026-05-21 bug-fix bundle): the graph-stats card is now a
+  // multi-graph table — every graph in the list gets a row. The
+  // previous single-graph "pick a default graph by name" heuristic
+  // is gone. These specs replace the prior pickDefaultGraph
+  // coverage with the new render contract.
+  it('renders a row in the stats card for every graph in the list', () => {
+    overviewFixture.graphs = ['movies', 'people', 'companies']
     renderPage()
     const card = screen.getByTestId('dashboard-stats-card')
-    // First non-default in list order wins so the operator can predict
-    // which graph the card surfaces.
-    expect(card).toHaveTextContent('movies stats')
+    expect(card).toHaveTextContent('movies')
+    expect(card).toHaveTextContent('people')
+    expect(card).toHaveTextContent('companies')
+  })
+
+  it('renders rows for every graph including "default"', () => {
+    overviewFixture.graphs = ['default', 'movies']
+    renderPage()
+    const card = screen.getByTestId('dashboard-stats-card')
+    expect(card).toHaveTextContent('default')
+    expect(card).toHaveTextContent('movies')
   })
 
   // Geode-metrics rendering gate. By default the polling fixture
