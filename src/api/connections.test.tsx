@@ -15,6 +15,16 @@ jest.mock('./electron-bridge', () => ({
   isElectron: jest.fn().mockReturnValue(false),
 }))
 
+// Bug 2 (2026-05-21 bug-fix bundle): mock the cookie-rehydration
+// endpoint at the auth module so the connections lazy-hydrate path can
+// exercise both "cookie present" and "cookie absent" branches without
+// hitting fetch.
+jest.mock('./auth', () => ({
+  ...jest.requireActual('./auth'),
+  fetchWhoAmI: jest.fn().mockResolvedValue(null),
+}))
+const mockWhoAmI = jest.requireMock('./auth').fetchWhoAmI as jest.Mock
+
 const mockStore = jest.requireMock('./electron-bridge')
   .storeConnections as jest.Mock
 const mockGetStored = jest.requireMock('./electron-bridge')
@@ -24,6 +34,8 @@ beforeEach(() => {
   mockStore.mockClear()
   mockGetStored.mockReset()
   mockGetStored.mockResolvedValue([])
+  mockWhoAmI.mockReset()
+  mockWhoAmI.mockResolvedValue(null)
   setLatestToken(null)
 })
 
@@ -519,6 +531,168 @@ test('PSR-F16: bridge failure flips loading off without crashing', async () => {
 
   // Loading flips off and the map stays empty — caller will hit the
   // unauthenticated path, ProtectedRoute will redirect to /login.
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(screen.getByTestId('size').textContent).toBe('0')
+})
+
+// ---------------------------------------------------------------------------
+// Bug 2 (2026-05-21 bug-fix bundle): cookie-driven session rehydration.
+// ---------------------------------------------------------------------------
+
+test('Bug 2: lazyHydrate synthesises ConnectionState from whoami when bridge is empty', async () => {
+  // Browser-mode bootstrap: getStoredConnections() returns [] (no
+  // Electron secure-store), but the HttpOnly cookie carries a valid
+  // session. The provider must ask /api/v1/auth/whoami and synthesise
+  // a ConnectionState so ProtectedRoute does NOT bounce to /login.
+  mockGetStored.mockResolvedValue([])
+  mockWhoAmI.mockResolvedValue({
+    sub: 'alice',
+    profile: 'default',
+    roles: ['reader'],
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    connection_id: 'cookie-conn-1',
+  })
+
+  const Probe: React.FC = () => {
+    const { connections, activeId, loading } = useConnections()
+    const active = useActiveConnection()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+        <span data-testid="activeId">{activeId ?? 'none'}</span>
+        <span data-testid="active-profile">
+          {active?.profileName ?? 'none'}
+        </span>
+        <span data-testid="active-token-empty">
+          {active && active.token === '' ? 'yes' : 'no'}
+        </span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(screen.getByTestId('size').textContent).toBe('1')
+  expect(screen.getByTestId('activeId').textContent).toBe('cookie-conn-1')
+  expect(screen.getByTestId('active-profile').textContent).toBe('default')
+  // The synthesised state intentionally carries an empty token so
+  // client.ts strips the Authorization header and the server reads
+  // the cookie. The JWT must NEVER end up in JS-readable storage.
+  expect(screen.getByTestId('active-token-empty').textContent).toBe('yes')
+  // Module-level latch is also empty for the same reason.
+  expect(getLatestToken()).toBe('')
+})
+
+test('Bug 2: lazyHydrate falls through to /login when whoami returns null', async () => {
+  // No Electron store, no cookie: typical first-visit / post-logout
+  // path. The provider must NOT synthesise anything and the
+  // ProtectedRoute gate must redirect normally.
+  mockGetStored.mockResolvedValue([])
+  mockWhoAmI.mockResolvedValue(null)
+
+  const Probe: React.FC = () => {
+    const { connections, loading } = useConnections()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(screen.getByTestId('size').textContent).toBe('0')
+  expect(mockWhoAmI).toHaveBeenCalledTimes(1)
+})
+
+test('Bug 2: lazyHydrate skips whoami when bridge already returned a connection', async () => {
+  // Electron mode: the secure-store hydrates a connection. There is
+  // no need to ping whoami; the in-memory state already has what
+  // ProtectedRoute needs. Skipping the request avoids a wasted round
+  // trip on every Electron app launch.
+  mockGetStored.mockResolvedValue([
+    {
+      connectionId: 'electron-c1',
+      token: 'real-jwt-from-store',
+      profileName: 'default',
+      expiresAt: Date.now() + 3600_000,
+    },
+  ])
+
+  const Probe: React.FC = () => {
+    const { connections, loading } = useConnections()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
+  expect(screen.getByTestId('loading').textContent).toBe('no')
+  expect(screen.getByTestId('size').textContent).toBe('1')
+  expect(mockWhoAmI).not.toHaveBeenCalled()
+})
+
+test('Bug 2: whoami failure is non-fatal — bootstrap falls through to /login', async () => {
+  mockGetStored.mockResolvedValue([])
+  mockWhoAmI.mockRejectedValue(new Error('network down'))
+
+  const Probe: React.FC = () => {
+    const { connections, loading } = useConnections()
+    return (
+      <div>
+        <span data-testid="loading">{loading ? 'yes' : 'no'}</span>
+        <span data-testid="size">{String(connections.size)}</span>
+      </div>
+    )
+  }
+  render(
+    <ConnectionsProvider lazyHydrate>
+      <Probe />
+    </ConnectionsProvider>
+  )
+
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+
   expect(screen.getByTestId('loading').textContent).toBe('no')
   expect(screen.getByTestId('size').textContent).toBe('0')
 })

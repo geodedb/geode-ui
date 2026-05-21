@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -15,6 +16,21 @@ import (
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
+
+// WhoAmIResponse is the JSON shape returned by GET /api/v1/auth/whoami.
+//
+// Bug 2 (2026-05-21 bug-fix bundle): purely a cookie/header-driven
+// claims read-back. Lets the SPA recover its session posture across a
+// browser refresh by asking the server "who am I?" rather than echoing
+// the JWT into JS-readable storage. ExpiresAt is unix seconds so the
+// SPA can detect "about to expire" without re-parsing the cookie.
+type WhoAmIResponse struct {
+	Sub          string   `json:"sub"`
+	Profile      string   `json:"profile"`
+	Roles        []string `json:"roles"`
+	ExpiresAt    int64    `json:"expires_at"`
+	ConnectionID string   `json:"connection_id,omitempty"`
+}
 
 // Login implements POST /api/v1/auth/login.
 //
@@ -251,6 +267,74 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandleWhoAmI implements GET /api/v1/auth/whoami.
+//
+// Bug 2 (2026-05-21 bug-fix bundle): with the JWT living exclusively
+// in an HttpOnly cookie post-SEC-F7, the SPA cannot read its own auth
+// state across a browser refresh. Without this endpoint, the lack of
+// in-memory connection state triggers a redirect to /login even when
+// the cookie is still valid — forcing a fresh re-authentication on
+// every reload.
+//
+// Contract:
+//
+//   - GET only (idempotent; no CSRF requirement).
+//   - Reads the JWT from the same priority chain as AuthJWT
+//     (Authorization header → cookie → ?access_token=) via
+//     extractToken; intentionally does NOT mutate request context
+//     (no AuthJWT call) — this is a read-back of claims only, never a
+//     side-effecting auth gate.
+//   - 200 with `{ sub, profile, roles, expires_at, connection_id }`
+//     when the token parses cleanly.
+//   - 401 / ErrCodeUnauthorized in every other case: missing token,
+//     unparseable token, revoked token, no Issuer configured.
+//     Failure paths are silent so an unauthenticated probe cannot
+//     distinguish "no token" from "bad token" from "revoked token".
+//
+// Wired in cmd/server/app_routes.go as a hand-rolled mux.HandleFunc
+// because the route is intentionally bearer-cookie-aware and lives
+// outside the genapi-emitted REST surface.
+func (s *GraphServer) HandleWhoAmI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	unauthorized := func() {
+		writeEndpointError(w, &endpointError{
+			status:      http.StatusUnauthorized,
+			code:        ErrCodeUnauthorized,
+			description: "authentication required",
+		})
+	}
+	if s.cfg.JWT == nil {
+		unauthorized()
+		return
+	}
+	tok, err := extractToken(r)
+	if err != nil || tok == "" {
+		unauthorized()
+		return
+	}
+	claims, err := s.cfg.JWT.Parse(tok)
+	if err != nil || claims == nil {
+		unauthorized()
+		return
+	}
+	resp := WhoAmIResponse{
+		Sub:          claims.Subject,
+		Profile:      claims.Profile,
+		Roles:        append([]string{}, claims.Roles...),
+		ConnectionID: claims.ConnectionID,
+	}
+	if claims.ExpiresAt != nil {
+		resp.ExpiresAt = claims.ExpiresAt.Unix()
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // bestEffortRevokeFromRequest is the SEC-NEW-9 helper: it pulls a JWT

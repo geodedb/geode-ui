@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react'
 import { getStoredConnections, storeConnections } from './electron-bridge'
+import { fetchWhoAmI } from './auth'
 
 // ConnectionState is the per-connection bookkeeping the SPA holds in
 // memory. The token is the JWT minted by /api/v1/auth/login; we
@@ -219,8 +220,9 @@ export const ConnectionsProvider: React.FC<{
   useEffect(() => {
     if (!wantsLazy) return
     let cancelled = false
-    getStoredConnections()
-      .then((stored) => {
+    const hydrate = async (): Promise<void> => {
+      try {
+        const stored = await getStoredConnections()
         if (cancelled) return
         // Map the persisted records to the in-memory ConnectionState
         // shape and dispatch a single hydrate action. Latching the
@@ -232,17 +234,51 @@ export const ConnectionsProvider: React.FC<{
           profileName: c.profileName,
           expiresAt: c.expiresAt,
         }))
+
+        // Bug 2 (2026-05-21 bug-fix bundle): cookie-driven session
+        // rehydration. When the Electron secure-store has no records
+        // (the typical browser-mode path, since electron-bridge.ts
+        // short-circuits getStoredConnections to []), the HttpOnly
+        // `geode-ui-auth` cookie may still carry a valid session
+        // from a prior login. Ask the server who we are; on a 200,
+        // synthesise a placeholder ConnectionState so ProtectedRoute
+        // does NOT redirect to /login on every page reload.
+        //
+        // The synthesised state carries `token=""` so client.ts
+        // strips the Authorization header and the server falls
+        // through to reading the cookie (its preferred transport
+        // anyway). We deliberately do NOT echo the JWT back into
+        // the SPA — SEC-F7 (#62) closed that DOM-XSS exfil channel
+        // and this rehydration must not re-open it.
+        if (conns.length === 0) {
+          const who = await fetchWhoAmI()
+          if (cancelled) return
+          if (who) {
+            const synth: ConnectionState = {
+              connectionId: who.connection_id || `cookie:${who.sub}`,
+              token: '',
+              profileName: who.profile,
+              // Server-side stamp is unix seconds; ConnectionState
+              // expects epoch ms.
+              expiresAt: who.expires_at * 1000,
+            }
+            conns.push(synth)
+          }
+        }
+
         if (conns[0]) setLatestToken(conns[0].token)
         dispatch({ type: 'hydrate', conns })
-      })
-      .catch(() => {
-        // Bridge failure is non-fatal: the SPA falls through to the
-        // unauthenticated path. ProtectedRoute will redirect to /login
-        // because no active connection is set.
-      })
-      .finally(() => {
+      } catch {
+        // Bridge / whoami failure is non-fatal: the SPA falls
+        // through to the unauthenticated path. ProtectedRoute will
+        // redirect to /login because no active connection is set.
+      } finally {
         if (!cancelled) setLoading(false)
-      })
+      }
+    }
+    hydrate().catch(() => {
+      /* defensive: hydrate already swallows its own errors */
+    })
     return () => {
       cancelled = true
     }

@@ -79,6 +79,47 @@ export async function login(
   return result
 }
 
+// WhoAmIResult mirrors the server-side WhoAmIResponse shape.
+//
+// Bug 2 (2026-05-21 bug-fix bundle): cookie-driven session rehydration
+// payload. Lets the SPA bootstrap reconstruct a ConnectionState after
+// a browser refresh without echoing the JWT into JS-readable storage.
+export type WhoAmIResult = {
+  sub: string
+  profile: string
+  roles: string[]
+  /** Unix seconds (server stamp). */
+  expires_at: number
+  /** May be empty for legacy single-session tokens. */
+  connection_id?: string
+}
+
+/**
+ * fetchWhoAmI asks the server "do I have a valid session?" using
+ * whatever transport the browser carries — typically the HttpOnly
+ * `geode-ui-auth` cookie. Returns the claims on success or `null` on
+ * any 4xx/5xx (including the canonical 401 for "no token / expired
+ * token"). The SPA bootstrap path uses this to decide whether to
+ * synthesise an in-memory ConnectionState after a reload.
+ *
+ * Does NOT throw on 401 — the function distinguishes "authenticated"
+ * (truthy result) from "not authenticated" (null) at the type level
+ * so callers can branch without try/catch noise.
+ */
+export async function fetchWhoAmI(): Promise<WhoAmIResult | null> {
+  try {
+    const res = await fetch('/api/v1/auth/whoami', {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    })
+    if (!res.ok) return null
+    return (await res.json()) as WhoAmIResult
+  } catch {
+    return null
+  }
+}
+
 // logout calls the server-side /api/v1/auth/logout to clear the cookie
 // and removes any legacy localStorage token. Idempotent — safe to call
 // when already logged out.

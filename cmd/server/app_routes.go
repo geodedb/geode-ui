@@ -71,6 +71,16 @@ func registerRoutes(mux *http.ServeMux, cfg appConfig, pool *conn.Pool, issuer *
 	// internal/server/handlers_auth.go:HandleLogout.
 	mux.HandleFunc("POST /api/v1/auth/logout", srv.HandleLogout)
 
+	// Bug 2 (2026-05-21 bug-fix bundle): cookie-driven session
+	// rehydration. GET /api/v1/auth/whoami reads the JWT from the
+	// HttpOnly cookie (or Authorization header / ?access_token=) and
+	// returns the claims the SPA needs to reconstruct a
+	// ConnectionState after a browser refresh. Auth-required (401
+	// when no valid token); hand-rolled rather than genapi-emitted
+	// so the failure mode is a silent 401 instead of leaking the
+	// reason through the genapi error catalogue.
+	mux.HandleFunc("GET /api/v1/auth/whoami", srv.HandleWhoAmI)
+
 	// SEC-F7 (#62 S3b): CSRF token endpoint. GET issues a fresh token
 	// in both a NON-HttpOnly cookie (for SPA reading) and the JSON
 	// response body. The double-submit middleware enforces a matching
