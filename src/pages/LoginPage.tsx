@@ -12,6 +12,8 @@ import {
 } from '../services/webawesome/components'
 import { isElectron } from '../api/electron-bridge'
 import { usePublicProfilesWithStoredPasswords } from '../lib/usePublicProfilesWithStoredPasswords'
+import { ProfileFilter } from '../components/auth/ProfileFilter'
+import { OnboardProfileForm } from '../components/auth/OnboardProfileForm'
 
 // Bootstrap-migrated styled-components — the Form, Title, ProfileList,
 // ProfileDescription, ErrText, and LogoSlot below now lean on Bootstrap
@@ -36,20 +38,6 @@ const Title = styled.h1`
   margin: 0 0 ${({ theme }) => theme.spacing.sm};
 `
 
-// ProfileDescription stays as a styled-component because the
-// overflow-wrap:anywhere rule is load-bearing for the multi-sentence
-// description copy inside the 380 px form card — replacing it with
-// Bootstrap's `.text-break` is fine in theory but the typography
-// (color: theme.text.secondary, theme-token font-size) keeps the
-// component tied to theme tokens. Bootstrap's `.text-secondary` would
-// shadow the wa-theme token under data-theme="dark"; keep it native.
-const ProfileDescription = styled.div`
-  font-size: ${({ theme }) => theme.font.sizes.sm};
-  color: ${({ theme }) => theme.text.secondary};
-  padding: 0 ${({ theme }) => theme.spacing.sm};
-  overflow-wrap: anywhere;
-`
-
 export const LoginPage: React.FC = () => {
   const { signIn } = useAuth()
   const { t } = useTranslation()
@@ -70,6 +58,19 @@ export const LoginPage: React.FC = () => {
   const [savePw, setSavePw] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // 2026-05-21 login profile UX (Task 7): three-way render branch.
+  // Zero profiles → onboard form as the landing view; explicit toggle
+  // from the login form → same form, returnable via onCancel. The
+  // `profiles !== null` guard distinguishes "fetch resolved with an
+  // empty list" (onboard mode is correct) from "fetch still in flight"
+  // (initial state is null — render the login form skeleton; the
+  // ProfileFilter will swap in once the list resolves).
+  const [showOnboard, setShowOnboard] = useState<boolean>(false)
+  const noProfiles =
+    profilesState.profiles !== null &&
+    profilesState.profiles.length === 0 &&
+    !profilesState.loadErr
 
   // Apply the discovered default profile name in a separate effect so
   // the fetcher's single-state-update invariant stays clean. The effect
@@ -130,7 +131,23 @@ export const LoginPage: React.FC = () => {
     }
   }
 
-  const showList = profiles && profiles.length > 0 && !loadErr
+  // Onboard branch: zero profiles in the system OR the user explicitly
+  // toggled to "add a new profile". The OnboardProfileForm POSTs to
+  // /api/v1/profiles/onboard which validates the supplied admin creds
+  // against the supplied DSN, persists a system-scope profile, and
+  // mints a JWT (server writes the auth cookie). onSuccess navigates
+  // to the protected shell; AuthProvider rehydrates session posture
+  // from /api/v1/auth/whoami on next mount.
+  if (showOnboard || noProfiles) {
+    return (
+      <OnboardProfileForm
+        onSuccess={() => {
+          nav('/', { replace: true })
+        }}
+        onCancel={() => setShowOnboard(false)}
+      />
+    )
+  }
 
   return (
     <Form onSubmit={submit} className="p-4 d-flex flex-column gap-3">
@@ -139,56 +156,13 @@ export const LoginPage: React.FC = () => {
       </div>
       <Title>{t('auth.signIn')}</Title>
 
-      {showList ? (
-        <ul
-          aria-label={t('auth.profileList')}
-          className="list-unstyled m-0 p-0 d-flex flex-column gap-1"
-        >
-          {profiles!.map((p) => (
-            <li key={p.name} className="d-flex flex-column gap-1">
-              {/*
-                Profile description must sit OUTSIDE the <wa-button>: the
-                button's shadow-DOM label slot lays out children inline
-                without word-wrap, so a multi-paragraph <div> slotted as
-                a button child overflows the form card horizontally
-                (~1051px wide inside a 380px form, regression caught by
-                25-ui-health.spec.ts).
-              */}
-              <wa-button
-                type="button"
-                appearance={p.name === profile ? 'filled' : 'outlined'}
-                variant={p.name === profile ? 'brand' : 'default'}
-                size="m"
-                role="button"
-                data-testid={`login-profile-${p.name}`}
-                aria-pressed={p.name === profile ? 'true' : 'false'}
-                aria-label={p.name}
-                aria-describedby={
-                  p.description ? `login-profile-${p.name}-desc` : undefined
-                }
-                onClick={() => setProfile(p.name)}
-                style={{ width: '100%' }}
-              >
-                <strong>{p.name}</strong>
-              </wa-button>
-              {p.description ? (
-                <ProfileDescription id={`login-profile-${p.name}-desc`}>
-                  {p.description}
-                </ProfileDescription>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <Field label={t('auth.profile')} htmlFor="login-profile">
-          <WaInput
-            id="login-profile"
-            data-testid="login-profile-input"
-            value={profile}
-            onInput={(e) => setProfile((e.target as HTMLInputElement).value)}
-          />
-        </Field>
-      )}
+      {profiles && profiles.length > 0 && !loadErr ? (
+        <ProfileFilter
+          profiles={profiles}
+          value={profile}
+          onChange={setProfile}
+        />
+      ) : null}
 
       <Field label={t('auth.username')} htmlFor="login-username" required>
         <WaInput
@@ -240,6 +214,21 @@ export const LoginPage: React.FC = () => {
       >
         {t('auth.signInButton')}
       </wa-button>
+      {/*
+        2026-05-21 login profile UX (Task 7): explicit toggle into the
+        OnboardProfileForm branch. Rendered inside the form (after the
+        submit button) so the operator can opt into profile creation
+        without leaving the login surface. Styled as a btn-link so it
+        reads as a secondary affordance, not a competing CTA.
+      */}
+      <button
+        type="button"
+        className="btn btn-link btn-sm p-0 align-self-start"
+        data-testid="login-add-profile"
+        onClick={() => setShowOnboard(true)}
+      >
+        {t('auth.loginAddProfile')}
+      </button>
       {err && (
         <p role="alert" className="text-danger small m-0">
           {err}

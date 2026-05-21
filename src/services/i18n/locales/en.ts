@@ -174,6 +174,10 @@ export const en = {
     onboardSubmitting: 'Verifying…',
     onboardCancel: 'Cancel',
     onboardError: 'Could not onboard the profile.',
+    // 2026-05-21 login-profile-ux Task 7: LoginPage toggle that swaps
+    // the credentials form for the OnboardProfileForm. Lives below the
+    // submit button as a btn-link so it reads as a secondary affordance.
+    loginAddProfile: '+ Add a new profile',
   },
 
   query: {
