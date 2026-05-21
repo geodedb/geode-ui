@@ -41,6 +41,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -211,11 +212,23 @@ func (s *GraphServer) HandleMetrics(w http.ResponseWriter, r *http.Request) {
 // baked in. Indirected through this helper so a test can swap in a
 // transport via t.Cleanup without locking the production path to a
 // var-level singleton.
+//
+// PERF-2026-05-21-03 (Item 6): production path uses the package-
+// wide shared *http.Transport (see http_transport.go) so the 5s
+// metrics-poll cadence reuses idle keep-alive connections to the
+// upstream Prom listener instead of resetting TCP+TLS on every
+// poll. Tests still override via cfg.MetricsHTTPClient.
+var metricsClientOnce sync.Once
+var metricsClient *http.Client
+
 func metricsHTTPClient(s *GraphServer) *http.Client {
 	if s.cfg.MetricsHTTPClient != nil {
 		return s.cfg.MetricsHTTPClient
 	}
-	return &http.Client{Timeout: metricsUpstreamTimeout}
+	metricsClientOnce.Do(func() {
+		metricsClient = newSharedClient(metricsUpstreamTimeout)
+	})
+	return metricsClient
 }
 
 // projectSnapshot pulls the well-known metric families into the typed

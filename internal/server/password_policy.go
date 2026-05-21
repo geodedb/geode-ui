@@ -9,8 +9,27 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
+
+// hibpDefaultClient returns the package-wide *http.Client used for
+// HIBP range fetches when policy.HIBPClient is not configured.
+// PERF-2026-05-21-03 (Item 6): wraps the shared *http.Transport (see
+// http_transport.go) so TLS handshakes and keep-alive connections to
+// api.pwnedpasswords.com are reused across calls rather than reset
+// per password validation.
+var (
+	hibpDefaultClientOnce sync.Once
+	hibpDefaultClientCli  *http.Client
+)
+
+func hibpDefaultClient() *http.Client {
+	hibpDefaultClientOnce.Do(func() {
+		hibpDefaultClientCli = newSharedClient(5 * time.Second)
+	})
+	return hibpDefaultClientCli
+}
 
 // GAP-N4 (#72): server-side password policy.
 //
@@ -168,7 +187,7 @@ func hibpHasSeen(ctx context.Context, pw string, policy PasswordPolicy) (bool, e
 	}
 	client := policy.HIBPClient
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
+		client = hibpDefaultClient()
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+prefix, nil)
 	if err != nil {
