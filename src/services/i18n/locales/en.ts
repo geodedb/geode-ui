@@ -355,6 +355,15 @@ export const en = {
     metricsSparklineActiveAria: 'Active connections over time',
     metricsAuditMixTitle: 'Audit events ({{count}})',
     metricsAuditMixEmpty: 'No audit entries yet.',
+    // Bug 3 (2026-05-21 bug-fix bundle): advisory banner that fires
+    // when every counter is zero on a server that has been up long
+    // enough for traffic to have moved the needle. Tells the operator
+    // the SPA is healthy — the upstream emitter is the gap.
+    metricsUpstreamAdvisoryTitle: 'Upstream metrics emitter incomplete',
+    metricsUpstreamAdvisoryBody:
+      'The server has been up for {{uptime}} but every counter still reports 0. The geode-ui pipeline is fine; the upstream Geode build is not wired to increment these instruments yet.',
+    metricsUpstreamAdvisoryLink: 'See the upstream bug report',
+    metricsUpstreamAdvisoryDismiss: 'Dismiss',
   },
 
   schema: {

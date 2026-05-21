@@ -21,6 +21,7 @@ import {
   StorageCard,
   metricsHidden,
 } from '../components/dashboard/MetricsCards'
+import { MetricsUpstreamAdvisory } from '../components/dashboard/MetricsUpstreamAdvisory'
 import { AuditEventMixCard } from '../components/dashboard/AuditEventMixCard'
 
 // Grid — Bootstrap-migrated to a plain <div>. The auto-fill grid track
@@ -47,6 +48,10 @@ export const DashboardPage: React.FC = () => {
   return (
     <div>
       <h1>{t('dashboard.title')}</h1>
+      {/* Bug 3 (2026-05-21 bug-fix bundle): rendered above the grid so
+          the operator sees the upstream-instrumentation note before
+          drawing conclusions about a quiet-looking dashboard. */}
+      <MetricsUpstreamAdvisory polling={metrics} />
       <div className="gap-3 mt-3" style={gridStyle}>
         {/* Bug 4 (2026-05-21 bug-fix bundle): the multi-graph stats
             card now lives next to GraphsCard so the operator gets the

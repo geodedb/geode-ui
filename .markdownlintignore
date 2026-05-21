@@ -1,5 +1,7 @@
 docs/superpowers/plans/**
 docs/audits/**
+docs/bug-fixes/**
+docs/upstream-issues/**
 gen/**
 node_modules/**
 dist/**
