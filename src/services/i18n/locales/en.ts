@@ -151,6 +151,29 @@ export const en = {
     profileFilterPlaceholder: 'Filter profiles…',
     profileFilterAria: 'Filter profiles',
     profileFilterEmpty: 'No profiles match the filter.',
+    // 2026-05-21 login-profile-ux Task 6: OnboardProfileForm strings.
+    // Pre-authenticated profile creation lives on the LoginPage either
+    // as the first-run landing view (zero profiles configured) or
+    // behind an explicit Add-profile toggle. The server validates the
+    // supplied admin credentials against the supplied DSN before
+    // persisting; onboardSubtitle communicates that contract to the
+    // operator so an unfamiliar 401 doesn't surprise them. Submit /
+    // Submitting / Cancel are the action labels; onboardError is the
+    // fallback message when the API rejects without an `error_
+    // description` (server always provides one today, but the SPA
+    // shouldn't crash on a future schema gap).
+    onboardTitle: 'Connect a new server',
+    onboardSubtitle:
+      'Enter the connection details and an administrator login. We verify the credentials against the server before saving the profile.',
+    onboardName: 'Profile name',
+    onboardDsn: 'Connection URL',
+    onboardDescription: 'Description (optional)',
+    onboardAdminUsername: 'Admin username',
+    onboardAdminPassword: 'Admin password',
+    onboardSubmit: 'Connect & save',
+    onboardSubmitting: 'Verifying…',
+    onboardCancel: 'Cancel',
+    onboardError: 'Could not onboard the profile.',
   },
 
   query: {
