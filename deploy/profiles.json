@@ -2,6 +2,11 @@
   {
     "name": "default",
     "dsn": "quic://geode:Geode%20E2E%20Bootstrap%20Password%202024@geode:3141?insecure_tls_skip_verify=true",
-    "description": "in-cluster geode instance for the e2e test stack (admin creds embedded; this profile is used by the connection pool, while login still rotates through injectCreds for JWT issuance)"
+    "description": "primary geode instance — movies + vulndb seeds (admin creds embedded; the connection pool uses this profile while login still rotates through injectCreds for JWT issuance)"
+  },
+  {
+    "name": "social",
+    "dsn": "quic://geode:Geode%20E2E%20Bootstrap%20Password%202024@geode-b:3141?insecure_tls_skip_verify=true",
+    "description": "secondary geode instance — 10k-node / 50k-edge synthetic social graph (used by the multi-upstream e2e specs to verify profile-driven connection switching)"
   }
 ]

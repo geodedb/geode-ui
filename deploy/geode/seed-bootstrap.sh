@@ -90,6 +90,20 @@ GEODE_INIT_GQL="${GEODE_INIT_GQL:-/seed/init.gql}"
 GEODE_VULNDB_GQL="${GEODE_VULNDB_GQL:-/seed/vulndb.gql}"
 GEODE_WAIT_SECS="${GEODE_WAIT_SECS:-60}"
 
+# GEODE_SEEDS overrides the default movies + vulndb seed pair so the
+# secondary geode-b stack can load its own dataset (social graph) by
+# setting a single env var instead of duplicating the script. The
+# default empty value triggers the legacy movies + vulndb path below.
+# Format: comma-separated triples `name:path:expected_count`. Optional
+# fourth field is a `|`-separated list of labels to deduplicate after
+# ingest (Geode v0.5.18 CLI emits a duplicate of the last statement
+# every ~100 lines on -f mode; see dedupe_graph_label below).
+#
+# Examples:
+#   GEODE_SEEDS=social:/seed/social.gql:10000:Person
+#   GEODE_SEEDS=movies:/seed/init.gql:171,vulndb:/seed/vulndb.gql:1369:CWE|CVE|Package
+GEODE_SEEDS="${GEODE_SEEDS:-}"
+
 log() { printf '[seed] %s\n' "$*"; }
 err() { printf '[seed] %s\n' "$*" >&2; }
 
@@ -363,31 +377,82 @@ dedupe_graph_label() {
     return 0
 }
 
+# Parse a GEODE_SEEDS triple/quad of `name:path:count[:label1|label2|...]`
+# and seed accordingly. Returns 0 on success, non-zero on failure (which
+# the caller treats as non-fatal for richer secondary seeds like
+# vulndb / social — the count verification is what gates "good enough").
+seed_one_from_spec() {
+    local spec="$1"
+    local name path count labels
+    name="${spec%%:*}"
+    spec="${spec#*:}"
+    path="${spec%%:*}"
+    spec="${spec#*:}"
+    # Remaining is either `count` or `count:labels`.
+    if [[ "$spec" == *:* ]]; then
+        count="${spec%%:*}"
+        labels="${spec#*:}"
+    else
+        count="$spec"
+        labels=""
+    fi
+    if [[ -z "$name" || -z "$path" || -z "$count" ]]; then
+        err "malformed GEODE_SEEDS spec: '$1'"
+        return 2
+    fi
+    if [[ ! -f "$path" ]]; then
+        log "seed file '$path' for '$name' not present; skipping"
+        return 0
+    fi
+    seed_graph "$name" "$path" "$count" || \
+        log "$name seed reported a non-zero status (continuing)"
+    if [[ -n "$labels" ]]; then
+        local IFS='|'
+        for label in $labels; do
+            dedupe_graph_label "$name" "$label"
+        done
+    fi
+    verify_graph "$name" "$count" || \
+        log "$name seed is partial; verify expected count and source file"
+}
+
 main() {
     wait_for_wire
     ensure_admin_password
     ensure_e2e_user
-    # 171 = 38 Movie + 133 Person from the Neo4j Movies dataset.
-    seed_graph movies "${GEODE_INIT_GQL}" 171
-    verify_graph movies 171
-    # vulndb is a richer secondary fixture: ~969 CWE + KEV CVEs +
-    # affected Package nodes. Treat any partial-load as non-fatal so
-    # the geode-ui stack still comes up (the movies graph is what
-    # gates the e2e suite); log the discrepancy for diagnostics.
-    if [[ -f "${GEODE_VULNDB_GQL}" ]]; then
-        seed_graph vulndb "${GEODE_VULNDB_GQL}" 1369 || \
-            log "vulndb seed reported a non-zero status (continuing)"
-        # Strip the geode CLI's batch-boundary duplicate artifacts
-        # before verifying the row count. See dedupe_graph_label for the
-        # quirk; without this, vulndb routinely lands at 1379 (10 extras
-        # across CWE + CVE) and fails the strict count check.
-        dedupe_graph_label vulndb CWE
-        dedupe_graph_label vulndb CVE
-        dedupe_graph_label vulndb Package
-        verify_graph vulndb 1369 || \
-            log "vulndb seed is partial; check convert-vulndb.py output for parse-rejected rows"
+
+    if [[ -n "$GEODE_SEEDS" ]]; then
+        # Operator-supplied seed list overrides the default movies +
+        # vulndb pair. Used by the geode-b stack to load only the
+        # social graph instead of duplicating the script.
+        log "GEODE_SEEDS override: $GEODE_SEEDS"
+        local IFS=','
+        for spec in $GEODE_SEEDS; do
+            seed_one_from_spec "$spec"
+        done
     else
-        log "vulndb seed not present at ${GEODE_VULNDB_GQL}; skipping"
+        # Default geode-a stack: movies (gates the bulk of the e2e
+        # suite) + vulndb (richer secondary fixture for the schema /
+        # admin specs).
+        # 171 = 38 Movie + 133 Person from the Neo4j Movies dataset.
+        seed_graph movies "${GEODE_INIT_GQL}" 171
+        verify_graph movies 171
+        if [[ -f "${GEODE_VULNDB_GQL}" ]]; then
+            seed_graph vulndb "${GEODE_VULNDB_GQL}" 1369 || \
+                log "vulndb seed reported a non-zero status (continuing)"
+            # Strip the geode CLI's batch-boundary duplicate artifacts
+            # before verifying the row count. See dedupe_graph_label
+            # for the quirk; without this, vulndb routinely lands at
+            # 1379 (10 extras across CWE + CVE) and fails the strict
+            # count check.
+            dedupe_graph_label vulndb CWE
+            dedupe_graph_label vulndb CVE
+            dedupe_graph_label vulndb Package
+            verify_graph vulndb 1369 || \
+                log "vulndb seed is partial; check convert-vulndb.py output for parse-rejected rows"
+        else
+            log "vulndb seed not present at ${GEODE_VULNDB_GQL}; skipping"
+        fi
     fi
     log "bootstrap complete"
 }

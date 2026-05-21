@@ -128,6 +128,79 @@ services:
     - ./geode/vulndb.gql:/seed/vulndb.gql:ro
     restart: no
 
+  # Second full geode setup so the SPA / e2e suite can exercise multi-
+  # upstream switching (Add Connection flow, profile dropdown, per-
+  # profile graph isolation). Identical Dockerfile + entrypoint pair as
+  # the primary; data dir is its own named volume so the social-graph
+  # seed cannot pollute the movies + vulndb fixtures the rest of the
+  # suite asserts against. Listens on the in-container QUIC port 3141
+  # so GEODE_METRICS_URL et al. don't have to know about port-remaps;
+  # host-side exposure is 3142 (3141 is already taken by the primary).
+  geode-b:
+    image: geode:v0.5.19
+    entrypoint: [/usr/bin/tini, --, /geode-entrypoint.sh]
+    command:
+    - --data-dir
+    - /data
+    - --listen
+    - 0.0.0.0:3141
+    - --log-level
+    - info
+    environment:
+      # Distinct metrics port so a host-side scrape can distinguish the
+      # two instances even though both bind 9090 inside their own
+      # network namespaces.
+      GEODE_METRICS_PORT: '9090'
+      GEODE_METRICS_BIND: 0.0.0.0
+    volumes:
+    - geode-b-data:/data
+    - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
+    ports:
+    - 3142:3141/udp
+    - 9094:9090/tcp
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - >-
+        geode query --insecure-tls-skip-verify
+        --server 127.0.0.1:3141 -U _healthcheck_probe_ -P x 'RETURN 1' 2>&1
+        | grep -qiE 'auth|password|status_class|reset'
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # One-shot bootstrap for geode-b: rotate the admin password, then
+  # seed the social graph (10k Person nodes + 50k FOLLOWS edges, see
+  # deploy/geode/seed/gen-social.py). Uses the same seed-bootstrap.sh
+  # as geode-init, gated through the GEODE_SEEDS env override so a
+  # single script handles both stacks.
+  geode-b-init:
+    image: geode:v0.5.19
+    depends_on:
+      geode-b:
+        condition: service_healthy
+    entrypoint: [/seed/seed-bootstrap.sh]
+    environment:
+      GEODE_HOST: geode-b
+      GEODE_PORT: '3141'
+      GEODE_ADMIN_USER: ${GEODE_ADMIN_USER:-geode}
+      GEODE_ADMIN_PASSWORD: ${GEODE_ADMIN_PASSWORD:-Geode E2E Bootstrap Password 2024}
+      E2E_USER: ${E2E_USER:-e2e_admin}
+      E2E_PASSWORD: ${E2E_PASSWORD:-E2E Admin User Password 2024}
+      # Seed only the social graph here. The default movies + vulndb
+      # pair lives on geode (the primary upstream). 60k+ statement
+      # ingest is the dominant cost for this container's wall-clock,
+      # so generous wait/idempotency caps mean re-runs after the
+      # first successful seed exit in seconds via the count check.
+      GEODE_SEEDS: social:/seed/social.gql:10000:Person
+      GEODE_WAIT_SECS: '120'
+    volumes:
+    - geode-b-data:/shared-data:ro
+    - ./geode/seed-bootstrap.sh:/seed/seed-bootstrap.sh:ro
+    - ./geode/social.gql:/seed/social.gql:ro
+    restart: no
+
   geode-ui:
     image: geode-ui:e2e
     build:
@@ -135,6 +208,8 @@ services:
       dockerfile: geode-ui/deploy/Dockerfile
     depends_on:
       geode-init:
+        condition: service_completed_successfully
+      geode-b-init:
         condition: service_completed_successfully
     environment:
       # SEC #322 (was: GAP-S5 / #118): GEODE_PROFILESTORE_KEY is the
@@ -285,6 +360,7 @@ services:
 
 volumes:
   geode-data:
+  geode-b-data:
   geode-ui-uploads:
 
 # Hosts that route 10.0.0.0/8, 172.16.0.0/12, and 192.168.0.0/16 through

@@ -33,6 +33,14 @@ repos:
   - id: detect-private-key
   - id: check-added-large-files
     args: [--maxkb=1024]
+    # Generated multi-statement Geode seed files routinely cross the
+    # 1024-KB hygiene cap (vulndb.gql ~424 KB stayed under; social.gql
+    # ~6.8 MB does not). They're machine-emitted from deploy/geode/
+    # seed/*.py with deterministic PRNG seeds, so the size is a
+    # function of the bake-in fixture count rather than something to
+    # vet at commit time. Exempt the GQL seeds to keep the gate
+    # meaningful for human-authored artefacts.
+    exclude: ^deploy/geode/.*\.gql$
   - id: check-merge-conflict
   - id: check-case-conflict
   - id: check-symlinks
