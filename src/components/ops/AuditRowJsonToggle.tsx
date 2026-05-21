@@ -48,6 +48,19 @@ const Summary = styled.summary`
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.link};
 
+  /* 2026-05-21 follow-up fix: Web Awesome's vendor stylesheet ships a
+     global \`summary { margin-inline: calc(-1 * var(--wa-space-m)) }\`
+     rule intended for its own card/expander components but applied to
+     every native <summary>. Combined with our display:inline-block,
+     the negative inline margin pulled the visible bounding box past
+     the content edges, making the button still appear full-width
+     (and click-targetable into the row gutter). Explicitly resetting
+     margin, padding, and border-radius scopes WA's affordances away
+     from this native usage. */
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+
   /* WebKit honours the legacy ::-webkit-details-marker pseudo-element
      for the disclosure triangle; list-style: none is enough for
      Firefox/Chrome but Safari still renders the marker without this. */

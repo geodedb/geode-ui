@@ -61,3 +61,24 @@ test('the View raw JSON anchor is sized to its text, not stretched full-width', 
   // Right-alignment moved to the parent <details>.
   expect(window.getComputedStyle(details).textAlign).toBe('right')
 })
+
+test('the View raw JSON summary resets WA vendor margin so the bounding box matches the text', () => {
+  // 2026-05-21 follow-up fix: Web Awesome's vendor stylesheet ships a
+  // global `summary { margin-inline: calc(-1 * var(--wa-space-m)) }`
+  // rule intended for its own card/expander components but applied to
+  // every native <summary>. Combined with display:inline-block, the
+  // negative inline margin pulled the visible bounding box past the
+  // content edges so the button still appeared full-width and the row
+  // gutter remained click-targetable. The Summary styled-component
+  // now resets margin/padding/border-radius explicitly so the WA
+  // override has nothing to pull on. Pin the reset here so a future
+  // refactor that drops the explicit zeros re-fails this test rather
+  // than silently regressing the visual.
+  renderToggle({ event: 'login', fields: { user: 'alice' } })
+  const summary = screen.getByTestId('audit-json-summary')
+  const style = window.getComputedStyle(summary)
+  expect(style.margin).toBe('0px')
+  expect(style.padding).toBe('0px')
+  // jsdom normalises border-radius to a unit-less "0" when set to 0.
+  expect(style.borderRadius).toBe('0')
+})
