@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"net/http"
@@ -62,7 +63,9 @@ func TestUsers_ChangePassword_RevocationSurvivesRestart(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	if _, err := s.Password(rec, httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil), &gentypes.PasswordChangeReq{
+	reqAlice := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	reqAlice = reqAlice.WithContext(context.WithValue(reqAlice.Context(), userCtxKey, "alice"))
+	if _, err := s.Password(rec, reqAlice, &gentypes.PasswordChangeReq{
 		Username:    "alice",
 		NewPassword: "fresh-secret-1",
 	}); err != nil {

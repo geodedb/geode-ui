@@ -401,7 +401,29 @@ func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentyp
 }
 
 // Password implements POST /api/v1/users/{username}/password.
+//
+// SEC A1 (2026-05-21 audit / CWE-639 BOLA): this route is JWT-gated
+// but intentionally lacks `required_roles:["admin"]` so a user can
+// change their OWN password. Defense-in-depth on upstream Geode RBAC
+// requires that a NON-admin caller's JWT subject match the path
+// username exactly (strict equality — the same string that AuthJWT
+// pulled from the `sub` claim and that the path bind already wrote
+// into req.Username). Mismatch returns 403 and emits a
+// `user_password_forbidden` audit row before any wire-level ALTER
+// USER runs. Admins (role "admin") bypass the equality check.
 func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gentypes.PasswordChangeReq) (*gentypes.Empty, error) {
+	actr := actorFromContext(r.Context())
+	if !hasRole(actr.Roles, "admin") && actr.Subject != req.Username {
+		emitAudit(auditEventUserPasswordForbidden,
+			"user", actr.Subject,
+			"target", req.Username,
+		)
+		return nil, respondErr(w, &endpointError{
+			status:      http.StatusForbidden,
+			code:        ErrCodeForbidden,
+			description: "password change requires admin role or self",
+		})
+	}
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		// GAP-N4 (#72): server-side password policy. NewPassword must
 		// satisfy length, weak-pattern, username-collision and (when

@@ -29,7 +29,14 @@ func userCreateReq(username, email, password string, roles []string) gentypes.Us
 // passwordHandlerCall invokes (*GraphServer).Password with the given
 // username + new password, returning the typed (resp, err) pair so
 // the calling test can branch on inline-body responses.
+//
+// Attaches a self-change JWT actor context (subject == username) so
+// the SEC A1 subject-equality gate (handlers_users.go::Password)
+// admits the request. Tests that need an admin or cross-user actor
+// should bypass this helper and call s.Password directly.
 func passwordHandlerCall(s *GraphServer, rec *httptest.ResponseRecorder, req *http.Request, username, newPassword string) (*gentypes.Empty, error) {
+	ctx := context.WithValue(req.Context(), userCtxKey, username)
+	req = req.WithContext(ctx)
 	return s.Password(rec, req, &gentypes.PasswordChangeReq{
 		Username:    username,
 		NewPassword: newPassword,

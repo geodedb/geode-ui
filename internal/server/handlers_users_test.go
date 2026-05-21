@@ -464,12 +464,18 @@ func TestUsers_AssignRole(t *testing.T) {
 // TestUsers_ChangePassword asserts the POST /users/{u}/password handler
 // quotes both the username (identifier) and password (string literal)
 // and emits exactly one ALTER USER statement.
+//
+// Sets the JWT actor context to "alice" so the SEC A1 subject-equality
+// gate (handlers_users.go::Password) admits the request as a self
+// change.
 func TestUsers_ChangePassword(t *testing.T) {
 	d := &userDriver{}
 	s := newUserStubServer(t, "users_chpw", d)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	ctx := context.WithValue(req.Context(), userCtxKey, "alice")
+	req = req.WithContext(ctx)
 	if _, err := s.Password(rec, req, &gentypes.PasswordChangeReq{
 		Username:    "alice",
 		NewPassword: "another's secret",
@@ -480,6 +486,85 @@ func TestUsers_ChangePassword(t *testing.T) {
 	want := "ALTER USER alice SET PASSWORD 'another''s secret'"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("stmts=%v want [%s]", stmts, want)
+	}
+}
+
+// TestUsers_ChangePassword_AdminMayChangeAnyUser pins SEC A1: a caller
+// with the "admin" role bypasses the self-equality requirement.
+func TestUsers_ChangePassword_AdminMayChangeAnyUser(t *testing.T) {
+	d := &userDriver{}
+	s := newUserStubServer(t, "users_chpw_admin", d)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	ctx := context.WithValue(req.Context(), userCtxKey, "root")
+	ctx = context.WithValue(ctx, rolesCtxKey, []string{"admin"})
+	req = req.WithContext(ctx)
+	if _, err := s.Password(rec, req, &gentypes.PasswordChangeReq{
+		Username:    "alice",
+		NewPassword: "rotated-by-admin",
+	}); err != nil {
+		t.Fatalf("Password: %v", err)
+	}
+	if rec.Code != 0 && rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 (admin self-bypass)", rec.Code)
+	}
+	if len(d.seen()) != 1 {
+		t.Fatalf("admin path should reach upstream wire; stmts=%v", d.seen())
+	}
+}
+
+// TestUsers_ChangePassword_NonAdminCannotChangeOther pins SEC A1
+// (CWE-639 / BOLA): a non-admin caller whose JWT subject does NOT
+// match the path username is rejected with 403 BEFORE the upstream
+// wire is touched. The handler must NOT emit any ALTER USER, must NOT
+// revoke the target's tokens, and must emit a
+// `user_password_forbidden` audit row.
+func TestUsers_ChangePassword_NonAdminCannotChangeOther(t *testing.T) {
+	d := &userDriver{}
+	s := newUserStubServer(t, "users_chpw_bola", d)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	ctx := context.WithValue(req.Context(), userCtxKey, "bob")
+	ctx = context.WithValue(ctx, rolesCtxKey, []string{"reader"})
+	req = req.WithContext(ctx)
+
+	if _, err := s.Password(rec, req, &gentypes.PasswordChangeReq{
+		Username:    "alice",
+		NewPassword: "stolen-by-bob",
+	}); err != nil {
+		t.Fatalf("Password: unexpected error return: %v (handler should write body and return nil)", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want 403", rec.Code)
+	}
+	if got := len(d.seen()); got != 0 {
+		t.Fatalf("upstream wire executed %d stmts; want 0 (gate must reject pre-wire)", got)
+	}
+}
+
+// TestUsers_ChangePassword_AnonymousRejected pins SEC A1 defense-in-
+// depth: a request with no actor context (Subject="" / Roles=nil)
+// fails closed even though production middleware should have
+// prevented it.
+func TestUsers_ChangePassword_AnonymousRejected(t *testing.T) {
+	d := &userDriver{}
+	s := newUserStubServer(t, "users_chpw_anon", d)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	if _, err := s.Password(rec, req, &gentypes.PasswordChangeReq{
+		Username:    "alice",
+		NewPassword: "anon-attempt",
+	}); err != nil {
+		t.Fatalf("Password: %v", err)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want 403 (defense-in-depth)", rec.Code)
+	}
+	if got := len(d.seen()); got != 0 {
+		t.Fatalf("upstream wire executed %d stmts; want 0", got)
 	}
 }
 
@@ -521,6 +606,8 @@ func TestUsers_ChangePassword_RevokesExistingTokens(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/alice/password", nil)
+	ctx := context.WithValue(req.Context(), userCtxKey, "alice")
+	req = req.WithContext(ctx)
 	if _, err := s.Password(rec, req, &gentypes.PasswordChangeReq{
 		Username:    "alice",
 		NewPassword: "fresh-secret-1",
