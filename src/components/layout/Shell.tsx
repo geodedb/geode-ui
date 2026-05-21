@@ -251,10 +251,14 @@ export const Shell: React.FC = () => {
         </BrandLink>
         <ConnectionSwitcher onAddRequested={() => setAddOpen(true)} />
         <DesktopNav>
+          {/*
+            Bug 1 (2026-05-21 bug-fix bundle): Dashboard is the new
+            index — point the Query link at its dedicated /query path
+            so the left-nav state matches the route the protected
+            shell now renders for /.
+          */}
           <NavLink to="/dashboard">{t('nav.dashboard')}</NavLink>
-          <NavLink to="/" end>
-            {t('nav.query')}
-          </NavLink>
+          <NavLink to="/query">{t('nav.query')}</NavLink>
           <NavLink to="/schema">{t('nav.schema')}</NavLink>
           {/*
             SEC issue 264: hide the /admin entry-point for non-admins.
@@ -289,9 +293,7 @@ export const Shell: React.FC = () => {
         aria-label={t('nav.primaryMobile')}
       >
         <NavLink to="/dashboard">{t('nav.dashboard')}</NavLink>
-        <NavLink to="/" end>
-          {t('nav.query')}
-        </NavLink>
+        <NavLink to="/query">{t('nav.query')}</NavLink>
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
         {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
         <NavLink to="/profiles">{t('nav.profiles')}</NavLink>

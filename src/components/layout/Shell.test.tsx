@@ -40,6 +40,7 @@ const renderShell = (initialPath = '/') =>
         <Routes>
           <Route path="/" element={<Shell />}>
             <Route index element={<div>main</div>} />
+            <Route path="query" element={<div>query</div>} />
             <Route path="schema" element={<div>schema</div>} />
             <Route path="admin/*" element={<div>admin</div>} />
           </Route>
@@ -85,14 +86,16 @@ test('marks the current view in the nav via aria-current', () => {
   const schemaLinks = screen.getAllByRole('link', { name: 'Schema' })
   expect(schemaLinks.length).toBeGreaterThan(0)
   schemaLinks.forEach((l) => expect(l).toHaveAttribute('aria-current', 'page'))
-  // The Query link (to="/") must NOT be active on /schema thanks to `end`.
+  // Bug 1 (2026-05-21 bug-fix bundle): the Query link points at
+  // /query (its own dedicated path) so the desktop nav doesn't fire
+  // on /schema.
   screen
     .getAllByRole('link', { name: 'Query' })
     .forEach((l) => expect(l).not.toHaveAttribute('aria-current'))
 })
 
-test('Query nav link is active only on the index route, not on nested routes', () => {
-  renderShell('/')
+test('Query nav link is active on /query, not on the index route', () => {
+  renderShell('/query')
   screen
     .getAllByRole('link', { name: 'Query' })
     .forEach((l) => expect(l).toHaveAttribute('aria-current', 'page'))
@@ -106,7 +109,7 @@ test('a section nav link stays active on its nested routes', () => {
   screen
     .getAllByRole('link', { name: 'Admin' })
     .forEach((l) => expect(l).toHaveAttribute('aria-current', 'page'))
-  // And Query (to="/" end) is not active on /admin/users.
+  // Bug 1: Query is at /query now — never active on /admin/users.
   screen
     .getAllByRole('link', { name: 'Query' })
     .forEach((l) => expect(l).not.toHaveAttribute('aria-current'))

@@ -13,10 +13,12 @@ import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoginPage } from './pages/LoginPage'
 import { QueryPage } from './pages/QueryPage'
 // DashboardPage is lazy-loaded so the recharts dep (~140 KiB) lives
-// in its own async chunk rather than the main entrypoint. The
-// dashboard isn't the landing page anyway — /login or /query is —
-// so the chunk fetch happens behind a Suspense boundary the first
-// time the operator navigates to /dashboard.
+// in its own async chunk rather than the main entrypoint. As of the
+// 2026-05-21 bug-fix bundle (Bug 1) the dashboard IS the post-login
+// landing page — the index route below mounts SuspenseDashboardRoute
+// so the operator sees activity at a glance instead of a blank
+// query editor. The Suspense boundary lets the chunk fetch happen
+// without blocking the initial paint of the protected shell.
 import { SchemaPage } from './pages/SchemaPage'
 import { AdminPage } from './pages/AdminPage'
 import { UsersPage } from './components/admin/UsersPage'
@@ -183,7 +185,18 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                   element={<DevGraphBenchRoute />}
                 />
                 <Route element={<ProtectedShell />}>
-                  <Route index element={<QueryPage />} />
+                  {/*
+                    Bug 1 (2026-05-21 bug-fix bundle): /dashboard is
+                    now the post-login landing page. The protected
+                    index redirects to /dashboard so the canonical URL
+                    stays /dashboard (deep links unchanged) while a
+                    fresh login lands the operator on the activity
+                    overview instead of a blank query editor. /query
+                    moved to its own path so the left-nav "Query" link
+                    keeps a stable target.
+                  */}
+                  <Route index element={<Navigate to="/dashboard" replace />} />
+                  <Route path="query" element={<QueryPage />} />
                   <Route
                     path="dashboard"
                     element={<SuspenseDashboardRoute />}
