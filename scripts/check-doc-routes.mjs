@@ -39,6 +39,9 @@ const HISTORICAL_ALLOWLIST = [
   // marked Closed the row gets rewritten anyway.
   /^docs\/QUALITY_GAP_ANALYSIS\.md$/,
   /^docs\/GAP_ANALYSIS\.md$/,
+  // Dated audit deliverables describe the state of the repo at audit
+  // time, including findings that cite removed routes/components.
+  /^docs\/audits\//,
 ]
 
 // Forbidden terms in live docs.

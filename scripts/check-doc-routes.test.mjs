@@ -60,6 +60,23 @@ test('not ok when a live .md mentions WorkspacePage', () => {
   }
 })
 
+test('docs/audits/** is allow-listed (audit deliverables cite removed routes as evidence)', () => {
+  const root = makeRoot()
+  try {
+    mkdirSync(path.join(root, 'docs', 'audits', '2026-05-21'), {
+      recursive: true,
+    })
+    writeFileSync(
+      path.join(root, 'docs', 'audits', '2026-05-21', 'gap-collection.md'),
+      '`/workspace` route removed; WorkspacePage deleted\n'
+    )
+    const r = checkDocRoutes(root)
+    assert.equal(r.ok, true, JSON.stringify(r.hits))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('historic surfaces (GAP_ANALYSIS_RESOLVED, plans/, .remember/, .scratch/) are allow-listed', () => {
   const root = makeRoot()
   try {
