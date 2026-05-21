@@ -47,10 +47,27 @@ test.describe('public profiles endpoint', () => {
 })
 
 test.describe('login page profile picker', () => {
-  test('falls back to free-text Profile input when /profiles/public is unreachable', async ({
+  test('renders login form without picker when /profiles/public is unreachable', async ({
     page,
   }) => {
-    // Force the public-profile fetch to fail BEFORE the SPA mounts.
+    // Task 7 refactor (commit 20ce7a3, "feat(auth): LoginPage three-way
+    // branch (filter / onboard / add toggle)") removed the free-text
+    // Profile fallback input that the previous LoginPage rendered when
+    // fetchPublicProfiles rejected. The post-refactor render branch is:
+    //
+    //   noProfiles    = profiles !== null && length === 0 && !loadErr
+    //   showOnboard   = false (default)
+    //   loadErr=true  → noProfiles is false (the !loadErr guard) AND
+    //                   showOnboard is false, so the standard login
+    //                   form renders. The ProfileFilter is gated by
+    //                   `profiles && length > 0 && !loadErr` so it is
+    //                   NOT rendered. The form submits with the default
+    //                   profile state value ('default' from useState).
+    //
+    // The intent of this test is still "the SPA stays usable when the
+    // public-profiles fetch fails" — we just assert it via the new
+    // shape: form + submit visible, picker absent, add-profile toggle
+    // available so the operator can pivot to onboarding.
     await page.route('**/api/v1/profiles/public', (route) =>
       route.fulfill({
         status: 503,
@@ -60,21 +77,24 @@ test.describe('login page profile picker', () => {
     )
     await page.goto('/login')
 
-    // LoginPage's fallback: when fetchPublicProfiles rejects, it
-    // silently swaps the <ProfileList> button list for a free-text
-    // <Field label='Profile'>...<Input id='login-profile'/></Field>.
-    // The button-shaped picker (role=list, label='Available profiles')
-    // must NOT render; the text input MUST.
-    await expect(page.locator('#login-profile')).toBeVisible({ timeout: 5000 })
-    await expect(
-      page.getByRole('list', { name: /available profiles/i })
-    ).toHaveCount(0)
-    // Form remains usable. The Username/Password fields are now
-    // <wa-input>s — their <label for=...> targets the host element, but
-    // getByLabel can't resolve the inner shadow <input>. Assert via the
-    // stable data-testid on the host instead.
-    await expect(page.getByTestId('login-username')).toBeVisible()
+    // The form mounts. Username/Password are <wa-input>s — their
+    // <label for=...> targets the host element, but getByLabel can't
+    // resolve the inner shadow <input>. Assert via the stable
+    // data-testid on the host instead.
+    await expect(page.getByTestId('login-username')).toBeVisible({
+      timeout: 5000,
+    })
     await expect(page.getByTestId('login-password')).toBeVisible()
+    await expect(page.getByTestId('login-submit-btn')).toBeVisible()
+
+    // The ProfileFilter picker MUST be absent — its render is gated on
+    // !loadErr (LoginPage.tsx:159).
+    await expect(page.getByTestId('profile-filter-input')).toHaveCount(0)
+
+    // The add-profile toggle MUST remain visible so the operator can
+    // still pivot into the OnboardProfileForm even when discovery
+    // failed.
+    await expect(page.getByTestId('login-add-profile')).toBeVisible()
   })
 })
 
