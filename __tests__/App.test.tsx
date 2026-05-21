@@ -20,9 +20,12 @@ describe('App', () => {
     // the rejected promise (no backend mocked in this smoke test) flips
     // `loadErr` to true. Without awaiting the failure the setState
     // fires after the test exits, producing an act() warning. Wait for
-    // the fallback input to confirm the rejection finished.
+    // the username input — always rendered on the login branch (the
+    // post-Task-7 LoginPage drops the ProfileFilter entirely when
+    // `loadErr` is true, so `#login-profile` is no longer a reliable
+    // sentinel) — to confirm the rejection finished.
     await waitFor(() => {
-      expect(document.querySelector('#login-profile')).not.toBeNull()
+      expect(document.querySelector('#login-username')).not.toBeNull()
     })
   })
 
