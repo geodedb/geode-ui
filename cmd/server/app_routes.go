@@ -81,6 +81,15 @@ func registerRoutes(mux *http.ServeMux, cfg appConfig, pool *conn.Pool, issuer *
 	// reason through the genapi error catalogue.
 	mux.HandleFunc("GET /api/v1/auth/whoami", srv.HandleWhoAmI)
 
+	// 2026-05-21 login profile UX: unauthenticated profile onboarding.
+	// POST /api/v1/profiles/onboard takes a name + DSN + admin
+	// credentials, probes the upstream, creates a system-scope profile,
+	// and mints a JWT in one shot. Used by the SPA's first-run path
+	// (zero profiles → landing screen is the onboard form) and the
+	// add-profile-from-login flow. Hand-rolled rather than genapi-
+	// emitted because the route is intentionally unauthenticated.
+	mux.HandleFunc("POST /api/v1/profiles/onboard", srv.HandleOnboard)
+
 	// SEC-F7 (#62 S3b): CSRF token endpoint. GET issues a fresh token
 	// in both a NON-HttpOnly cookie (for SPA reading) and the JSON
 	// response body. The double-submit middleware enforces a matching
