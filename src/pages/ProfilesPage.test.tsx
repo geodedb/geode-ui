@@ -34,11 +34,32 @@ jest.mock('../components/profiles/ProfileEditorModal', () => ({
         <button
           data-testid="editor-stub-save"
           onClick={() => {
-            onSaved()
+            // 2026-05-21 bug-fix: pass the saved-profile payload so
+            // tests can drive both legacy (no arg) and the new
+            // post-Create "Connect now?" flow.
+            onSaved({ mode, profileName: 'stub-profile' })
             onClose()
           }}
         >
           save
+        </button>
+      </div>
+    )
+  },
+}))
+jest.mock('../components/layout/AddConnectionModal', () => ({
+  AddConnectionModal: ({ open, onClose, initialProfile }: any) => {
+    if (!open) return null
+    return (
+      <div data-testid="add-connection-modal">
+        <span data-testid="add-connection-initial-profile">
+          {initialProfile ?? '<none>'}
+        </span>
+        <button
+          data-testid="add-connection-stub-close"
+          onClick={() => onClose()}
+        >
+          close
         </button>
       </div>
     )
@@ -357,4 +378,69 @@ test('successful save refreshes the list', async () => {
   fireEvent.click(screen.getByRole('button', { name: /create profile/i }))
   fireEvent.click(screen.getByTestId('editor-stub-save'))
   await waitFor(() => expect(screen.getByText('new')).toBeInTheDocument())
+})
+
+// 2026-05-21 bug-fix: post-Create Connect-now flow. Saving a NEW
+// profile should open AddConnectionModal pre-selected to the saved
+// profile name so the operator goes straight from "I made a target"
+// to "now log me in to it". Edit-mode saves must NOT trigger the
+// flow (the operator already has whatever session they need).
+
+test('Bug 2: post-Create save opens AddConnectionModal pre-filled with the new profile', async () => {
+  mockList.mockResolvedValue([])
+  renderPage()
+  await waitFor(() =>
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument()
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: /create profile/i }))
+  expect(screen.getByTestId('editor-create')).toBeInTheDocument()
+  expect(screen.queryByTestId('add-connection-modal')).toBeNull()
+
+  fireEvent.click(screen.getByTestId('editor-stub-save'))
+
+  expect(screen.getByTestId('add-connection-modal')).toBeInTheDocument()
+  expect(screen.getByTestId('add-connection-initial-profile').textContent).toBe(
+    'stub-profile'
+  )
+})
+
+test('Bug 2: edit-mode save does NOT open AddConnectionModal', async () => {
+  mockList.mockResolvedValueOnce([
+    {
+      id: 'a',
+      scope: 'personal',
+      ownerUserId: 'alice',
+      name: 'stub-profile',
+      dsn: 'quic://x:1',
+      isDefault: false,
+    },
+  ])
+  renderPage()
+  await waitFor(() =>
+    expect(screen.getByText('stub-profile')).toBeInTheDocument()
+  )
+
+  const editBtn = screen.getAllByRole('button', { name: /edit/i })[0]
+  if (!editBtn) throw new Error('expected an Edit button on the row')
+  fireEvent.click(editBtn)
+  expect(screen.getByTestId('editor-edit')).toBeInTheDocument()
+  fireEvent.click(screen.getByTestId('editor-stub-save'))
+
+  // Edit-mode saves skip the Connect-now flow.
+  expect(screen.queryByTestId('add-connection-modal')).toBeNull()
+})
+
+test('Bug 2: AddConnectionModal closes when its onClose fires', async () => {
+  mockList.mockResolvedValue([])
+  renderPage()
+  await waitFor(() =>
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument()
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: /create profile/i }))
+  fireEvent.click(screen.getByTestId('editor-stub-save'))
+  expect(screen.getByTestId('add-connection-modal')).toBeInTheDocument()
+  fireEvent.click(screen.getByTestId('add-connection-stub-close'))
+  expect(screen.queryByTestId('add-connection-modal')).toBeNull()
 })

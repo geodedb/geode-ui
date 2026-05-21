@@ -32,12 +32,24 @@ import { TLSFieldset } from './TLSFieldset'
 //   - Row -> two-column CSS grid; Bootstrap has no `grid-cols-2` utility
 //     so the column template stays inline. gap-2 maps to theme.spacing.sm.
 //   - ErrText -> `text-danger small m-0`.
+// SavedProfile is the discriminated payload onSaved hands to its
+// callers. 2026-05-21 bug-fix: the parameter was previously void; the
+// post-Create "Connect now?" flow on ProfilesPage needs to know
+// (a) it was a create, not an edit, and (b) the saved profile name so
+// it can open AddConnectionModal pre-filled. Existing edit-mode
+// callers can ignore the argument; the optional param keeps the
+// onSaved() call site backwards-compatible with legacy tests.
+export interface SavedProfile {
+  mode: 'create' | 'edit'
+  profileName: string
+}
+
 // ButtonRow was already inline (`d-flex gap-2 justify-content-end mt-4`).
 export interface Props {
   mode: 'create' | 'edit'
   open: boolean
   onClose: () => void
-  onSaved: () => void
+  onSaved: (saved?: SavedProfile) => void
   isAdmin: boolean
   profile?: ProfileView
   // Names of every other profile currently on the server. Used for the
@@ -108,12 +120,17 @@ export const ProfileEditorModal: React.FC<Props> = ({
     setBusy(true)
     setErr(null)
     try {
+      // Capture the submitted name here so the onSaved payload mirrors
+      // exactly what the user typed (post-NFKC normalisation happens
+      // server-side; for the post-Create "Connect now?" flow the SPA
+      // wants the user-visible form value).
+      const submittedName = s.name.trim()
       if (mode === 'create') {
         await createProfile(buildCreateInput())
       } else if (profile) {
         await updateProfile(profile.id, buildUpdateInput(profile))
       }
-      onSaved()
+      onSaved({ mode, profileName: submittedName })
       onClose()
       if (mode === 'create') reset()
     } catch (e2: unknown) {

@@ -41,12 +41,23 @@ test('the raw JSON body pretty-prints with two-space indent', () => {
   )
 })
 
-test('the View raw JSON anchor is right-aligned via Bootstrap utilities', () => {
+test('the View raw JSON anchor is sized to its text, not stretched full-width', () => {
+  // 2026-05-21 bug-fix: pre-fix the summary carried `d-block text-end`,
+  // which stretched it to the full column width with the link text
+  // floated right — the entire gutter became a click target and the
+  // visual implied a button bar. Post-fix the summary renders as an
+  // inline-block sized to the text; right-alignment lives on the
+  // parent <details> via text-align: right so the <pre> body's text
+  // stays left-aligned.
   renderToggle({ event: 'login', fields: { user: 'alice' } })
   const summary = screen.getByTestId('audit-json-summary')
-  // Right-aligned within its column via Bootstrap's d-block + text-end
-  // responsive utility stack — these classes apply at every breakpoint
-  // so the toggle hugs the right edge on mobile and desktop alike.
-  expect(summary.className).toContain('d-block')
-  expect(summary.className).toContain('text-end')
+  const details = screen.getByTestId('audit-json-details')
+  // No more full-width Bootstrap classes on the summary itself.
+  expect(summary.className).not.toContain('d-block')
+  expect(summary.className).not.toContain('text-end')
+  // Summary is content-sized via display: inline-block (jsdom reads
+  // this off the styled-components emit through the cascade).
+  expect(window.getComputedStyle(summary).display).toBe('inline-block')
+  // Right-alignment moved to the parent <details>.
+  expect(window.getComputedStyle(details).textAlign).toBe('right')
 })

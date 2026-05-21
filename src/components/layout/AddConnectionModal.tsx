@@ -10,6 +10,13 @@ import { usePublicProfilesWithStoredPasswords } from '../../lib/usePublicProfile
 export interface Props {
   open: boolean
   onClose: () => void
+  // 2026-05-21 bug-fix: the post-Create flow on /profiles opens this
+  // modal pre-selected to the just-created profile so the user goes
+  // straight from "I made a profile target" to "now log in as me".
+  // When unset (the existing chrome-driven flow) the modal falls back
+  // to the public-profiles default discovery (initialProfileName from
+  // usePublicProfilesWithStoredPasswords).
+  initialProfile?: string
 }
 
 // PSR-F14 (#111) — debounce window for the (gated) saved-password
@@ -22,7 +29,11 @@ function pwCacheKey(profile: string, username: string): string {
   return `${profile}\x00${username}`
 }
 
-export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
+export const AddConnectionModal: React.FC<Props> = ({
+  open,
+  onClose,
+  initialProfile,
+}) => {
   const { t } = useTranslation()
   const { connectMore } = useAuth()
   // GAP-021 / #102: the public-profiles fetch + the saved-password
@@ -64,6 +75,16 @@ export const AddConnectionModal: React.FC<Props> = ({ open, onClose }) => {
       setProfile(profilesState.initialProfileName)
     }
   }, [profilesState.initialProfileName])
+
+  // 2026-05-21 bug-fix: if the caller supplied `initialProfile` (the
+  // post-Create flow on /profiles), it wins over the public-profiles
+  // discovery. This effect runs on every modal open so re-opening the
+  // modal with a different prop value re-selects the new profile.
+  useEffect(() => {
+    if (open && initialProfile) {
+      setProfile(initialProfile)
+    }
+  }, [open, initialProfile])
 
   // Renderer-local cache for decrypted passwords keyed by
   // (profile, username). Cleared on close so the cache never outlives a

@@ -19,22 +19,42 @@ import styled from 'styled-components'
 // `open` prop from React state makes the contract testable AND
 // preserves the native keyboard semantics in real browsers.
 
+// text-align: right is the simplest way to right-align an inline-block
+// summary inside a block-level <details>. The block-level Body (<pre>)
+// is unaffected because it lays out as a block element with its own
+// text-align: left (the pre default).
 const Details = styled.details`
   margin-top: ${({ theme }) => theme.spacing.xs};
+  text-align: right;
 `
 
-// The toggle anchor itself is right-aligned within its column so the
-// JSON disclosure sits flush with the right edge of the row's Fields
-// cell while the key/value list stays left-aligned. d-block strips
-// the default <summary> list-item marker so `text-end` lands the
-// link cleanly on the right; Bootstrap's responsive utility stack
-// applies the same alignment at every breakpoint.
-const Summary = styled.summary.attrs({
-  className: 'd-block text-end',
-})`
+// The toggle anchor is right-aligned within its column so the JSON
+// disclosure sits flush with the right edge of the row's Fields cell
+// while the key/value list stays left-aligned.
+//
+// 2026-05-21 bug-fix: pre-fix this used `d-block text-end`, which
+// stretched the <summary> across the full column width with the link
+// text floated right — making the entire row's gutter a click target
+// and looking visually like a button bar. The new layout uses
+// `display: inline-block` so the summary is content-sized (only the
+// "View raw JSON" text is clickable) and `margin-left: auto` inside
+// a flex parent below to keep it right-aligned. `list-style: none`
+// hides the native disclosure triangle marker that `d-block`
+// previously stripped as a side effect.
+const Summary = styled.summary`
   cursor: pointer;
+  display: inline-block;
+  list-style: none;
   font-size: ${({ theme }) => theme.font.sizes.xs};
   color: ${({ theme }) => theme.text.link};
+
+  /* WebKit honours the legacy ::-webkit-details-marker pseudo-element
+     for the disclosure triangle; list-style: none is enough for
+     Firefox/Chrome but Safari still renders the marker without this. */
+  &::-webkit-details-marker {
+    display: none;
+  }
+
   &:hover {
     text-decoration: underline;
   }
@@ -51,6 +71,9 @@ const Body = styled.pre`
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-all;
+  /* Counter the parent Details text-align: right so the JSON payload
+     itself stays left-aligned. */
+  text-align: left;
 `
 
 function safeStringify(value: unknown): string {

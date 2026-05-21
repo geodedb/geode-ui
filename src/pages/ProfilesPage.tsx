@@ -36,6 +36,7 @@ import { Button, TableScroll } from '@geodedb/ui-core'
 import { listProfiles, updateProfile, ProfileView } from '../api/profiles'
 import { ProfileEditorModal } from '../components/profiles/ProfileEditorModal'
 import { DeleteProfileModal } from '../components/profiles/DeleteProfileModal'
+import { AddConnectionModal } from '../components/layout/AddConnectionModal'
 import { useAuth } from '../auth/AuthProvider'
 
 // Page outer shell — Bootstrap-migrated to a plain <section>. The
@@ -153,6 +154,14 @@ export const ProfilesPage: React.FC = () => {
     mode: 'closed',
   })
   const [deleteTarget, setDeleteTarget] = useState<ProfileView | null>(null)
+  // 2026-05-21 bug-fix: post-Create "Connect now?" flow. When the
+  // editor saves a NEW profile, we stash its name here; the
+  // AddConnectionModal mounts pre-selected to that profile so the
+  // operator goes from "I made a target" straight to "log me in to
+  // it". Null when the modal is closed.
+  const [pendingConnectProfile, setPendingConnectProfile] = useState<
+    string | null
+  >(null)
 
   const refresh = useCallback(async () => {
     setErr(null)
@@ -358,8 +367,14 @@ export const ProfilesPage: React.FC = () => {
         mode={editorMode}
         open={editorState.mode !== 'closed'}
         onClose={closeEditor}
-        onSaved={() => {
+        onSaved={(saved) => {
           refresh().catch(() => undefined)
+          // 2026-05-21 bug-fix: surface the Connect-now affordance for
+          // a fresh profile. Edit-mode saves skip this path — the
+          // operator already has whatever connection they need.
+          if (saved && saved.mode === 'create' && saved.profileName) {
+            setPendingConnectProfile(saved.profileName)
+          }
         }}
         isAdmin={isAdmin}
         profile={editorTarget}
@@ -375,6 +390,11 @@ export const ProfilesPage: React.FC = () => {
           profile={deleteTarget}
         />
       )}
+      <AddConnectionModal
+        open={pendingConnectProfile !== null}
+        onClose={() => setPendingConnectProfile(null)}
+        initialProfile={pendingConnectProfile ?? undefined}
+      />
     </section>
   )
 }
