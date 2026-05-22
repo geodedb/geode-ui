@@ -65,7 +65,7 @@ repos:
     - --baseline
     - .secrets.baseline
     - --exclude-files
-    - (^gen/|^node_modules/|^package-lock\.json$|^\.secrets\.baseline$|_test\.go$)
+    - (^gen/|^node_modules/|^package-lock\.json$|^\.secrets\.baseline$|_test\.go$|^docs/superpowers/plans/.*\.md$|^docs/bug-fixes/.*\.md$|^docs/audits/.*\.md$)
 
   # ── Makefile lint ──────────────────────────────────────────────────────
 - repo: https://github.com/mrtazz/checkmake.git

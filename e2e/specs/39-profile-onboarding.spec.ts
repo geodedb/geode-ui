@@ -56,6 +56,8 @@ test('accepts an onboard with good creds and the new profile appears in /profile
   expect(typeof body.access_token).toBe('string')
   // /profiles/public reflects the new profile.
   const list = await request.get('/api/v1/profiles/public')
-  const names = (await list.json()).profiles.map((p: { name: string }) => p.name)
+  const names = (await list.json()).profiles.map(
+    (p: { name: string }) => p.name
+  )
   expect(names).toContain(name)
 })
