@@ -111,6 +111,32 @@ export const Overlay = styled.div`
   text-align: center;
 `
 
+// LayoutBusyOverlay paints a semi-transparent veil across the whole
+// CanvasArea while a runLayout pass is in flight. Unlike the empty/
+// error Overlay above it has `pointer-events: auto` — that's the
+// "lock the rest of the graph UI" half of the operator's request:
+// clicks on the toolbar / canvas / chips beneath the overlay get
+// absorbed instead of queuing a second layout (or worse, a node-tap
+// inspector update mid-layout). aria-busy + role="status" lets
+// assistive tech announce the wait.
+export const LayoutBusyOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  background: ${({ theme }) => theme.bg.surface};
+  opacity: 0.85;
+  pointer-events: auto;
+  color: ${({ theme }) => theme.text.secondary};
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  font-weight: ${({ theme }) => theme.font.weights.medium};
+  border-radius: ${({ theme }) => theme.radii.md};
+`
+
 export const ErrorBanner = styled.div`
   position: absolute;
   inset: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.sm}

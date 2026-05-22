@@ -118,6 +118,13 @@ export type UseGraphCytoscapeArgs = {
   // in the store; 0.5 is the default. Passed straight through to the
   // Cytoscape constructor so the setting takes effect on the next rebuild.
   wheelSensitivity: number
+  // 2026-05-22 UX: flipped true while runLayout is in flight, false on
+  // the onComplete callback. The orchestrator owns the state because
+  // it renders the busy surface (overlay + disabled toolbar). The
+  // hook calls this setter at both layout entry points: the initial
+  // build (debounced sig-keyed rebuild) and the layout-swap effect
+  // (operator picked a different layout from the dropdown).
+  setLayoutBusy?: (busy: boolean) => void
 }
 
 // useGraphCytoscape owns every effect that talks to the live Cytoscape
@@ -154,6 +161,7 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     reapplyFocus,
     t,
     wheelSensitivity,
+    setLayoutBusy,
   } = args
 
   // Stash the theme in a ref so the rebuild reads the latest value
@@ -251,6 +259,13 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
             reapplyPins?.()
             reapplyFocus?.()
           } else {
+            // 2026-05-22 UX: surface "graph is re-organizing" to the
+            // orchestrator. Worker-path fcose can take several seconds
+            // even when it doesn't lock the main thread; on the
+            // main-thread fallback the entire UI freezes until
+            // runLayout returns. The busy flag drives the loading
+            // overlay + toolbar disabled state in GraphViewCytoscape.
+            setLayoutBusy?.(true)
             runLayout({
               cy,
               layoutName: layoutRef.current,
@@ -261,6 +276,7 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
               onComplete: () => {
                 reapplyPins?.()
                 reapplyFocus?.()
+                setLayoutBusy?.(false)
               },
             })
           }
@@ -375,6 +391,11 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
     cy.nodes().forEach((node) => {
       ids.push(node.id() as string)
     })
+    // 2026-05-22 UX: same busy surface as the initial-build path —
+    // re-organising the graph for a different layout pick can take
+    // seconds and must show a loading indicator + lock the rest of
+    // the graph chrome until the layout settles.
+    setLayoutBusy?.(true)
     runLayout({
       cy,
       layoutName: layout,
@@ -385,6 +406,7 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
       onComplete: () => {
         reapplyPins?.()
         reapplyFocus?.()
+        setLayoutBusy?.(false)
       },
     })
     // reapplyPins / reapplyFocus are intentionally NOT in deps — their

@@ -39,7 +39,7 @@ import { useGraphSelectionActions } from './graph/useGraphSelectionActions'
 import { useGraphSigReset } from './graph/useGraphSigReset'
 import { useGraphToolbarActions } from './graph/useGraphToolbarActions'
 import { useZoomLevel } from './graph/useZoomLevel'
-import { CanvasArea, PathStatus, Wrap } from './graph/styled'
+import { CanvasArea, LayoutBusyOverlay, PathStatus, Wrap } from './graph/styled'
 
 // Register the layout extensions once, at module load. cytoscape.use is
 // idempotent in cytoscape@3 — a double-register (e.g. a test re-import)
@@ -133,6 +133,18 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     nodes: 0,
     edges: 0,
   })
+
+  // 2026-05-22 UX: layoutBusy is flipped on by useGraphCytoscape for
+  // the duration of every runLayout pass (initial rebuild + the
+  // layout-swap effect when the operator picks a different layout
+  // from the dropdown). It drives the loading overlay on the canvas
+  // and disables the layout picker in the toolbar so the operator
+  // can't queue overlapping layout passes while one is in flight.
+  // The fcose-on-worker path resolves asynchronously; the
+  // main-thread fallback locks the UI thread until runLayout
+  // returns, so even there the flag flips back to false in the next
+  // event-loop turn after the layout pass completes.
+  const [layoutBusy, setLayoutBusy] = useState(false)
 
   // Element-set + derived indices (memoized on resp/query/cluster).
   const { elements, nodeOptions, edgeOptions, nodeDataById, nodeLabelBuckets } =
@@ -245,6 +257,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
     reapplyFocus: focusMode.reapply,
     t,
     wheelSensitivity,
+    setLayoutBusy,
   })
 
   // Open expand-popover target node id (null = closed).
@@ -449,6 +462,27 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
           onFit={onFit}
           onResetView={onResetView}
         />
+        {/*
+          2026-05-22 UX: paint a busy overlay across the whole canvas
+          while runLayout is in flight. Operator request was "show a
+          loading indicator and lock the other features of the graph
+          UI" — the overlay's `pointer-events: auto` absorbs clicks on
+          everything underneath (toolbar buttons, canvas taps, chips)
+          so the operator can't queue overlapping layout passes or
+          inspector taps that race the layout's `cy.nodes()` walk.
+          See useGraphCytoscape.ts for the busy flips.
+        */}
+        {layoutBusy && (
+          <LayoutBusyOverlay
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+            data-testid="graph-layout-busy-overlay"
+          >
+            <span aria-hidden="true" className="spinner-border" />
+            <span>{t('graph.layoutBusy')}</span>
+          </LayoutBusyOverlay>
+        )}
       </CanvasArea>
       {!sidebarCollapsed && (
         <GraphSidebar

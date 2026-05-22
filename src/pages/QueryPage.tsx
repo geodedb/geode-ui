@@ -448,8 +448,17 @@ export const QueryPage: React.FC = () => {
   }
 
   const cancel = (): void => {
+    // 2026-05-22 UX: cancel works for both stream and sync runs.
+    // Stream: handleRef carries the WebSocket; cancel() closes the
+    // socket and the stream's terminal handler clears busy below.
+    // Sync: the generated client.query() doesn't accept a signal yet,
+    // so we can't actually abort the HTTP request — but we bump the
+    // runSync generation counter so the still-in-flight promise's
+    // resolve/reject is dropped on the floor (QUAL #289), and we
+    // clear busy immediately so the operator gets their editor back.
     handleRef.current?.cancel()
     handleRef.current = null
+    runSyncGenRef.current += 1
     setBusy(false)
   }
 
@@ -589,6 +598,11 @@ export const QueryPage: React.FC = () => {
           value={stmt}
           onChange={setStmt}
           onRun={run}
+          // 2026-05-22 UX: lock the buffer while a query is running.
+          // Pre-fix the operator could keep typing while a slow query
+          // settled, racing the snapshot the run captured. See
+          // src/components/editor/GqlEditor.readonly.test.tsx.
+          readOnly={busy}
         />
       </Suspense>
       <Bar>
@@ -604,7 +618,15 @@ export const QueryPage: React.FC = () => {
         >
           {t('query.runHotkey', { mod: modKeyLabel() })}
         </wa-button>
-        {streamMode && busy && (
+        {/*
+          2026-05-22 UX: cancel is available for BOTH stream and sync
+          runs. Pre-fix the gate was `streamMode && busy` so a sync
+          query left the operator stuck behind the spinner with no
+          way out. The cancel handler now also invalidates the
+          in-flight client.query() promise (its resolve is dropped
+          via the runSync generation counter) for the sync path.
+        */}
+        {busy && (
           <wa-button
             appearance="outlined"
             size="m"

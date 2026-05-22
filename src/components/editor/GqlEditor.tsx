@@ -44,6 +44,11 @@ type Props = {
   height?: number
   graph?: string
   tenant?: string
+  // 2026-05-22 UX fix: when a query is in flight the parent flips
+  // this on so the operator can't keep typing into the buffer that
+  // produced the running statement. Forwarded directly to Monaco's
+  // options.readOnly — see GqlEditor.readonly.test.tsx.
+  readOnly?: boolean
 }
 
 /**
@@ -63,7 +68,7 @@ export interface GqlEditorHandle {
 }
 
 const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
-  { value, onChange, onRun, height, graph, tenant },
+  { value, onChange, onRun, height, graph, tenant, readOnly },
   ref
 ) => {
   // When the caller doesn't override height, shrink to a mobile-friendly
@@ -324,6 +329,7 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
         minimap: { enabled: false },
         fontSize: 14,
         scrollBeyondLastLine: false,
+        readOnly: readOnly === true,
       }}
     />
   )

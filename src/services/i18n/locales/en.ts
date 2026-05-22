@@ -265,6 +265,7 @@ export const en = {
     expand: 'Expand',
     empty: 'No nodes or edges to display for this query.',
     errorBanner: 'Failed to render graph: {{message}}',
+    layoutBusy: 'Re-organising the graph…',
     layoutLabel: 'Layout',
     layout: {
       cose: 'Force (cose)',
