@@ -160,6 +160,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     [conns]
   )
 
+  // activateConnection centralises every side-effect that "this
+  // connection is now active" must produce: flip the reducer pointer,
+  // update the module-level token latch (for the fetch wrapper), and
+  // drop QueryPage's cross-route memory so the previous profile's
+  // editor + submitted statement + cached result cannot bleed
+  // through. Both performAuth (signIn always; connectMore when
+  // activate=true) and switchActive call into this helper so the
+  // two paths cannot drift apart — and so a future side-effect
+  // (telemetry, focus, route reset) only needs to be added in one
+  // place.
+  //
+  // Caller contract: the connection must already be present in the
+  // reducer's byId map at the time of dispatch — either because the
+  // caller just dispatched `add` for it (performAuth) or because
+  // switchActive's guard read already confirmed it. We deliberately
+  // accept the token as an explicit argument rather than re-reading
+  // it from `conns.connections.get(connectionId)?.token`: the
+  // performAuth caller holds the freshly-issued JWT directly and a
+  // post-dispatch read against the closed-over React state may be
+  // stale (see PSR-G06 / 2026-05-22 stale-closure repro).
+  const activateConnection = useCallback(
+    (connectionId: string, token: string): void => {
+      conns.setActive(connectionId)
+      setLatestToken(token)
+      // Lazy import to avoid a static cycle between AuthProvider and
+      // queryPageStore; matches the signOut + switchActive pattern.
+      import('../lib/queryPageStore')
+        .then((m) => m.useQueryPageStore.getState().reset())
+        .catch(() => {
+          /* store init can't fail in practice; ignore */
+        })
+    },
+    [conns]
+  )
+
   // performAuth is the shared body for signIn and connectMore. Both
   // wrap a successful apiLogin handshake with: register the new
   // connection, mint a fresh CSRF pair, flip the auth hint, refresh
@@ -239,9 +274,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       // `switchActive(newId)` — that path would read
       // `conns.connections.get(newId)` against the pre-dispatch
       // snapshot and silently no-op.
+      //
+      // `activateConnection` ALSO drops the cross-route
+      // `useQueryPageStore` so the previous profile's editor /
+      // submitted statement / cached result cannot bleed through the
+      // switch (parity with `switchActive`'s existing behaviour). On
+      // initial signIn the store is already at its defaults, so the
+      // reset is a no-op; the cost of always running it is one
+      // dynamic import + a single zustand `set({...})`.
       if (mode === 'signIn' || activate) {
-        conns.setActive(result.connection_id)
-        setLatestToken(result.access_token)
+        activateConnection(result.connection_id, result.access_token)
       }
 
       writeAuthHint(true)
@@ -283,7 +325,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       // (analytics, follow-up navigation keyed by id, etc.).
       return result.connection_id
     },
-    [conns]
+    [conns, activateConnection]
   )
 
   const signIn = useCallback(
@@ -391,18 +433,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     (connectionId: string): void => {
       const target = conns.connections.get(connectionId)
       if (!target) return
-      conns.setActive(connectionId)
-      setLatestToken(target.token)
-      // Drop QueryPage's cross-route memory. Switching active
-      // connection / profile is the second legitimate reset point
-      // (see signOut for the rationale and import strategy).
-      import('../lib/queryPageStore')
-        .then((m) => m.useQueryPageStore.getState().reset())
-        .catch(() => {
-          /* ignore */
-        })
+      // Delegates to activateConnection so the dispatch + token latch +
+      // QueryPage reset stay in lockstep with the performAuth activate
+      // path. Pre-refactor these two callers had drifted (the activate
+      // branch had no queryPageStore reset) and the operator-visible
+      // symptom was "the chrome label moved but the page still shows
+      // the previous profile". See AddConnectionModal.activation.test.tsx.
+      activateConnection(connectionId, target.token)
     },
-    [conns]
+    [conns, activateConnection]
   )
 
   // On mount, if the hint says we're logged in, refresh the CSRF
