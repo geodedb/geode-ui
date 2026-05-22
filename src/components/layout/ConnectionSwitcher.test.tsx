@@ -14,6 +14,15 @@ import {
 import { AuthProvider } from '../../auth/AuthProvider'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 
+// Mock the public-profiles fetch the ConnectionSwitcher fans out to
+// via usePublicProfilesWithStoredPasswords. Tests that only care
+// about the active-connections shape leave this returning an empty
+// list; the "configured profiles" tests below override per-test.
+jest.mock('../../api/auth', () => ({
+  ...jest.requireActual('../../api/auth'),
+  fetchPublicProfiles: jest.fn(async () => []),
+}))
+
 const Seed: React.FC<{ count: number }> = ({ count }) => {
   const { add, setActive } = useConnections()
   useEffect(() => {
@@ -134,4 +143,100 @@ test('renders an empty state when there are no active connections', () => {
   // The "No active connection" trigger button is the empty state. Use
   // a partial regex on the i18n value (en: "No active connection").
   expect(screen.getByText(/no active connection/i)).toBeInTheDocument()
+})
+
+// 2026-05-22 bug report: dropdown only shows the active profile +
+// "Add another connection" — the operator can't see, let alone
+// switch into, configured-but-not-yet-connected profiles. The
+// switcher should list EVERY configured profile (active or not) so
+// switching connection is a one-click affordance and the operator
+// doesn't have to discover "Add another connection" → "pick from a
+// hidden dropdown inside a modal".
+describe('lists configured (public) profiles, not just active connections', () => {
+  // Two configured profiles in the fixture — only one of which is
+  // currently active per Seed. The other must show up as an
+  // inactive, click-to-connect row in the dropdown.
+  beforeEach(() => {
+    const mod = jest.requireMock('../../api/auth') as {
+      fetchPublicProfiles: jest.Mock
+    }
+    mod.fetchPublicProfiles.mockResolvedValue([
+      { name: 'prof0', description: 'p0' },
+      { name: 'unused-profile', description: 'configured but not connected' },
+    ])
+  })
+
+  // findByTestId is the recommended async-aware locator for content
+  // that arrives via a useEffect-driven fetch.
+  test('renders one dropdown row per configured profile, even when not yet connected', async () => {
+    renderWithProviders(
+      <>
+        <Seed count={1} />
+        <ConnectionSwitcher onAddRequested={() => undefined} />
+      </>
+    )
+    // Active connection row (prof0) — already covered by existing
+    // tests above.
+    expect(await screen.findByTestId('connection-row-c0')).toBeInTheDocument()
+    // The configured-but-not-connected profile must surface as a row
+    // the operator can click to start a connect flow. Test-id is
+    // keyed on the profile name (not connection id, because there is
+    // no connection id yet — that's the whole point).
+    expect(
+      await screen.findByTestId('connection-row-profile-unused-profile')
+    ).toBeInTheDocument()
+  })
+
+  test('clicking an inactive configured profile fires onAddRequested with the profile name', async () => {
+    const onAddRequested = jest.fn()
+    renderWithProviders(
+      <>
+        <Seed count={1} />
+        <ConnectionSwitcher onAddRequested={onAddRequested} />
+      </>
+    )
+    const row = await screen.findByTestId(
+      'connection-row-profile-unused-profile'
+    )
+    selectDropdownItem(row)
+    // The Shell wires onAddRequested into AddConnectionModal's
+    // `initialProfile` prop so the modal opens pre-selected to the
+    // profile the operator picked. The arg must be the profile name.
+    expect(onAddRequested).toHaveBeenCalledWith('unused-profile')
+  })
+
+  test('inactive configured profile rows DO NOT render the disconnect × affordance', async () => {
+    renderWithProviders(
+      <>
+        <Seed count={1} />
+        <ConnectionSwitcher onAddRequested={() => undefined} />
+      </>
+    )
+    await screen.findByTestId('connection-row-profile-unused-profile')
+    // The × button only makes sense on active connections — there's
+    // nothing to disconnect from an inactive profile. The test-id for
+    // disconnect on a not-yet-connected profile must not exist.
+    expect(
+      screen.queryByTestId('connection-disconnect-profile-unused-profile')
+    ).toBeNull()
+  })
+
+  test('configured profiles that ARE active dedupe to a single row keyed by connection id', async () => {
+    // The active profile (prof0 via Seed) is also in the public
+    // profiles fixture; the dropdown must NOT render two rows for it
+    // (one keyed by connection id, one by profile name). The
+    // connection-id row wins because it carries the disconnect
+    // affordance + the role=menuitemradio active state.
+    renderWithProviders(
+      <>
+        <Seed count={1} />
+        <ConnectionSwitcher onAddRequested={() => undefined} />
+      </>
+    )
+    expect(await screen.findByTestId('connection-row-c0')).toBeInTheDocument()
+    // Wait for the public-profiles fetch to resolve so any
+    // double-render path would have already fired the duplicate row.
+    await screen.findByTestId('connection-row-profile-unused-profile')
+    expect(screen.queryByTestId('connection-row-profile-prof0')).toBeNull()
+  })
 })
