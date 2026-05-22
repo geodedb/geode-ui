@@ -57,17 +57,17 @@ test.describe('auth', () => {
     await expect(page).toHaveURL(/\/login/)
   })
 
-  test('reload after login: browser mode redirects to /login (post-rebuild)', async ({
+  test('reload after login: browser mode rehydrates the session from the cookie', async ({
     page,
   }) => {
-    // Plan B+C deliberately moved JWT storage from localStorage (DOM-XSS
-    // surface) to an in-memory ConnectionsContext latch. After a hard
-    // reload, the latch is empty; ProtectedRoute then gates on
-    // useActiveConnection() != null and redirects to /login. The auth
-    // cookie remains valid server-side — re-login with the same
-    // credentials is a one-click round-trip — but the UI design no
-    // longer "remembers" the session across reload in browser mode.
-    // (Electron mode auto-restores from safeStorage; tested separately.)
+    // Bug 2 (commit 170542d, 2026-05-21): cookie-driven session
+    // rehydration. The HttpOnly geode-ui-auth cookie persists across a
+    // hard reload; ConnectionsProvider's lazy-hydrate path now follows
+    // up the empty Electron secure-store with a /api/v1/auth/whoami
+    // round-trip, synthesises a placeholder ConnectionState on 200,
+    // and ProtectedRoute admits the protected shell instead of
+    // bouncing to /login. Pre-fix the SPA dumped the operator back on
+    // /login on every refresh even though the cookie was still valid.
     await page.goto('/login')
     // Pin the profile to `default` — see the comment in "login flow"
     // for why we don't rely on the auto-selected first row.
@@ -81,7 +81,7 @@ test.describe('auth', () => {
     // tweaks don't churn this test.
     await expect(page).not.toHaveURL(/\/login$/)
     await page.reload()
-    await expect(page).toHaveURL(/\/login$/)
+    await expect(page).not.toHaveURL(/\/login$/)
   })
 
   test('logout clears auth cookie and redirects', async ({ page, context }) => {
