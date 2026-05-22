@@ -134,4 +134,52 @@ describe('useQueryHistory', () => {
     expect(entriesFor(s, 'default')[0]?.rowCount).toBe(1)
     expect(entriesFor(s, 'social')[0]?.rowCount).toBe(2)
   })
+
+  // Regression — React Minified error #185 ("Maximum update depth
+  // exceeded") observed on /dashboard after a successful login. Root
+  // cause: entriesFor() returned `s.byProfile[name] ?? []` — a NEW
+  // empty array literal each call. Zustand's useStore(selector) is
+  // built on useSyncExternalStore which compares the selector result
+  // with Object.is. Two different `[]` references are not equal, so
+  // React thought the snapshot had changed every render and
+  // re-scheduled another render to recheck — infinite loop. Caught by
+  // 2026-05-22 1Password-autofill bug report. The fix returns a
+  // shared empty-array singleton when the profile has no entries.
+  describe('selector stability (#185 regression)', () => {
+    it('returns the SAME empty-array reference every call for an unknown profile', () => {
+      const s = useQueryHistory.getState()
+      const a = entriesFor(s, 'never-recorded')
+      const b = entriesFor(s, 'also-never-recorded')
+      const c = entriesFor(s, 'never-recorded')
+      // All three must point at the same singleton — referentially
+      // stable, not just structurally equal.
+      expect(a).toBe(b)
+      expect(b).toBe(c)
+      expect(a).toEqual([])
+    })
+
+    it('returns the SAME populated-array reference across calls when state has not changed', () => {
+      useQueryHistory
+        .getState()
+        .record('default', { statement: 'A', rowCount: 1, ok: true })
+      const s = useQueryHistory.getState()
+      const a = entriesFor(s, 'default')
+      const b = entriesFor(s, 'default')
+      // Populated lookup must also be referentially stable —
+      // returning a fresh map/filter would loop just like the empty
+      // case.
+      expect(a).toBe(b)
+      expect(a.map((e) => e.statement)).toEqual(['A'])
+    })
+
+    it('empty-array singleton is frozen (cannot be mutated by callers)', () => {
+      const s = useQueryHistory.getState()
+      const empty = entriesFor(s, 'never-recorded')
+      // The singleton must be frozen so a careless caller can't push
+      // into it and corrupt every future "no entries" lookup. The
+      // freeze also documents the API contract: the array is shared,
+      // do not mutate.
+      expect(Object.isFrozen(empty)).toBe(true)
+    })
+  })
 })

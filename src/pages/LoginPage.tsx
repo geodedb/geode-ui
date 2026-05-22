@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import styled from 'styled-components'
@@ -115,8 +115,18 @@ export const LoginPage: React.FC = () => {
     return fallback
   }
 
+  // Synchronous in-flight guard. The `busy` state setter is async — a
+  // second submit fired in the same microtask tick (e.g. wa-button's
+  // own form-submit bridge running in parallel with anything else
+  // listening for the click) would otherwise see busy=false and
+  // spawn a second signIn(). The ref dedupes without waiting for
+  // React to commit the busy flip.
+  const submitInflightRef = useRef(false)
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submitInflightRef.current) return
+    submitInflightRef.current = true
     setBusy(true)
     setErr(null)
     const liveUsername = readWaInputValue('login-username', username)
@@ -128,6 +138,7 @@ export const LoginPage: React.FC = () => {
       setErr(e2 instanceof Error ? e2.message : t('auth.loginFailed'))
     } finally {
       setBusy(false)
+      submitInflightRef.current = false
     }
   }
 
@@ -248,6 +259,18 @@ export const LoginPage: React.FC = () => {
         >
           {t('auth.signInButton')}
         </button>
+        {/*
+          NO onClick={submit} on the wa-button. The wa-button is
+          form-associated via ElementInternals: clicking it programmatically
+          appends a temporary native <button type="submit"> to the
+          form, clicks that, and removes it — see
+          node_modules/@awesome.me/webawesome/dist/chunks/chunk.LAD5TI7P.js
+          handleClick. The form's `onSubmit={submit}` catches that
+          submit event, so wiring onClick={submit} here would just
+          double-fire signIn() per user click. The submitInflightRef
+          guard above dedupes regardless; this comment is here so
+          future refactors don't re-add the onClick "for safety."
+        */}
         <wa-button
           type="submit"
           appearance="filled"
@@ -257,7 +280,6 @@ export const LoginPage: React.FC = () => {
           data-testid="login-submit-btn"
           disabled={busy ? true : undefined}
           loading={busy ? true : undefined}
-          onClick={submit}
           style={{ width: '100%' }}
         >
           {t('auth.signInButton')}

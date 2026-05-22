@@ -54,15 +54,32 @@ type QueryHistoryState = {
   clear: (profileName: string) => void
 }
 
+// Stable empty-array singleton returned when a profile has no recorded
+// entries. Zustand's `useStore(selector)` is built on
+// `useSyncExternalStore` which compares each render's selector result
+// against the previous one with `Object.is`. Returning a FRESH `[]`
+// here (`s.byProfile[profileName] ?? []`) makes every comparison
+// `Object.is([], [])` → false, so React thinks the snapshot has
+// changed every render and schedules another render to recheck — the
+// classic "selector returns a new reference each call" infinite loop
+// (React Minified error #185). The fix is to hand out one shared
+// frozen empty array so the "no entries" case is referentially stable.
+// See e2e/specs/41-login-react-185-repro.spec.ts for the regression.
+const EMPTY_ENTRIES: ReadonlyArray<QueryHistoryEntry> = Object.freeze([])
+
 // entriesFor returns the recent-queries slice for the named profile
-// or an empty array when nothing has been recorded yet. Exported as
-// a selector helper so callers can `useQueryHistory((s) =>
-// entriesFor(s, name))` without re-implementing the lookup.
+// or the shared EMPTY_ENTRIES singleton when nothing has been
+// recorded yet. Exported as a selector helper so callers can
+// `useQueryHistory((s) => entriesFor(s, name))` without
+// re-implementing the lookup. The empty-array singleton is critical
+// for selector stability — see EMPTY_ENTRIES above.
 export function entriesFor(
   s: QueryHistoryState,
   profileName: string
 ): QueryHistoryEntry[] {
-  return s.byProfile[profileName] ?? []
+  // The cast back from ReadonlyArray to QueryHistoryEntry[] is safe
+  // because EMPTY_ENTRIES is frozen — no caller can mutate it.
+  return s.byProfile[profileName] ?? (EMPTY_ENTRIES as QueryHistoryEntry[])
 }
 
 export const useQueryHistory = create<QueryHistoryState>()(
