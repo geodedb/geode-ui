@@ -150,90 +150,144 @@ export const LoginPage: React.FC = () => {
   }
 
   return (
-    <Form onSubmit={submit} className="p-4 d-flex flex-column gap-3">
-      <div className="d-flex justify-content-center mb-3">
-        <Logo height={36} variant="on-light" />
-      </div>
-      <Title>{t('auth.signIn')}</Title>
+    <div className="d-flex flex-column align-items-center">
+      <Form
+        onSubmit={submit}
+        className="p-4 d-flex flex-column gap-3"
+        name="geode-login"
+        // autoComplete="on" makes the host-level intent explicit for
+        // password managers: this is a credential form, the fields
+        // declare their semantic roles, please offer/fill saved logins
+        // here. Pairs with the per-field autocomplete tokens below.
+        autoComplete="on"
+      >
+        <div className="d-flex justify-content-center mb-3">
+          <Logo height={36} variant="on-light" />
+        </div>
+        <Title>{t('auth.signIn')}</Title>
 
-      {profiles && profiles.length > 0 && !loadErr ? (
-        <ProfileFilter
-          profiles={profiles}
-          value={profile}
-          onChange={setProfile}
-        />
-      ) : null}
+        {profiles && profiles.length > 0 && !loadErr ? (
+          <ProfileFilter
+            profiles={profiles}
+            value={profile}
+            onChange={setProfile}
+          />
+        ) : null}
 
-      <Field label={t('auth.username')} htmlFor="login-username" required>
-        <WaInput
-          id="login-username"
-          type="text"
-          data-testid="login-username"
-          value={username}
-          onInput={(e) => setUsername((e.target as HTMLInputElement).value)}
-          autoComplete="username"
-          required
-        />
-      </Field>
-      <Field label={t('auth.password')} htmlFor="login-password" required>
-        <WaInput
-          id="login-password"
-          type="password"
-          data-testid="login-password"
-          value={password}
-          onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
-          autoComplete="current-password"
-          required
-        />
-      </Field>
-      {isElectron() ? (
-        <Field label={t('auth.savePassword')} htmlFor="login-savePw">
-          <WaCheckbox
-            id="login-savePw"
-            data-testid="login-save-password"
-            checked={savePw}
-            onChange={(e: Event) => {
-              const target = e.target as HTMLInputElement
-              setSavePw(target.checked)
-            }}
-            size="m"
+        <Field label={t('auth.username')} htmlFor="login-username" required>
+          <WaInput
+            id="login-username"
+            type="text"
+            data-testid="login-username"
+            value={username}
+            onInput={(e) => setUsername((e.target as HTMLInputElement).value)}
+            autoComplete="username"
+            name="username"
+            required
           />
         </Field>
-      ) : null}
-      <wa-button
-        type="submit"
-        appearance="filled"
-        variant="brand"
-        size="m"
-        role="button"
-        data-testid="login-submit-btn"
-        disabled={busy ? true : undefined}
-        loading={busy ? true : undefined}
-        onClick={submit}
-        style={{ width: '100%' }}
-      >
-        {t('auth.signInButton')}
-      </wa-button>
+        <Field label={t('auth.password')} htmlFor="login-password" required>
+          <WaInput
+            id="login-password"
+            type="password"
+            data-testid="login-password"
+            value={password}
+            onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
+            autoComplete="current-password"
+            name="password"
+            required
+          />
+        </Field>
+        {isElectron() ? (
+          <Field label={t('auth.savePassword')} htmlFor="login-savePw">
+            <WaCheckbox
+              id="login-savePw"
+              data-testid="login-save-password"
+              checked={savePw}
+              onChange={(e: Event) => {
+                const target = e.target as HTMLInputElement
+                setSavePw(target.checked)
+              }}
+              size="m"
+            />
+          </Field>
+        ) : null}
+        {/*
+          NATIVE submit anchor for password managers + Enter-key
+          submission. 1Password / Bitwarden / LastPass scan the form
+          for a real `button[type="submit"]` to click after autofill;
+          `<wa-button>` is a custom element they don't recognize. This
+          hidden native button is the first submit-typed element in
+          the form, so it becomes the implicit submit target for
+          form.requestSubmit() and password-manager auto-submit, and
+          forwards the gesture through the form's onSubmit handler
+          (same `submit` callback the visible wa-button wires to).
+          aria-hidden + tabIndex=-1 keep it off the a11y tree and tab
+          order; `display:none` would disqualify it as an implicit
+          submit target in some browsers, so we visually hide it
+          instead. See e2e/specs/40-login-password-manager.spec.ts +
+          src/pages/LoginPage.passwordManager.test.tsx for the
+          regression invariants this anchor satisfies.
+        */}
+        <button
+          type="submit"
+          aria-hidden="true"
+          tabIndex={-1}
+          data-testid="login-submit-anchor"
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0,0,0,0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+        >
+          {t('auth.signInButton')}
+        </button>
+        <wa-button
+          type="submit"
+          appearance="filled"
+          variant="brand"
+          size="m"
+          role="button"
+          data-testid="login-submit-btn"
+          disabled={busy ? true : undefined}
+          loading={busy ? true : undefined}
+          onClick={submit}
+          style={{ width: '100%' }}
+        >
+          {t('auth.signInButton')}
+        </wa-button>
+        {err && (
+          <p role="alert" className="text-danger small m-0">
+            {err}
+          </p>
+        )}
+      </Form>
       {/*
-        2026-05-21 login profile UX (Task 7): explicit toggle into the
-        OnboardProfileForm branch. Rendered inside the form (after the
-        submit button) so the operator can opt into profile creation
-        without leaving the login surface. Styled as a btn-link so it
-        reads as a secondary affordance, not a competing CTA.
+        2026-05-22 password-manager safety: the "+ Add a new profile"
+        toggle lives OUTSIDE the <form> so 1Password's "click the
+        first/only native button in the form after autofill"
+        heuristic can never land on it. It's still rendered
+        immediately below the login card visually, but it's a sibling
+        of the form, not a descendant. Pre-fix it was rendered as the
+        last child of the form and was the only native <button> there
+        — password-manager auto-submit clicked it and silently
+        swapped the page into OnboardProfileForm. See
+        e2e/specs/40-login-password-manager.spec.ts.
       */}
       <button
         type="button"
-        className="btn btn-link btn-sm p-0 align-self-start"
+        className="btn btn-link btn-sm p-0 mt-2"
         data-testid="login-add-profile"
         onClick={() => setShowOnboard(true)}
       >
         {t('auth.loginAddProfile')}
       </button>
-      {err && (
-        <p role="alert" className="text-danger small m-0">
-          {err}
-        </p>
-      )}
-    </Form>
+    </div>
   )
 }

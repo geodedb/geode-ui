@@ -130,6 +130,16 @@ export const OnboardProfileForm: React.FC<OnboardProfileFormProps> = ({
         />
       </Field>
 
+      {/*
+        Admin credentials for an UPSTREAM Geode server, not credentials
+        for THIS app. Mark them autocomplete="off" so password managers
+        don't offer to fill the operator's saved app-level login here
+        (and don't offer to save the upstream admin creds under this
+        origin). The 2026-05-22 password-manager safety pass also
+        moves the LoginPage "Add a new profile" toggle outside its
+        form for the same class of reasons — see
+        e2e/specs/40-login-password-manager.spec.ts.
+      */}
       <Field
         label={t('auth.onboardAdminUsername')}
         htmlFor="onboard-admin-username"
@@ -141,7 +151,7 @@ export const OnboardProfileForm: React.FC<OnboardProfileFormProps> = ({
           className="form-control"
           value={adminUsername}
           onChange={(e) => setAdminUsername(e.target.value)}
-          autoComplete="username"
+          autoComplete="off"
           required
         />
       </Field>
@@ -158,7 +168,7 @@ export const OnboardProfileForm: React.FC<OnboardProfileFormProps> = ({
           type="password"
           value={adminPassword}
           onChange={(e) => setAdminPassword(e.target.value)}
-          autoComplete="current-password"
+          autoComplete="new-password"
           required
         />
       </Field>
