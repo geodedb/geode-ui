@@ -383,6 +383,69 @@ describe('result panel maximize / fullscreen', () => {
 // B1 — running a query records it into useQueryHistory. The sync path
 // (client.query resolves) is exercised here; the store is reset between
 // tests so the assertion isn't polluted by other runs in this file.
+// 2026-05-22 operator-reported UX gap: "when querying the query box
+// should become read-only and support a cancel option". Pre-fix the
+// cancel button was gated on `streamMode && busy` — sync runs left
+// the operator stuck with a busy spinner and no way to bail. The
+// fix shows the cancel affordance whenever a query is in flight,
+// stream OR sync.
+describe('UX: cancel + readOnly during a sync run', () => {
+  beforeEach(() => {
+    queryMock.mockReset()
+  })
+
+  test('cancel button is visible while a sync run is in flight, even with streamMode=off', async () => {
+    // Hold the sync query open with a never-resolving promise so the
+    // busy state stays true for the assertion window.
+    queryMock.mockImplementation(() => {
+      // Never-resolving promise so the busy state stays true for the
+      // assertion window.
+      return new Promise<unknown>(() => {})
+    })
+
+    const view = render(
+      <Wrappers>
+        <QueryPage />
+      </Wrappers>
+    )
+    await waitFor(() =>
+      expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()
+    )
+    // Default state is streamMode=off (sync). Click Run.
+    fireEvent.click(view.getByRole('button', { name: /run/i }))
+    // Cancel button must appear despite streamMode=off.
+    await waitFor(() =>
+      expect(view.getByTestId('query-cancel-btn')).toBeInTheDocument()
+    )
+  })
+
+  test('clicking cancel during a sync run clears the busy state (spinner goes off)', async () => {
+    queryMock.mockImplementation(() => {
+      // Never-resolving promise so the busy state stays true for the
+      // assertion window.
+      return new Promise<unknown>(() => {})
+    })
+
+    const view = render(
+      <Wrappers>
+        <QueryPage />
+      </Wrappers>
+    )
+    await waitFor(() =>
+      expect(view.getByTestId('monaco-editor-stub')).toBeInTheDocument()
+    )
+    fireEvent.click(view.getByRole('button', { name: /run/i }))
+    const cancelBtn = await waitFor(() => view.getByTestId('query-cancel-btn'))
+    fireEvent.click(cancelBtn)
+    // Post-cancel the cancel button itself disappears (busy=false →
+    // ternary stops rendering it) — the most observable signal that
+    // busy was cleared.
+    await waitFor(() =>
+      expect(view.queryByTestId('query-cancel-btn')).toBeNull()
+    )
+  })
+})
+
 describe('B1: running a query records it into the query history', () => {
   beforeEach(() => {
     localStorage.clear()
