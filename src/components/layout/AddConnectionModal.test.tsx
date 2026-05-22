@@ -6,7 +6,12 @@ import i18n from '../../services/i18n/config'
 import { lightTheme } from '@geodedb/ui-core/theme'
 import { AddConnectionModal } from './AddConnectionModal'
 
-const mockConnectMore = jest.fn(async () => undefined)
+// connectMore now returns the new connection's connectionId so the
+// modal can call switchActive on the freshly-minted connection. Older
+// tests that don't care about the return value still work because the
+// id they get back is never asserted there.
+const mockConnectMore = jest.fn(async () => 'conn-1')
+const mockSwitchActive = jest.fn()
 
 jest.mock('../../auth/AuthProvider', () => ({
   ...jest.requireActual('../../auth/AuthProvider'),
@@ -17,6 +22,7 @@ jest.mock('../../auth/AuthProvider', () => ({
     signOut: jest.fn(),
     connectMore: mockConnectMore,
     disconnect: jest.fn(),
+    switchActive: mockSwitchActive,
   }),
 }))
 
@@ -39,17 +45,27 @@ jest.mock('../../api/electron-bridge', () => ({
   getStoredPassword: jest.fn().mockResolvedValue(null),
 }))
 
-const renderModal = (open: boolean, onClose: () => void) =>
+const renderModal = (
+  open: boolean,
+  onClose: () => void,
+  props: { initialProfile?: string } = {}
+) =>
   render(
     <I18nextProvider i18n={i18n}>
       <ThemeProvider theme={lightTheme}>
-        <AddConnectionModal open={open} onClose={onClose} />
+        <AddConnectionModal
+          open={open}
+          onClose={onClose}
+          initialProfile={props.initialProfile}
+        />
       </ThemeProvider>
     </I18nextProvider>
   )
 
 beforeEach(() => {
   mockConnectMore.mockClear()
+  mockConnectMore.mockResolvedValue('conn-1')
+  mockSwitchActive.mockClear()
 })
 
 test('does not fetch or render when closed', () => {
@@ -406,4 +422,121 @@ test('PSR-F14: closing the modal clears the password cache (no leak across opens
   } finally {
     jest.useRealTimers()
   }
+})
+
+// 2026-05-22 bug report — when the ConnectionSwitcher dropdown opens
+// the modal with a specific profile pre-selected (operator clicked an
+// inactive profile chip), the profile picker was falling back to the
+// public-profiles default ("default") because the public-profiles
+// fetch resolved AFTER the prop-applied setState and overrode it. The
+// fix: when initialProfile is set, the public-profiles default
+// discovery must NOT touch the profile state.
+describe('initialProfile precedence over public-profiles default', () => {
+  test('the picker stays on the supplied initialProfile after the public-profiles fetch resolves', async () => {
+    renderModal(true, jest.fn(), { initialProfile: 'prod' })
+    // Wait for the public-profiles fetch to settle so the racing effect
+    // would have had a chance to overwrite the prop.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: /connection/i })
+      ).toBeInTheDocument()
+    })
+    // The pre-selected profile must STILL be 'prod' — pre-fix the
+    // public-profiles' first entry ('default') won the race.
+    const select = screen.getByRole('combobox', {
+      name: /connection/i,
+    }) as HTMLSelectElement
+    expect(select.value).toBe('prod')
+  })
+
+  test('clicking submit with a pre-selected initialProfile forwards that profile name to connectMore', async () => {
+    renderModal(true, jest.fn(), { initialProfile: 'prod' })
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: /connection/i })
+      ).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByLabelText(/username/i), {
+      target: { value: 'alice' },
+    })
+    fireEvent.change(
+      screen.getByLabelText(/password/i, {
+        selector: 'input[type="password"]',
+      }),
+      { target: { value: 'pw' } }
+    )
+    await act(async () => {
+      fireEvent.submit(screen.getByLabelText(/username/i).closest('form')!)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    // connectMore must see 'prod' — not the public-profiles default
+    // 'default'.
+    expect(mockConnectMore).toHaveBeenCalledWith('alice', 'pw', 'prod', false)
+  })
+})
+
+// 2026-05-22 bug report — the operator clicked an inactive profile in
+// the ConnectionSwitcher dropdown, authenticated, and expected the UI
+// to switch to that profile. The pre-fix connectMore path adds the
+// connection but deliberately does NOT call setActive (by design —
+// "+ Add another connection" is fire-and-forget add). When the modal
+// opens with `initialProfile` set, however, the operator picked a
+// SPECIFIC profile to use; the intent is switching, not just adding.
+describe('post-connect switchActive when modal opened with initialProfile', () => {
+  test('calls switchActive with the freshly-minted connectionId after a successful connectMore', async () => {
+    mockConnectMore.mockResolvedValueOnce('new-conn-id')
+    const onClose = jest.fn()
+    renderModal(true, onClose, { initialProfile: 'prod' })
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: /connection/i })
+      ).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByLabelText(/username/i), {
+      target: { value: 'alice' },
+    })
+    fireEvent.change(
+      screen.getByLabelText(/password/i, {
+        selector: 'input[type="password"]',
+      }),
+      { target: { value: 'pw' } }
+    )
+    await act(async () => {
+      fireEvent.submit(screen.getByLabelText(/username/i).closest('form')!)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(mockSwitchActive).toHaveBeenCalledWith('new-conn-id')
+  })
+
+  test('does NOT call switchActive when modal opened without initialProfile (chrome "+ Add another connection" flow)', async () => {
+    // Same as the default flow — operator picked "+ Add another
+    // connection" from the chrome dropdown. No specific profile
+    // requested → add without switching (preserves the existing
+    // multi-connection workflow where the user explicitly switches
+    // afterwards if they want to).
+    const onClose = jest.fn()
+    renderModal(true, onClose, { initialProfile: undefined })
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: /connection/i })
+      ).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByLabelText(/username/i), {
+      target: { value: 'alice' },
+    })
+    fireEvent.change(
+      screen.getByLabelText(/password/i, {
+        selector: 'input[type="password"]',
+      }),
+      { target: { value: 'pw' } }
+    )
+    await act(async () => {
+      fireEvent.submit(screen.getByLabelText(/username/i).closest('form')!)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(mockSwitchActive).not.toHaveBeenCalled()
+  })
 })
