@@ -763,3 +763,76 @@ Acceptance criteria: `npm audit --omit=dev` and `npm audit` (full tree) both rep
 The 2026-05-21 cohort is **smaller than the 2026-05-19 cohort and dominated by defense-in-depth tightening on already-mitigated surfaces** (HSTS scheme handling, WS empty-origin tighten, metrics rate-limit, graph-name strictness, prom-parser size caps). The single notable new finding is **A1 — `POST /api/v1/users/{u}/password` not subject-bound** — which is bracketed by upstream Geode RBAC today but is a clean defense-in-depth one-line gate. The dev-only npm cluster (S1) reclassifies UP to **MEDIUM at the dev-machine boundary** because of the open-LAN webpack-dev-server attack window — production runtime image remains clean.
 
 No active RCE. No live leaked production secrets. No privilege-escalation path open without operator action. No findings warrant CVE filing. This cohort is in-doc only — no GitLab issues filed in this run.
+
+---
+
+## 2026-05-21 follow-up — Profile-onboard trust-on-first-use
+
+**Surface:** `POST /api/v1/profiles/onboard` (`internal/server/handlers_profiles_onboard.go`)
+
+**Context:** the login-profile-ux feature (commits `b16512b..1ad3650`) added an
+unauthenticated server endpoint that the SPA calls from the first-run landing
+view and the Add-profile toggle on LoginPage. The endpoint accepts a profile
+`name`, a `quic://` DSN, and an admin username + password, then opens a
+short-lived `*sql.DB` against the supplied DSN to validate the credentials
+before persisting the profile to the profile store and minting a JWT.
+
+**Threat model — trust on first use (TOFU).** The endpoint does not check
+whether the caller already controls the upstream Geode whose DSN they supply.
+The implicit trust contract is: *if the caller can authenticate against the
+upstream as an admin, they are entitled to register a profile pointing at that
+upstream and to log into the SPA as that admin*. In the current deployment
+shape — operators bringing up a geode-ui instance against geode clusters they
+already own — this is the intended behaviour: operator-owned creds gating
+operator-owned registration. Two non-obvious corollaries follow:
+
+- **An attacker who possesses admin credentials for ANY reachable geode
+  instance can add a profile pointing at it.** "Reachable" here means
+  reachable from the geode-ui process, not from the public Internet — most
+  deployments front geode-ui with a reverse proxy whose network neighbours
+  are private. The attacker gains nothing beyond what the stolen creds already
+  give them (the upstream itself is the authority), but they do gain a UI
+  surface for them.
+
+- **Profile rows are system-scope by default.** A successful onboard adds a
+  row that every subsequent SPA visitor sees on the login picker. There is
+  no review step. An operator who shares the SPA's URL with a co-worker can
+  watch the co-worker arrive at a populated picker with profiles they did
+  not configure if the co-worker (or any past visitor) onboarded their own.
+
+**Mitigations already in place:**
+
+- DSN is constrained to the `quic://` scheme; `file://`, `http://`,
+  `gopher://`, etc. are rejected at validation time.
+- Server-side DSN length cap at 1024 bytes (commit `0e7a643`) matches the SPA
+  input maxLength and prevents pathological payloads from reaching `url.Parse`,
+  `sql.Open`, or the audit pipeline.
+- The 401 response on a failed probe is generic (`"upstream rejected the
+  supplied admin credentials"`); no driver error string is echoed back, so the
+  endpoint does not leak upstream reachability or infrastructure details
+  through error-message timing oracles.
+- Per-IP rate limit (follow-up #2 from the post-feature review — tracking
+  separately) and audit events for every onboard attempt (follow-up #3) close
+  the credential-spray and forensic-trail gaps respectively.
+
+**Why not require existing-admin auth on the onboard route?** Bootstrapping.
+The endpoint is designed for the zero-profile first-run case where no operator
+has logged in yet because no profile exists to log into. Requiring an existing
+JWT would create a chicken-and-egg paradox. The same endpoint serves the
+"add another profile" flow from an authenticated SPA visit; that visit does
+have a JWT (the SPA could attach it), but the server-side handler is
+deliberately uniform — TOFU on every call — so the two entry points share a
+single code path.
+
+**Acceptance signal:** record this section as documentation that the next
+SEC review (or the next operator onboarding a multi-tenant deployment) reads
+before tightening the contract. If the deployment story shifts toward shared
+geode-ui instances serving heterogeneous tenants, this endpoint MUST be
+either (a) gated on a deployment-time `-allow-self-onboard=false` flag that
+disables the route entirely, or (b) repointed at a one-shot bootstrap token
+written to disk by the operator and consumed on first call (cf. Geode itself
+generates a one-shot admin password file on `geode auth init`).
+
+**Status:** TOFU is **accepted risk** in the current deployment shape and
+documented here as the contract. Re-evaluate when the deployment story
+changes.
