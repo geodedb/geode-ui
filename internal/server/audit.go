@@ -61,6 +61,17 @@ const (
 	auditEventProfileDeleted        = "profile_deleted"
 	auditEventProfileReloadFail     = "profile_reload_failed"
 	auditEventProfileRateLimited    = "profile_rate_limited"
+	// 2026-05-21 login-profile-ux follow-up #3: POST /api/v1/profiles/
+	// onboard is the only persistent-state mutation in the SPA that
+	// runs WITHOUT an authenticated JWT (it is the bootstrap path
+	// itself). Without an audit row there is no forensic trail for
+	// who registered which profile against which upstream. Success
+	// rows carry the minted profile_id; failure rows carry the
+	// reason classifier (probe / duplicate / validation / internal).
+	// Neither shape ever carries the admin password — only the
+	// admin username, the supplied DSN, and the profile name.
+	auditEventOnboardSuccess = "profile_onboard_success"
+	auditEventOnboardFailure = "profile_onboard_failure"
 	// SEC #300 (Scope-A): emitted alongside login_success when a role
 	// is attached to a JWT, naming the SOURCE of the role decision.
 	// Currently only `source=bootstrap` (the -admin-users CSV) fires,

@@ -63,6 +63,14 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if vErr := validateOnboardRequest(&req); vErr != nil {
+		// Audit pre-probe validation failures so a probe / spray pattern
+		// that bottoms out on malformed payloads still leaves a trail.
+		emitAudit(auditEventOnboardFailure,
+			"user", req.AdminUsername,
+			"name", req.Name,
+			"target", onboardTargetForAudit(req.DSN),
+			"reason", "validation",
+		)
 		writeEndpointError(w, vErr)
 		return
 	}
@@ -77,6 +85,12 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 	}
 	roles, err := authenticate(r.Context(), req.DSN, req.AdminUsername, req.AdminPassword)
 	if err != nil {
+		emitAudit(auditEventOnboardFailure,
+			"user", req.AdminUsername,
+			"name", req.Name,
+			"target", onboardTargetForAudit(req.DSN),
+			"reason", "upstream_rejected",
+		)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnauthorized,
 			code:        ErrCodeUnauthorized,
@@ -86,6 +100,12 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.cfg.Store == nil {
+		emitAudit(auditEventOnboardFailure,
+			"user", req.AdminUsername,
+			"name", req.Name,
+			"target", onboardTargetForAudit(req.DSN),
+			"reason", "store_unavailable",
+		)
 		writeStoreUnavailable(w)
 		return
 	}
@@ -98,6 +118,12 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, profilestore.ErrConflict) {
+			emitAudit(auditEventOnboardFailure,
+				"user", req.AdminUsername,
+				"name", req.Name,
+				"target", onboardTargetForAudit(req.DSN),
+				"reason", "duplicate_name",
+			)
 			writeEndpointError(w, &endpointError{
 				status:      http.StatusConflict,
 				code:        ErrCodeConflict,
@@ -105,6 +131,12 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		emitAudit(auditEventOnboardFailure,
+			"user", req.AdminUsername,
+			"name", req.Name,
+			"target", onboardTargetForAudit(req.DSN),
+			"reason", "store_error",
+		)
 		writeEndpointError(w, storeErrorToHTTP(err))
 		return
 	}
@@ -117,6 +149,13 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.JWT == nil {
 		// Successful create but no Issuer configured — return the
 		// profile_id so a subsequent /api/v1/auth/login can take over.
+		emitAudit(auditEventOnboardSuccess,
+			"user", req.AdminUsername,
+			"name", p.Name,
+			"profile_id", p.ID,
+			"target", onboardTargetForAudit(req.DSN),
+			"token_minted", false,
+		)
 		writeJSON(w, http.StatusOK, OnboardResponse{
 			ProfileID:   p.ID,
 			ProfileName: p.Name,
@@ -127,6 +166,13 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 
 	token, exp, err := s.cfg.JWT.Issue(req.AdminUsername, req.Name, roles, "")
 	if err != nil {
+		emitAudit(auditEventOnboardFailure,
+			"user", req.AdminUsername,
+			"name", p.Name,
+			"profile_id", p.ID,
+			"target", onboardTargetForAudit(req.DSN),
+			"reason", "mint_failed",
+		)
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
 			code:        ErrCodeInternalError,
@@ -135,6 +181,13 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expiresIn := s.mintAndSetAuthCookie(w, token, exp)
+	emitAudit(auditEventOnboardSuccess,
+		"user", req.AdminUsername,
+		"name", p.Name,
+		"profile_id", p.ID,
+		"target", onboardTargetForAudit(req.DSN),
+		"token_minted", true,
+	)
 	writeJSON(w, http.StatusOK, OnboardResponse{
 		ProfileID:   p.ID,
 		ProfileName: p.Name,
@@ -142,6 +195,21 @@ func (s *GraphServer) HandleOnboard(w http.ResponseWriter, r *http.Request) {
 		TokenType:   "bearer",
 		ExpiresIn:   expiresIn,
 	})
+}
+
+// onboardTargetForAudit extracts the host:port piece of the supplied
+// DSN for the audit-ring field. The full DSN sometimes carries
+// inline credentials in the user-info section (operator misconfig);
+// the audit pipeline's sensitive-keys list redacts any "dsn"-keyed
+// field on principle, so we emit a credential-stripped target
+// identifier instead. Falls back to the original DSN if url.Parse
+// fails — better to log SOMETHING than to drop the audit row.
+func onboardTargetForAudit(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Host == "" {
+		return dsn
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 func validateOnboardRequest(req *OnboardRequest) *endpointError {
