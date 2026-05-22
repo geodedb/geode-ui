@@ -114,7 +114,16 @@ type AuthState = {
     username: string,
     password: string,
     profile: string,
-    savePassword?: boolean
+    savePassword?: boolean,
+    // 2026-05-22 bug-fix: when the caller (the ConnectionSwitcher →
+    // AddConnectionModal flow) wants the freshly-connected profile to
+    // become the active one, the activation MUST happen inside
+    // performAuth's synchronous post-dispatch tick — calling
+    // `switchActive(newId)` from the submit handler instead races a
+    // stale React reducer snapshot (the closed-over `conns.connections`
+    // predates the `add` dispatch) and silently no-ops. See
+    // AddConnectionModal.activation.test.tsx.
+    activate?: boolean
   ) => Promise<string>
   disconnect: (connectionId: string) => void
   switchActive: (connectionId: string) => void
@@ -157,10 +166,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // the cached roles, and (optionally) persist the password through
   // the electron bridge. The two callers differ in three points:
   //
-  //   - signIn promotes the new connection to active and writes its
-  //     token into the in-memory latch (so subsequent fetches attach
-  //     it as a Bearer header). connectMore deliberately does NOT —
-  //     the existing active connection keeps focus.
+  //   - signIn ALWAYS promotes the new connection to active and
+  //     writes its token into the in-memory latch (so subsequent
+  //     fetches attach it as a Bearer header). connectMore promotes
+  //     only when the caller opts in via `activate=true` (e.g. the
+  //     ConnectionSwitcher → modal flow where the operator picked a
+  //     SPECIFIC profile); the default keeps the existing active
+  //     connection focused.
   //   - signIn parallelizes the CSRF refresh with the synchronous
   //     reducer/latch writes (PSR-F10 / #108): the round-trip starts
   //     immediately and is awaited at the end so the resolved
@@ -186,8 +198,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       username: string
       password: string
       savePassword?: boolean
+      // 2026-05-22 bug-fix: `activate=true` for connectMore promotes
+      // the freshly-minted connection to active INSIDE this function,
+      // immediately after `conns.add` dispatches. This is the
+      // only safe way to do post-add activation — a subsequent
+      // `switchActive(newId)` from the caller would race a stale
+      // closed-over `conns.connections` snapshot taken before the
+      // dispatch landed. signIn implicitly activates (mode==='signIn'
+      // branch below); connectMore preserves its "add without
+      // displacing focus" default unless `activate=true`.
+      activate?: boolean
     }): Promise<string> => {
-      const { mode, profile, username, password, savePassword } = params
+      const { mode, profile, username, password, savePassword, activate } =
+        params
       const result = await apiLogin(username, password, profile)
 
       // CSRF ordering depends on mode: signIn parallelises (F10),
@@ -206,9 +229,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         expiresAt: Date.now() + result.expires_in * 1000,
       })
 
-      // Active-connection promotion + latch only on signIn.
-      // connectMore keeps the existing active connection focused.
-      if (mode === 'signIn') {
+      // Active-connection promotion + latch on signIn always; on
+      // connectMore only when the caller opted in (activate=true). The
+      // dispatch path mirrors signIn exactly — setActive is a pure
+      // dispatch, setLatestToken updates the module-level latch, and
+      // neither reads from the closed-over React state, so this is
+      // safe to run in the same tick the `add` dispatch just ran in.
+      // Critically we do NOT defer this to the caller via
+      // `switchActive(newId)` — that path would read
+      // `conns.connections.get(newId)` against the pre-dispatch
+      // snapshot and silently no-op.
+      if (mode === 'signIn' || activate) {
         conns.setActive(result.connection_id)
         setLatestToken(result.access_token)
       }
@@ -242,13 +273,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         // double-submit pair".
         await csrfPromise
       }
-      // Return the freshly-minted connectionId. The AddConnectionModal's
-      // initialProfile-driven flow uses this to follow up with
-      // switchActive() — the operator picked a specific profile to
-      // use, the modal authenticates them against it, and now the
-      // UI needs to switch focus to that connection. signIn callers
-      // ignore the return value (signIn already setActive's via the
-      // mode === 'signIn' branch above).
+      // Return the freshly-minted connectionId. signIn callers
+      // ignore the value (signIn already setActive's via the
+      // mode === 'signIn' branch above). connectMore callers that
+      // opted into `activate=true` also do not need the id because
+      // performAuth already promoted the connection above — the id
+      // is still returned for connectMore callers that want to
+      // record the new connection for non-activation purposes
+      // (analytics, follow-up navigation keyed by id, etc.).
       return result.connection_id
     },
     [conns]
@@ -314,7 +346,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       username: string,
       password: string,
       profile: string,
-      savePassword?: boolean
+      savePassword?: boolean,
+      activate?: boolean
     ): Promise<string> =>
       performAuth({
         mode: 'connectMore',
@@ -322,6 +355,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         username,
         password,
         savePassword,
+        activate,
       }),
     [performAuth]
   )

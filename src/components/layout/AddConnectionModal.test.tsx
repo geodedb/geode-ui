@@ -103,7 +103,15 @@ test('submits via connectMore with the typed profile/credentials', async () => {
     await Promise.resolve()
     await Promise.resolve()
   })
-  expect(mockConnectMore).toHaveBeenCalledWith('alice', 'pw', 'default', false)
+  // Trailing `false` is the new `activate` arg — when initialProfile
+  // is unset, the modal preserves the add-without-switching semantics.
+  expect(mockConnectMore).toHaveBeenCalledWith(
+    'alice',
+    'pw',
+    'default',
+    false,
+    false
+  )
   expect(onClose).toHaveBeenCalled()
 })
 
@@ -471,20 +479,32 @@ describe('initialProfile precedence over public-profiles default', () => {
       await Promise.resolve()
     })
     // connectMore must see 'prod' — not the public-profiles default
-    // 'default'.
-    expect(mockConnectMore).toHaveBeenCalledWith('alice', 'pw', 'prod', false)
+    // 'default'. Trailing `true` is the activate arg: when initialProfile
+    // is set, the operator picked a specific profile and the new
+    // connection must become active.
+    expect(mockConnectMore).toHaveBeenCalledWith(
+      'alice',
+      'pw',
+      'prod',
+      false,
+      true
+    )
   })
 })
 
 // 2026-05-22 bug report — the operator clicked an inactive profile in
 // the ConnectionSwitcher dropdown, authenticated, and expected the UI
-// to switch to that profile. The pre-fix connectMore path adds the
-// connection but deliberately does NOT call setActive (by design —
-// "+ Add another connection" is fire-and-forget add). When the modal
-// opens with `initialProfile` set, however, the operator picked a
-// SPECIFIC profile to use; the intent is switching, not just adding.
-describe('post-connect switchActive when modal opened with initialProfile', () => {
-  test('calls switchActive with the freshly-minted connectionId after a successful connectMore', async () => {
+// to switch to that profile. The connectMore path adds the connection
+// but deliberately does NOT setActive by default (the "+ Add another
+// connection" chrome flow stays add-without-switching). When the
+// modal opens with `initialProfile` set, however, the operator picked
+// a SPECIFIC profile to use; activation MUST happen inside
+// performAuth's synchronous tick — see
+// AddConnectionModal.activation.test.tsx for the stale-closure repro
+// that motivated routing activation through the `activate` arg
+// instead of a post-resolve `switchActive` call.
+describe('post-connect activation when modal opened with initialProfile', () => {
+  test('passes activate=true to connectMore so AuthProvider promotes the new connection inline', async () => {
     mockConnectMore.mockResolvedValueOnce('new-conn-id')
     const onClose = jest.fn()
     renderModal(true, onClose, { initialProfile: 'prod' })
@@ -507,15 +527,24 @@ describe('post-connect switchActive when modal opened with initialProfile', () =
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(mockSwitchActive).toHaveBeenCalledWith('new-conn-id')
+    expect(mockConnectMore).toHaveBeenCalledWith(
+      'alice',
+      'pw',
+      'prod',
+      false,
+      true
+    )
+    // The modal MUST NOT also call switchActive — a post-resolve
+    // switchActive races a stale reducer snapshot (see
+    // AddConnectionModal.activation.test.tsx).
+    expect(mockSwitchActive).not.toHaveBeenCalled()
   })
 
-  test('does NOT call switchActive when modal opened without initialProfile (chrome "+ Add another connection" flow)', async () => {
-    // Same as the default flow — operator picked "+ Add another
-    // connection" from the chrome dropdown. No specific profile
-    // requested → add without switching (preserves the existing
-    // multi-connection workflow where the user explicitly switches
-    // afterwards if they want to).
+  test('passes activate=false to connectMore for the bare "+ Add another connection" chrome flow', async () => {
+    // Operator picked "+ Add another connection" — no specific
+    // profile requested → add without switching (preserves the
+    // existing multi-connection workflow where the user explicitly
+    // switches afterwards if they want to).
     const onClose = jest.fn()
     renderModal(true, onClose, { initialProfile: undefined })
     await waitFor(() => {
@@ -537,6 +566,13 @@ describe('post-connect switchActive when modal opened with initialProfile', () =
       await Promise.resolve()
       await Promise.resolve()
     })
+    expect(mockConnectMore).toHaveBeenCalledWith(
+      'alice',
+      'pw',
+      'default',
+      false,
+      false
+    )
     expect(mockSwitchActive).not.toHaveBeenCalled()
   })
 })

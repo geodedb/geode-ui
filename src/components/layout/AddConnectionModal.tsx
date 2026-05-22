@@ -35,7 +35,7 @@ export const AddConnectionModal: React.FC<Props> = ({
   initialProfile,
 }) => {
   const { t } = useTranslation()
-  const { connectMore, switchActive } = useAuth()
+  const { connectMore } = useAuth()
   // GAP-021 / #102: the public-profiles fetch + the saved-password
   // lookup now live behind a shared hook (LoginPage uses the same
   // hook). The hook's `enabled: open` knob preserves the modal-open
@@ -202,25 +202,26 @@ export const AddConnectionModal: React.FC<Props> = ({
     setBusy(true)
     setErr(null)
     try {
-      const newConnectionId = await connectMore(
-        username,
-        password,
-        profile,
-        savePw
-      )
       // 2026-05-22 bug-fix: when the modal opens with `initialProfile`
       // the operator picked a SPECIFIC profile to use (either the
       // ConnectionSwitcher's "click an inactive profile" affordance
       // or the /profiles "Create → connect" flow). Both flows want
-      // the UI to switch focus to the freshly-connected profile;
-      // connectMore by design does not setActive, so do it
-      // explicitly here. The bare "+ Add another connection" flow
-      // (no initialProfile prop) preserves the original add-without-
-      // switching semantics — the operator can switch later via the
-      // dropdown if they want to.
-      if (initialProfile) {
-        switchActive(newConnectionId)
-      }
+      // the UI to switch focus to the freshly-connected profile, so
+      // pass `activate=true` and let AuthProvider promote the new
+      // connection inside the SAME tick that dispatched the `add`.
+      // An earlier iteration of this fix called
+      // `switchActive(newConnectionId)` here, but the running
+      // submit's closure captured `switchActive` against a stale
+      // pre-dispatch reducer snapshot — the guard read
+      // `conns.connections.get(newId)` returned undefined and the
+      // call silently no-op'd. AuthProvider's activate branch
+      // sidesteps the race by dispatching setActive directly without
+      // a read.
+      //
+      // The bare "+ Add another connection" flow (no initialProfile
+      // prop) preserves the original add-without-switching semantics
+      // — operators can switch later via the dropdown if they want.
+      await connectMore(username, password, profile, savePw, !!initialProfile)
       onClose()
       setUsername('')
       setPassword('')
