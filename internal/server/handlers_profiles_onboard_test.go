@@ -79,6 +79,36 @@ func TestOnboard_RejectsInvalidDSNScheme(t *testing.T) {
 	}
 }
 
+// TestOnboard_RejectsOversizeDSN pins the 1024-byte ceiling on the
+// supplied DSN (matches the SPA's OnboardProfileForm maxLength). A
+// pathologically long DSN is rejected pre-probe so the upstream
+// parser and any logging pipeline never see the payload.
+func TestOnboard_RejectsOversizeDSN(t *testing.T) {
+	srv := New(Config{})
+	// 1025 bytes: 13-byte scheme+host prefix + 1012 trailing query
+	// padding to overshoot the 1024 cap by one byte.
+	oversize := "quic://x:3141?" + strings.Repeat("p", 1011)
+	if len(oversize) <= 1024 {
+		t.Fatalf("test fixture is %d bytes; expected >1024", len(oversize))
+	}
+	body, _ := json.Marshal(map[string]string{
+		"name":           "prod",
+		"dsn":            oversize,
+		"admin_username": "alice",
+		"admin_password": "pw", // pragma: allowlist secret
+	})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/profiles/onboard", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.HandleOnboard(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "1024") {
+		t.Errorf("body should cite the 1024-byte cap; got %s", rec.Body.String())
+	}
+}
+
 func TestOnboard_HappyPath(t *testing.T) {
 	iss := newTestIssuer(t)
 	store := newFakeProfileStore()

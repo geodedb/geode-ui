@@ -155,6 +155,19 @@ func validateOnboardRequest(req *OnboardRequest) *endpointError {
 			description: "name, dsn, admin_username, and admin_password are required",
 		}
 	}
+	// Defense in depth: the SPA's OnboardProfileForm caps the DSN
+	// input at maxLength={1024}, but a programmatic caller is not
+	// bound by that — and url.Parse + sql.Open will happily process
+	// pathologically long DSNs that could feed an upstream parser DoS
+	// or smuggle large payloads through a logging pipeline. Mirror
+	// the SPA's bound on the server so the limit is the contract.
+	if len(req.DSN) > 1024 {
+		return &endpointError{
+			status:      http.StatusBadRequest,
+			code:        ErrCodeInvalidRequest,
+			description: "dsn must be at most 1024 bytes",
+		}
+	}
 	u, err := url.Parse(req.DSN)
 	if err != nil || u.Scheme != "quic" || u.Host == "" {
 		return &endpointError{
