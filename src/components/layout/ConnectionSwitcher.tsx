@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
@@ -6,6 +6,7 @@ import { Icon } from '@geodedb/ui-core'
 import { useConnections, useActiveConnection } from '../../api/connections'
 import { useAuth } from '../../auth/AuthProvider'
 import { Dropdown, DropdownItem } from '../../services/webawesome/components'
+import { usePublicProfilesWithStoredPasswords } from '../../lib/usePublicProfilesWithStoredPasswords'
 
 const SwitcherWrap = styled.div`
   position: relative;
@@ -32,13 +33,29 @@ const disconnectStyle: React.CSSProperties = {
 }
 
 export interface Props {
-  onAddRequested: () => void
+  // onAddRequested is fired in two situations:
+  //   1) no profile name — the "+ Add another connection" item, which
+  //      opens AddConnectionModal in its default discovery flow.
+  //   2) profile name argument — the operator clicked a CONFIGURED
+  //      profile they aren't connected to yet, so the modal opens
+  //      pre-selected to that profile and the operator only has to
+  //      enter credentials. Wired into AddConnectionModal's
+  //      `initialProfile` prop by the parent Shell.
+  onAddRequested: (initialProfile?: string) => void
 }
 
 // Sentinel value used on the "Add another connection" dropdown item.
 // The wa-select handler routes any item with this value to the
-// onAddRequested callback rather than switchActive(connectionId).
+// onAddRequested callback (no initialProfile) rather than
+// switchActive(connectionId).
 const ADD_ITEM_VALUE = '__add__'
+
+// Prefix used on the `value` of "configured-but-not-active" profile
+// rows so the wa-select handler can tell them apart from
+// connection-id rows. Connection ids are server-issued opaque
+// strings; the prefix gives us a stable, parseable disambiguator
+// without changing the connection-id wire format.
+const PROFILE_ITEM_PREFIX = '__profile__:'
 
 // React-synthetic-event `stopPropagation` only stops React's
 // synthetic delegation chain — the native click event continues to
@@ -73,6 +90,40 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   const { connections, activeId, loading } = useConnections()
   const active = useActiveConnection()
   const { disconnect, switchActive } = useAuth()
+
+  // Public-profiles fetch — the same shared hook LoginPage and
+  // AddConnectionModal use. Surfaces every CONFIGURED profile name so
+  // the dropdown lists profiles the operator hasn't connected to yet
+  // (2026-05-22 bug report: only the active connection + "Add
+  // another connection" were visible). The hook caches the fetch and
+  // owns its own cancellation seam.
+  const { profilesState } = usePublicProfilesWithStoredPasswords()
+  const publicProfiles = profilesState.profiles
+
+  // Build the merged row list:
+  //   - one entry per active connection (with disconnect ×)
+  //   - one entry per configured-but-inactive profile (click → open
+  //     AddConnectionModal pre-selected)
+  // Dedupe is keyed on profile name: a configured profile that's
+  // already in `connections` is rendered ONLY as the connection-id
+  // row so the active state + disconnect affordance survive.
+  const rows = useMemo(() => {
+    const activeRows = [...connections.values()].map((c) => ({
+      kind: 'active' as const,
+      key: c.connectionId,
+      profileName: c.profileName,
+      connectionId: c.connectionId,
+    }))
+    const activeNames = new Set(activeRows.map((r) => r.profileName))
+    const inactiveRows = (publicProfiles ?? [])
+      .filter((p) => !activeNames.has(p.name))
+      .map((p) => ({
+        kind: 'inactive' as const,
+        key: `profile-${p.name}`,
+        profileName: p.name,
+      }))
+    return [...activeRows, ...inactiveRows]
+  }, [connections, publicProfiles])
 
   // <wa-dropdown-item>'s Lit `updated()` lifecycle forcibly sets
   // role="menuitem" + clears aria-checked on first commit (it only
@@ -128,7 +179,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
           size="s"
           role="button"
           data-testid="connection-trigger"
-          onClick={onAddRequested}
+          onClick={() => onAddRequested()}
           aria-label={t('connection.connect')}
         >
           {t('connection.noActive')}
@@ -154,6 +205,11 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
             ''
           if (value === ADD_ITEM_VALUE) {
             onAddRequested()
+          } else if (value.startsWith(PROFILE_ITEM_PREFIX)) {
+            // Configured-but-inactive profile picked. Open the modal
+            // pre-selected to that profile name so the operator only
+            // has to type credentials.
+            onAddRequested(value.slice(PROFILE_ITEM_PREFIX.length))
           } else if (value) {
             switchActive(value)
           }
@@ -169,54 +225,75 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
         >
           {active?.profileName ?? t('connection.noActive')}
         </wa-button>
-        {[...connections.values()].map((c) => (
-          <DropdownItem
-            key={c.connectionId}
-            value={c.connectionId}
-            // Preserve the existing test-id surface so e2e + unit
-            // tests can find rows by connection id. Role + aria-checked
-            // are also set here for React's initial commit (which
-            // wins for the seed item that re-reconciles), but the
-            // useEffect above is the authoritative writer: WA's
-            // <wa-dropdown-item> lifecycle overwrites both attributes
-            // on first commit, so a freshly-mounted row would
-            // otherwise render as role="menuitem" without
-            // aria-checked. The data-connection-row + data-* attrs
-            // give the effect a stable target.
-            role="menuitemradio"
-            aria-checked={c.connectionId === activeId}
-            aria-label={c.profileName}
-            data-testid={`connection-row-${c.connectionId}`}
-            data-connection-row=""
-            data-connection-row-active={
-              c.connectionId === activeId ? 'true' : 'false'
-            }
-          >
-            <span style={rowInnerStyle}>
-              <span>{c.profileName}</span>
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={`${t('connection.disconnect')}: ${c.profileName}`}
-                data-testid={`connection-disconnect-${c.connectionId}`}
-                ref={bindCaptureClick(() => disconnect(c.connectionId))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.stopPropagation()
-                    e.preventDefault()
-                    disconnect(c.connectionId)
-                  }
-                }}
-                style={disconnectStyle}
-              >
-                <Icon
-                  name="xmark"
-                  label={`${t('connection.disconnect')}: ${c.profileName}`}
-                />
+        {rows.map((row) => {
+          return row.kind === 'active' ? (
+            <DropdownItem
+              key={row.key}
+              value={row.connectionId}
+              // Preserve the existing test-id surface so e2e + unit
+              // tests can find rows by connection id. Role + aria-checked
+              // are also set here for React's initial commit (which
+              // wins for the seed item that re-reconciles), but the
+              // useEffect above is the authoritative writer: WA's
+              // <wa-dropdown-item> lifecycle overwrites both attributes
+              // on first commit, so a freshly-mounted row would
+              // otherwise render as role="menuitem" without
+              // aria-checked. The data-connection-row + data-* attrs
+              // give the effect a stable target.
+              role="menuitemradio"
+              aria-checked={row.connectionId === activeId}
+              aria-label={row.profileName}
+              data-testid={`connection-row-${row.connectionId}`}
+              data-connection-row=""
+              data-connection-row-active={
+                row.connectionId === activeId ? 'true' : 'false'
+              }
+            >
+              <span style={rowInnerStyle}>
+                <span>{row.profileName}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${t('connection.disconnect')}: ${row.profileName}`}
+                  data-testid={`connection-disconnect-${row.connectionId}`}
+                  ref={bindCaptureClick(() => disconnect(row.connectionId))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      disconnect(row.connectionId)
+                    }
+                  }}
+                  style={disconnectStyle}
+                >
+                  <Icon
+                    name="xmark"
+                    label={`${t('connection.disconnect')}: ${row.profileName}`}
+                  />
+                </span>
               </span>
-            </span>
-          </DropdownItem>
-        ))}
+            </DropdownItem>
+          ) : (
+            // Inactive (configured-but-not-connected) profile row.
+            // wa-select dispatches with value=PROFILE_ITEM_PREFIX+name;
+            // the dropdown's handler routes that to onAddRequested
+            // with the profile name so AddConnectionModal opens
+            // pre-selected. No disconnect × — there's nothing to
+            // disconnect from a profile we aren't connected to.
+            <DropdownItem
+              key={row.key}
+              value={`${PROFILE_ITEM_PREFIX}${row.profileName}`}
+              role="menuitem"
+              aria-label={`${t('connection.connect')}: ${row.profileName}`}
+              data-testid={`connection-row-profile-${row.profileName}`}
+            >
+              <span style={rowInnerStyle}>
+                <span>{row.profileName}</span>
+                <Icon name="plug" />
+              </span>
+            </DropdownItem>
+          )
+        })}
         <DropdownItem
           value={ADD_ITEM_VALUE}
           role="menuitem"

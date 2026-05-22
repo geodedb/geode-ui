@@ -1,6 +1,6 @@
 /// <reference types="@testing-library/jest-dom" />
 import React, { useEffect } from 'react'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 import { I18nextProvider } from 'react-i18next'
 import i18n from '../../services/i18n/config'
@@ -22,6 +22,28 @@ jest.mock('../../api/auth', () => ({
   ...jest.requireActual('../../api/auth'),
   fetchPublicProfiles: jest.fn(async () => []),
 }))
+
+// flushPublicProfiles waits for the mocked fetchPublicProfiles
+// microtask to commit a setState into the React tree. Tests that
+// don't otherwise wait for any async work would leak the resolve
+// into the next test's setup (firing an act() warning); calling
+// this at the start of each existing test gates the render past
+// the fetch.
+async function flushPublicProfiles(): Promise<void> {
+  await waitFor(() =>
+    expect(
+      (
+        jest.requireMock('../../api/auth') as {
+          fetchPublicProfiles: jest.Mock
+        }
+      ).fetchPublicProfiles
+    ).toHaveBeenCalled()
+  )
+  // One tick for the promise resolution → setState commit.
+  await act(async () => {
+    await Promise.resolve()
+  })
+}
 
 const Seed: React.FC<{ count: number }> = ({ count }) => {
   const { add, setActive } = useConnections()
@@ -78,13 +100,14 @@ const selectDropdownItem = (item: HTMLElement) => {
   })
 }
 
-test('shows all active connections; clicking a row switches active', () => {
+test('shows all active connections; clicking a row switches active', async () => {
   renderWithProviders(
     <>
       <Seed count={2} />
       <ConnectionSwitcher onAddRequested={() => undefined} />
     </>
   )
+  await flushPublicProfiles()
   // The trigger button shows the active profile name.
   expect(screen.getByTestId('connection-trigger')).toHaveTextContent('prof0')
   // Both rows are rendered as wa-dropdown-item children.
@@ -99,26 +122,28 @@ test('shows all active connections; clicking a row switches active', () => {
   expect(screen.getByTestId('connection-trigger')).toHaveTextContent('prof1')
 })
 
-test('clicking a row updates the latch to the new active token', () => {
+test('clicking a row updates the latch to the new active token', async () => {
   renderWithProviders(
     <>
       <Seed count={2} />
       <ConnectionSwitcher onAddRequested={() => undefined} />
     </>
   )
+  await flushPublicProfiles()
   // After Seed, active is c0 → latch holds tok0.
   expect(getLatestToken()).toBe('tok0')
   selectDropdownItem(screen.getByTestId('connection-row-c1'))
   expect(getLatestToken()).toBe('tok1')
 })
 
-test('clicking × on a row disconnects without switching active', () => {
+test('clicking × on a row disconnects without switching active', async () => {
   renderWithProviders(
     <>
       <Seed count={2} />
       <ConnectionSwitcher onAddRequested={() => undefined} />
     </>
   )
+  await flushPublicProfiles()
   // Active is c0; disconnecting c1 should remove it from the
   // dropdown but leave c0 active (the trigger keeps showing prof0).
   fireEvent.click(screen.getByTestId('connection-disconnect-c1'))
@@ -126,7 +151,7 @@ test('clicking × on a row disconnects without switching active', () => {
   expect(screen.getByTestId('connection-trigger')).toHaveTextContent('prof0')
 })
 
-test('selecting the add-connection item invokes onAddRequested', () => {
+test('selecting the add-connection item invokes onAddRequested', async () => {
   const onAddRequested = jest.fn()
   renderWithProviders(
     <>
@@ -134,12 +159,14 @@ test('selecting the add-connection item invokes onAddRequested', () => {
       <ConnectionSwitcher onAddRequested={onAddRequested} />
     </>
   )
+  await flushPublicProfiles()
   selectDropdownItem(screen.getByTestId('connection-add'))
   expect(onAddRequested).toHaveBeenCalledTimes(1)
 })
 
-test('renders an empty state when there are no active connections', () => {
+test('renders an empty state when there are no active connections', async () => {
   renderWithProviders(<ConnectionSwitcher onAddRequested={() => undefined} />)
+  await flushPublicProfiles()
   // The "No active connection" trigger button is the empty state. Use
   // a partial regex on the i18n value (en: "No active connection").
   expect(screen.getByText(/no active connection/i)).toBeInTheDocument()

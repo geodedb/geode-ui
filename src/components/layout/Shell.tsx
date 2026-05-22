@@ -224,6 +224,15 @@ export const Shell: React.FC = () => {
   const { t } = useTranslation()
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  // 2026-05-22 ConnectionSwitcher fix: when the operator picks a
+  // configured-but-not-active profile from the dropdown, that profile
+  // name flows into AddConnectionModal's `initialProfile` prop so the
+  // modal opens pre-selected and the operator only has to enter
+  // credentials. undefined for the default "Add another connection"
+  // entry point.
+  const [addInitialProfile, setAddInitialProfile] = useState<
+    string | undefined
+  >(undefined)
   const location = useLocation()
 
   // Auto-close the drawer on route change so a tap on a nav link
@@ -249,7 +258,12 @@ export const Shell: React.FC = () => {
         <BrandLink to="/" aria-label={t('brand.home')}>
           <Logo height={28} />
         </BrandLink>
-        <ConnectionSwitcher onAddRequested={() => setAddOpen(true)} />
+        <ConnectionSwitcher
+          onAddRequested={(profile) => {
+            setAddInitialProfile(profile)
+            setAddOpen(true)
+          }}
+        />
         <DesktopNav>
           {/*
             Bug 1 (2026-05-21 bug-fix bundle): Dashboard is the new
@@ -306,7 +320,18 @@ export const Shell: React.FC = () => {
       <Body id="main-content">
         <Outlet />
       </Body>
-      <AddConnectionModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <AddConnectionModal
+        open={addOpen}
+        onClose={() => {
+          setAddOpen(false)
+          // Clear the staged initial profile on close so the next
+          // "+ Add another connection" entry-point falls back to the
+          // public-profiles default discovery rather than reusing
+          // whatever was last selected.
+          setAddInitialProfile(undefined)
+        }}
+        initialProfile={addInitialProfile}
+      />
     </>
   )
 }
