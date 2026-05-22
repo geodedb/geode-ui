@@ -71,13 +71,22 @@ jest.mock('../components/dashboard/AuditEventMixCard', () => ({
 
 import { DashboardPage } from './DashboardPage'
 import { useQueryHistory } from '../lib/useQueryHistory'
+import { ConnectionsProvider } from '../api/connections'
 
 function renderPage(): ReturnType<typeof render> {
   return render(
     <MemoryRouter>
       <LocalizationProvider>
         <ThemeProvider theme={theme}>
-          <DashboardPage />
+          {/* 2026-05-22 bug-fix: DashboardPage now reads the active
+              profile name via useActiveConnection() to scope the
+              session-query-history card. Mount an empty
+              ConnectionsProvider so the hook resolves to null and
+              the page falls through to the '' (no-profile) bucket
+              the test fixture seeds below. */}
+          <ConnectionsProvider initialConnections={[]}>
+            <DashboardPage />
+          </ConnectionsProvider>
         </ThemeProvider>
       </LocalizationProvider>
     </MemoryRouter>
@@ -87,15 +96,22 @@ function renderPage(): ReturnType<typeof render> {
 describe('DashboardPage', () => {
   beforeEach(() => {
     localStorage.clear()
+    // 2026-05-22 bug-fix: query history is keyed per profile. Seed
+    // under the empty-string profile key — DashboardPage reads
+    // entriesFor(state, activeConn?.profileName ?? '') and the test
+    // mount has no active connection wired, so '' is the bucket the
+    // page will pick.
     useQueryHistory.setState({
-      entries: [
-        {
-          statement: 'MATCH (a) RETURN a',
-          ranAt: Date.now(),
-          rowCount: 1,
-          ok: true,
-        },
-      ],
+      byProfile: {
+        '': [
+          {
+            statement: 'MATCH (a) RETURN a',
+            ranAt: Date.now(),
+            rowCount: 1,
+            ok: true,
+          },
+        ],
+      },
     })
   })
 

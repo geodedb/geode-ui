@@ -63,11 +63,16 @@ jest.mock('../api/client', () => ({
 }))
 
 import { QueryPage } from './QueryPage'
+import { ConnectionsProvider } from '../api/connections'
 
 const Wrappers: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <MemoryRouter initialEntries={['/']}>
     <LocalizationProvider>
-      <ThemeProvider theme={theme}>{children}</ThemeProvider>
+      <ThemeProvider theme={theme}>
+        <ConnectionsProvider initialConnections={[]}>
+          {children}
+        </ConnectionsProvider>
+      </ThemeProvider>
     </LocalizationProvider>
   </MemoryRouter>
 )

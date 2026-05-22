@@ -110,6 +110,7 @@ class MockWebSocket implements MockWS {
 
 import { QueryPage } from './QueryPage'
 import { useQueryPageStore } from '../lib/queryPageStore'
+import { ConnectionsProvider } from '../api/connections'
 
 beforeEach(() => {
   tableViewRefs.length = 0
@@ -128,7 +129,9 @@ async function renderStreamingPage(): Promise<void> {
     <MemoryRouter>
       <LocalizationProvider>
         <ThemeProvider theme={theme}>
-          <QueryPage />
+          <ConnectionsProvider initialConnections={[]}>
+            <QueryPage />
+          </ConnectionsProvider>
         </ThemeProvider>
       </LocalizationProvider>
     </MemoryRouter>
@@ -187,7 +190,9 @@ describe('PERF-2026-05-17-02 (#239): consecutive WS batches inside one animation
       <MemoryRouter>
         <LocalizationProvider>
           <ThemeProvider theme={theme}>
-            <QueryPage />
+            <ConnectionsProvider initialConnections={[]}>
+              <QueryPage />
+            </ConnectionsProvider>
           </ThemeProvider>
         </LocalizationProvider>
       </MemoryRouter>

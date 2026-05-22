@@ -90,7 +90,8 @@ jest.mock('../api/client', () => ({
 }))
 
 import { QueryPage } from './QueryPage'
-import { useQueryHistory } from '../lib/useQueryHistory'
+import { useQueryHistory, entriesFor } from '../lib/useQueryHistory'
+import { ConnectionsProvider } from '../api/connections'
 import { useQueryPageStore } from '../lib/queryPageStore'
 
 // The QueryPage editor + result state lives in a module-level zustand
@@ -112,7 +113,15 @@ const Wrappers: React.FC<{
 }> = ({ children, initialEntries = ['/'] }) => (
   <MemoryRouter initialEntries={initialEntries}>
     <LocalizationProvider>
-      <ThemeProvider theme={theme}>{children}</ThemeProvider>
+      <ThemeProvider theme={theme}>
+        {/* 2026-05-22 bug-fix: QueryPage now reads useActiveConnection
+            so the per-profile query-history record(...) calls land in
+            the right bucket. Empty provider so the hook returns null
+            (history records under the '' profile slot). */}
+        <ConnectionsProvider initialConnections={[]}>
+          {children}
+        </ConnectionsProvider>
+      </ThemeProvider>
     </LocalizationProvider>
   </MemoryRouter>
 )
@@ -377,7 +386,7 @@ describe('result panel maximize / fullscreen', () => {
 describe('B1: running a query records it into the query history', () => {
   beforeEach(() => {
     localStorage.clear()
-    useQueryHistory.setState({ entries: [] })
+    useQueryHistory.setState({ byProfile: {} })
     queryMock.mockReset()
     queryMock.mockResolvedValue({
       columns: [{ name: 'n', type: 'STRING' }],
@@ -398,10 +407,13 @@ describe('B1: running a query records it into the query history', () => {
     )
     fireEvent.click(view.getByRole('button', { name: /run/i }))
     await waitFor(() => expect(view.getByRole('tablist')).toBeInTheDocument())
+    // 2026-05-22 bug-fix: history is per-profile. Test mount has no
+    // ConnectionsProvider entry, so the active profile resolves to
+    // '' and the recorded entry lands in that bucket.
     await waitFor(() =>
-      expect(useQueryHistory.getState().entries).toHaveLength(1)
+      expect(entriesFor(useQueryHistory.getState(), '')).toHaveLength(1)
     )
-    const entry = useQueryHistory.getState().entries[0]
+    const entry = entriesFor(useQueryHistory.getState(), '')[0]
     expect(entry?.statement).toContain('MATCH (n) RETURN n LIMIT 25')
     expect(entry?.ok).toBe(true)
     expect(entry?.rowCount).toBe(2)
@@ -418,7 +430,7 @@ describe('B1: running a query records it into the query history', () => {
 describe('QUAL #289: rapid double-Run race', () => {
   beforeEach(() => {
     localStorage.clear()
-    useQueryHistory.setState({ entries: [] })
+    useQueryHistory.setState({ byProfile: {} })
     queryMock.mockReset()
   })
 

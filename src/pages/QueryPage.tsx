@@ -16,6 +16,7 @@ import { ResultPanel } from '../components/results/ResultPanel'
 import { client } from '../api/client'
 import { streamQuery, StreamHandle } from '../lib/queryStream'
 import { useQueryHistory } from '../lib/useQueryHistory'
+import { useActiveConnection } from '../api/connections'
 import { useQueryStore } from '../lib/queryStore'
 import { useQueryPageStore } from '../lib/queryPageStore'
 import { useLspSettings } from '../lib/lspSettings'
@@ -154,6 +155,14 @@ function streamStateToResp(s: StreamState): QueryResp {
 
 export const QueryPage: React.FC = () => {
   const { t } = useTranslation()
+  // 2026-05-22 bug-fix: query-history is keyed per profile. Read the
+  // active connection's profile name here so every record(...) call
+  // below routes into the right bucket. Falls back to '' when there
+  // is no active connection (test mounts, first-paint pre-hydrate)
+  // so an orphan record lands in the always-clearable empty-profile
+  // slot rather than polluting a real profile's view.
+  const activeConn = useActiveConnection()
+  const historyProfile = activeConn?.profileName ?? ''
   // queryPageStore is a module-level singleton — its state survives the
   // QueryPage component being unmounted by router navigation (user
   // clicks Schema, then comes back to Query). signOut + switchActive in
@@ -318,7 +327,7 @@ export const QueryPage: React.FC = () => {
   // settled by then) and runStmtRef is a stable ref.
   useEffect(() => {
     if (stream.status === 'done' || stream.status === 'error') {
-      useQueryHistory.getState().record({
+      useQueryHistory.getState().record(historyProfile, {
         statement: runStmtRef.current,
         rowCount:
           stream.status === 'done'
@@ -382,7 +391,7 @@ export const QueryPage: React.FC = () => {
       // already-rendered) response.
       if (runSyncGenRef.current !== myGen) return
       setResp(r)
-      useQueryHistory.getState().record({
+      useQueryHistory.getState().record(historyProfile, {
         statement: ranStmt,
         rowCount: r.row_count ?? r.rows.length,
         ok: true,
@@ -390,9 +399,11 @@ export const QueryPage: React.FC = () => {
     } catch (e: unknown) {
       if (runSyncGenRef.current !== myGen) return
       setErr(e instanceof Error ? e.message : t('errors.queryFailed'))
-      useQueryHistory
-        .getState()
-        .record({ statement: ranStmt, rowCount: null, ok: false })
+      useQueryHistory.getState().record(historyProfile, {
+        statement: ranStmt,
+        rowCount: null,
+        ok: false,
+      })
     } finally {
       // setBusy is intentionally NOT gated on the generation check:
       // the user must always see the spinner stop when their MOST

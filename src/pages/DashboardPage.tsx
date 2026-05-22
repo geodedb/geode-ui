@@ -8,8 +8,9 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useOverviewData } from '../lib/useOverviewData'
-import { useQueryHistory } from '../lib/useQueryHistory'
+import { entriesFor, useQueryHistory } from '../lib/useQueryHistory'
 import { useMetricsPolling } from '../lib/useMetricsPolling'
+import { useActiveConnection } from '../api/connections'
 import { GraphsCard } from '../components/dashboard/GraphsCard'
 import { RecentQueriesCard } from '../components/dashboard/RecentQueriesCard'
 import { ConnectionCard } from '../components/dashboard/ConnectionCard'
@@ -37,8 +38,15 @@ const gridStyle: React.CSSProperties = {
 export const DashboardPage: React.FC = () => {
   const { t } = useTranslation()
   const ov = useOverviewData()
-  const entries = useQueryHistory((s) => s.entries)
-  const clear = useQueryHistory((s) => s.clear)
+  // 2026-05-22 bug-fix: scope the Session-query-history card to the
+  // active profile. Pre-fix the store was a single global array so
+  // switching profiles in the ConnectionSwitcher leaked the prior
+  // profile's recent queries into the new profile's dashboard view.
+  const activeConn = useActiveConnection()
+  const profileName = activeConn?.profileName ?? ''
+  const entries = useQueryHistory((s) => entriesFor(s, profileName))
+  const clearForProfile = useQueryHistory((s) => s.clear)
+  const clear = (): void => clearForProfile(profileName)
   // Geode-metrics polling. The hook returns state='disabled' the first
   // time the proxy reports METRICS_DISABLED (the operator hasn't set
   // GEODE_METRICS_URL on the geode-ui server); in that case metricsHidden
