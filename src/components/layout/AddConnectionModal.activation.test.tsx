@@ -12,6 +12,7 @@ import {
   setLatestToken,
 } from '../../api/connections'
 import { resetCsrfTokenForTests } from '../../api/csrf'
+import { useQueryPageStore } from '../../lib/queryPageStore'
 
 // 2026-05-22 bug report — operator clicks an inactive profile in the
 // top-left ConnectionSwitcher dropdown, authenticates against it, and
@@ -201,5 +202,94 @@ describe('AddConnectionModal post-submit profile activation (real providers)', (
     // chrome's stale switchActive closure made this a silent no-op and
     // activeId stayed at 'cid-initial'.
     expect(observedActiveId).toBe('cid-new-prod')
+  })
+
+  // 2026-05-22 follow-up bug — after my first fix made `activeId`
+  // flip correctly, the user still reported that the UI "doesn't go
+  // to the profile". Root cause: AuthProvider's `switchActive` resets
+  // the cross-route `useQueryPageStore` (so the new profile starts
+  // with a fresh editor + empty result), but the new activate-via-
+  // performAuth branch did NOT. The chrome label moved, but the
+  // QueryPage kept showing the prior profile's submitted statement
+  // and result — looks identical to "the switch didn't take" because
+  // the page content is what the operator is staring at.
+  test('connectMore-with-activate also resets queryPageStore so the prior profile state cannot bleed through', async () => {
+    let captured: ReturnType<typeof useAuth> | null = null
+    const AuthCapturer: React.FC = () => {
+      captured = useAuth()
+      return null
+    }
+
+    // Pre-populate queryPageStore with state that would survive the
+    // route if not explicitly reset. submittedStmt is the visible
+    // tell: QueryPage re-renders the last submitted statement and
+    // its result; if it persists across an activate, the new profile
+    // appears to "still show the previous profile".
+    useQueryPageStore.getState().setStmt('MATCH (n:Movie) RETURN n LIMIT 5')
+    useQueryPageStore
+      .getState()
+      .setSubmittedStmt('MATCH (n:Movie) RETURN n LIMIT 5')
+
+    const onClose = jest.fn()
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ThemeProvider theme={lightTheme}>
+          <ConnectionsProvider>
+            <AuthProvider>
+              <AuthCapturer />
+              <ActiveObserver />
+              <AddConnectionModal
+                open
+                onClose={onClose}
+                initialProfile="prod"
+              />
+            </AuthProvider>
+          </ConnectionsProvider>
+        </ThemeProvider>
+      </I18nextProvider>
+    )
+
+    await act(async () => {
+      captured!.signIn('alice', 'pw', 'default').catch(() => undefined)
+      for (let i = 0; i < 12; i += 1) {
+        // eslint-disable-next-line no-await-in-loop -- intentional microtask drain
+        await Promise.resolve()
+      }
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: /connection/i })
+      ).toBeInTheDocument()
+    })
+
+    fireEvent.change(screen.getByLabelText(/username/i), {
+      target: { value: 'bob' },
+    })
+    fireEvent.change(
+      screen.getByLabelText(/password/i, {
+        selector: 'input[type="password"]',
+      }),
+      { target: { value: 'pw' } }
+    )
+    await act(async () => {
+      fireEvent.submit(screen.getByLabelText(/username/i).closest('form')!)
+      for (let i = 0; i < 16; i += 1) {
+        // eslint-disable-next-line no-await-in-loop -- drain through dynamic import of queryPageStore reset
+        await Promise.resolve()
+      }
+    })
+
+    expect(observedActiveId).toBe('cid-new-prod')
+    // RELEASE-BLOCKER: the queryPageStore must be reset. Pre-fix the
+    // store still held 'MATCH (n:Movie) RETURN n LIMIT 5' (the
+    // previous profile's state) and the new profile would render
+    // with that prior submittedStmt + result.
+    const state = useQueryPageStore.getState()
+    expect(state.submittedStmt).toBe('')
+    // The default seed statement is the store's reset value; the
+    // exact text isn't load-bearing for this assertion — what matters
+    // is that whatever we set above is gone.
+    expect(state.stmt).not.toBe('MATCH (n:Movie) RETURN n LIMIT 5')
   })
 })
