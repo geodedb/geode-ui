@@ -35,7 +35,7 @@ export const AddConnectionModal: React.FC<Props> = ({
   initialProfile,
 }) => {
   const { t } = useTranslation()
-  const { connectMore } = useAuth()
+  const { connectMore, switchActive } = useAuth()
   // GAP-021 / #102: the public-profiles fetch + the saved-password
   // lookup now live behind a shared hook (LoginPage uses the same
   // hook). The hook's `enabled: open` knob preserves the modal-open
@@ -69,15 +69,22 @@ export const AddConnectionModal: React.FC<Props> = ({
 
   // Apply the discovered default profile name in a separate effect so
   // the public-profiles fetcher's single-state-update invariant stays
-  // clean (matches LoginPage's pattern).
+  // clean (matches LoginPage's pattern). 2026-05-22 fix: skip the
+  // assignment when the caller supplied `initialProfile` — the
+  // public-profiles fetch resolves AFTER the modal opens and would
+  // otherwise overwrite the prop-applied profile (the operator's
+  // explicit pick from the ConnectionSwitcher dropdown). Pinned by
+  // AddConnectionModal.test.tsx#initialProfile-precedence-over-public-profiles-default.
   useEffect(() => {
+    if (initialProfile) return
     if (profilesState.initialProfileName) {
       setProfile(profilesState.initialProfileName)
     }
-  }, [profilesState.initialProfileName])
+  }, [profilesState.initialProfileName, initialProfile])
 
   // 2026-05-21 bug-fix: if the caller supplied `initialProfile` (the
-  // post-Create flow on /profiles), it wins over the public-profiles
+  // post-Create flow on /profiles, OR the 2026-05-22 ConnectionSwitcher
+  // "click an inactive profile" flow), it wins over the public-profiles
   // discovery. This effect runs on every modal open so re-opening the
   // modal with a different prop value re-selects the new profile.
   useEffect(() => {
@@ -195,7 +202,25 @@ export const AddConnectionModal: React.FC<Props> = ({
     setBusy(true)
     setErr(null)
     try {
-      await connectMore(username, password, profile, savePw)
+      const newConnectionId = await connectMore(
+        username,
+        password,
+        profile,
+        savePw
+      )
+      // 2026-05-22 bug-fix: when the modal opens with `initialProfile`
+      // the operator picked a SPECIFIC profile to use (either the
+      // ConnectionSwitcher's "click an inactive profile" affordance
+      // or the /profiles "Create → connect" flow). Both flows want
+      // the UI to switch focus to the freshly-connected profile;
+      // connectMore by design does not setActive, so do it
+      // explicitly here. The bare "+ Add another connection" flow
+      // (no initialProfile prop) preserves the original add-without-
+      // switching semantics — the operator can switch later via the
+      // dropdown if they want to.
+      if (initialProfile) {
+        switchActive(newConnectionId)
+      }
       onClose()
       setUsername('')
       setPassword('')

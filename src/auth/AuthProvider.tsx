@@ -115,7 +115,7 @@ type AuthState = {
     password: string,
     profile: string,
     savePassword?: boolean
-  ) => Promise<void>
+  ) => Promise<string>
   disconnect: (connectionId: string) => void
   switchActive: (connectionId: string) => void
 }
@@ -186,7 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       username: string
       password: string
       savePassword?: boolean
-    }): Promise<void> => {
+    }): Promise<string> => {
       const { mode, profile, username, password, savePassword } = params
       const result = await apiLogin(username, password, profile)
 
@@ -242,24 +242,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         // double-submit pair".
         await csrfPromise
       }
+      // Return the freshly-minted connectionId. The AddConnectionModal's
+      // initialProfile-driven flow uses this to follow up with
+      // switchActive() — the operator picked a specific profile to
+      // use, the modal authenticates them against it, and now the
+      // UI needs to switch focus to that connection. signIn callers
+      // ignore the return value (signIn already setActive's via the
+      // mode === 'signIn' branch above).
+      return result.connection_id
     },
     [conns]
   )
 
   const signIn = useCallback(
-    (
+    async (
       username: string,
       password: string,
       profile: string,
       savePassword?: boolean
-    ): Promise<void> =>
-      performAuth({
+    ): Promise<void> => {
+      // signIn returns void — the caller doesn't need the connection
+      // id because performAuth's signIn-mode branch has already
+      // setActive'd it and latched its token.
+      await performAuth({
         mode: 'signIn',
         profile,
         username,
         password,
         savePassword,
-      }),
+      })
+    },
     [performAuth]
   )
 
@@ -303,7 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       password: string,
       profile: string,
       savePassword?: boolean
-    ): Promise<void> =>
+    ): Promise<string> =>
       performAuth({
         mode: 'connectMore',
         profile,
