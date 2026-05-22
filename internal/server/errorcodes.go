@@ -61,6 +61,13 @@ const (
 	// pre-auth handlers; distinct from ErrCodeInvalidPassword (password-
 	// policy violations) and ErrCodeForbidden (authorisation failures).
 	ErrCodeInvalidRequest = "invalid_request"
+	// ErrCodeRateLimited: the request was rejected by a per-IP / per-actor
+	// token bucket (429). Mirrors the wire `code` already emitted by the
+	// login + profile-CRUD limiters' hand-rolled JSON bodies, and used by
+	// the onboard limiter (follow-up #2 to login-profile-ux) which emits
+	// the same shape via the structured writer. The 429 always carries a
+	// Retry-After integer-seconds header alongside the body.
+	ErrCodeRateLimited = "rate_limited"
 
 	// --- password policy ---
 
@@ -256,6 +263,7 @@ var allErrorCodes = []string{
 	ErrCodeInvalidCredentials,
 	ErrCodeUnauthorized,
 	ErrCodeInvalidRequest,
+	ErrCodeRateLimited,
 	ErrCodePasswordTooShort,
 	ErrCodePasswordTooWeak,
 	ErrCodePasswordContainsUsername,

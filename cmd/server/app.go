@@ -50,6 +50,8 @@ type appConfig struct {
 	passwordHIBPCheck    bool
 	profileCRUDRPS       float64
 	profileCRUDBurst     float64
+	onboardRPS           float64
+	onboardBurst         float64
 	trustProxyXFF        bool
 	profileRewrapFromB64 string
 	// LSP bridge wiring (geode-ui platform LSP integration). The
@@ -117,6 +119,15 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// the built-in default".
 	fs.Float64Var(&cfg.profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the built-in default (0.5 = 30/min)")
 	fs.Float64Var(&cfg.profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the built-in default (10)")
+	// login-profile-ux follow-up #2: per-IP rate limit on the
+	// unauthenticated POST /api/v1/profiles/onboard surface. Production
+	// defaults are deliberately tight — 1 rps with burst 5 — because
+	// operators onboard a small N profiles TOTAL during setup, not
+	// per-day-per-user like the login surface. Tunable here for the e2e
+	// suite, which parallelises onboarding across browser workers
+	// sharing a loopback IP. <= 0 means "use the built-in default".
+	fs.Float64Var(&cfg.onboardRPS, "onboard-rps", 0, "per-IP rate (req/sec) on POST /api/v1/profiles/onboard; <=0 uses the built-in default (1)")
+	fs.Float64Var(&cfg.onboardBurst, "onboard-burst", 0, "per-IP burst size on POST /api/v1/profiles/onboard; <=0 uses the built-in default (5)")
 	// S-NEW-5 (#201): X-Forwarded-For is no longer trusted by default.
 	// When this flag is false (the secure-by-default), the per-IP login
 	// limiter (5 rps) and the per-(profile,username) lockout counter
