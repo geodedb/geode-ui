@@ -20,11 +20,35 @@ export const LAYOUTS: readonly LayoutName[] = [
   'spread',
 ]
 
-// Above this node count the cose force-directed layout becomes
-// noticeably sluggish (O(N²) repulsion sums). Fall back to grid as a
-// safer auto default; users can still pick cose explicitly via the
-// dropdown.
+// Above this element count the heavy layouts (anything that runs an
+// iterative simulation, hierarchy walk, or all-pairs distance) become
+// noticeably sluggish — cose / fcose / dagre / breadthfirst /
+// concentric / spread can lock the tab for tens of seconds on the
+// main thread. The auto-downgrade in useGraphSigReset uses this
+// threshold to swap into `grid` so the page stays responsive; the
+// operator can still pick a heavy layout explicitly via the dropdown
+// after the downgrade.
 export const COSE_NODE_LIMIT = 400
+
+// HEAVY_LAYOUTS — the layouts the auto-downgrade should rescue from
+// at large element counts. Anything not in this set is already
+// O(N) per render (grid, circle) and doesn't need the downgrade.
+// The fcose worker path in runLayout.ts moves fcose off the main
+// thread above WORKER_MIN_N, but that's still gated on the user's
+// `useWorkerLayout` preference; the auto-downgrade is the
+// defense-in-depth that keeps the tab responsive when the worker
+// path isn't available (worker pref off, layout != fcose, or build
+// took the synchronous fallback). Operator report 2026-05-22:
+// 2500-edge "follows" graph froze the UI when fcose was the picked
+// layout — covered by useGraphSigReset.test.ts.
+export const HEAVY_LAYOUTS: ReadonlySet<LayoutName> = new Set<LayoutName>([
+  'cose',
+  'fcose',
+  'dagre',
+  'breadthfirst',
+  'concentric',
+  'spread',
+])
 
 // Static dispatch — keeps the validate-translations script happy by
 // using literal graph.layout.* keys instead of a template-literal
