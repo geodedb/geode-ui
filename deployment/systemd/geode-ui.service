@@ -1,0 +1,45 @@
+[Unit]
+Description=Geode UI - web admin & query UI for the Geode graph database
+Documentation=https://gitlab.com/devnw/codepros/geode/geode-ui
+After=network.target
+# Soft dependency: when geode is co-installed start it first so the
+# seeded local profile has a target. Use Wants= (not Requires=) so
+# remote-only geode-ui deployments still boot.
+Wants=geode.service
+After=geode.service
+
+[Service]
+Type=simple
+User=geode-ui
+Group=geode-ui
+EnvironmentFile=-/etc/geode-ui/geode-ui.conf
+ExecStart=/usr/bin/geode-ui \
+  -listen=${GEODE_UI_LISTEN} \
+  -profile-store=${GEODE_UI_PROFILE_STORE} \
+  -profile-seed-dir=${GEODE_UI_PROFILE_SEED_DIR} \
+  -upload-dir=${GEODE_UI_UPLOAD_DIR}
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening (mirrors ../geode/deployment/systemd/geode.service)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/geode-ui /var/log/geode-ui /etc/geode-ui
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+LimitNOFILE=65536
+LimitNPROC=512
+
+[Install]
+WantedBy=multi-user.target
