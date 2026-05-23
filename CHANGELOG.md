@@ -12,6 +12,29 @@ and 2026-05-17. Entries are grouped by the date the cohort closed, then
 by Keep-a-Changelog subsection. Issue numbers reference
 `gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/<id>`.
 
+### Breaking Changes
+
+- Electron `.deb` renamed: the desktop installer is now published as
+  `geode-ui-desktop_<version>_<arch>.deb` (was `geode_<version>_<arch>.deb`).
+  Inside the package the binary lives at `/opt/Geode UI Desktop/geode-ui-desktop`
+  (electron-builder's standard AppDir layout — unchanged shape, new name).
+  This avoids the collision with the upstream `geode` graph-database
+  package. Migration: `sudo apt remove geode && sudo apt install ./geode-ui-desktop_*.deb`
+  (uninstall the previous-name package, then install the renamed one;
+  user data lives in `~/.config/geode-ui-desktop` going forward —
+  electron migrates the old `~/.config/Geode` directory on first run).
+
+### Features
+
+- New `geode-ui` apt package: `apt install geode-ui` produces a working
+  systemd service that listens on 127.0.0.1:8080 and serves the SPA +
+  API. The postinstall detects a co-resident `geode` install and seeds
+  a `local-geode` profile pointing at `quic://localhost:3141`.
+- New `-profile-seed-dir` flag (default `/etc/geode-ui/seed-profiles.d`)
+  scans the directory for `*.json` profile seed drop-ins on first
+  launch. Drop-ins are loaded in lexicographic order with first-wins
+  semantics on duplicate names; existing stores are left untouched.
+
 ### Added — 2026-05-12 batch
 
 - Multi-pane query workspace at `/workspace` (1–4 tiled editor+result
