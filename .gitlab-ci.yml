@@ -883,6 +883,76 @@ release:publish:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 
+# ============================================================================
+# PUBLISH STAGE - apt install smoke test
+# ============================================================================
+#
+# Verifies that the goreleaser-produced .deb can be installed via apt from a
+# locally-staged apt repository.  A real apt-repo publishing step (pushing to
+# apt.geodedb.com via the apt-publish catalog component + Vault/S3) is a
+# follow-up; the prerequisite Vault role and GPG key material have not been
+# provisioned for geode-ui yet.  Until that work lands, this job gives the
+# same correctness signal by building an unsigned, local-only repository from
+# the goreleaser artifacts and running the full `apt install geode-ui` path
+# against it.
+#
+# What is exercised:
+#   • dpkg dependency resolution + package control file correctness
+#   • preinstall / postinstall scripts execute without error
+#   • /usr/bin/geode-ui responds to -h
+#   • /etc/geode-ui/geode-ui.conf is installed
+#   • /lib/systemd/system/geode-ui.service is installed
+#
+# Runs on tagged releases only (goreleaser:release produces dist/*.deb).
+#
+# TODO(#apt-publish): once the apt-publish catalog component and Vault role
+# are provisioned for this project, replace this local-repo approach with the
+# real apt-repo pipeline that publishes to apt.geodedb.com (mirroring how the
+# sibling `geode` repo uses apt-publish@v1.25.2).  At that point this smoke
+# job should be updated to install from the live apt.geodedb.com repo.
+apt-install-smoke:
+  stage: publish
+  # image-pin: 2026-05-23 @ debian:bookworm — stable Debian release; refresh
+  # per the 60d cadence enforced by image-pins-check.
+  image: debian:bookworm
+  needs:
+    - job: goreleaser:release
+      artifacts: true
+  before_script: []
+  script:
+    - |
+      set -euo pipefail
+
+      # ── 1. Build a minimal local apt repository from the goreleaser .debs ──
+      apt-get update -qq
+      apt-get install -y --no-install-recommends dpkg-dev ca-certificates
+
+      mkdir -p /tmp/apt-repo/pool/main
+      cp dist/geode-ui_*_Linux_x86_64.deb /tmp/apt-repo/pool/main/
+      (cd /tmp/apt-repo && dpkg-scanpackages -m pool/main /dev/null > Packages)
+
+      # ── 2. Register the local repo and install geode-ui ──
+      echo "deb [trusted=yes] file:/tmp/apt-repo ./" \
+        > /etc/apt/sources.list.d/geode-ui-local.list
+      apt-get update -qq
+      # ca-certificates is listed as a dependency in the package control
+      # file; it must be satisfiable from the standard bookworm repo.
+      apt-get install -y geode-ui
+
+      # ── 3. Verify install artefacts ──
+      echo "→ binary responds to -h"
+      /usr/bin/geode-ui -h
+
+      echo "→ EnvironmentFile present"
+      test -f /etc/geode-ui/geode-ui.conf
+
+      echo "→ systemd unit present"
+      test -f /lib/systemd/system/geode-ui.service
+
+      echo "apt-install-smoke: all checks passed"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
 ui-core:typecheck:
   stage: lint
   image: node:${NODE_VERSION}
