@@ -11,15 +11,24 @@ import { sel } from '../helpers/selectors'
 const USER = process.env.ADMIN_USER ?? 'geode'
 const PASS = process.env.ADMIN_PASSWORD ?? 'Geode E2E Bootstrap Password 2024'
 
+// Connect a SECOND distinct profile ('social') so the switcher actually
+// holds two rows. Pre-2026-05-22 this helper re-added 'default' to
+// produce two rows, but the GAP-046 dedupe-by-profileName reducer
+// REPLACES same-profile re-adds — exercising it that way only ever
+// landed one row.
 async function connectSecond(
   page: import('@playwright/test').Page
 ): Promise<void> {
   await sel.connectionTrigger(page).click()
   await sel.addConnectionMenuItem(page).click()
+  await expect(page.locator('select#add-profile')).toBeVisible({
+    timeout: 10_000,
+  })
+  await page.locator('select#add-profile').selectOption('social')
   await page.getByLabel('Username').fill(USER)
   await page.getByLabel('Password').fill(PASS)
   await sel.addConnectionSubmit(page).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 5000 })
+  await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15_000 })
 }
 
 test.describe('connection switcher', () => {
@@ -29,49 +38,52 @@ test.describe('connection switcher', () => {
     await page.goto('/')
     await connectSecond(page)
 
-    await sel.connectionTrigger(page).click()
-    // Should now have two rows. Pick the inactive one to disconnect
-    // so we don't tear down the active session mid-test.
-    const rows = page.getByRole('menuitemradio', { name: /default/i })
-    await expect(rows).toHaveCount(2)
+    await page.getByTestId('connection-trigger').click()
+    // Two rows now: one 'default' (from the fixture seed) and one
+    // 'social' (just added). The disconnect handler stops
+    // propagation, so the menu stays open and we can assert the new
+    // count without re-clicking the trigger.
+    await expect(
+      page.getByRole('menuitemradio', { name: /default/i })
+    ).toHaveCount(1)
+    await expect(
+      page.getByRole('menuitemradio', { name: /social/i })
+    ).toHaveCount(1)
 
-    // The Disconnect aria-label is "Disconnect: <profileName>". Both
-    // rows are named 'default' so we use .last() to pick one. The
-    // disconnect handler stops propagation, so the menu stays open
-    // and we can assert the new count without re-clicking the
-    // trigger (which would toggle the menu closed).
-    await page
-      .getByRole('button', { name: 'Disconnect: default' })
-      .last()
-      .click()
+    // Disconnect 'social' (the inactive row) so we don't tear down
+    // the active session mid-test.
+    await page.getByRole('button', { name: 'Disconnect: social' }).click()
 
-    await expect(rows).toHaveCount(1, { timeout: 5000 })
+    await expect(
+      page.getByRole('menuitemradio', { name: /social/i })
+    ).toHaveCount(0, { timeout: 5000 })
+    await expect(
+      page.getByRole('menuitemradio', { name: /default/i })
+    ).toHaveCount(1)
   })
 
-  test('unseeded protected shell redirects to /login (lazy-hydrate empty)', async ({
+  test('unseeded protected shell with no cookie redirects to /login (lazy-hydrate empty)', async ({
     browser,
   }) => {
     // The fixture eagerly seeds __GEODE_E2E_INITIAL_CONNECTIONS__ so
-    // ProtectedRoute admits the test page. Without that seed,
-    // ConnectionsProvider hydrates with an empty map, the protected
-    // shell sees useActiveConnection() === null, and the route
-    // redirects to /login. This is the OBSERVABLE consequence of the
-    // PSR-F16 lazy-hydrate path; the aria-busy placeholder branch
-    // itself only renders in Electron mode and is covered by
-    // src/components/layout/ConnectionSwitcher.test.tsx.
-    const apiCtx = await browser.newContext()
-    const loginRes = await apiCtx.request.post('/api/v1/auth/login', {
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      form: { username: USER, password: PASS, profile: 'default' },
-    })
-    expect(loginRes.ok()).toBeTruthy()
-    const storageState = await apiCtx.request.storageState()
-    await apiCtx.close()
-
-    const ctx = await browser.newContext({ storageState })
-    // Seed only the session-hint so AuthProvider considers us authed.
-    // Do NOT seed __GEODE_E2E_INITIAL_CONNECTIONS__ — that's the whole
-    // point of the test.
+    // ProtectedRoute admits the test page. Without that seed AND
+    // without a valid auth cookie, ConnectionsProvider hydrates with
+    // an empty map, useActiveConnection() === null, and the route
+    // redirects to /login.
+    //
+    // 2026-05-21 cookie-driven session rehydration (commit 170542d):
+    // when the lazy-hydrate path finds no records on disk, it asks
+    // the server who we are via /api/v1/auth/whoami. If the cookie is
+    // valid the SPA synthesises a placeholder connection and ADMITS
+    // — so the original "session-hint + valid cookie → redirect"
+    // shape no longer holds. This test now exercises the genuine no-
+    // session case (no cookie at all, no seed) which still must
+    // redirect.
+    const ctx = await browser.newContext()
+    // Seed ONLY the session-hint so AuthProvider's optimistic flag
+    // is set; we do NOT login, so there is no auth cookie and
+    // /api/v1/auth/whoami will 401. Neither of these paths gives
+    // ProtectedRoute a non-null active connection.
     await ctx.addInitScript(() => {
       sessionStorage.setItem('geode-ui.session-hint', '1')
     })

@@ -89,24 +89,36 @@ test.describe('add connection modal', () => {
   test('successful connect adds a second row to the switcher', async ({
     authedPage: page,
   }) => {
+    // 2026-05-22: GAP-046 dedupe-by-profileName replaces a same-
+    // profile re-add rather than creating a duplicate row. To prove
+    // "a successful connectMore reaches the chrome", target a
+    // DIFFERENT profile (social) — the resulting menu must hold one
+    // default row AND one social row.
     await page.goto('/')
-    await sel.connectionTrigger(page).click()
+    await page.getByTestId('connection-trigger').click()
     await sel.addConnectionMenuItem(page).click()
 
-    // The public-profile picker auto-selects the first (default) entry,
-    // so the profile field already carries 'default'. We only need to
-    // fill credentials.
+    // Flip the public-profile picker to the second profile so the
+    // connection lands under a fresh profileName. Wait for the
+    // <select> to materialise — the picker is an <input> fallback
+    // while the public-profiles fetch is still in flight.
+    await expect(page.locator('select#add-profile')).toBeVisible({
+      timeout: 10_000,
+    })
+    await page.locator('select#add-profile').selectOption('social')
     await page.getByLabel('Username').fill(USER)
     await page.getByLabel('Password').fill(PASS)
     await sel.addConnectionSubmit(page).click()
 
-    // Modal closes on success; reopen the switcher and confirm there
-    // are now TWO menuitemradio rows for 'default'. The fixture seed
-    // contributed one; connectMore added the second.
-    await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 5000 })
-    await sel.connectionTrigger(page).click()
+    // Modal closes on success; reopen the switcher and confirm the
+    // chrome now holds rows for BOTH profiles.
+    await expect(page.getByRole('dialog')).toHaveCount(0, { timeout: 15_000 })
+    await page.getByTestId('connection-trigger').click()
     await expect(
       page.getByRole('menuitemradio', { name: /default/i })
-    ).toHaveCount(2, { timeout: 5000 })
+    ).toHaveCount(1, { timeout: 5000 })
+    await expect(
+      page.getByRole('menuitemradio', { name: /social/i })
+    ).toHaveCount(1, { timeout: 5000 })
   })
 })
