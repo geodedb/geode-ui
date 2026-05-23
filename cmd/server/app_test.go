@@ -558,6 +558,26 @@ func jwtSecret32() []byte {
 // returns the http.Server.Shutdown error wrapped in errGracefulShutdown
 // when an in-flight request doesn't drain within the budget — so run()
 // logs it (at WARN) and exits non-zero rather than discarding it.
+func TestParseFlags_ProfileSeedDirDefault(t *testing.T) {
+	cfg, err := parseFlags([]string{"geode-ui"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.profileSeedDir != "/etc/geode-ui/seed-profiles.d" {
+		t.Errorf("default seed dir = %q, want /etc/geode-ui/seed-profiles.d", cfg.profileSeedDir)
+	}
+}
+
+func TestParseFlags_ProfileSeedDirOverride(t *testing.T) {
+	cfg, err := parseFlags([]string{"geode-ui", "-profile-seed-dir", "/tmp/seeds"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.profileSeedDir != "/tmp/seeds" {
+		t.Errorf("override seed dir = %q, want /tmp/seeds", cfg.profileSeedDir)
+	}
+}
+
 func TestServe_GracefulShutdownErrorPropagates(t *testing.T) {
 	issuer, err := jwt.NewIssuer(jwtSecret32(), time.Hour)
 	if err != nil {

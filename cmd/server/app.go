@@ -54,6 +54,7 @@ type appConfig struct {
 	onboardBurst         float64
 	trustProxyXFF        bool
 	profileRewrapFromB64 string
+	profileSeedDir       string
 	// LSP bridge wiring (geode-ui platform LSP integration). The
 	// /ws/lsp WebSocket reverse-proxies to an upstream LSP TCP listener
 	// (geode serve --lsp-port). lspEnabled gates route registration so
@@ -77,6 +78,7 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	var cfg appConfig
 	fs.StringVar(&cfg.listen, "listen", ":8080", "address to listen on")
 	fs.StringVar(&cfg.profilesFile, "profiles", "", "path to JSON profiles config; on first launch with -profile-store empty, seeds the store as scope=system profiles, then is unused")
+	fs.StringVar(&cfg.profileSeedDir, "profile-seed-dir", "/etc/geode-ui/seed-profiles.d", "directory scanned for *.json profile seed drop-ins on first launch (only when -profile-store is empty); matches the apt package's /etc/geode-ui/seed-profiles.d convention")
 	fs.StringVar(&cfg.profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
 	fs.StringVar(&cfg.secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
 	fs.DurationVar(&cfg.jwtTTL, "jwt-ttl", defaultJWTTTL, "JWT TTL (1m..24h)")
@@ -251,6 +253,11 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// (5) Seed + reload-from-store + revocation backend.
 	if err := seedFromJSON(context.Background(), store, profiles); err != nil {
 		return nil, fmt.Errorf("profile store seed: %w", err)
+	}
+	if cfg.profileSeedDir != "" {
+		if err := seedFromDropInDir(context.Background(), store, cfg.profileSeedDir); err != nil {
+			return nil, fmt.Errorf("seed profiles drop-in: %w", err)
+		}
 	}
 	if err := reloadPoolFromStore(context.Background(), store, pool); err != nil {
 		return nil, fmt.Errorf("profile pool reload: %w", err)
