@@ -920,36 +920,7 @@ apt-install-smoke:
       artifacts: true
   before_script: []
   script:
-    - |
-      set -euo pipefail
-
-      # ── 1. Build a minimal local apt repository from the goreleaser .debs ──
-      apt-get update -qq
-      apt-get install -y --no-install-recommends dpkg-dev ca-certificates
-
-      mkdir -p /tmp/apt-repo/pool/main
-      cp dist/geode-ui_*_Linux_x86_64.deb /tmp/apt-repo/pool/main/
-      (cd /tmp/apt-repo && dpkg-scanpackages -m pool/main /dev/null > Packages)
-
-      # ── 2. Register the local repo and install geode-ui ──
-      echo "deb [trusted=yes] file:/tmp/apt-repo ./" \
-        > /etc/apt/sources.list.d/geode-ui-local.list
-      apt-get update -qq
-      # ca-certificates is listed as a dependency in the package control
-      # file; it must be satisfiable from the standard bookworm repo.
-      apt-get install -y geode-ui
-
-      # ── 3. Verify install artefacts ──
-      echo "→ binary responds to -h"
-      /usr/bin/geode-ui -h
-
-      echo "→ EnvironmentFile present"
-      test -f /etc/geode-ui/geode-ui.conf
-
-      echo "→ systemd unit present"
-      test -f /lib/systemd/system/geode-ui.service
-
-      echo "apt-install-smoke: all checks passed"
+    - tests/packaging/apt-install-smoke.sh dist/geode-ui_*_Linux_x86_64.deb
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 
