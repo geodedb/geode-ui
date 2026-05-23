@@ -189,6 +189,17 @@ export function testOnlyGetGraphStatsCacheTTL(): number {
 // against the given graph.
 export function useOverviewData(): OverviewData {
   const [graphs, setGraphs] = useState<string[] | null>(null)
+  // 2026-05-22 bug-fix: track which connection's `graphs` are
+  // currently in state. The auto-loadAllStats effect (below) runs in
+  // the SAME commit phase as the connection-change clear effect, so
+  // its `graphs` read is the PREVIOUS connection's list — without
+  // this gate, picking a new profile would fan out stats queries
+  // for the prior profile's graphs against the new upstream (the
+  // observable 422 in the bug report). We only fire loadAllStats
+  // when `graphs` was actually fetched FOR the current
+  // connection, so a stale render between clear-and-refetch
+  // doesn't trigger a thundering-herd of mismatched queries.
+  const [graphsConnId, setGraphsConnId] = useState<string | null>(null)
   const [geodeVersion, setGeodeVersion] = useState<string | null>(null)
   const [adminWritable, setAdminWritable] = useState<AdminWritable | null>(null)
   const [loading, setLoading] = useState(true)
@@ -208,47 +219,116 @@ export function useOverviewData(): OverviewData {
     []
   )
 
+  // 2026-05-22 bug-fix: a generation token guards every in-flight
+  // load() against a profile switch that lands while the previous
+  // load is still resolving. Without it the older response's
+  // setGraphs / setGeodeVersion / etc. would clobber the newer
+  // profile's freshly-fetched data. We compare each settle against
+  // the captured loadGen — a mismatch means the active connection
+  // has rotated since this load was scheduled, and the response is
+  // discarded. Bumps live with the connection-change effect below.
+  const loadGenRef = useRef(0)
+  // activeConnectionIdRef mirrors `connectionId` for callbacks that
+  // must compare against the CURRENT active connection rather than
+  // the connection that was active when the callback was created.
+  // fetchOneGraphStats captures connectionId in a closure (via
+  // useCallback deps); when the operator switches profile mid-fetch,
+  // the OLD-identity fetchOneGraphStats's in-flight queries can
+  // resolve AFTER we cleared `allGraphStats` and writeOneStat the
+  // OLD profile's numbers back into the new profile's view. The
+  // ref lets fetchOneGraphStats read the LATEST connectionId at
+  // write-time and skip the setOneStat call when stale.
+  const activeConnectionIdRef = useRef<string | null>(null)
+
   const load = useCallback(() => {
+    loadGenRef.current += 1
+    const myGen = loadGenRef.current
+    // Capture the connection that this load is fetching for. When
+    // graphs land, we tag the state with this id so the auto-load-
+    // stats effect can tell whether `graphs` matches the operator's
+    // CURRENT active connection. A re-render driven by a profile
+    // switch otherwise fires the auto-load effect with the previous
+    // profile's `graphs` (state setters haven't applied yet in the
+    // same commit phase) and we'd fan out against the wrong upstream.
+    const myConnId = activeConnectionIdRef.current
     setLoading(true)
     setGraphsError(null)
     setCapsError(null)
     let pending = 2
     const done = (): void => {
       pending -= 1
-      if (pending === 0 && aliveRef.current) setLoading(false)
+      if (pending === 0 && aliveRef.current && loadGenRef.current === myGen) {
+        setLoading(false)
+      }
     }
     client
       .graphs({})
       .then(
         (g) => {
-          if (aliveRef.current) setGraphs(g.graphs ?? [])
+          if (!aliveRef.current || loadGenRef.current !== myGen) return
+          setGraphs(g.graphs ?? [])
+          setGraphsConnId(myConnId)
         },
         (e) => {
-          if (aliveRef.current) setGraphsError(errMsg(e))
+          if (!aliveRef.current || loadGenRef.current !== myGen) return
+          setGraphsError(errMsg(e))
         }
       )
       .finally(done)
     fetchCapabilities()
       .then(
         (c) => {
-          if (aliveRef.current) {
-            setGeodeVersion(c.geodeVersion)
-            setAdminWritable(c.adminWritable)
-          }
+          if (!aliveRef.current || loadGenRef.current !== myGen) return
+          setGeodeVersion(c.geodeVersion)
+          setAdminWritable(c.adminWritable)
         },
         (e) => {
-          if (aliveRef.current) setCapsError(errMsg(e))
+          if (!aliveRef.current || loadGenRef.current !== myGen) return
+          setCapsError(errMsg(e))
         }
       )
       .finally(done)
   }, [])
 
-  useEffect(() => {
-    load()
-  }, [load])
-
   const activeConn = useActiveConnection()
   const connectionId = activeConn?.connectionId ?? null
+
+  // Refetch on EVERY active-connection change — mount is one such
+  // change (the initial activeConn). Pre-fix `load()` only fired on
+  // mount; switching profile in the chrome dropdown left the
+  // dashboard pinned to the prior profile's graphs + capabilities,
+  // and the loadAllStats auto-fan-out then re-fired
+  // `client.query({ graph: <oldName> })` against the new upstream —
+  // observed as a 422 against a Geode that lacked the prior
+  // profile's seeded graphs.
+  //
+  // We also clear EVERY downstream view's state on a real
+  // connection change: graphs, geodeVersion, adminWritable,
+  // defaultGraphStats, and allGraphStats. The operator must see a
+  // visibly-reloading dashboard rather than the prior profile's
+  // numbers under a new chrome label. The initial mount renders
+  // with `null` graphs anyway so the clear is a no-op on first run.
+  const prevConnectionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    // Mirror the active connection into the ref synchronously so any
+    // callback that captured an older value can detect the rotation.
+    activeConnectionIdRef.current = connectionId
+    const prev = prevConnectionIdRef.current
+    if (prev !== null && prev !== connectionId) {
+      setGraphs(null)
+      setGraphsConnId(null)
+      setGeodeVersion(null)
+      setAdminWritable(null)
+      setDefaultGraphStats(null)
+      setAllGraphStats(new Map())
+      setGraphsError(null)
+      setCapsError(null)
+      setStatsError(null)
+      setStatsLoading(false)
+    }
+    prevConnectionIdRef.current = connectionId
+    load()
+  }, [connectionId, load])
 
   // Bug 4 (2026-05-21 bug-fix bundle): per-graph stats map for the
   // Dashboard multi-graph view. Stored as a Map so callers iterating
@@ -279,11 +359,20 @@ export function useOverviewData(): OverviewData {
 
   const fetchOneGraphStats = useCallback(
     async (graph: string): Promise<void> => {
+      // Snapshot the connection at fetch-start. If the operator rotates
+      // profile while the queries are in flight, the resolved promise's
+      // setOneStat would otherwise leak the OLD profile's stats into
+      // the NEW profile's view (the chrome label moved, but the cards
+      // still showed yesterday's numbers). Compare against the live
+      // ref at every write site and skip stale settles.
+      const myConnId = connectionId
+      const stale = (): boolean => activeConnectionIdRef.current !== myConnId
       // Cache fast-path. Skip the two full-graph count() scans when a
       // fresh entry is on hand (60s TTL by default, see writeGraphStats
       // Cache).
       const cached = readGraphStatsCache(connectionId, graph)
       if (cached) {
+        if (stale()) return
         setOneStat(graph, {
           nodes: cached.nodes,
           edges: cached.edges,
@@ -292,6 +381,7 @@ export function useOverviewData(): OverviewData {
         })
         return
       }
+      if (stale()) return
       setOneStat(graph, { loading: true, error: null })
       try {
         const [nodesResp, edgesResp] = await Promise.all([
@@ -308,6 +398,7 @@ export function useOverviewData(): OverviewData {
             graph,
           }),
         ])
+        if (stale()) return
         const stats = {
           nodes: scalarCount(nodesResp),
           edges: scalarCount(edgesResp),
@@ -320,6 +411,7 @@ export function useOverviewData(): OverviewData {
           error: null,
         })
       } catch (e) {
+        if (stale()) return
         setOneStat(graph, { loading: false, error: errMsg(e) })
       }
     },
@@ -367,14 +459,25 @@ export function useOverviewData(): OverviewData {
 
   // Auto-load stats once the graph list lands. Reuses the cache, so a
   // remount within the TTL window is free.
+  //
+  // 2026-05-22 bug-fix: gate on `graphsConnId === connectionId`. The
+  // effect's dep `loadAllStats` changes identity whenever connectionId
+  // changes (via fetchOneGraphStats's deps). After a profile switch,
+  // this effect re-runs in the SAME commit phase as the
+  // connection-change clear effect — at that point `graphs` is still
+  // the PREVIOUS profile's list (the clear's `setGraphs(null)` is
+  // queued but not yet applied). Without the connId gate we'd fan
+  // out queries for old-profile graphs against the new upstream,
+  // producing the 422 from the operator's bug report.
   useEffect(() => {
-    if (graphs && graphs.length > 0) {
+    if (graphs && graphs.length > 0 && graphsConnId === connectionId) {
       loadAllStats()
     }
     // graphs identity changes on each fetch; loadAllStats is memoised
     // on graphs+fetchOneGraphStats so this effect fires once per real
-    // graph-list change.
-  }, [graphs, loadAllStats])
+    // graph-list change. graphsConnId is the per-connection
+    // freshness token populated by load() on success.
+  }, [graphs, graphsConnId, connectionId, loadAllStats])
 
   const loadStats = useCallback(
     (graph: string) => {
