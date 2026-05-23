@@ -101,8 +101,14 @@ default:
     paths:
       - .npm/
     policy: pull
+  # `linux` constrains job picking to the linux runner pool — without
+  # it, the company-tag also matches the Windows runner (which lacks
+  # `npm` on PATH and would fail every node-based job). electron:mac
+  # and electron:win opt into their platform pools explicitly via
+  # their own tags.
   tags:
     - company
+    - linux
 
 stages:
   - install
