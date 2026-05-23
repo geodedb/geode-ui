@@ -487,4 +487,117 @@ describe('useOverviewData', () => {
       testOnlySetGraphStatsCacheTTL(originalTTL)
     }
   })
+
+  // 2026-05-22 bug report — operator switches active profile through
+  // the chrome ConnectionSwitcher; the dashboard kept showing the
+  // PREVIOUS profile's graph list (because `load()` only ran on
+  // mount) and the per-graph stats fan-out then re-fired
+  // `client.query({ graph: <oldName> })` against the NEW connection,
+  // producing a 422 (the old graph doesn't exist on the new upstream
+  // — observed against a Geode-B that lacks the primary's seeded
+  // graphs). The dashboard MUST refetch its graphs + capabilities
+  // when the active connection changes, AND clear the per-graph
+  // stats map so the user does not see the prior profile's stats
+  // while the new data is in flight.
+  describe('profile switch → refetch invariants', () => {
+    it('refetches graphs + capabilities when the active connection changes', async () => {
+      graphsMock
+        .mockResolvedValueOnce({ graphs: ['movies', 'vulndb'] })
+        .mockResolvedValueOnce({ graphs: ['social'] })
+      capsMock
+        .mockResolvedValueOnce({
+          ...rawCaps,
+          geode_version: 'v0.5.11-default',
+        })
+        .mockResolvedValueOnce({
+          ...rawCaps,
+          geode_version: 'v0.5.19-social',
+        })
+
+      const { result, rerender } = renderHook(() => useOverviewData())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.graphs).toEqual(['movies', 'vulndb'])
+      expect(result.current.geodeVersion).toBe('v0.5.11-default')
+      expect(graphsMock).toHaveBeenCalledTimes(1)
+      expect(capsMock).toHaveBeenCalledTimes(1)
+
+      // Operator picks a different profile in the chrome — useActiveConnection
+      // now returns a different connectionId.
+      useActiveConnectionMock.mockImplementation(() => ({
+        connectionId: 'test-conn-2',
+        profileName: 'social',
+        token: 'tok-social',
+        expiresAt: Date.now() + 60_000,
+      }))
+      rerender()
+
+      // RELEASE-BLOCKER: graphs + capabilities MUST refetch for the new
+      // profile. Pre-fix they stayed pinned to the previous profile's
+      // values and the dashboard rendered stale data.
+      await waitFor(() => expect(result.current.graphs).toEqual(['social']))
+      expect(result.current.geodeVersion).toBe('v0.5.19-social')
+      expect(graphsMock).toHaveBeenCalledTimes(2)
+      expect(capsMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('clears the per-graph stats map across a connection change so stale entries cannot leak', async () => {
+      graphsMock
+        .mockResolvedValueOnce({ graphs: ['movies'] })
+        .mockResolvedValueOnce({ graphs: ['social'] })
+      capsMock.mockResolvedValue(rawCaps)
+      queryMock
+        // First pair: movies stats on connection 1.
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[171]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[253]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        // Second pair: social stats on connection 2.
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[10_028]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+        .mockResolvedValueOnce({
+          columns: [{ name: 'c', type: 'INT' }],
+          rows: [[50_446]],
+          row_count: 1,
+          elapsed_ms: 1,
+        })
+
+      const { result, rerender } = renderHook(() => useOverviewData())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      // The auto-load effect fans out stats for the loaded graph list.
+      await waitFor(() => expect(result.current.allGraphStats.size).toBe(1))
+      expect(result.current.allGraphStats.get('movies')?.nodes).toBe(171)
+
+      // Switch profile.
+      useActiveConnectionMock.mockImplementation(() => ({
+        connectionId: 'test-conn-2',
+        profileName: 'social',
+        token: 'tok-social',
+        expiresAt: Date.now() + 60_000,
+      }))
+      rerender()
+
+      // RELEASE-BLOCKER: the prior profile's entries MUST NOT remain
+      // visible after the connection changes. Pre-fix the dashboard
+      // kept rendering "movies: 171 nodes, 253 edges" under the new
+      // profile until the operator manually refreshed.
+      await waitFor(() => expect(result.current.graphs).toEqual(['social']))
+      await waitFor(() =>
+        expect(result.current.allGraphStats.has('movies')).toBe(false)
+      )
+      await waitFor(() => expect(result.current.allGraphStats.size).toBe(1))
+      expect(result.current.allGraphStats.get('social')?.nodes).toBe(10_028)
+    })
+  })
 })
