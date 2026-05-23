@@ -304,10 +304,22 @@ build:
   stage: build
   needs:
     - job: install
+    # The validator jobs (eslint, typecheck, unit-tests, audit-ratchets)
+    # only run on MR + default-branch pipelines (their rules exclude
+    # tags). The build job DOES run on tags (rules include
+    # $CI_COMMIT_TAG below), so we'd otherwise fail config validation
+    # with "X does not exist in the pipeline". `optional: true` makes
+    # the dependency a no-op when the upstream job is absent — fine
+    # for tag pipelines because main was already green when the tag
+    # was cut from it.
     - job: eslint
+      optional: true
     - job: typecheck
+      optional: true
     - job: unit-tests
+      optional: true
     - job: audit-ratchets
+      optional: true
   script:
     - npm run build
   # QUALITY rank 2 / #226: webpack emits `internal/ui/dist`
@@ -708,13 +720,19 @@ goreleaser-release:
   extends: .goreleaser-base
   stage: release
   interruptible: false
+  # The validator jobs (unit-tests, go:test) run on MR + default-branch
+  # only — they're absent on tag pipelines. `build` DOES run on tags
+  # (we use its dist/ artifact). Mark the absent-on-tag deps optional;
+  # leave build as a hard dep so we always have the freshly-built SPA.
   needs:
     - job: unit-tests
       artifacts: false
+      optional: true
     - job: build
       artifacts: false
     - job: go:test
       artifacts: false
+      optional: true
   timeout: 2h
   script:
     - . /tmp/dockerhub.env
@@ -759,9 +777,13 @@ goreleaser-release:
 .electron-base:
   stage: release
   interruptible: false
+  # unit-tests doesn't run on tag pipelines (its rules exclude tags),
+  # so mark optional. build is included because it has $CI_COMMIT_TAG
+  # in its rules.
   needs:
     - job: unit-tests
       artifacts: false
+      optional: true
     - job: build
       artifacts: false
   timeout: 1h
