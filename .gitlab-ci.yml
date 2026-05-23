@@ -40,6 +40,35 @@ include:
       stage: release
       allow_failure: true
 
+  # APT repository publishing (apt.geodedb.com)
+  #
+  # Mirrors the sibling ../geode CI's apt-publish wiring (see
+  # ../geode/.gitlab-ci.yml:34-45). Both projects publish .deb
+  # artifacts to the same apt repo at apt.geodedb.com — they MUST
+  # share vault_secret_path + gpg_key_name because the repo carries
+  # a single detached signature; mixing keys invalidates the repo
+  # for either set of packages.
+  #
+  # TODO(#apt-publish-policy): the codepros-ci Vault role's policy
+  # currently grants only the sibling geode project ID access to
+  # devnw/geode/apt. To activate publishing for geode-ui, widen the
+  # policy to include this project's $CI_PROJECT_ID. Until then
+  # `allow_failure: true` keeps the pipeline green on tagged
+  # releases (the local smoke job `apt-install-smoke` validates the
+  # .deb itself; the GitLab Release page hosts the .deb for direct
+  # `dpkg -i` installs as a fallback).
+  - component: gitlab.com/devnw/ci-catalog/apt-publish@v1.25.2
+    inputs:
+      apt_domain: apt.geodedb.com
+      job_suffix: apt-geodedb-com
+      vault_auth_role: codepros-ci
+      vault_mount: devnw
+      vault_secret_path: geode/apt
+      package_path: dist/*.deb
+      gpg_key_name: geode.gpg
+      sign_needs: goreleaser:release
+      allow_failure: true
+
 variables:
   NODE_VERSION: '22.14.0'
   GO_VERSION: '1.26-alpine'
@@ -905,11 +934,14 @@ release:publish:
 #
 # Runs on tagged releases only (goreleaser:release produces dist/*.deb).
 #
-# TODO(#apt-publish): once the apt-publish catalog component and Vault role
-# are provisioned for this project, replace this local-repo approach with the
-# real apt-repo pipeline that publishes to apt.geodedb.com (mirroring how the
-# sibling `geode` repo uses apt-publish@v1.25.2).  At that point this smoke
-# job should be updated to install from the live apt.geodedb.com repo.
+# This is the LOCAL pre-publish sanity check: install the .deb from the
+# goreleaser artifact directly via dpkg-path, run the binary, assert the
+# unit/conf/seed-file invariants. The downstream `apt-publish` catalog
+# component (see include block) pushes the same .deb to
+# apt.geodedb.com; once the Vault policy widens to include this
+# project (TODO #apt-publish-policy), a follow-up CI job can also
+# exercise the install-from-live-repo path. Until then this smoke
+# remains the authoritative install gate.
 apt-install-smoke:
   stage: publish
   # image-pin: 2026-05-23 @ debian:bookworm — stable Debian release; refresh
