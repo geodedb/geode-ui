@@ -49,14 +49,15 @@ include:
   # a single detached signature; mixing keys invalidates the repo
   # for either set of packages.
   #
-  # TODO(#apt-publish-policy): the codepros-ci Vault role's policy
-  # currently grants only the sibling geode project ID access to
-  # devnw/geode/apt. To activate publishing for geode-ui, widen the
-  # policy to include this project's $CI_PROJECT_ID. Until then
-  # `allow_failure: true` keeps the pipeline green on tagged
-  # releases (the local smoke job `apt-install-smoke` validates the
-  # .deb itself; the GitLab Release page hosts the .deb for direct
-  # `dpkg -i` installs as a fallback).
+  # Vault access is already provisioned: the `codepros-ci` JWT role
+  # at devnw/infra/vault/gitlab_ci_roles.tf:223-252 binds to
+  # `namespace_path = "devnw,devnw/*"` with `bound_claims_type =
+  # "glob"`, so any project under devnw/* (including this one at
+  # devnw/codepros/geode/geode-ui) can authenticate. The
+  # `gitlab-ci-apt-repos` policy (line 181) already grants read on
+  # devnw/data/geode/* — covering the geode/apt path used here. No
+  # infra change required; allow_failure stays at false so a publish
+  # failure blocks the deploy gate.
   - component: gitlab.com/devnw/ci-catalog/apt-publish@v1.25.2
     inputs:
       apt_domain: apt.geodedb.com
@@ -67,7 +68,7 @@ include:
       package_path: dist/*.deb
       gpg_key_name: geode.gpg
       sign_needs: goreleaser:release
-      allow_failure: true
+      allow_failure: false
 
 variables:
   NODE_VERSION: '22.14.0'
@@ -938,10 +939,11 @@ release:publish:
 # goreleaser artifact directly via dpkg-path, run the binary, assert the
 # unit/conf/seed-file invariants. The downstream `apt-publish` catalog
 # component (see include block) pushes the same .deb to
-# apt.geodedb.com; once the Vault policy widens to include this
-# project (TODO #apt-publish-policy), a follow-up CI job can also
-# exercise the install-from-live-repo path. Until then this smoke
-# remains the authoritative install gate.
+# apt.geodedb.com on every tagged release. A future post-publish
+# install-from-live-repo smoke could close the loop but is not
+# required — the live publish job's own validation steps (sign,
+# repo-build, S3 upload) cover the publish path; this smoke covers
+# the install path.
 apt-install-smoke:
   stage: publish
   # image-pin: 2026-05-23 @ debian:bookworm — stable Debian release; refresh
