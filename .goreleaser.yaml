@@ -383,7 +383,9 @@ nfpms:
     Geode UI - admin web interface for the Geode graph database.
 
     Self-hosted Go binary serving a React SPA + JSON+WS API. Pairs with
-    the Geode graph database (geodedb.com).
+    the Geode graph database (geodedb.com). When installed on a host
+    that also carries the `geode` package, the postinstall seeds a
+    `local-geode` profile pointing at quic://localhost:3141.
   license: Apache-2.0
   formats:
   - deb
@@ -396,40 +398,71 @@ nfpms:
   - geode-ui
   dependencies:
   - ca-certificates
+  # Soft-suggest the geode server. apt installs both with one
+  # command (`apt install geode geode-ui`) but does not pull geode
+  # in implicitly.
+  recommends:
+  - geode
   file_name_template: >-
     {{ .ProjectName }}_{{ .Version }}_
     {{- if eq .Os "linux" }}Linux{{- else }}{{ title .Os }}{{ end }}_
     {{- if eq .Arch "amd64" }}x86_64
     {{- else if eq .Arch "arm64" }}arm64
     {{- else }}{{ .Arch }}{{ end }}
+  scripts:
+    preinstall: scripts/packaging/preinstall.sh
+    postinstall: scripts/packaging/postinstall.sh
+    preremove: scripts/packaging/preremove.sh
+    postremove: scripts/packaging/postremove.sh
   contents:
+    # Docs
   - src: README.md
     dst: /usr/share/doc/geode-ui/README.md
-    file_info:
-      mode: 0644
+    file_info: {mode: 0644}
   - src: LICENSE
     dst: /usr/share/doc/geode-ui/LICENSE
-    file_info:
-      mode: 0644
-  - src: deploy/profiles.json
-    dst: /etc/geode-ui/profiles.json
-    type: config|noreplace
-    file_info:
-      mode: 0640
+    file_info: {mode: 0644}
+  - src: docs/INSTALL.md
+    dst: /usr/share/doc/geode-ui/INSTALL.md
+    file_info: {mode: 0644}
 
-      # Upload + log directories
+    # systemd unit
+  - src: deployment/systemd/geode-ui.service
+    dst: /lib/systemd/system/geode-ui.service
+    file_info: {mode: 0644}
+
+    # EnvironmentFile + seed dir (config|noreplace so operator edits
+    # survive upgrades).
+  - src: deployment/config/geode-ui.conf
+    dst: /etc/geode-ui/geode-ui.conf
+    type: config|noreplace
+    file_info: {mode: 0644}
+  - src: deployment/seed-profiles.d/README.md
+    dst: /etc/geode-ui/seed-profiles.d/README.md
+    file_info: {mode: 0644}
+
+    # detect-local-geode.sh (sourced from postinstall via the
+    # canonical /usr/share path so it survives a chroot postinstall).
+  - src: scripts/packaging/detect-local-geode.sh
+    dst: /usr/share/geode-ui/packaging/detect-local-geode.sh
+    file_info: {mode: 0755}
+
+    # Runtime dirs (empty, mode 0750 — postinstall fixes ownership).
+  - dst: /var/lib/geode-ui
+    type: dir
+    file_info: {mode: 0750}
   - dst: /var/lib/geode-ui/uploads
     type: dir
-    file_info:
-      mode: 0750
+    file_info: {mode: 0750}
   - dst: /var/log/geode-ui
     type: dir
-    file_info:
-      mode: 0750
+    file_info: {mode: 0750}
   - dst: /etc/geode-ui
     type: dir
-    file_info:
-      mode: 0755
+    file_info: {mode: 0750}
+  - dst: /etc/geode-ui/seed-profiles.d
+    type: dir
+    file_info: {mode: 0750}
 
   deb:
     compression: xz
