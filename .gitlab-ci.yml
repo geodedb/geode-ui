@@ -130,10 +130,23 @@ install:
     paths:
       - .npm/
       - node_modules/
+      # `packages/ui-core/dist/` is built during `npm ci` by the
+      # workspace package's `prepare` script. Caching it alongside
+      # node_modules means a warm CI run skips the ~3s tsup rebuild.
+      - packages/ui-core/dist/
     policy: pull-push
   artifacts:
     paths:
       - node_modules/
+      # Downstream jobs (build, goreleaser-release, electron:*) import
+      # `@geodedb/ui-core/theme`, which resolves via the package's
+      # `exports` field to packages/ui-core/dist/*.js + .d.ts. The
+      # `prepare` script in packages/ui-core/package.json materialises
+      # dist/ during `npm ci`; archiving it here propagates the
+      # output so downstream webpack/typecheck see the Theme type
+      # augmentation (without this, 750+ TS2339 errors on
+      # `theme.{spacing,zIndex,bg,…}` accessors).
+      - packages/ui-core/dist/
     expire_in: 1 hour
 
 # ============================================================================
