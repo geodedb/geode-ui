@@ -74,6 +74,17 @@ deb:
   # the all-on-one-host experience" without forcing it.
   recommends:
   - geode-ui
+  # Block the pre-rename electron .deb (was published locally only;
+  # never reached apt). The historic package was named `geode` at
+  # version 0.1.x. The graph DB `geode` package (sibling repo at
+  # gitlab.com/devnw/codepros/geode/geode) is currently at v0.5.19+,
+  # well past 0.2 — so this Conflicts entry blocks ONLY the historic
+  # electron stub without blocking the intended co-resident-with-DB
+  # install. electron-builder 26.x does not expose a native `conflicts:`
+  # key; pass the flag through fpm (the underlying packager tool).
+  fpm:
+  - --conflicts
+  - geode (<< 0.2)
 
 # Publishing config. CI does NOT use electron-builder's --publish flag;
 # instead, the per-OS jobs upload `release/**/*.{dmg,AppImage,deb,exe}`
