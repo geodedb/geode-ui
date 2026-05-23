@@ -67,7 +67,7 @@ include:
       vault_secret_path: geode/apt
       package_path: dist/*.deb
       gpg_key_name: geode.gpg
-      sign_needs: goreleaser:release
+      sign_needs: goreleaser-release
       allow_failure: false
 
 variables:
@@ -451,7 +451,10 @@ go:generate-verify:
 
 go:test:
   <<: *go_defaults
-  stage: test
+  # Must run AFTER `build` so the //go:embed sees the SPA dist artifact.
+  # Same stage as `build` is OK — GitLab evaluates intra-stage `needs:`
+  # as a DAG.
+  stage: build
   # QUALITY #229: reuse the SPA bundle the `build` job already produced
   # instead of re-running `npm ci` + `npm run build` here (a ~99s
   # webpack rebuild on every pipeline). The build job archives
@@ -495,7 +498,10 @@ go:test:
 # See docs/ARCHITECTURE.md ("Performance SLOs").
 bench-gate:
   <<: *go_defaults
-  stage: test
+  # Same stage as `go:test` (which moved to `build` so its //go:embed
+  # sees the SPA dist). The intra-stage needs: edge orders bench AFTER
+  # go:test passes.
+  stage: build
   needs: ['go:test']
   script:
     - apk add --no-cache git make bash
@@ -610,12 +616,12 @@ e2e:playwright:
 #
 # Two release entry points mirroring the ../geode pipeline:
 #
-#   • goreleaser:snapshot — runs on every main-branch commit. Builds the
+#   • goreleaser-snapshot — runs on every main-branch commit. Builds the
 #     binaries + images locally and pushes the GitLab Container Registry
 #     tags only. Never touches Docker Hub or the GitLab Release page.
 #     allow_failure: true so a flaky goreleaser run doesn't block main.
 #
-#   • goreleaser:release — runs only on git tags matching v*. Pushes to
+#   • goreleaser-release — runs only on git tags matching v*. Pushes to
 #     Docker Hub when DOCKERHUB_USERNAME + DOCKERHUB_TOKEN are set.
 #     Hard-blocks on failure.
 #
@@ -670,7 +676,7 @@ e2e:playwright:
     # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
     - npm ci
 
-goreleaser:snapshot:
+goreleaser-snapshot:
   extends: .goreleaser-base
   stage: release
   interruptible: false
@@ -698,7 +704,7 @@ goreleaser:snapshot:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG == null'
   allow_failure: true
 
-goreleaser:release:
+goreleaser-release:
   extends: .goreleaser-base
   stage: release
   interruptible: false
@@ -712,7 +718,11 @@ goreleaser:release:
   timeout: 2h
   script:
     - . /tmp/dockerhub.env
-    - echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"
+    # The single quotes are load-bearing: the `: ` inside the message would
+    # otherwise turn the whole line into a YAML mapping (key=`echo "Building
+    # release`, value=`...`). See the matching snapshot job above for the
+    # bare-form template that's safe because it has no `: `.
+    - 'echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
     - goreleaser release --clean --timeout 120m
     - ls -la dist/
   artifacts:
@@ -814,7 +824,7 @@ electron:win:
 # PUBLISH STAGE - Attach goreleaser + electron artifacts to GitLab Release
 # ============================================================================
 #
-# After goreleaser:release + electron:* finish on a tag, this job:
+# After goreleaser-release + electron:* finish on a tag, this job:
 #   1. Uploads each binary / package / installer to the GitLab Generic
 #      Package Registry (permanent URL keyed by version + filename).
 #   2. Creates a GitLab Release pointing at those uploads as assets.
@@ -832,7 +842,7 @@ release:publish:
   # scripts/check-image-pins.sh enforces cadence.
   image: registry.gitlab.com/gitlab-org/release-cli:v0.24.0@sha256:3f52d526f48e8d10625c722fa6d6423ee82aadeae1b1aa91f07b62551d96dacf
   needs:
-    - job: goreleaser:release
+    - job: goreleaser-release
       artifacts: true
     - job: electron:linux
       artifacts: true
@@ -933,7 +943,7 @@ release:publish:
 #   • /etc/geode-ui/geode-ui.conf is installed
 #   • /lib/systemd/system/geode-ui.service is installed
 #
-# Runs on tagged releases only (goreleaser:release produces dist/*.deb).
+# Runs on tagged releases only (goreleaser-release produces dist/*.deb).
 #
 # This is the LOCAL pre-publish sanity check: install the .deb from the
 # goreleaser artifact directly via dpkg-path, run the binary, assert the
@@ -950,7 +960,7 @@ apt-install-smoke:
   # per the 60d cadence enforced by image-pins-check.
   image: debian:bookworm
   needs:
-    - job: goreleaser:release
+    - job: goreleaser-release
       artifacts: true
   before_script: []
   script:
