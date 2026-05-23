@@ -11,6 +11,18 @@ Neo4j-style interactive graph visualization, a Monaco GQL editor, schema
 explorer, and admin/ops UIs for users, roles, policies, grants, backups,
 restores, migrations, and the audit log.
 
+## Install
+
+```bash
+sudo apt install geode-ui              # headless service (systemd-managed)
+sudo apt install geode-ui-desktop      # electron GUI (recommended on workstations)
+```
+
+When installed alongside `geode`, the postinstall seeds a
+`local-geode` profile so the SPA's connection picker is non-empty on
+first launch. Full install paths (apt repo bootstrap, direct dpkg,
+co-resident setup) are documented in [docs/INSTALL.md](docs/INSTALL.md).
+
 ## Quick start
 
 ```bash
