@@ -16,7 +16,7 @@
 #           separately if desired — out of scope here).
 
 appId: com.geodedb.ui
-productName: Geode
+productName: Geode UI Desktop
 copyright: Copyright (c) Geode Database. All rights reserved.
 
 directories:
@@ -50,12 +50,8 @@ linux:
   - target: deb
     arch: [x64, arm64]
   category: Development
-  # icon: build/icon.png
-  # The npm package name `@geodedb/ui` contains an `@/` which fpm tries
-  # to treat as a directory boundary when synthesising the .deb filename.
-  # Pin an artifact name so the output lands at release/linux/geode_...deb.
-  artifactName: geode_${version}_${arch}.${ext}
-  executableName: geode
+  artifactName: geode-ui-desktop_${version}_${arch}.${ext}
+  executableName: geode-ui-desktop
 
 win:
   target:
@@ -66,6 +62,18 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+
+deb:
+  # Avoid the "geode" name collision with the upstream graph-database
+  # apt package. The package name is the artifactName base; depends
+  # stays empty because the desktop app talks to any reachable geode-
+  # ui origin, not necessarily a locally-installed one.
+  packageName: geode-ui-desktop
+  depends: []
+  # Recommend the headless service so apt suggests "install both for
+  # the all-on-one-host experience" without forcing it.
+  recommends:
+  - geode-ui
 
 # Publishing config. CI does NOT use electron-builder's --publish flag;
 # instead, the per-OS jobs upload `release/**/*.{dmg,AppImage,deb,exe}`
