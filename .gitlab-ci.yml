@@ -67,7 +67,16 @@ include:
       vault_secret_path: geode/apt
       package_path: dist/*.deb
       gpg_key_name: geode.gpg
-      sign_needs: goreleaser-release
+      # `sign_needs` points the catalog's apt-sign + apt-publish jobs at the
+      # job whose `dist/` artifact carries every .deb destined for the repo.
+      # `prepare-apt-packages` (defined further down) consolidates the two
+      # producers — `goreleaser-release` (server .deb/.rpm/.apk) and
+      # `electron:linux` (desktop geode-ui-desktop_*.deb) — into a single
+      # `dist/` tree so the catalog's `dist/*.deb` glob covers BOTH the
+      # headless and desktop packages. Pre-fix the catalog only saw
+      # `goreleaser-release`'s artifacts and the `geode-ui-desktop` .debs
+      # never reached apt.geodedb.com.
+      sign_needs: prepare-apt-packages
       allow_failure: false
 
 variables:
@@ -939,6 +948,48 @@ electron:win:
     expire_in: 30 days
   # Same windows-runner caveat as the mac job.
   allow_failure: true
+
+# ============================================================================
+# RELEASE STAGE - Consolidate .debs for apt-publish
+# ============================================================================
+#
+# Merges the two `.deb` producers (goreleaser-release → dist/*.deb for the
+# headless server; electron:linux → release/linux/*.deb for the desktop
+# app) into a single `dist/` tree so the apt-publish catalog component's
+# single-glob `package_path: dist/*.deb` covers BOTH sets.
+#
+# Pre-fix the catalog only consumed `goreleaser-release`'s artifacts via
+# `sign_needs: goreleaser-release`, so the `geode-ui-desktop_*.deb` files
+# were never uploaded to apt.geodedb.com — they were only attached to the
+# GitLab Release page via `release:publish` below.
+#
+# This job is intentionally minimal: no signing, no checksumming, no
+# repository state — just a `cp` + artifact re-upload. The downstream
+# catalog jobs (apt-sign-* and apt-publish-*) sign and stage from here.
+
+prepare-apt-packages:
+  stage: release
+  image: alpine:3.20
+  needs:
+    - job: goreleaser-release
+      artifacts: true
+    - job: electron:linux
+      artifacts: true
+  script:
+    - apk add --no-cache bash coreutils
+    - ls -la dist/ release/linux/ || true
+    - mkdir -p dist
+    # Copy every electron-builder .deb into dist/ so the catalog's
+    # single-glob package_path sees both sets. -v echoes each path so
+    # the job log makes the merge auditable.
+    - cp -v release/linux/*.deb dist/
+    - ls -la dist/*.deb
+  artifacts:
+    paths:
+      - dist/
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 
 # ============================================================================
 # PUBLISH STAGE - Attach goreleaser + electron artifacts to GitLab Release
