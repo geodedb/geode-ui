@@ -560,24 +560,8 @@ docker:build:
   before_script: []
   variables:
     DOCKER_TLS_CERTDIR: ""
-    # Without DOCKER_HOST the client tries `unix:///var/run/docker.sock`
-    # which dind doesn't expose. The k8s runner publishes the dind
-    # service at the `docker` hostname on TCP 2375 (TLS off because
-    # DOCKER_TLS_CERTDIR=""). v0.1.9 docker:build failed with
-    # "Cannot connect to the Docker daemon at unix:///var/run/docker.sock".
-    DOCKER_HOST: tcp://docker:2375
   script:
     - apk add --no-cache git
-    # Wait up to 60s for the dind service to bind on tcp://docker:2375.
-    # Same pattern as .goreleaser-base above; docker:build was failing
-    # intermittently on tag pipelines because the daemon-readiness gate
-    # wasn't present (v0.1.6/7/8 happened to win the race; v0.1.9 lost).
-    - |
-      for i in $(seq 1 60); do
-        if docker info >/dev/null 2>&1; then break; fi
-        sleep 1
-      done
-      docker info
     - mkdir -p /tmp/ctx/geode-ui
     - cp -r . /tmp/ctx/geode-ui/
     - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
@@ -585,8 +569,13 @@ docker:build:
     - docker build -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
     - if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA; fi
   rules:
+    # Main-branch only. On tag pipelines goreleaser-release produces
+    # the release images directly (deploy/Dockerfile.release +
+    # Dockerfile.release.alpine via the dockers: section in
+    # .goreleaser.yaml), making this e2e-CI image redundant. Skipping
+    # docker:build on tags also dodges intermittent dind startup
+    # failures on the company k8s runner (observed v0.1.9 + v0.1.10).
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_COMMIT_TAG
 
 # ============================================================================
 # E2E STAGE - Playwright suite against the full docker-compose stack
