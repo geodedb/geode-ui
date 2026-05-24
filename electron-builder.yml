@@ -69,6 +69,17 @@ deb:
   # stays empty because the desktop app talks to any reachable geode-
   # ui origin, not necessarily a locally-installed one.
   packageName: geode-ui-desktop
+  # `xz` compression on the outer .deb wrapper (vs the default gzip).
+  # Marginal additional savings on a .deb whose bulk is already-
+  # compressed chromium binaries (~5-10%), but every megabyte counts:
+  # the apt-publish catalog roundtrips `apt-repo/` as a GitLab job
+  # artifact bounded by the 1GB runner upload limit (catalog v1.25.2
+  # template `templates/apt-publish/template.yml:515-519`). Pairs with
+  # the `apt-repo-apt-geodedb-com.after_script` trim in `.gitlab-ci.yml`
+  # which drops the historical S3-pool snapshot from the artifact so
+  # only THIS release's .debs round-trip — the historical .debs stay
+  # on S3 and are referenced by the freshly-generated `Packages`.
+  compression: xz
   depends: []
   # Recommend the headless service so apt suggests "install both for
   # the all-on-one-host experience" without forcing it.

@@ -894,8 +894,16 @@ electron:linux:
     # electron-builder needs a few system libs to package linux artifacts.
     - apt-get update && apt-get install -y --no-install-recommends rpm fakeroot dpkg
     - npm run electron:build
+    # Pin the .deb / AppImage filename to the git tag. Without
+    # `extraMetadata.version` electron-builder reads `package.json:version`
+    # (statically `0.1.1`) — so v0.1.19 shipped `geode-ui-desktop_0.1.1_*.deb`
+    # and `apt install geode-ui-desktop=0.1.19` had nothing to resolve.
+    # `extraMetadata` is a build-only override; `package.json` on disk is
+    # untouched so the source tree stays clean.
+    - export ELECTRON_VERSION="${CI_COMMIT_TAG#v}"
+    - echo "Building electron .debs for v${ELECTRON_VERSION}"
     # Build BOTH AppImage + deb for x64 + arm64 (per electron-builder.yml).
-    - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml
+    - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml --config.extraMetadata.version="${ELECTRON_VERSION}"
     - ls -la release/linux/ || true
   artifacts:
     # Ship the user-facing installers + latest-*.yml manifests only.
@@ -990,6 +998,67 @@ prepare-apt-packages:
     expire_in: 30 days
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+# ============================================================================
+# CATALOG OVERRIDE — apt-repo trim (works around 1GB artifact ceiling)
+# ============================================================================
+#
+# The `apt-publish@v1.25.2` catalog's `apt-repo` job (template
+# `templates/apt-publish/template.yml:244-525`) builds the apt repo by:
+#   1. Downloading the existing S3 pool (every .deb ever published to
+#      apt.geodedb.com — geode AND geode-ui, every version).
+#   2. Adding the freshly-signed new .debs from `apt-sign`'s artifact.
+#   3. Running `apt-ftparchive` to emit `dists/*/Packages*`.
+#   4. Signing the `Release` file with the geode GPG key.
+#   5. Uploading the entire `apt-repo/` tree as a GitLab job artifact
+#      so the downstream `apt-publish` job can `aws s3 sync` it back.
+#
+# Step 5 hit `413 Payload Too Large` on v0.1.19 once the geode-ui-desktop
+# electron .debs (~250 MB across two arches) pushed the artifact past the
+# 1 GB runner upload ceiling. The repo had been climbing toward the limit
+# for releases — adding the desktop .deb tipped it over.
+#
+# Fix: override the catalog job's `after_script` to PRUNE the historical
+# pool from `apt-repo/pool/` before the artifact upload runs. `Packages*`
+# is already generated (step 3 ran before `after_script`) and references
+# every historical .deb by relative path; those .debs remain on S3 from
+# previous releases, so the apt client still resolves them. The
+# downstream `apt-publish` job's `aws s3 sync` is additive (no `--delete`)
+# so leaving the historical .debs off the artifact does NOT remove them
+# from S3 — the sync only uploads `dists/`, `*.gpg`, and the NEW .debs.
+#
+# Keep-set per release:
+#   • `pool/main/g/geode-ui_${VERSION}_*.deb*`           (server, this tag)
+#   • `pool/main/g/geode-ui-desktop_${VERSION}_*.deb*`   (desktop, this tag)
+# Everything else under `pool/` is dropped from the artifact.
+#
+# This decouples the catalog's local-artifact size from the unbounded
+# S3-pool size — releases stay below the runner ceiling regardless of how
+# many historical .debs accumulate at apt.geodedb.com.
+
+apt-repo-apt-geodedb-com:
+  after_script:
+    - |
+      set -euo pipefail
+      VERSION="${CI_COMMIT_TAG#v}"
+      echo "=== apt-repo override: trim pool/ to v${VERSION} only ==="
+      du -sh apt-repo/ 2>/dev/null || true
+      if [ -d apt-repo/pool/main/g ]; then
+        # Delete every pool entry that is NOT one of this release's new .debs
+        # (or their detached .asc signatures). `Packages*` and `Release*`
+        # under `dists/` already reference the historical .debs by relative
+        # path; those files remain on S3 from prior runs, so the apt client
+        # still resolves them after `aws s3 sync` adds the new dists.
+        find apt-repo/pool/main/g/ -type f \
+          ! -name "geode-ui_${VERSION}_*.deb" \
+          ! -name "geode-ui_${VERSION}_*.deb.asc" \
+          ! -name "geode-ui-desktop_${VERSION}_*.deb" \
+          ! -name "geode-ui-desktop_${VERSION}_*.deb.asc" \
+          -print -delete
+      fi
+      echo "=== post-trim apt-repo size + retained pool entries ==="
+      du -sh apt-repo/ 2>/dev/null || true
+      ls -la apt-repo/pool/main/g/ 2>/dev/null || true
 
 # ============================================================================
 # PUBLISH STAGE - Attach goreleaser + electron artifacts to GitLab Release
