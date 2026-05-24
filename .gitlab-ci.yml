@@ -699,10 +699,17 @@ e2e:playwright:
       tar -xzf /tmp/gr.tgz -C /tmp goreleaser
       install -m 0755 /tmp/goreleaser /usr/local/bin/goreleaser
       goreleaser --version
-    # Wait for docker daemon
+    # Wait for the dind sidecar to bind. The company k8s runner
+    # sometimes takes >60s to spin up the docker:25-dind pod (observed
+    # v0.1.11). Bumping the window to 180s with per-attempt logging
+    # so a real outage surfaces as a clear failure instead of a
+    # truncated "Cannot connect to the Docker daemon" at job-end.
     - |
-      for i in $(seq 1 60); do
-        if docker info >/dev/null 2>&1; then break; fi
+      for i in $(seq 1 180); do
+        if docker info >/dev/null 2>&1; then
+          echo "dind ready after ${i}s"
+          break
+        fi
         sleep 1
       done
       docker info
