@@ -33,9 +33,14 @@ before:
     # so the //go:embed all:dist directive does NOT pull 48.78 MiB of
     # *.map files into the release binary. Dev builds (no env var) keep
     # source-map for devtools-driven debugging.
-  - cmd: npm run build
-    env:
-    - EMBEDDED_BUILD=1
+    #
+    # Goreleaser v2.13.3's nFPM-compatible YAML schema expects each
+    # hooks entry as a string, NOT the `{cmd, env}` map form (the map
+    # shape produces `yaml: unmarshal errors: cannot unmarshal !!map
+    # into string` at parse time). Pre-pend the env var inline via
+    # `sh -c` to preserve the EMBEDDED_BUILD=1 semantics without the
+    # map syntax.
+  - sh -c "EMBEDDED_BUILD=1 npm run build"
 
 builds:
 - id: geode-ui
