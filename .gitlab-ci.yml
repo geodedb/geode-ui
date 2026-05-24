@@ -733,6 +733,18 @@ e2e:playwright:
     - docker buildx inspect --bootstrap
     # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
     - npm ci
+    # go.mod has `replace geodedb.com/geode => ../geode-client-go`,
+    # so goreleaser's `go build` needs a sibling checkout of
+    # geode-client-go relative to this repo. Local developers have
+    # both repos side-by-side; CI clones it explicitly. Uses
+    # CI_JOB_TOKEN so the same line works whether the sibling is
+    # public or private.
+    - |
+      if [ ! -d ../geode-client-go ]; then
+        git clone --depth=1 \
+          "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/devnw/codepros/geode/geode-client-go.git" \
+          ../geode-client-go
+      fi
 
 goreleaser-snapshot:
   extends: .goreleaser-base
