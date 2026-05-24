@@ -186,6 +186,42 @@ follow-up.
   whitelists `https:` and `mailto:` — file:// or custom schemes
   cannot be launched.
 
+## Secure-store MAC key (APP-04)
+
+Closes APP-04 from `docs/APPSEC_REVIEW_2026-05-24_auth-ipc.md`.
+
+The secure-store (`<userData>/secure-store.json`) wraps every payload
+in a `{ v: 2, ciphertext, hmac }` envelope. The HMAC key is now an
+explicit 32-byte random value persisted to a sibling file:
+
+```text
+<userData>/
+  secure-store.json     # connections + saved passwords (encrypted via safeStorage)
+  secure-store.mackey   # HMAC key (32 random bytes wrapped via safeStorage), mode 0o600
+```
+
+Pre-APP-04 the MAC key was derived by hashing
+`safeStorage.encryptString('geode-ui-mac-key-v1')`, which relied on
+an undocumented byte-stable-output assumption across Electron
+versions, OS keyring rotations, and DPAPI re-encryption events. Under
+a non-deterministic AEAD the MAC key would shift on every restart and
+HMAC verify would silently fail on the legitimate read path —
+producing an empty doc with no observable signal to the user beyond
+"logged out + saved passwords gone".
+
+**One-shot wipe.** Deleting `secure-store.mackey` (manually or via
+an OS-driven recovery flow) forces the next launch to generate a
+fresh key. The prior `secure-store.json` then fails its HMAC and the
+read returns `{}`. This is an explicit, recoverable wipe: the user
+sees a clean re-login flow instead of a silently-broken UI. There is
+no degraded "partial decrypt" path — the wipe is the contract.
+
+The file is written through the same tmp-suffix-then-rename atomic
+pattern as the data file, with `mode: 0o600`. Failure to persist the
+wrapped key is non-fatal for the running process (the in-memory key
+still works); the next process will re-key and the user will see the
+wipe.
+
 ## Permission policy (APP-05)
 
 Closes APP-05 from `docs/APPSEC_REVIEW_2026-05-24_auth-ipc.md`.

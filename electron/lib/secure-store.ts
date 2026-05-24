@@ -58,13 +58,25 @@ export { SecureStoreUnavailableError } from './ipc-guards'
 const empty: SecureStoreDoc = {}
 const DEFAULT_DEBOUNCE_MS = 250
 
-// MAC_KEY_LABEL — derives a per-install MAC key by asking safeStorage
-// to encrypt a constant tag. The OS-bound encryption blob is hashed to
-// produce the symmetric MAC key. Two installations on the same machine
-// each get a distinct key (because OSX Keychain / DPAPI / libsecret
-// per-app secrets diverge); a copy of the file alone (without the OS
-// keyring entry) cannot forge a valid HMAC.
-const MAC_KEY_LABEL = 'geode-ui-mac-key-v1'
+// MAC_KEY_FILENAME — APP-04 (2026-05-24 appsec): the wrapped HMAC key
+// lives in a sibling file next to the secure-store data file. Pre-fix
+// the MAC key was derived by hashing `safeStorage.encryptString(label)`,
+// which relied on an undocumented byte-stable-output assumption across
+// Electron versions, OS keyring rotations, and DPAPI re-encryption
+// events. If the platform ever rewrapped under a non-deterministic
+// AEAD (likely on at least some OSes today), the HMAC verify would
+// silently fail on the legitimate read path and every connection /
+// saved password would appear lost.
+//
+// Post-fix the MAC key is an explicit 32 random bytes generated on
+// first run, wrapped via `safeStorage.encryptString` (so the OS keyring
+// still gates the file at rest), and written to
+// `<storePath dir>/secure-store.mackey` with mode 0o600. Reads load it
+// back; deleting the file forces a one-shot re-key (the prior data
+// fails its HMAC and surfaces as an empty doc on the next read — the
+// user sees "logged out + saved passwords gone" which is observable
+// instead of silently broken).
+const MAC_KEY_FILENAME = 'secure-store.mackey'
 
 // On-disk envelope shape. `ciphertext` is the safeStorage-encrypted
 // blob (base64). `hmac` is the hex-encoded HMAC-SHA256 of `ciphertext`
@@ -142,18 +154,56 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
     return JSON.parse(JSON.stringify(doc)) as SecureStoreDoc
   }
 
-  function deriveMacKey(): Buffer {
-    if (macKey) return macKey
-    // safeStorage.encryptString returns a Buffer that is bound to the
-    // OS keyring entry for this app+user. Hashing it gives a stable
-    // 32-byte symmetric key for HMAC-SHA256.
-    const seed = safeStorage.encryptString(MAC_KEY_LABEL)
-    macKey = crypto.createHash('sha256').update(seed).digest()
-    return macKey
+  function macKeyPath(): string {
+    return path.join(path.dirname(storePath), MAC_KEY_FILENAME)
   }
 
-  function computeMac(ciphertext: Buffer): string {
-    const key = deriveMacKey()
+  // loadOrCreateMacKey reads the wrapped 32-byte MAC key from
+  // `<storePath dir>/secure-store.mackey`, decrypting via
+  // `safeStorage.decryptString`. On a missing or unreadable file (first
+  // launch, operator-driven recovery, or a partial migration from a
+  // pre-APP-04 store) it generates a fresh key via `crypto.randomBytes`,
+  // wraps it through safeStorage, and writes the ciphertext to a tmp
+  // file before renaming atomically (mode 0o600, mirroring the data
+  // file's own atomic-rename pattern).
+  async function loadOrCreateMacKey(): Promise<Buffer> {
+    if (macKey) return macKey
+    const keyPath = macKeyPath()
+    // Try to load an existing wrapped key.
+    try {
+      const wrapped = await fs.readFile(keyPath)
+      // base64 around a 32-byte random key — `safeStorage.decryptString`
+      // returns the original string; we then re-base64-decode.
+      const decoded = safeStorage.decryptString(wrapped)
+      const raw = Buffer.from(decoded, 'base64')
+      if (raw.length !== 32) {
+        // A short or corrupt key file falls through to regenerate.
+        throw new Error('unexpected mac key length')
+      }
+      macKey = raw
+      return raw
+    } catch {
+      // Fall through to generate.
+    }
+    const raw = crypto.randomBytes(32)
+    const wrapped = safeStorage.encryptString(raw.toString('base64'))
+    try {
+      await fs.mkdir(path.dirname(keyPath), { recursive: true })
+      const tmp = joinTmp(keyPath, randomTmpSuffix())
+      await fs.writeFile(tmp, wrapped, { mode: 0o600 })
+      await fs.rename(tmp, keyPath)
+    } catch {
+      // Persist failure is non-fatal for this process — the in-memory
+      // MAC key still works, but the next process will re-key (one-shot
+      // wipe). The user sees logged-out / saved-passwords-empty which
+      // is observable instead of silently broken.
+    }
+    macKey = raw
+    return raw
+  }
+
+  async function computeMac(ciphertext: Buffer): Promise<string> {
+    const key = await loadOrCreateMacKey()
     return crypto.createHmac('sha256', key).update(ciphertext).digest('hex')
   }
 
@@ -194,7 +244,7 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
       // (or a substituted file from another install) fails the MAC
       // and surfaces as an empty doc rather than mis-decrypted bytes.
       cipherBuf = Buffer.from(parsed.ciphertext, 'base64')
-      const expected = computeMac(cipherBuf)
+      const expected = await computeMac(cipherBuf)
       // crypto.timingSafeEqual requires equal lengths.
       const got = parsed.hmac
       const expectedBuf = Buffer.from(expected, 'hex')
@@ -279,7 +329,7 @@ export function createSecureStore(opts: SecureStoreOptions): SecureStore {
     const snapshot = clone(memo)
     const plain = JSON.stringify(snapshot)
     const cipherBytes = safeStorage.encryptString(plain)
-    const hmac = computeMac(cipherBytes)
+    const hmac = await computeMac(cipherBytes)
     const envelope: EnvelopeV2 = {
       v: 2,
       ciphertext: cipherBytes.toString('base64'),

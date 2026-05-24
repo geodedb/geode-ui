@@ -21,24 +21,34 @@ function fakeSafeStorage(): SafeStorageLike {
   }
 }
 
+// APP-04: the secure-store no longer encrypts a constant MAC label —
+// it now wraps a 32-byte random key and writes it to a sibling file.
+// The wrap call passes the key as a base64-encoded string (44 chars
+// for 32 bytes). The counting helper recognises that shape and skips
+// it so the F6 perf assertions still pin the number of *payload*
+// encrypts, not the per-store MAC-key wrap.
+const APP_04_MAC_KEY_B64 = /^[A-Za-z0-9+/]{43}=$/
+
 function countingFakeSafeStorage(): CountingFake {
   const fake = {
     encryptCount: 0,
     decryptCount: 0,
     isEncryptionAvailable: () => true,
     encryptString(s: string): Buffer {
-      // The S4 HMAC envelope derives a per-store MAC key by encrypting
-      // a constant label. That derivation runs once per store and must
-      // not inflate the payload encrypt count tracked by the F6 perf
-      // assertions (which pin the number of *payload* encrypts).
-      if (s !== 'geode-ui-mac-key-v1') {
+      if (!APP_04_MAC_KEY_B64.test(s)) {
         fake.encryptCount += 1
       }
       return Buffer.from(`enc:${s}`, 'utf8')
     },
     decryptString(b: Buffer): string {
-      fake.decryptCount += 1
-      return b.toString('utf8').replace(/^enc:/, '')
+      const out = b.toString('utf8').replace(/^enc:/, '')
+      // Decrypts of the wrapped MAC key are a per-store one-off (cold
+      // load only); don't count them against the per-payload decrypt
+      // assertions either.
+      if (!APP_04_MAC_KEY_B64.test(out)) {
+        fake.decryptCount += 1
+      }
+      return out
     },
   }
   return fake
@@ -424,4 +434,101 @@ test('S4: tmp file uses a randomized hex suffix (no predictable .tmp)', () => {
   expect(a.endsWith('.tmp')).toBe(true)
   // Suffix is 16 hex chars + '.tmp' before basename of storePath.
   expect(a).toMatch(/secure\.json\.[0-9a-f]{16}\.tmp$/)
+})
+
+// ---------------------------------------------------------------------------
+// APP-04 (2026-05-24 appsec): MAC key persisted explicitly. Pre-fix
+// `deriveMacKey` relied on `safeStorage.encryptString(label)` being
+// byte-stable across calls. The MAC key is now an explicit 32-byte
+// random value wrapped via safeStorage and written to a sibling file
+// (`secure-store.mackey`); reads load it back, first-launch generates
+// it, deletion forces a one-shot re-key (data wipe).
+// ---------------------------------------------------------------------------
+
+test('APP-04: MAC key file is created on first write next to secure-store', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  const keyPath = path.join(dir, 'secure-store.mackey')
+  const store = createSecureStore({
+    storePath: filePath,
+    safeStorage: fakeSafeStorage(),
+  })
+  // No file before write.
+  await expect(fs.access(keyPath)).rejects.toThrow()
+  await store.write({ passwords: { 'a\x00b': 'pw' } })
+  await store.flushSync()
+  await expect(fs.access(keyPath)).resolves.toBeUndefined()
+  // File mode should be 0o600 (owner read/write only).
+  const stat = fsSync.statSync(keyPath)
+  // mode & 0o777 isolates the permission bits from the file-type bits.
+  expect(stat.mode & 0o777).toBe(0o600)
+  await fs.rm(dir, { recursive: true })
+})
+
+test('APP-04: MAC key is stable across store instances on the same file', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  // Use a fake that returns DIFFERENT ciphertext per call (closer to a
+  // real non-deterministic AEAD). Pre-fix the in-process deriveMacKey
+  // would diverge between launches and the HMAC verify would silently
+  // fail, returning {} on read.
+  let counter = 0
+  const nonDeterministic: SafeStorageLike = {
+    isEncryptionAvailable: () => true,
+    encryptString: (s: string) => {
+      counter += 1
+      return Buffer.from(`enc${counter}:${s}`, 'utf8')
+    },
+    decryptString: (b: Buffer) =>
+      b.toString('utf8').replace(/^enc\d+:/, ''),
+  }
+  {
+    const store = createSecureStore({
+      storePath: filePath,
+      safeStorage: nonDeterministic,
+    })
+    await store.write({ passwords: { 'a\x00b': 'persists' } })
+    await store.flushSync()
+  }
+  // Fresh store instance, same sibling key file → must read back the
+  // value despite encryptString returning different bytes each call.
+  const store2 = createSecureStore({
+    storePath: filePath,
+    safeStorage: nonDeterministic,
+  })
+  const got = await store2.read()
+  expect(got.passwords?.['a\x00b']).toBe('persists')
+  await fs.rm(dir, { recursive: true })
+})
+
+test('APP-04: deleting the MAC key file forces a one-shot wipe (read returns empty)', async () => {
+  const dir = await tmpDir()
+  const filePath = path.join(dir, 'secure.json')
+  const keyPath = path.join(dir, 'secure-store.mackey')
+  const fake = fakeSafeStorage()
+  {
+    const store = createSecureStore({
+      storePath: filePath,
+      safeStorage: fake,
+    })
+    await store.write({ passwords: { 'a\x00b': 'pw' } })
+    await store.flushSync()
+  }
+  // Operator-equivalent recovery: remove the wrapped MAC key.
+  await fs.unlink(keyPath)
+  const store2 = createSecureStore({
+    storePath: filePath,
+    safeStorage: fakeSafeStorage(),
+  })
+  // A fresh MAC key is generated; the HMAC over the prior ciphertext
+  // mismatches and the read surfaces an empty doc (no silent decrypt
+  // of mis-keyed bytes).
+  const got = await store2.read()
+  expect(got).toEqual({})
+  // The MAC key file is recreated on next write so subsequent reads
+  // resume cleanly.
+  await store2.write({ passwords: { 'a\x00b': 'fresh' } })
+  await store2.flushSync()
+  await expect(fs.access(keyPath)).resolves.toBeUndefined()
+  await fs.rm(dir, { recursive: true })
 })
