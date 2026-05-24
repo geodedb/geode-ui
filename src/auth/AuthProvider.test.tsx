@@ -1006,4 +1006,88 @@ describe('AuthProvider → ConnectionsContext integration', () => {
 
     global.fetch = orig
   })
+
+  // APP-06 (2026-05-24 appsec): the sessionStorage roles cache is
+  // observable + writable by anything sharing the document origin
+  // (DOM-XSS, devtools paste, a malicious npm transitive that runs
+  // before React mounts). Server-side admin handlers re-check, so a
+  // forged cache does not escalate privilege at the server — but the
+  // SPA's `RoleGate` mount in App.tsx:213 is the only client-side
+  // admin authority and reads the cache directly. The whoami bootstrap
+  // overwrite converts the cache from "authoritative" to "best-effort
+  // hint, replaced by the next whoami response".
+  test('APP-06: fetchWhoAmI on mount overrides a forged sessionStorage roles stash', async () => {
+    // Forge an admin posture in sessionStorage BEFORE the AuthProvider
+    // mounts. The auth-hint key ensures `isAuthed` starts true so the
+    // bootstrap effect fires.
+    sessionStorage.setItem('geode-ui.session-hint', '1')
+    sessionStorage.setItem('geode-ui.session-roles', JSON.stringify(['admin']))
+
+    let whoamiCalls = 0
+    const orig = global.fetch
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url.endsWith('/api/v1/auth/whoami')) {
+        whoamiCalls += 1
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sub: 'alice',
+            profile: 'default',
+            roles: [], // server says: NOT an admin
+            expires_at: Math.floor(Date.now() / 1000) + 3600,
+          }),
+        } as unknown as Response
+      }
+      if (url.endsWith('/api/v1/csrf')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ token: 'csrf-mock' }),
+        } as unknown as Response
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    let captured: ReturnType<typeof useAuth> | null = null
+    const InnerOverride: React.FC = () => {
+      captured = useAuth()
+      return <span />
+    }
+    render(
+      <ConnectionsProvider>
+        <AuthProvider>
+          <InnerOverride />
+        </AuthProvider>
+      </ConnectionsProvider>
+    )
+
+    // Initial render sees the forged stash.
+    expect(captured!.isAdmin).toBe(true)
+
+    await act(async () => {
+      for (let i = 0; i < 8; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve()
+      }
+    })
+
+    // After the bootstrap whoami round-trip the server's empty roles
+    // list wins. The forged cache no longer matters.
+    expect(whoamiCalls).toBeGreaterThanOrEqual(1)
+    expect(captured!.isAdmin).toBe(false)
+    expect(captured!.roles).toEqual([])
+    // The sessionStorage cache was overwritten too — a second mount
+    // (or a reload) starts from the server's truth.
+    expect(sessionStorage.getItem('geode-ui.session-roles')).toBeNull()
+
+    global.fetch = orig
+    sessionStorage.removeItem('geode-ui.session-hint')
+    sessionStorage.removeItem('geode-ui.session-roles')
+  })
 })

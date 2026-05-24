@@ -21,7 +21,11 @@ import React, {
   useMemo,
   useState,
 } from 'react'
-import { login as apiLogin, logout as apiLogout } from '../api/auth'
+import {
+  login as apiLogin,
+  logout as apiLogout,
+  fetchWhoAmI,
+} from '../api/auth'
 import { clearCsrfToken, refreshCsrfToken } from '../api/csrf'
 import { useConnections, setLatestToken } from '../api/connections'
 import { storeSavedPassword } from '../api/electron-bridge'
@@ -451,6 +455,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     refreshCsrfToken().catch(() => {
       /* swallow — non-fatal, the next mutation will retry */
     })
+  }, [isAuthed])
+
+  // APP-06 (2026-05-24 appsec): the sessionStorage roles cache
+  // (`geode-ui.session-roles`) is writable by anything sharing the
+  // document origin — DOM-XSS, devtools paste, a malicious npm
+  // transitive that runs before React mounts. Server-side admin
+  // handlers re-check, so a forged cache cannot escalate privilege at
+  // the server, but the SPA's `RoleGate` mount (App.tsx) is the only
+  // client-side admin authority and reads the cache directly. The
+  // bootstrap fetchWhoAmI round-trip converts the cache from
+  // "authoritative until 401" to "best-effort hint, overwritten by
+  // the next whoami response from the server". If whoami fails or
+  // returns null, the existing hydrated cache stays in place — the
+  // client-side gate is information-disclosure-only and the server
+  // remains the final authority.
+  useEffect(() => {
+    if (!isAuthed) return
+    let cancelled = false
+    fetchWhoAmI()
+      .then((who) => {
+        if (cancelled || !who) return
+        const serverRoles = Array.isArray(who.roles) ? who.roles : []
+        writeStoredRoles(serverRoles)
+        setRoles(serverRoles)
+      })
+      .catch(() => {
+        /* swallow — the cache stays as best-effort UI hint */
+      })
+    return () => {
+      cancelled = true
+    }
   }, [isAuthed])
 
   // PSR-G09: convenience selectors derived from `roles`. `hasRole` is

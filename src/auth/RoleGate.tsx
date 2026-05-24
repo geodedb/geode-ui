@@ -21,6 +21,23 @@ import { useAuth } from './AuthProvider'
 // The component DOES NOT render any "403" UI surface — the redirect is
 // the discloure-suppressing behaviour; an inline 403 surface would
 // leak the route's existence.
+//
+// APP-06 (2026-05-24 appsec) — TRUST BOUNDARY: this client-side gate
+// is information-disclosure-only. The `roles` array it consults comes
+// from `AuthProvider`, which seeds it from the JWT claim AND from a
+// best-effort `sessionStorage['geode-ui.session-roles']` cache that a
+// DOM-XSS / devtools paste / malicious npm transitive could forge.
+// The bootstrap `fetchWhoAmI` effect in AuthProvider overwrites the
+// cache with the server's authoritative roles list whenever the
+// browser is authenticated, so a forged cache survives at most one
+// render before the network round-trip replaces it.
+//
+// EVERY API HANDLER on the server independently checks
+// `hasRole('admin')` (or the equivalent) and returns 403. DO NOT
+// remove the server-side check on the assumption that this gate
+// covers it — the gate is a UX + disclosure suppression layer, not
+// an authority. Cross-link: App.tsx mounts this around AdminPage and
+// its siblings.
 
 export const RoleGate: React.FC<{
   requiredRole: string
