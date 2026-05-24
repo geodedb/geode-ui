@@ -52,6 +52,10 @@ grep -q 'quic://localhost:3141' /etc/geode-ui/seed-profiles.d/10-local-geode.jso
 
 # 4. Binary runs & serves health. We start it manually (no systemd-pid1
 # in the container) and curl the health endpoint, then SIGTERM it.
+# GEODE_PROFILESTORE_KEY is required at startup for at-rest
+# encryption of the SQLite profile store — even when -profile-store
+# is :memory:. Generate an ephemeral one for the smoke run.
+export GEODE_PROFILESTORE_KEY="$(openssl rand -base64 32)"
 /usr/bin/geode-ui \
     -listen=127.0.0.1:18080 \
     -profile-store=:memory: \
