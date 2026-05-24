@@ -675,8 +675,11 @@ e2e:playwright:
     DOCKER_BUILDKIT: '1'
     GIT_DEPTH: '0'
   before_script:
-    # Tools: alpine package set + node (for the npm-build before-hook).
-    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm
+    # Tools: alpine package set + node (for the npm-build before-hook)
+    # + go (the goreleaser default builder for the geode-ui binary;
+    # without it goreleaser fails at "loading go mod information" with
+    # `exec: "go": executable file not found`).
+    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm go
     # Goreleaser binary (pinned, integrity-verifiable via SHA next time).
     - |
       curl -fsSL "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" -o /tmp/gr.tgz
