@@ -20,4 +20,15 @@ paths = [
     # committed; allowlisting it here keeps `make pre-commit` /
     # gitleaks scans quiet.
     '''\.scratch''',
+    # 2026-05-23: JWT-shaped fixtures + example payloads in Go test
+    # files and audit documentation. The `generic-api-key` rule
+    # flags any 32+ char hex-ish string; every hit in these files
+    # is either:
+    #   - a deterministic test JWT (e.g. tests/fixtures, ws_e2e_test.go)
+    #   - an example payload inside an audit/review doc
+    # None are live credentials. Vetted via the report artifact
+    # from pipeline 2548560814 (27 hits, all in these paths).
+    '''_test\.go$''',
+    '''docs/audits/.*\.md$''',
+    '''docs/superpowers/plans/.*\.md$''',
 ]

@@ -664,8 +664,12 @@ e2e:playwright:
   image: docker:25
   services:
     - docker:25-dind
+  # Without `linux` the company-tag also matches the Windows runner
+  # (which lacks docker/npm on PATH and would parse the bash heredocs
+  # below as PowerShell). The dind service also assumes a Linux host.
   tags:
     - company
+    - linux
   variables:
     DOCKER_TLS_CERTDIR: ''
     DOCKER_BUILDKIT: '1'
@@ -823,8 +827,14 @@ electron:linux:
     - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml
     - ls -la release/linux/ || true
   artifacts:
+    # Ship the user-facing installers + latest-*.yml manifests only.
+    # The `linux-unpacked/` and `linux-arm64-unpacked/` trees are
+    # electron-builder build intermediates (~520MB each); including
+    # them blew the GitLab 1GB artifact-upload limit (413 Too Large).
     paths:
-      - release/linux/
+      - release/linux/*.deb
+      - release/linux/*.AppImage
+      - release/linux/*.yml
     expire_in: 30 days
 
 electron:mac:
@@ -838,8 +848,12 @@ electron:mac:
     - npx electron-builder --mac --universal --config electron-builder.yml
     - ls -la release/mac/ || true
   artifacts:
+    # User-facing installers only — exclude electron-builder's
+    # `mac/`/`mac-arm64/` unpacked .app bundles (build intermediates).
     paths:
-      - release/mac/
+      - release/mac/*.dmg
+      - release/mac/*.zip
+      - release/mac/*.yml
     expire_in: 30 days
   # No mac runner registered yet → skip without failing the pipeline.
   # Switch to `allow_failure: false` once a macos runner is available.
@@ -855,8 +869,11 @@ electron:win:
     - npx electron-builder --win --x64 --config electron-builder.yml
     - dir release\win || echo "no win artifacts"
   artifacts:
+    # User-facing installers only — exclude `win-unpacked/`.
     paths:
-      - release/win/
+      - release/win/*.exe
+      - release/win/*.msi
+      - release/win/*.yml
     expire_in: 30 days
   # Same windows-runner caveat as the mac job.
   allow_failure: true
