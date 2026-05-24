@@ -24,6 +24,8 @@ import { AdminPage } from './pages/AdminPage'
 import { UsersPage } from './components/admin/UsersPage'
 import { RolesPage } from './components/admin/RolesPage'
 import { PoliciesPage } from './components/admin/PoliciesPage'
+import { RlsDenyPoliciesPage } from './components/admin/RlsDenyPoliciesPage'
+import { RlsAttributePoliciesPage } from './components/admin/RlsAttributePoliciesPage'
 import { GrantsPanel } from './components/admin/GrantsPanel'
 import { ProfilesPage } from './pages/ProfilesPage'
 import { DocsPage } from './pages/DocsPage'
@@ -216,6 +218,11 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                     <Route path="roles" element={<RolesPage />} />
                     <Route path="policies" element={<PoliciesPage />} />
                     <Route path="grants" element={<GrantsPanel />} />
+                    <Route path="rls-deny" element={<RlsDenyPoliciesPage />} />
+                    <Route
+                      path="rls-attribute"
+                      element={<RlsAttributePoliciesPage />}
+                    />
                     <Route path="backups" element={<BackupPage />} />
                     <Route path="restore" element={<RestorePage />} />
                     <Route path="migrations" element={<MigrationsPage />} />

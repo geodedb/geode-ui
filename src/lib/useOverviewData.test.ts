@@ -71,6 +71,9 @@ describe('useOverviewData', () => {
       roles: false,
       policies: false,
       grants: false,
+      attributes: false,
+      rlsDenyPolicies: false,
+      rlsAttributePolicies: false,
     })
   })
 

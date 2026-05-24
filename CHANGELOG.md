@@ -12,6 +12,36 @@ and 2026-05-17. Entries are grouped by the date the cohort closed, then
 by Keep-a-Changelog subsection. Issue numbers reference
 `gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/<id>`.
 
+### Added (2026-05-24 — Geode 0.5.20 policy subsystem)
+
+- **Admin / RLS Deny Policies** (`/admin/rls-deny`): list, add, and
+  remove label-level deny policies (rows of `<label>` hidden from
+  `<username>`; empty username denies all users). Backed by
+  `geode.rls.add_deny_policy` / `remove_deny_policy` /
+  `list_deny_policies` / `policy_count` procedures called over the
+  existing `POST /api/v1/query` channel.
+- **Admin / RLS Attribute Policies** (`/admin/rls-attribute`):
+  per-row ABAC policies that compare `row.<rowProperty>` to the
+  querying user's `attribute.<attributeKey>`. Live expression
+  preview shows the canonical policy form before submit; in-session
+  mirror surfaces policies on builds without `gps.list_policies`.
+- **Per-user attributes**: every user row in `/admin/users` now has
+  an "Attributes" action that opens an editor for the
+  ABAC-attribute key/value store (`geode.auth.user_set_attribute` /
+  `user_remove_attribute`). Keys are validated client-side against
+  the GQL identifier shape `[A-Za-z_][A-Za-z0-9_]*`.
+- **Schema page**: indexes section renders as a typed table with
+  per-row Type badge — FULLTEXT indexes (newly listed by SHOW INDEXES
+  in Geode 0.5.20, commit `9fa1eab2`) appear alongside BTREE.
+- **Monaco GQL editor**: completion provider registers `Interval()`,
+  `interval_overlaps`, and `interval_contains` (Geode 0.5.20 commit
+  `384c3bf0`) so the autocomplete reflects the new vocabulary
+  immediately, independent of the LSP connection.
+- **Capabilities**: `admin_writable.{attributes, rls_deny_policies,
+  rls_attribute_policies}` are now narrowed by `fetchCapabilities`
+  so the per-tab gating renders the correct state for pre-0.5.20
+  builds (all three flags fall back to `false`).
+
 ### Breaking Changes
 
 - Electron `.deb` renamed: the desktop installer is now published as

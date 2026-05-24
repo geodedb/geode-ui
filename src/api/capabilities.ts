@@ -19,6 +19,14 @@ export interface AdminWritable {
   roles: boolean
   policies: boolean
   grants: boolean
+  // Geode 0.5.20 — admin surfaces backed by CALL procedures rather
+  // than discrete REST endpoints. Mirror the upstream snake_case
+  // wire keys: `attributes`, `rls_deny_policies`,
+  // `rls_attribute_policies`. Default false on builds that don't
+  // emit them.
+  attributes: boolean
+  rlsDenyPolicies: boolean
+  rlsAttributePolicies: boolean
 }
 
 export interface Capabilities {
@@ -41,6 +49,9 @@ export const ADMIN_WRITABLE_NONE: AdminWritable = {
   roles: false,
   policies: false,
   grants: false,
+  attributes: false,
+  rlsDenyPolicies: false,
+  rlsAttributePolicies: false,
 }
 
 function asBool(v: unknown): boolean {
@@ -60,6 +71,9 @@ export async function fetchCapabilities(): Promise<Capabilities> {
       roles: asBool(aw.roles),
       policies: asBool(aw.policies),
       grants: asBool(aw.grants),
+      attributes: asBool(aw.attributes),
+      rlsDenyPolicies: asBool(aw.rls_deny_policies),
+      rlsAttributePolicies: asBool(aw.rls_attribute_policies),
     },
     metricsEnabled: asBool(
       (raw as unknown as Record<string, unknown>).metrics_enabled

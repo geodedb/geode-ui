@@ -15,6 +15,9 @@ const NONE: AdminWritable = {
   roles: false,
   policies: false,
   grants: false,
+  attributes: false,
+  rlsDenyPolicies: false,
+  rlsAttributePolicies: false,
 }
 
 test('renders the version and all four capabilities disabled', () => {

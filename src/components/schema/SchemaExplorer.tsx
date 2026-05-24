@@ -163,6 +163,50 @@ const Pre = styled.pre`
   color: ${({ theme }) => theme.text.primary};
 `
 
+// IndexTable replaces the JSON-blob dump of indexes with a typed row
+// view (name / label / property / type). FULLTEXT indexes — newly
+// surfaced by SHOW INDEXES in Geode 0.5.20 (commit 9fa1eab2) — are
+// rendered with the same row shape as B-TREE indexes; only the
+// IndexTypeBadge background changes per type.
+const IndexTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  font-size: ${({ theme }) => theme.font.sizes.sm};
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+
+  th,
+  td {
+    padding: ${({ theme }) => theme.spacing.xs}
+      ${({ theme }) => theme.spacing.sm};
+    border-bottom: 1px solid ${({ theme }) => theme.border.subtle};
+    text-align: left;
+  }
+  th {
+    font-weight: ${({ theme }) => theme.font.weights.semibold};
+    color: ${({ theme }) => theme.text.secondary};
+  }
+`
+
+const IndexTypeBadge = styled.span<{ $kind: string }>`
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: ${({ theme }) => theme.radii.sm};
+  font-size: ${({ theme }) => theme.font.sizes.xs};
+  font-weight: ${({ theme }) => theme.font.weights.semibold};
+  letter-spacing: 0.02em;
+  background: ${({ theme, $kind }) => {
+    const k = $kind.toUpperCase()
+    if (k === 'FULLTEXT') return theme.colors.info
+    if (k === 'BTREE') return theme.bg.subtle
+    return theme.bg.subtle
+  }};
+  color: ${({ theme, $kind }) => {
+    const k = $kind.toUpperCase()
+    if (k === 'FULLTEXT') return theme.text.onPrimary
+    return theme.text.primary
+  }};
+`
+
 // SchemaExplorerProps lets tests inject a fresh cache instance per
 // run; production callers omit the prop and inherit the module-level
 // defaultSchemaCache. The prop accepts any SchemaCacheLike — the
@@ -355,7 +399,49 @@ export const SchemaExplorer: React.FC<SchemaExplorerProps> = ({ cache }) => {
           <>
             <h4>{t('schema.indexes')}</h4>
             {indexes.length > 0 ? (
-              <Pre>{JSON.stringify(indexes, null, 2)}</Pre>
+              <IndexTable data-testid="schema-indexes-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Label</th>
+                    <th>Property</th>
+                    <th>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {indexes.map((idx) => {
+                    const name = typeof idx.name === 'string' ? idx.name : ''
+                    const label = typeof idx.label === 'string' ? idx.label : ''
+                    const property =
+                      typeof idx.property === 'string' ? idx.property : ''
+                    const explicitType =
+                      typeof idx.index_type === 'string' ? idx.index_type : ''
+                    const fallbackType =
+                      typeof idx.type === 'string' ? idx.type : ''
+                    const indexType = explicitType || fallbackType
+                    // Index rows are uniquely identified by name across
+                    // a graph (SHOW INDEXES guarantees one row per
+                    // declared index). Fall back to a composite of
+                    // label+property when name is absent (shouldn't
+                    // happen against current geode builds).
+                    const rowKey =
+                      name ||
+                      `${label || '_'}::${property || '_'}::${indexType}`
+                    return (
+                      <tr key={rowKey}>
+                        <td>{name || <em>—</em>}</td>
+                        <td>{label || <em>—</em>}</td>
+                        <td>{property || <em>—</em>}</td>
+                        <td>
+                          <IndexTypeBadge $kind={indexType}>
+                            {indexType || 'UNKNOWN'}
+                          </IndexTypeBadge>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </IndexTable>
             ) : (
               <p className="text-body-tertiary fst-italic">
                 {t('schema.noIndexes')}

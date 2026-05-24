@@ -59,6 +59,8 @@ export const en = {
     adminTabRoles: 'Roles',
     adminTabPolicies: 'Policies',
     adminTabGrants: 'Grants',
+    adminTabRlsDeny: 'RLS Deny',
+    adminTabRlsAttribute: 'RLS Attribute',
     // GAP-051: single user-facing entry point for the
     // backup ↔ restore workflow. The two underlying routes
     // (/admin/backups + /admin/restore) stay live for deep-links;
@@ -535,6 +537,62 @@ export const en = {
       'Not supported on the connected Geode build — manage grants via the `geode` CLI',
     wireFeatureMissing:
       'Not supported on the connected Geode build — manage grants via the `geode` CLI',
+  },
+
+  userAttributes: {
+    title: 'User attributes',
+    description:
+      'Per-user key/value attributes consumed by ABAC row-level policies (e.g. department, region).',
+    noneYet: 'This user has no attributes yet.',
+    keyLabel: 'Attribute key',
+    valueLabel: 'Value',
+    addButton: 'Add attribute',
+    removeConfirmTitle: 'Remove attribute',
+    removeConfirmBody: 'Remove "{{key}}" from user "{{username}}"?',
+    invalidKey:
+      'Attribute keys must start with a letter and contain only letters, digits, and underscores.',
+    unsupportedTooltip:
+      'The connected Geode build does not implement geode.auth.user_set_attribute.',
+    closeLabel: 'Close',
+  },
+  rlsDeny: {
+    title_one: '{{count}} deny policy',
+    title_other: '{{count}} deny policies',
+    description:
+      'Label-level deny policies: rows of the named label are hidden from the named user. Leave username empty to deny all users.',
+    newButton: 'New deny policy',
+    graphLabel: 'Graph',
+    labelLabel: 'Label',
+    usernameLabel: 'Username (empty = all users)',
+    allUsersLabel: 'all users',
+    removeConfirmTitle: 'Remove deny policy',
+    removeConfirmBody:
+      'Remove the deny policy for label "{{label}}" on graph "{{graph}}" for user "{{username}}"?',
+    unsupportedNote:
+      'RLS deny-policy management requires Geode 0.5.20 or newer.',
+    unsupportedTooltip:
+      'The connected Geode build does not implement geode.rls.add_deny_policy.',
+  },
+  rlsAttribute: {
+    title_one: '{{count}} attribute policy',
+    title_other: '{{count}} attribute policies',
+    description:
+      'Row-level ABAC: every row is shown only when row.<property> equals the querying user attribute for <key>.',
+    newButton: 'New attribute policy',
+    graphLabel: 'Graph',
+    labelLabel: 'Label',
+    rowPropertyLabel: 'Row property',
+    attributeKeyLabel: 'User attribute key',
+    expressionPreview: 'Generates: {{preview}}',
+    removeConfirmTitle: 'Remove attribute policy',
+    removeConfirmBody:
+      'Remove the attribute policy mapping row.{{rowProperty}} = principal.attribute.{{attributeKey}} on {{graph}}/{{label}}?',
+    unsupportedNote:
+      'ABAC attribute-policy management requires Geode 0.5.20 or newer.',
+    unsupportedTooltip:
+      'The connected Geode build does not implement geode.rls.add_attribute_policy.',
+    listingUnsupportedNote:
+      'This Geode build does not expose gps.list_policies — policies you create here are tracked locally for the current session only.',
   },
 
   backups: {

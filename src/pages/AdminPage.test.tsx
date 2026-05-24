@@ -41,7 +41,15 @@ beforeEach(() => useCapabilitiesMock.mockReset())
 
 test('GAP-050: disables the Policies tab when admin_writable.policies is false', async () => {
   useCapabilitiesMock.mockReturnValue({
-    adminWritable: { users: true, roles: true, policies: false, grants: true },
+    adminWritable: {
+      users: true,
+      roles: true,
+      policies: false,
+      grants: true,
+      attributes: false,
+      rlsDenyPolicies: false,
+      rlsAttributePolicies: false,
+    },
     geodeVersion: 'v0.5.19',
     loading: false,
     loaded: true,
@@ -64,6 +72,9 @@ test('GAP-050: surfaces the upcoming-feature copy on the disabled tab', () => {
       roles: false,
       policies: false,
       grants: false,
+      attributes: false,
+      rlsDenyPolicies: false,
+      rlsAttributePolicies: false,
     },
     geodeVersion: 'v0.5.19',
     loading: false,
@@ -79,7 +90,15 @@ test('GAP-050: surfaces the upcoming-feature copy on the disabled tab', () => {
 
 test('GAP-050: every supported family renders as a <Link>', () => {
   useCapabilitiesMock.mockReturnValue({
-    adminWritable: { users: true, roles: true, policies: true, grants: true },
+    adminWritable: {
+      users: true,
+      roles: true,
+      policies: true,
+      grants: true,
+      attributes: true,
+      rlsDenyPolicies: true,
+      rlsAttributePolicies: true,
+    },
     geodeVersion: 'v0.5.19',
     loading: false,
     loaded: true,
@@ -103,6 +122,9 @@ test('GAP-050: shows tabs as enabled while capabilities are loading', () => {
       roles: false,
       policies: false,
       grants: false,
+      attributes: false,
+      rlsDenyPolicies: false,
+      rlsAttributePolicies: false,
     },
     geodeVersion: '',
     loading: true,

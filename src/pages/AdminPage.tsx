@@ -143,6 +143,22 @@ export const AdminPage: React.FC = () => {
           loading: capsLoading,
           upcomingLabel: upcoming,
         })}
+        {renderTab({
+          to: 'rls-deny',
+          label: t('nav.adminTabRlsDeny'),
+          active: pathname.endsWith('/rls-deny'),
+          supported: adminWritable.rlsDenyPolicies,
+          loading: capsLoading,
+          upcomingLabel: upcoming,
+        })}
+        {renderTab({
+          to: 'rls-attribute',
+          label: t('nav.adminTabRlsAttribute'),
+          active: pathname.endsWith('/rls-attribute'),
+          supported: adminWritable.rlsAttributePolicies,
+          loading: capsLoading,
+          upcomingLabel: upcoming,
+        })}
         {/* GAP-051: collapse Backups + Restore into a single
             "Snapshots" tab. The two underlying routes still exist for
             backward-compatible deep links (BackupPage's per-row

@@ -25,6 +25,7 @@ import {
 } from '../../lib/passwordPolicy'
 import { AdminPageShell, ErrorBanner } from './AdminPageShell'
 import { useAdminListPage } from './useAdminListPage'
+import { UserAttributesModal } from './UserAttributesModal'
 
 // UsersPage drives the /admin/users tab. The Geode B4 endpoints back
 // every action:
@@ -58,6 +59,8 @@ export const UsersPage: React.FC = () => {
       client.deleteUsername({ username }).then(() => undefined),
   })
   const users = page.rows
+  const [attributesFor, setAttributesFor] = useState<string | null>(null)
+  const attributesEnabled = page.capabilities.adminWritable.attributes
   const [extraErr, setExtraErr] = useState<string | null>(null)
   const err = page.err ?? extraErr
   const { refetch } = page
@@ -148,6 +151,16 @@ export const UsersPage: React.FC = () => {
                           {t('common.disable')}
                         </Button>
                       )}
+                      {attributesEnabled && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setAttributesFor(u.username)}
+                          data-testid={`user-row-attributes-${u.username}`}
+                        >
+                          {t('userAttributes.title')}
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -164,6 +177,12 @@ export const UsersPage: React.FC = () => {
         </DataTable>
       </TableScroll>
       {page.showCreate && <CreateUserModal onClose={page.closeCreate} />}
+      {attributesFor !== null && (
+        <UserAttributesModal
+          username={attributesFor}
+          onClose={() => setAttributesFor(null)}
+        />
+      )}
       <ConfirmModal
         open={page.confirmDelete !== null}
         title={t('users.deleteTitle', { name: page.confirmDelete ?? '' })}

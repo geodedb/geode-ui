@@ -19,6 +19,7 @@ import { breakpoints } from '@geodedb/ui-core/theme'
 
 import { GQL_LANGUAGE_ID, registerGqlLanguage } from './gqlLanguage'
 import { registerGqlSnippetProvider } from '../../lib/snippets/gqlSnippetProvider'
+import { registerIntervalCompletionProvider } from '../../lib/monaco/intervalFunctions'
 import type { LspClientHandle, LspState } from '../../lib/lsp/client'
 import { useAuth } from '../../auth/AuthProvider'
 // Origin/main moved the access token off `useAuth()` into a module-level
@@ -167,6 +168,14 @@ const GqlEditorImpl: React.ForwardRefRenderFunction<GqlEditorHandle, Props> = (
     // Monaco snippet UI (tab-stops + placeholder navigation) while
     // the LSP keeps owning identifier completion.
     registerGqlSnippetProvider(
+      monaco as unknown as typeof import('monaco-editor'),
+      GQL_LANGUAGE_ID
+    )
+    // Geode 0.5.20 Interval / interval_overlaps / interval_contains
+    // surfaces via its own completion provider — kept separate from
+    // the LSP completion path so it works even when the WebSocket
+    // hasn't connected yet (e.g. first paint).
+    registerIntervalCompletionProvider(
       monaco as unknown as typeof import('monaco-editor'),
       GQL_LANGUAGE_ID
     )

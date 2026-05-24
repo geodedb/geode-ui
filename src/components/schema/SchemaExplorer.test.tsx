@@ -231,3 +231,40 @@ test('F8: cache LRU eviction respects maxEntries', () => {
   expect(cache.get('c')).toBeUndefined()
   expect(cache.get('b')?.indexes[0]).toEqual({ name: 'B2' })
 })
+
+test('renders FULLTEXT index type alongside BTREE in the indexes table', async () => {
+  render(
+    <ThemeProvider theme={theme}>
+      <MemoryRouter initialEntries={['/schema?graph=alpha']}>
+        <SchemaExplorer cache={createSchemaExplorerCache()} />
+      </MemoryRouter>
+    </ThemeProvider>
+  )
+  await waitFor(() => expect(indexesCallArgs.length).toBeGreaterThan(0))
+  // Resolve indexes with one BTREE and one FULLTEXT row; constraints
+  // can stay empty for this assertion.
+  await act(async () => {
+    indexResolvers[0]?.({
+      indexes: [
+        {
+          name: 'idx_person_name',
+          label: 'Person',
+          property: 'name',
+          index_type: 'BTREE',
+        },
+        {
+          name: 'ft_doc_body',
+          label: 'Doc',
+          property: 'body',
+          index_type: 'FULLTEXT',
+        },
+      ],
+    })
+    constraintResolvers[0]?.({ constraints: [] })
+  })
+  expect(await screen.findByTestId('schema-indexes-table')).toBeInTheDocument()
+  expect(screen.getByText('idx_person_name')).toBeInTheDocument()
+  expect(screen.getByText('ft_doc_body')).toBeInTheDocument()
+  expect(screen.getByText('BTREE')).toBeInTheDocument()
+  expect(screen.getByText('FULLTEXT')).toBeInTheDocument()
+})
