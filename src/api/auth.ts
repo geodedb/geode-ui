@@ -17,17 +17,15 @@
 // against) is NOT a secret and remains in localStorage — losing it
 // across reloads would just degrade UX, not security.
 //
-// Backout flag: setting `localStorage['geode-ui.legacy-auth'] = '1'`
-// reactivates the legacy bearer token storage. Only intended as an
-// emergency escape hatch for an operator chasing a regression while
-// the cookie path is being rolled out — production traffic should
-// never use this. The bearer token storage is only populated when
-// the flag is set; otherwise getLegacyToken() returns null and the
-// client + queryStream omit the Authorization header (cookie wins).
+// APP-07 (2026-05-24 appsec): the legacy backout flag
+// (`geode-ui.legacy-auth` re-enabling a JS-readable bearer in
+// `localStorage['geode-ui.access_token']`) was retired. Cookie-mode is
+// unconditional — the JWT never enters JS-readable storage from this
+// module. Setting the old flag in localStorage has no effect; a
+// compromised renderer cannot flip the flag and wait for the next
+// login cycle to harvest a JWT.
 
 const PROFILE_KEY = 'geode-ui.profile'
-const LEGACY_FLAG_KEY = 'geode-ui.legacy-auth'
-const LEGACY_TOKEN_KEY = 'geode-ui.access_token'
 
 export type LoginResult = {
   access_token: string
@@ -64,19 +62,7 @@ export async function login(
     const detail = err.error || err.error_description || err.message
     throw new Error(detail || `login failed (${res.status})`)
   }
-  const result = (await res.json()) as LoginResult
-  // Legacy backout: if the operator has flipped the flag, also write
-  // the token to localStorage so the bearer-header path keeps working.
-  // Production traffic with the flag unset takes the cookie path that
-  // the server already wrote in its Set-Cookie response.
-  if (isLegacyMode()) {
-    try {
-      localStorage.setItem(LEGACY_TOKEN_KEY, result.access_token)
-    } catch {
-      /* localStorage may be unavailable (private mode); fall through */
-    }
-  }
-  return result
+  return (await res.json()) as LoginResult
 }
 
 // WhoAmIResult mirrors the server-side WhoAmIResponse shape.
@@ -120,9 +106,9 @@ export async function fetchWhoAmI(): Promise<WhoAmIResult | null> {
   }
 }
 
-// logout calls the server-side /api/v1/auth/logout to clear the cookie
-// and removes any legacy localStorage token. Idempotent — safe to call
-// when already logged out.
+// logout calls the server-side /api/v1/auth/logout to clear the cookie.
+// Idempotent — safe to call when already logged out. APP-07: no legacy
+// localStorage token to clear; cookie-mode is unconditional.
 export async function logout(): Promise<void> {
   try {
     // CSRF header is required for cookie-authenticated state-changing
@@ -137,19 +123,6 @@ export async function logout(): Promise<void> {
     })
   } catch {
     /* best-effort — even on network failure we clear local state below */
-  }
-  try {
-    localStorage.removeItem(LEGACY_TOKEN_KEY)
-  } catch {
-    /* private-mode browsers throw on access; continue */
-  }
-}
-
-function isLegacyMode(): boolean {
-  try {
-    return localStorage.getItem(LEGACY_FLAG_KEY) === '1'
-  } catch {
-    return false
   }
 }
 
@@ -243,27 +216,13 @@ export async function onboardProfile(
   return (await res.json()) as OnboardResponse
 }
 
+// APP-07: the auth object exposes only profile-selection helpers.
+// Pre-APP-07 it also surfaced `getToken`, `clearToken`, and
+// `isLegacyMode` to support the legacy bearer-token backout flag.
+// Those were removed because the flag re-opened the DOM-XSS exfil
+// channel SEC-F7 closed (see APP-07 in
+// docs/APPSEC_REVIEW_2026-05-24_auth-ipc.md).
 export const auth = {
-  // getToken returns the legacy bearer token only when the operator
-  // has explicitly enabled the backout flag. In normal cookie-mode
-  // operation it returns null; the cookie carries the JWT instead.
-  getToken(): string | null {
-    if (!isLegacyMode()) return null
-    try {
-      return localStorage.getItem(LEGACY_TOKEN_KEY)
-    } catch {
-      return null
-    }
-  },
-  // clearToken removes the legacy bearer-token entry; harmless when
-  // already absent. Called on logout for defense-in-depth.
-  clearToken(): void {
-    try {
-      localStorage.removeItem(LEGACY_TOKEN_KEY)
-    } catch {
-      /* private-mode: ignore */
-    }
-  },
   setProfile(p: string) {
     try {
       localStorage.setItem(PROFILE_KEY, p)
@@ -278,8 +237,4 @@ export const auth = {
       return 'default'
     }
   },
-  // isLegacyMode is exposed for tests + the queryStream / client
-  // adapters that need to decide whether to attach a bearer token to
-  // a request.
-  isLegacyMode,
 }

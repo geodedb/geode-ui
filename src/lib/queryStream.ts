@@ -1,4 +1,4 @@
-import { auth } from '../api/auth'
+import { getLatestToken } from '../api/connections'
 import { getQueryStreamWorkerUrl } from './queryStreamWorkerUrl'
 
 // base64UrlEncode produces an unpadded base64url encoding of the given UTF-8
@@ -106,13 +106,15 @@ export function streamQuery(
   // SEC-F7 (#62 S3c): same-origin WebSocket connections automatically
   // include cookies on the upgrade request, so the server-side AuthJWT
   // (which now reads the geode-ui-auth cookie) authenticates the
-  // browser session without any extra effort from the SPA. We retain
-  // the genapi.auth.bearer.<base64url(token)> subprotocol as a
-  // fallback for the legacy backout flag — when an operator has set
-  // localStorage['geode-ui.legacy-auth']='1', auth.getToken() returns
-  // the stored JWT and we attach it via the subprotocol channel just
-  // like the pre-cookie SPA did.
-  const token = auth.getToken()
+  // browser session without any extra effort from the SPA.
+  //
+  // APP-07 (2026-05-24 appsec): the legacy localStorage-backed bearer
+  // backout was retired. The subprotocol fallback is now driven from
+  // the in-memory connection latch (`getLatestToken` from
+  // src/api/connections.tsx), which mirrors the same `Authorization`
+  // header the fetch wrapper attaches in cookie-mode. The bearer never
+  // touches JS-readable storage.
+  const token = getLatestToken()
   const protocols: string[] = []
   if (token) {
     const encoded = base64UrlEncode(token)

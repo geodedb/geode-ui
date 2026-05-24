@@ -21,11 +21,7 @@ import React, {
   useMemo,
   useState,
 } from 'react'
-import {
-  auth as authStore,
-  login as apiLogin,
-  logout as apiLogout,
-} from '../api/auth'
+import { login as apiLogin, logout as apiLogout } from '../api/auth'
 import { clearCsrfToken, refreshCsrfToken } from '../api/csrf'
 import { useConnections, setLatestToken } from '../api/connections'
 import { storeSavedPassword } from '../api/electron-bridge'
@@ -350,8 +346,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   )
 
   const signOut = useCallback(async (): Promise<void> => {
+    // APP-07: the legacy bearer-token clearToken() call was retired —
+    // cookie-mode is unconditional, no JS-readable token exists.
     await apiLogout()
-    authStore.clearToken()
     clearCsrfToken()
     conns.clear()
     setLatestToken(null)

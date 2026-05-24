@@ -1,4 +1,7 @@
 // Tests for the cookie-mode auth helper (SEC-F7 / #62 S3c).
+// APP-07 retired the legacy-bearer-token backout flag — cookie-mode is
+// now unconditional. The legacy flag, the legacy token storage, and the
+// auth.{getToken,clearToken,isLegacyMode} surface no longer exist.
 import { auth, fetchPublicProfiles, login, logout } from './auth'
 
 const realFetch = global.fetch
@@ -14,40 +17,22 @@ afterEach(() => {
   global.fetch = realFetch
 })
 
-test('auth.getToken returns null in cookie mode (default)', () => {
-  // No legacy flag: cookie-mode is the default. The token never flows
-  // through localStorage so getToken returns null.
-  localStorage.setItem('geode-ui.access_token', 'should-be-ignored')
-  expect(auth.getToken()).toBeNull()
-})
-
-test('auth.getToken returns stored token when legacy flag is set', () => {
-  localStorage.setItem('geode-ui.legacy-auth', '1')
-  localStorage.setItem('geode-ui.access_token', 'legacy-token')
-  expect(auth.getToken()).toBe('legacy-token')
-})
-
-test('auth.clearToken removes the legacy bearer token', () => {
-  localStorage.setItem('geode-ui.legacy-auth', '1')
-  localStorage.setItem('geode-ui.access_token', 'legacy-token')
-  expect(auth.getToken()).toBe('legacy-token')
-  auth.clearToken()
-  expect(auth.getToken()).toBeNull()
+test('auth has no getToken / clearToken / isLegacyMode surface', () => {
+  // APP-07: the legacy bearer-token surface was retired. The flag,
+  // the localStorage token slot, and the auth.{getToken,clearToken,
+  // isLegacyMode} helpers must not exist on the public surface so a
+  // future caller cannot accidentally re-introduce the JS-readable
+  // JWT exfil channel SEC-F7 closed.
+  const surface = auth as unknown as Record<string, unknown>
+  expect(surface.getToken).toBeUndefined()
+  expect(surface.clearToken).toBeUndefined()
+  expect(surface.isLegacyMode).toBeUndefined()
 })
 
 test('auth.setProfile + getProfile round-trip', () => {
   expect(auth.getProfile()).toBe('default')
   auth.setProfile('prod')
   expect(auth.getProfile()).toBe('prod')
-})
-
-test('auth.isLegacyMode returns false by default', () => {
-  expect(auth.isLegacyMode()).toBe(false)
-})
-
-test('auth.isLegacyMode returns true when flag is set', () => {
-  localStorage.setItem('geode-ui.legacy-auth', '1')
-  expect(auth.isLegacyMode()).toBe(true)
 })
 
 test('login posts credentials and returns the parsed body', async () => {
@@ -75,7 +60,7 @@ test('login posts credentials and returns the parsed body', async () => {
   )
 })
 
-test('login does NOT write the token to localStorage in cookie mode', async () => {
+test('login does NOT write the token to localStorage (cookie-mode is unconditional)', async () => {
   global.fetch = jest.fn(() =>
     Promise.resolve({
       ok: true,
@@ -89,11 +74,16 @@ test('login does NOT write the token to localStorage in cookie mode', async () =
     } as unknown as Response)
   ) as unknown as typeof fetch
   await login('alice', 'p', 'default')
-  // Cookie mode (no legacy flag): localStorage must not retain the JWT.
+  // Cookie mode is unconditional after APP-07: localStorage must never
+  // retain the JWT regardless of the (now-retired) legacy flag.
   expect(localStorage.getItem('geode-ui.access_token')).toBeNull()
 })
 
-test('login writes the token to localStorage in legacy mode', async () => {
+test('login ignores the retired legacy-auth flag', async () => {
+  // APP-07: setting the old escape-hatch flag must NOT re-enable the
+  // bearer-token branch. localStorage stays clean even if the flag is
+  // somehow present (left over from a previous build, or set by a
+  // compromised renderer that does not yet know the flag was retired).
   localStorage.setItem('geode-ui.legacy-auth', '1')
   global.fetch = jest.fn(() =>
     Promise.resolve({
@@ -108,7 +98,7 @@ test('login writes the token to localStorage in legacy mode', async () => {
     } as unknown as Response)
   ) as unknown as typeof fetch
   await login('alice', 'p', 'default')
-  expect(localStorage.getItem('geode-ui.access_token')).toBe('jwt-here')
+  expect(localStorage.getItem('geode-ui.access_token')).toBeNull()
 })
 
 test('login throws on non-OK response', async () => {
@@ -124,9 +114,7 @@ test('login throws on non-OK response', async () => {
   )
 })
 
-test('logout posts to the server and clears legacy storage', async () => {
-  localStorage.setItem('geode-ui.legacy-auth', '1')
-  localStorage.setItem('geode-ui.access_token', 'legacy-token')
+test('logout posts to the server (no legacy storage to clear)', async () => {
   const fetchMock = jest.fn(() =>
     Promise.resolve({ ok: true } as unknown as Response)
   )
@@ -136,7 +124,6 @@ test('logout posts to the server and clears legacy storage', async () => {
     '/api/v1/auth/logout',
     expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
   )
-  expect(localStorage.getItem('geode-ui.access_token')).toBeNull()
 })
 
 test('logout swallows network errors (best effort)', async () => {

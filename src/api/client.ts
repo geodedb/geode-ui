@@ -1,6 +1,5 @@
 // eslint-disable-next-line import/no-unresolved
 import { createClient } from '@api'
-import { auth } from './auth'
 import { getLatestToken } from './connections'
 import { getCsrfToken, isCsrfRequired, refreshCsrfToken } from './csrf'
 
@@ -65,16 +64,16 @@ function makeFetchImpl(): typeof fetch {
     const needsCsrf = isCsrfRequired(method)
     let headers = new Headers(init?.headers ?? {})
 
-    // Plan B: when an in-memory active connection has a token, attach
-    // it as Bearer. The cookie path still works in parallel; the
-    // server's AuthJWT prefers the header when both are present.
+    // APP-07: cookie-mode is unconditional. When an in-memory active
+    // connection has a token (latched in src/api/connections.tsx),
+    // attach it as Bearer. Otherwise strip the generated client's
+    // placeholder Authorization so the server falls through to the
+    // HttpOnly cookie. The server's AuthJWT prefers the header when
+    // both are present.
     const liveToken = getLatestToken()
     if (liveToken) {
       headers.set('Authorization', 'Bearer ' + liveToken)
-    } else if (!auth.getToken()) {
-      // Cookie-mode (no in-memory token, no legacy bearer): strip the
-      // generated client's placeholder Authorization so the server
-      // falls through to the cookie.
+    } else {
       headers.delete('Authorization')
     }
 
@@ -96,7 +95,7 @@ function makeFetchImpl(): typeof fetch {
         const live = getLatestToken()
         if (live) {
           headers.set('Authorization', 'Bearer ' + live)
-        } else if (!auth.getToken()) {
+        } else {
           headers.delete('Authorization')
         }
         headers.set('X-CSRF-Token', fresh)
@@ -109,11 +108,10 @@ function makeFetchImpl(): typeof fetch {
 
 export const client = createClient({
   baseUrl: resolveBaseUrl(),
-  // In cookie-mode auth.getToken() is null; the generated client refuses
-  // to send a request without a non-empty bearer, so we hand it a
-  // placeholder that the fetchImpl wrapper strips before the request
-  // leaves the SPA. In legacy backout mode the real JWT flows through
-  // and the Authorization header is kept.
-  bearerToken: () => auth.getToken() ?? COOKIE_MODE_PLACEHOLDER,
+  // APP-07: cookie-mode is unconditional. The generated client refuses
+  // to send a request without a non-empty bearer; hand it a placeholder
+  // that the fetchImpl wrapper strips before the request leaves the
+  // SPA. The server reads the JWT from the HttpOnly cookie instead.
+  bearerToken: () => COOKIE_MODE_PLACEHOLDER,
   fetchImpl: makeFetchImpl(),
 })

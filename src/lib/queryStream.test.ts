@@ -1,3 +1,4 @@
+import { setLatestToken } from '../api/connections'
 import {
   streamQuery,
   StreamMsg,
@@ -56,10 +57,10 @@ beforeEach(() => {
   lastInstance = null
   // eslint-disable-next-line semi-style -- prettier emits the leading-semicolon protector
   ;(window as any).WebSocket = MockWebSocket
-  // SEC-F7 (#62 S3c): cookie-mode tests start with no legacy token. The
-  // bearer-fallback test below opts into legacy mode explicitly.
-  localStorage.removeItem('geode-ui.legacy-auth')
-  localStorage.removeItem('geode-ui.access_token')
+  // SEC-F7 (#62 S3c) + APP-07: cookie-mode tests start with no in-memory
+  // token. The bearer-subprotocol test below sets one explicitly via the
+  // module-level latch (the legacy localStorage flag was retired).
+  setLatestToken(null)
 })
 
 test('sends start message on open and forwards messages', () => {
@@ -98,15 +99,14 @@ test('cookie mode: opens WS without subprotocol auth (cookie carries JWT)', () =
   expect(lastInstance!.url).not.toContain('access_token')
 })
 
-test('legacy fallback: bearer subprotocol attached when backout flag is set', () => {
-  // The backout flag is documented in src/api/auth.ts as the emergency
-  // escape hatch for an operator chasing a regression while the cookie
-  // path is being rolled out. With the flag set, auth.getToken()
-  // returns the stored bearer token and queryStream attaches it via
-  // the genapi.auth.bearer.<base64url(token)> subprotocol exactly as
-  // the pre-cookie SPA did.
-  localStorage.setItem('geode-ui.legacy-auth', '1')
-  localStorage.setItem('geode-ui.access_token', 'tok123')
+test('in-memory bearer: subprotocol attached when active-connection latch is set', () => {
+  // APP-07: the legacy localStorage-backed bearer fallback was retired.
+  // The subprotocol channel is now driven from the in-memory active-
+  // connection token (see src/api/connections.tsx — setLatestToken is
+  // the module-level latch the AuthProvider writes on signIn / switch).
+  // The bearer never enters JS-readable storage; a renderer compromise
+  // cannot flip a flag and wait for the next login cycle.
+  setLatestToken('tok123')
   streamQuery('RETURN 1', undefined, () => {})
   // Token 'tok123' base64url-encoded (no padding) is 'dG9rMTIz'.
   expect(lastInstance!.protocols).toContain('genapi.auth.bearer.dG9rMTIz')
