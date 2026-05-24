@@ -560,8 +560,24 @@ docker:build:
   before_script: []
   variables:
     DOCKER_TLS_CERTDIR: ""
+    # Without DOCKER_HOST the client tries `unix:///var/run/docker.sock`
+    # which dind doesn't expose. The k8s runner publishes the dind
+    # service at the `docker` hostname on TCP 2375 (TLS off because
+    # DOCKER_TLS_CERTDIR=""). v0.1.9 docker:build failed with
+    # "Cannot connect to the Docker daemon at unix:///var/run/docker.sock".
+    DOCKER_HOST: tcp://docker:2375
   script:
     - apk add --no-cache git
+    # Wait up to 60s for the dind service to bind on tcp://docker:2375.
+    # Same pattern as .goreleaser-base above; docker:build was failing
+    # intermittently on tag pipelines because the daemon-readiness gate
+    # wasn't present (v0.1.6/7/8 happened to win the race; v0.1.9 lost).
+    - |
+      for i in $(seq 1 60); do
+        if docker info >/dev/null 2>&1; then break; fi
+        sleep 1
+      done
+      docker info
     - mkdir -p /tmp/ctx/geode-ui
     - cp -r . /tmp/ctx/geode-ui/
     - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
@@ -674,6 +690,14 @@ e2e:playwright:
     DOCKER_TLS_CERTDIR: ''
     DOCKER_BUILDKIT: '1'
     GIT_DEPTH: '0'
+    # The alpine `go` package ships with GOTOOLCHAIN=local (no
+    # auto-download), but our go.mod requires Go 1.26.3 while alpine
+    # currently ships Go 1.22.x. `auto` tells Go to download the
+    # specific toolchain go.mod asks for. .goreleaser.yaml's
+    # builds[].env still pins GOTOOLCHAIN=go1.26.3 for the build
+    # process itself; this variable governs the pre-build "loading
+    # go mod information" step that runs with the shell env.
+    GOTOOLCHAIN: auto
   before_script:
     # Tools: alpine package set + node (for the npm-build before-hook)
     # + go (the goreleaser default builder for the geode-ui binary;
