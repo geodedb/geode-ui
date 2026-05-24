@@ -1,7 +1,25 @@
 // eslint-disable-next-line import/no-unresolved
 import { createClient } from '@api'
-import { getLatestToken } from './connections'
+import { getLatestToken, getTokenForConnection } from './connections'
 import { getCsrfToken, isCsrfRequired, refreshCsrfToken } from './csrf'
+
+// APP-08 (2026-05-24 appsec): the fetch wrapper accepts an optional
+// `connectionId` field on `RequestInit`. Call sites that target a
+// specific connection (e.g. profile-scoped reads) plumb the id through
+// the init object; the wrapper resolves the bearer via
+// `getTokenForConnection(id)` rather than `getLatestToken()`. The
+// module-level latch stays as the legacy fallback for call sites that
+// don't yet thread a connection id.
+type ConnectionScopedInit = RequestInit & { connectionId?: string }
+
+function resolveBearer(init?: ConnectionScopedInit): string | null {
+  const id = init?.connectionId
+  if (typeof id === 'string' && id.length > 0) {
+    const explicit = getTokenForConnection(id)
+    if (explicit) return explicit
+  }
+  return getLatestToken()
+}
 
 // Exported for unit tests (src/api/client.test.ts). Not part of the
 // public API — call sites use the constructed `client` below.
@@ -60,17 +78,18 @@ function makeFetchImpl(): typeof fetch {
     input: RequestInfo | URL,
     init?: RequestInit
   ): Promise<Response> => {
+    const scoped = init as ConnectionScopedInit | undefined
     const method = (init?.method ?? 'GET').toUpperCase()
     const needsCsrf = isCsrfRequired(method)
     let headers = new Headers(init?.headers ?? {})
 
-    // APP-07: cookie-mode is unconditional. When an in-memory active
-    // connection has a token (latched in src/api/connections.tsx),
-    // attach it as Bearer. Otherwise strip the generated client's
-    // placeholder Authorization so the server falls through to the
-    // HttpOnly cookie. The server's AuthJWT prefers the header when
-    // both are present.
-    const liveToken = getLatestToken()
+    // APP-07: cookie-mode is unconditional. When the caller targets a
+    // specific connection (init.connectionId — APP-08) or the in-
+    // memory latch holds a token, attach it as Bearer. Otherwise
+    // strip the generated client's placeholder Authorization so the
+    // server falls through to the HttpOnly cookie. The server's
+    // AuthJWT prefers the header when both are present.
+    const liveToken = resolveBearer(scoped)
     if (liveToken) {
       headers.set('Authorization', 'Bearer ' + liveToken)
     } else {
@@ -81,10 +100,17 @@ function makeFetchImpl(): typeof fetch {
       const tok = getCsrfToken()
       if (tok) headers.set('X-CSRF-Token', tok)
     }
+    // Strip `connectionId` before handing the init to the native
+    // fetch; it is not a valid RequestInit field and Chromium will
+    // ignore it, but cleanliness is cheap. Build the passthrough init
+    // explicitly to keep eslint's no-unused-vars rule happy without an
+    // explicit ignore.
+    const passthroughInit: RequestInit = init ? { ...init } : {}
+    delete (passthroughInit as ConnectionScopedInit).connectionId
     const reqInit: RequestInit = {
-      ...init,
+      ...passthroughInit,
       headers,
-      credentials: init?.credentials ?? 'same-origin',
+      credentials: passthroughInit.credentials ?? 'same-origin',
     }
     let res = await native(input, reqInit)
     if (needsCsrf && res.status === 403) {
@@ -92,7 +118,7 @@ function makeFetchImpl(): typeof fetch {
       const fresh = await refreshCsrfToken()
       if (fresh) {
         headers = new Headers(init?.headers ?? {})
-        const live = getLatestToken()
+        const live = resolveBearer(scoped)
         if (live) {
           headers.set('Authorization', 'Bearer ' + live)
         } else {
@@ -105,6 +131,12 @@ function makeFetchImpl(): typeof fetch {
     return res
   }
 }
+
+// Test-only seam — exposed so `src/api/client.test.ts` can exercise
+// the wrapper without standing up the genapi-generated client. Never
+// import from production code (the `client` singleton below already
+// uses the wrapper via its `fetchImpl` option).
+export const makeFetchImplForTests = makeFetchImpl
 
 export const client = createClient({
   baseUrl: resolveBaseUrl(),

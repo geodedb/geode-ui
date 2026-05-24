@@ -305,6 +305,13 @@ export const ConnectionsProvider: React.FC<{
       expiresAt: c.expiresAt,
     }))
     storeConnections(list).catch(() => undefined)
+    // APP-08: keep the per-connection token accessor in lockstep with
+    // the reducer. Rebuilding from the byId map (rather than diffing
+    // adds/removes) is the cheapest correct way to keep `add` /
+    // `remove` / `hydrate` / `clear` all consistent under one effect.
+    internalSyncConnectionTokens(
+      [...state.byId.values()].map((c) => [c.connectionId, c.token])
+    )
   }, [state.version])
 
   const value = useMemo<ContextValue>(
@@ -346,4 +353,55 @@ export function setLatestToken(token: string | null): void {
 
 export function getLatestToken(): string | null {
   return latestActiveToken
+}
+
+// APP-08 (2026-05-24 appsec): per-connection bearer accessor. The
+// module-level latch is fragile — between two fetches against
+// connection A, a synchronous switch to B by the reducer would attach
+// B's token to A's in-flight request. Call sites that target a
+// specific connection should now plumb the connectionId through their
+// fetch `init`, and the wrapper in `src/api/client.ts` resolves the
+// bearer via this accessor rather than `getLatestToken`.
+//
+// The accessor reads from a process-internal map kept in lockstep with
+// the reducer: every `add` populates it, every `remove` evicts, every
+// `hydrate` rebuilds, every `clear` empties it. The map is module-
+// local (not exposed) so a renderer compromise cannot enumerate it
+// directly — it must still satisfy the reducer's add/remove
+// invariants.
+const tokensByConnectionId = new Map<string, string>()
+
+export function getTokenForConnection(connectionId: string): string | null {
+  return tokensByConnectionId.get(connectionId) ?? null
+}
+
+// Internal helpers — the ConnectionsProvider's persist + reducer paths
+// import these so the per-connection map stays in sync with the React
+// reducer state without leaking the mutation surface to renderers.
+export function setConnectionTokenForTests(
+  connectionId: string,
+  token: string
+): void {
+  tokensByConnectionId.set(connectionId, token)
+}
+
+export function clearConnectionTokensForTests(): void {
+  tokensByConnectionId.clear()
+}
+
+// internalSyncConnectionTokens replaces the per-connection token map
+// in one shot. The ConnectionsProvider's persist effect calls this
+// every time the reducer's version int bumps, so the accessor stays
+// in lockstep with the React state without leaking the per-entry
+// mutation surface.
+export function internalSyncConnectionTokens(
+  entries: Iterable<[string, string]>
+): void {
+  tokensByConnectionId.clear()
+  // forEach to keep the lint rule happy — the entries iterable is
+  // small (capped by STORE_CONNECTIONS_MAX) so allocation isn't a
+  // concern.
+  Array.from(entries).forEach(([id, token]) => {
+    tokensByConnectionId.set(id, token)
+  })
 }

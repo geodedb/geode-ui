@@ -63,3 +63,87 @@ describe('client.resolveBaseUrl', () => {
     expect(importResolver()()).toBe('http://localhost')
   })
 })
+
+// APP-08 (2026-05-24 appsec): the fetch wrapper accepts an optional
+// `connectionId` field on `init` and uses `getTokenForConnection(id)`
+// to pick the bearer, falling back to the module-level latch. The
+// per-connection plumbing prevents a confused-deputy race where a
+// switch from A to B between two fetches against A would attach
+// B's token.
+describe('client fetch wrapper — APP-08 per-connection bearer', () => {
+  const realFetch = global.fetch
+  afterEach(() => {
+    global.fetch = realFetch
+  })
+
+  test('honors init.connectionId over the module-level latch', async () => {
+    // eslint-disable-next-line global-require
+    const conns = require('./connections') as {
+      setLatestToken: (t: string | null) => void
+      setConnectionTokenForTests: (id: string, token: string) => void
+      clearConnectionTokensForTests: () => void
+    }
+    conns.clearConnectionTokensForTests()
+    conns.setLatestToken('tok-A-from-latch')
+    conns.setConnectionTokenForTests('cid-B', 'tok-B-explicit')
+
+    // The wrapper binds the native fetch at construction time, so
+    // install the jest mock BEFORE building the wrapper.
+    let capturedAuth: string | null = null
+    global.fetch = jest.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedAuth = new Headers(init?.headers ?? {}).get('authorization')
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '',
+          json: async () => ({}),
+        } as unknown as Response
+      }
+    ) as unknown as typeof fetch
+    // eslint-disable-next-line global-require
+    const { makeFetchImplForTests } = require('./client') as {
+      makeFetchImplForTests: () => typeof fetch
+    }
+    const fetchImpl = makeFetchImplForTests()
+
+    await fetchImpl('http://localhost/api/v1/probe', {
+      connectionId: 'cid-B',
+    } as RequestInit & { connectionId: string })
+    expect(capturedAuth).toBe('Bearer tok-B-explicit')
+    conns.clearConnectionTokensForTests()
+    conns.setLatestToken(null)
+  })
+
+  test('falls back to the module-level latch when init.connectionId is unset', async () => {
+    // eslint-disable-next-line global-require
+    const conns = require('./connections') as {
+      setLatestToken: (t: string | null) => void
+      clearConnectionTokensForTests: () => void
+    }
+    conns.clearConnectionTokensForTests()
+    conns.setLatestToken('tok-latch-only')
+
+    let capturedAuth: string | null = null
+    global.fetch = jest.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        capturedAuth = new Headers(init?.headers ?? {}).get('authorization')
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '',
+          json: async () => ({}),
+        } as unknown as Response
+      }
+    ) as unknown as typeof fetch
+    // eslint-disable-next-line global-require
+    const { makeFetchImplForTests } = require('./client') as {
+      makeFetchImplForTests: () => typeof fetch
+    }
+    const fetchImpl = makeFetchImplForTests()
+
+    await fetchImpl('http://localhost/api/v1/probe')
+    expect(capturedAuth).toBe('Bearer tok-latch-only')
+    conns.setLatestToken(null)
+  })
+})

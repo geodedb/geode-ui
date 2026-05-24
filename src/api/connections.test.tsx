@@ -696,3 +696,46 @@ test('Bug 2: whoami failure is non-fatal — bootstrap falls through to /login',
   expect(screen.getByTestId('loading').textContent).toBe('no')
   expect(screen.getByTestId('size').textContent).toBe('0')
 })
+
+// APP-08 (2026-05-24 appsec): per-connection bearer binding. The
+// module-level latch (`setLatestToken`) is fragile — a render-driven
+// switch from connection A to B between two fetches against A would
+// attach B's token. `getTokenForConnection(id)` exposes a stable
+// lookup keyed by the connection id so callers that target a specific
+// connection can plumb the id through their request `init` and let
+// the fetch wrapper read the right token.
+test('APP-08: getTokenForConnection returns the per-connection token', () => {
+  // The connections map is process-internal; we exercise the
+  // accessor by populating it through the public reducer surface.
+  const Inner: React.FC = () => {
+    const conns = useConnections()
+    React.useEffect(() => {
+      conns.add({
+        connectionId: 'cid-A',
+        token: 'tok-A',
+        profileName: 'profile-A',
+        expiresAt: Date.now() + 60_000,
+      })
+      conns.add({
+        connectionId: 'cid-B',
+        token: 'tok-B',
+        profileName: 'profile-B',
+        expiresAt: Date.now() + 60_000,
+      })
+    }, [])
+    return <span data-testid="probe" />
+  }
+
+  render(
+    <ConnectionsProvider lazyHydrate={false}>
+      <Inner />
+    </ConnectionsProvider>
+  )
+  // The accessor lives in ./connections — import via require to keep
+  // the existing top-level imports stable.
+  // eslint-disable-next-line global-require
+  const { getTokenForConnection } = require('./connections')
+  expect(getTokenForConnection('cid-A')).toBe('tok-A')
+  expect(getTokenForConnection('cid-B')).toBe('tok-B')
+  expect(getTokenForConnection('cid-missing')).toBeNull()
+})
