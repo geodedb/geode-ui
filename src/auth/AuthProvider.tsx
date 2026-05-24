@@ -28,7 +28,7 @@ import {
 } from '../api/auth'
 import { clearCsrfToken, refreshCsrfToken } from '../api/csrf'
 import { useConnections, setLatestToken } from '../api/connections'
-import { storeSavedPassword } from '../api/electron-bridge'
+import { openUnlockWindow, storeSavedPassword } from '../api/electron-bridge'
 import { extractRoles } from './jwt-claims'
 
 const AUTH_HINT_KEY = 'geode-ui.session-hint'
@@ -247,6 +247,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const { mode, profile, username, password, savePassword, activate } =
         params
       const result = await apiLogin(username, password, profile)
+      // APP-01 R2 (2026-05-24 appsec): open a fresh single-use unlock
+      // window on the Electron main side. A subsequent saved-password
+      // read within ~30 s (e.g. an AddConnectionModal opening
+      // immediately after sign-in to fan out the connection list) is
+      // gated on this token. Fire-and-forget — the token store is
+      // process-local and the open IPC cannot fail in a way that
+      // would block the login navigation. Browser mode returns null
+      // (no bridge) which is harmless.
+      openUnlockWindow().catch(() => {
+        /* best-effort: future reads will mint their own window */
+      })
 
       // CSRF ordering depends on mode: signIn parallelises (F10),
       // connectMore serialises before any further state writes (G03).

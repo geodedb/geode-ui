@@ -47,9 +47,16 @@ export interface GeodeBridge {
   onSystemThemeChange(handler: (variant: ThemeVariant) => void): () => void
   getStoredConnections(): Promise<ConnectionRecord[]>
   storeConnections(list: ConnectionRecord[]): Promise<boolean>
+  // APP-01 R2 (2026-05-24 appsec): saved-password reads require a
+  // single-use unlock token issued by openUnlockWindow(). A renderer
+  // compromise without a token gets null. Callers obtain the token
+  // immediately after a successful login and pass it through; the
+  // token expires after ~30 s on the main-process side.
+  openUnlockWindow(): Promise<string>
   getStoredPassword(
     profileName: string,
-    username: string
+    username: string,
+    unlockToken: string
   ): Promise<string | null>
   storeSavedPassword(
     profileName: string,

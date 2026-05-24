@@ -37,7 +37,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { fetchPublicProfiles, type PublicProfile } from '../api/auth'
-import { getStoredPassword } from '../api/electron-bridge'
+import { getStoredPassword, openUnlockWindow } from '../api/electron-bridge'
 
 /**
  * Single state slot for the public-profile fetch so the hook commits
@@ -135,7 +135,15 @@ export function usePublicProfilesWithStoredPasswords(
   // list it in a useEffect deps array won't trigger spurious re-runs.
   const lookupStoredPassword = useCallback(
     async (profile: string, username: string): Promise<string | null> => {
-      return getStoredPassword(profile, username)
+      // APP-01 R2 (2026-05-24 appsec): mint a single-use unlock token
+      // immediately before the read. The IPC handler verifies the
+      // token and discards it; a renderer compromise without an
+      // unlock window cannot read the password. In browser mode
+      // (no electron bridge) `openUnlockWindow` returns null and
+      // `getStoredPassword` short-circuits to null.
+      const unlockToken = await openUnlockWindow()
+      if (!unlockToken) return null
+      return getStoredPassword(profile, username, unlockToken)
     },
     []
   )

@@ -13,10 +13,14 @@ jest.mock('../api/auth', () => ({
 
 jest.mock('../api/electron-bridge', () => ({
   getStoredPassword: jest.fn(),
+  // APP-01 R2: the hook now opens a single-use unlock window before
+  // calling getStoredPassword. The mock returns a token by default so
+  // the existing pass-through tests keep exercising the read path.
+  openUnlockWindow: jest.fn().mockResolvedValue('unlock-token-stub'),
 }))
 
 import { fetchPublicProfiles } from '../api/auth'
-import { getStoredPassword } from '../api/electron-bridge'
+import { getStoredPassword, openUnlockWindow } from '../api/electron-bridge'
 import { usePublicProfilesWithStoredPasswords } from './usePublicProfilesWithStoredPasswords'
 
 const fetchMock = fetchPublicProfiles as jest.MockedFunction<
@@ -25,11 +29,16 @@ const fetchMock = fetchPublicProfiles as jest.MockedFunction<
 const storedMock = getStoredPassword as jest.MockedFunction<
   typeof getStoredPassword
 >
+const openUnlockMock = openUnlockWindow as jest.MockedFunction<
+  typeof openUnlockWindow
+>
 
 describe('usePublicProfilesWithStoredPasswords', () => {
   beforeEach(() => {
     fetchMock.mockReset()
     storedMock.mockReset()
+    openUnlockMock.mockReset()
+    openUnlockMock.mockResolvedValue('unlock-token-stub')
   })
 
   it('fetches public profiles on mount and exposes initialProfileName', async () => {
@@ -81,7 +90,32 @@ describe('usePublicProfilesWithStoredPasswords', () => {
       const pw = await result.current.lookupStoredPassword('default', 'alice')
       expect(pw).toBe('s3cret')
     })
-    expect(storedMock).toHaveBeenCalledWith('default', 'alice')
+    // APP-01 R2: the hook opens a fresh unlock window before each
+    // read and threads the token through to getStoredPassword.
+    expect(openUnlockMock).toHaveBeenCalled()
+    expect(storedMock).toHaveBeenCalledWith(
+      'default',
+      'alice',
+      'unlock-token-stub'
+    )
+  })
+
+  // APP-01 R2: when the unlock window cannot be opened (browser mode,
+  // or a future R3 biometric prompt declined), lookupStoredPassword
+  // short-circuits to null without calling getStoredPassword.
+  it('APP-01 R2: returns null and skips the read when openUnlockWindow returns null', async () => {
+    fetchMock.mockResolvedValueOnce([])
+    openUnlockMock.mockResolvedValueOnce(null)
+    storedMock.mockResolvedValue('would-not-be-returned')
+    const { result } = renderHook(() => usePublicProfilesWithStoredPasswords())
+    await waitFor(() => {
+      expect(result.current.profilesState.profiles).toEqual([])
+    })
+    await act(async () => {
+      const pw = await result.current.lookupStoredPassword('default', 'alice')
+      expect(pw).toBeNull()
+    })
+    expect(storedMock).not.toHaveBeenCalled()
   })
 
   it('lookupStoredPassword identity is stable across renders', async () => {

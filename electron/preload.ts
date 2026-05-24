@@ -50,11 +50,17 @@ const bridge: GeodeBridge = {
     >,
   storeConnections: (list) =>
     ipcRenderer.invoke('geode:store-connections', list) as Promise<boolean>,
-  getStoredPassword: (profileName, username) =>
+  // APP-01 R2: opens a fresh single-use unlock token window on the
+  // main side. Callers thread the returned token into getStoredPassword
+  // immediately; the token expires after ~30 s.
+  openUnlockWindow: () =>
+    ipcRenderer.invoke('geode:open-unlock-window') as Promise<string>,
+  getStoredPassword: (profileName, username, unlockToken) =>
     ipcRenderer.invoke(
       'geode:get-stored-password',
       profileName,
-      username
+      username,
+      unlockToken
     ) as Promise<string | null>,
   storeSavedPassword: (profileName, username, password) =>
     ipcRenderer.invoke(

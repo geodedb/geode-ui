@@ -52,6 +52,10 @@ describe('GAP-Q4 / GAP-PSR-G07: bridge types are re-exported from a single sourc
       onSystemThemeChange: () => () => undefined,
       getStoredConnections: async () => [],
       storeConnections: async () => true,
+      // APP-01 R2: unlock-token gate. The stub satisfies the bridge
+      // contract; runtime behaviour is irrelevant for the structural
+      // assertion this test enforces.
+      openUnlockWindow: async () => 'stub-token',
       getStoredPassword: async () => null,
       storeSavedPassword: async () => true,
       clearStoredPassword: async () => true,

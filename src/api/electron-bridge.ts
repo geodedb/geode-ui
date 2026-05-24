@@ -93,23 +93,48 @@ export async function storeConnections(
  *
  * IPC channel: `geode:get-stored-password`.
  *
+ * APP-01 R2 (2026-05-24 appsec): the read is gated on a single-use
+ * unlock token. Callers MUST open a fresh window via
+ * `openUnlockWindow()` (typically immediately after a successful
+ * `apiLogin`) and pass the returned token here. A renderer compromise
+ * without a token gets `null`.
+ *
  * Web fallback: returns `null` when not running in Electron, because
  * there is no browser-side equivalent of `safeStorage`. Callers must
  * still treat the saved password as best-effort and prompt for one if
  * `null` comes back.
  *
- * Errors (secure-store unavailable, decrypt failure, etc.) are
- * swallowed and reported as `null` so callers can treat the helper as
- * a simple "got one or didn't" lookup.
+ * Errors (secure-store unavailable, decrypt failure, missing/expired
+ * unlock token, etc.) are swallowed and reported as `null` so callers
+ * can treat the helper as a simple "got one or didn't" lookup.
  */
 export async function getStoredPassword(
   profileName: string,
-  username: string
+  username: string,
+  unlockToken: string
 ): Promise<string | null> {
   const b = bridge()
   if (!b) return null
   try {
-    return await b.getStoredPassword(profileName, username)
+    return await b.getStoredPassword(profileName, username, unlockToken)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * APP-01 R2 (2026-05-24 appsec): opens a fresh single-use unlock token
+ * window on the Electron main side. The returned token is valid for
+ * ~30 s and consumable exactly once via `getStoredPassword`.
+ *
+ * Web fallback: returns `null` when not running in Electron — the
+ * unlock-token gate is an Electron-only control.
+ */
+export async function openUnlockWindow(): Promise<string | null> {
+  const b = bridge()
+  if (!b) return null
+  try {
+    return await b.openUnlockWindow()
   } catch {
     return null
   }

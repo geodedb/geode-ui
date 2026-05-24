@@ -30,6 +30,7 @@ import {
   sanitizeConnections,
   sanitizeSavedPasswordInput,
 } from './lib/ipc-guards'
+import { createUnlockTokenStore } from './lib/unlock-tokens'
 
 // Hard caps for IPC-supplied payloads (S8 — GitLab #121). Pre-fix the
 // `geode:store-connections` and `geode:store-saved-password` handlers
@@ -50,6 +51,13 @@ const STORE_EXPIRES_FORWARD_MS = 7 * 24 * 60 * 60 * 1000
 // 1 MiB cap on PEM material — real certs/keys are typically <10 KB; a
 // file larger than this is almost certainly the wrong thing.
 const PEM_FILE_MAX_BYTES = 1024 * 1024
+
+// APP-01 R2 (2026-05-24 appsec): unlock-token TTL. A token issued at
+// signIn (or via `geode:open-unlock-window`) is valid for 30 s and
+// usable exactly once. Tightening this further is fine; loosening
+// undoes the defense-in-depth.
+const UNLOCK_TOKEN_TTL_MS = 30_000
+const unlockTokens = createUnlockTokenStore({ ttlMs: UNLOCK_TOKEN_TTL_MS })
 
 // P-NEW-7: keep recently-served SPA assets in memory so a hard reload
 // or a tight burst of subresource requests don't all hit the disk.
@@ -468,9 +476,26 @@ ipcMain.handle('geode:store-connections', async (_evt, raw: unknown) => {
 //     Hello / polkit prompt before the read returns.
 // See `docs/ELECTRON.md#saved-password-trust-boundary-app-01` for the
 // operator-facing summary.
+// APP-01 R2: issue a single-use unlock token. The renderer calls this
+// from AuthProvider.performAuth immediately after a successful
+// apiLogin so the next saved-password read is gated. Future R3 work
+// can OR-in an OS-native re-auth step here.
+ipcMain.handle('geode:open-unlock-window', async () => {
+  return unlockTokens.issue()
+})
+
 ipcMain.handle(
   'geode:get-stored-password',
-  async (_evt, profileName: unknown, username: unknown) => {
+  async (
+    _evt,
+    profileName: unknown,
+    username: unknown,
+    unlockToken: unknown
+  ) => {
+    // APP-01 R2: the caller must present a single-use unlock token
+    // issued by `geode:open-unlock-window`. A renderer compromise
+    // without a token gets `null` from every read.
+    if (!unlockTokens.consume(unlockToken)) return null
     // S8 (#121): the read path takes the same untrusted input shape;
     // validate to prevent type-confused lookups (e.g. `{}` colliding
     // with the empty-string key, or a number coerced via the pwKey

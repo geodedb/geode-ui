@@ -43,6 +43,12 @@ jest.mock('../../api/electron-bridge', () => ({
   ...jest.requireActual('../../api/electron-bridge'),
   isElectron: jest.fn().mockReturnValue(true),
   getStoredPassword: jest.fn().mockResolvedValue(null),
+  // APP-01 R2: the saved-password read path now mints a single-use
+  // unlock token first. Browser-mode tests don't have a window.geode
+  // bridge so the real helper returns null — short-circuiting the
+  // read. Mock a non-null token here so the existing F14 tests that
+  // assert getStoredPassword is invoked still exercise the read.
+  openUnlockWindow: jest.fn().mockResolvedValue('unlock-token-stub'),
 }))
 
 const renderModal = (
@@ -230,7 +236,11 @@ test('PSR-F14: with toggle ON, getStoredPassword fires once after debounce windo
     })
     // After the 300ms idle window: exactly one IPC call.
     expect(getStoredPassword).toHaveBeenCalledTimes(1)
-    expect(getStoredPassword).toHaveBeenCalledWith('default', 'users')
+    expect(getStoredPassword).toHaveBeenCalledWith(
+      'default',
+      'users',
+      'unlock-token-stub'
+    )
   } finally {
     jest.useRealTimers()
   }

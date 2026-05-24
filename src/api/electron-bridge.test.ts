@@ -3,6 +3,7 @@ import {
   getStoredConnections,
   storeConnections,
   getStoredPassword,
+  openUnlockWindow,
   storeSavedPassword,
   clearStoredPassword,
   pickPemFile,
@@ -46,7 +47,35 @@ test('storeConnections noop in browser mode', async () => {
 })
 
 test('getStoredPassword returns null in browser mode', async () => {
-  await expect(getStoredPassword('p', 'u')).resolves.toBeNull()
+  // APP-01 R2: third arg is the unlock token. Browser mode returns
+  // null regardless of the token value.
+  await expect(getStoredPassword('p', 'u', 'unused-token')).resolves.toBeNull()
+})
+
+test('openUnlockWindow returns null in browser mode', async () => {
+  await expect(openUnlockWindow()).resolves.toBeNull()
+})
+
+test('openUnlockWindow delegates to the bridge', async () => {
+  const stub = jest.fn().mockResolvedValue('hex-token')
+  window.geode = {
+    isElectron: true,
+    openUnlockWindow: stub,
+  } as unknown as GeodeBridge
+  const got = await openUnlockWindow()
+  expect(stub).toHaveBeenCalled()
+  expect(got).toBe('hex-token')
+})
+
+test('getStoredPassword delegates to the bridge with unlock token', async () => {
+  const stub = jest.fn().mockResolvedValue('decrypted-pw')
+  window.geode = {
+    isElectron: true,
+    getStoredPassword: stub,
+  } as unknown as GeodeBridge
+  const got = await getStoredPassword('p', 'u', 'tok-abc')
+  expect(stub).toHaveBeenCalledWith('p', 'u', 'tok-abc')
+  expect(got).toBe('decrypted-pw')
 })
 
 test('storeSavedPassword + clearStoredPassword noop in browser mode', async () => {
