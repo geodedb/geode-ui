@@ -141,6 +141,41 @@ export async function openUnlockWindow(): Promise<string | null> {
 }
 
 /**
+ * APP-01 R3 (2026-05-24 appsec): read the
+ * `savedPasswordRequireBiometric` pref from the Electron secure-store.
+ * When true, a `getStoredPassword` IPC requires a successful Touch ID
+ * (macOS) prompt; Windows / Linux fail-closed until Hello / polkit
+ * are wired.
+ *
+ * Web fallback: returns false (the pref is an Electron-only control).
+ */
+export async function getSavedPasswordBiometricPref(): Promise<boolean> {
+  const b = bridge()
+  if (!b) return false
+  try {
+    return await b.getSavedPasswordBiometricPref()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * APP-01 R3: write the `savedPasswordRequireBiometric` pref. Returns
+ * true on success, false on validation failure / bridge absence.
+ */
+export async function setSavedPasswordBiometricPref(
+  enabled: boolean
+): Promise<boolean> {
+  const b = bridge()
+  if (!b) return false
+  try {
+    return await b.setSavedPasswordBiometricPref(enabled)
+  } catch {
+    return false
+  }
+}
+
+/**
  * Persists a password to the Electron secure-store, keyed by
  * `(profileName, username)`. The triple is validated by
  * `sanitizeSavedPasswordInput` (S8 / #121) in the main process before

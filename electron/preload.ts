@@ -55,6 +55,19 @@ const bridge: GeodeBridge = {
   // immediately; the token expires after ~30 s.
   openUnlockWindow: () =>
     ipcRenderer.invoke('geode:open-unlock-window') as Promise<string>,
+  // APP-01 R3: pref read/write so the renderer (a future settings
+  // panel) can toggle biometric requirement. The IPC handlers
+  // round-trip through secure-store; settings UI is out of scope this
+  // commit.
+  getSavedPasswordBiometricPref: () =>
+    ipcRenderer.invoke(
+      'geode:get-saved-password-biometric-pref'
+    ) as Promise<boolean>,
+  setSavedPasswordBiometricPref: (enabled) =>
+    ipcRenderer.invoke(
+      'geode:set-saved-password-biometric-pref',
+      enabled
+    ) as Promise<boolean>,
   getStoredPassword: (profileName, username, unlockToken) =>
     ipcRenderer.invoke(
       'geode:get-stored-password',

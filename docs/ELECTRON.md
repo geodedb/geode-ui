@@ -217,19 +217,33 @@ equivalent to a browser password manager, not a privileged credential
 vault. The user/operator must understand that a renderer compromise
 exposes every stored credential.
 
-**Defense in depth (R2 + R3, landing in follow-up commits):**
+**Defense in depth (R2 + R3, now landed):**
 
-- **R2 unlock-token gate.** The main process tracks a per-session
-  unlock token issued at signIn and expires it after ~30 s. The IPC
-  handler requires a matching token before returning the password.
-  A renderer compromise that lacks the freshly-issued token gets
-  `null` from every `getStoredPassword` call.
-- **R3 OS-native re-auth.** Opt-in via the
-  `savedPasswordRequireBiometric` pref. macOS uses Touch ID
-  (`systemPreferences.canPromptTouchID`); Windows Hello and
-  Linux polkit are stubs that fail-closed in this commit (return
-  `null` when the pref is on), with full integration tracked as a
-  follow-up.
+- **R2 unlock-token gate (APP-01 R2).** The main process tracks a
+  per-session unlock token issued at signIn and expires it after
+  ~30 s. The IPC handler requires a matching token before returning
+  the password. A renderer compromise that lacks the freshly-issued
+  token gets `null` from every `getStoredPassword` call.
+- **R3 OS-native re-auth (APP-01 R3).** Opt-in via the
+  `savedPasswordRequireBiometric` pref (persisted in
+  `<userData>/secure-store.json`, toggled via the new
+  `geode:get-saved-password-biometric-pref` /
+  `geode:set-saved-password-biometric-pref` IPCs). When the pref is
+  on:
+  - **macOS** uses `systemPreferences.canPromptTouchID()` +
+    `promptTouchID('Unlock saved password')`. A rejected prompt
+    returns `null` from `getStoredPassword`.
+  - **Windows** is a fail-closed stub (returns `null` when the pref
+    is on) until Windows Hello is wired via a native module — tracked
+    as a follow-up. Opting in on Windows today disables saved
+    passwords until the integration lands.
+  - **Linux** is a fail-closed stub until polkit / pkexec is wired —
+    tracked as a follow-up with the same semantics as Windows.
+  - A successful biometric prompt within the last 60 s satisfies the
+    R3 gate without re-prompting AND obviates the R2 unlock-token
+    requirement for that read (the human-presence proof is at least
+    as strong). The R2 token, if presented, is still consumed so it
+    cannot be replayed against the next read.
 
 **Operator playbook for verifying the threat is real today:**
 

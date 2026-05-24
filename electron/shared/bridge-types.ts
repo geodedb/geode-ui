@@ -53,6 +53,15 @@ export interface GeodeBridge {
   // immediately after a successful login and pass it through; the
   // token expires after ~30 s on the main-process side.
   openUnlockWindow(): Promise<string>
+  // APP-01 R3 (2026-05-24 appsec): opt-in OS-native re-auth pref.
+  // When `getSavedPasswordBiometricPref()` returns true the
+  // `getStoredPassword` IPC requires a successful biometric prompt
+  // (Touch ID / Hello / polkit) before returning a stored password.
+  // Settings UI for toggling the pref is a follow-up; the IPC pair is
+  // exposed so a future settings panel (or a regression test) can set
+  // the value without touching the secure-store schema directly.
+  getSavedPasswordBiometricPref(): Promise<boolean>
+  setSavedPasswordBiometricPref(enabled: boolean): Promise<boolean>
   getStoredPassword(
     profileName: string,
     username: string,

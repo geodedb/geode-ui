@@ -26,6 +26,11 @@ export interface SecureStoreDoc {
     expiresAt: number
   }>
   passwords?: Record<string, string>
+  // APP-01 R3 (2026-05-24 appsec): when true, the saved-password IPC
+  // requires a successful OS-native biometric prompt (Touch ID /
+  // Hello / polkit) before returning a stored password. Defaults to
+  // false (unset) — preserving the pre-R3 unlock-token-only contract.
+  savedPasswordRequireBiometric?: boolean
 }
 
 export interface SecureStoreOptions {

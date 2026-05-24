@@ -9,6 +9,7 @@ import {
   safeStorage,
   dialog,
   session,
+  systemPreferences,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
@@ -31,6 +32,7 @@ import {
   sanitizeSavedPasswordInput,
 } from './lib/ipc-guards'
 import { createUnlockTokenStore } from './lib/unlock-tokens'
+import { createBiometricGate } from './lib/biometric'
 
 // Hard caps for IPC-supplied payloads (S8 — GitLab #121). Pre-fix the
 // `geode:store-connections` and `geode:store-saved-password` handlers
@@ -58,6 +60,37 @@ const PEM_FILE_MAX_BYTES = 1024 * 1024
 // undoes the defense-in-depth.
 const UNLOCK_TOKEN_TTL_MS = 30_000
 const unlockTokens = createUnlockTokenStore({ ttlMs: UNLOCK_TOKEN_TTL_MS })
+
+// APP-01 R3 (2026-05-24 appsec): OS-native re-auth gate. Opt-in via
+// the `savedPasswordRequireBiometric` pref (persisted in the secure-
+// store doc). When the gate succeeds within the last 60 s the
+// saved-password read can skip the R2 unlock-token requirement —
+// either the biometric prompt cleared the human-presence check or
+// the R2 token does, but never neither.
+const biometricGate = createBiometricGate({
+  platform: process.platform,
+  canPromptTouchID: () => {
+    // The canPromptTouchID symbol only exists on macOS builds. Guard
+    // defensively so a Linux/Windows runtime never throws.
+    if (process.platform !== 'darwin') return false
+    const fn = (
+      systemPreferences as unknown as {
+        canPromptTouchID?: () => boolean
+      }
+    ).canPromptTouchID
+    return typeof fn === 'function' ? fn.call(systemPreferences) : false
+  },
+  promptTouchID: async (reason) => {
+    if (process.platform !== 'darwin') throw new Error('not supported')
+    const fn = (
+      systemPreferences as unknown as {
+        promptTouchID?: (reason: string) => Promise<void>
+      }
+    ).promptTouchID
+    if (typeof fn !== 'function') throw new Error('not supported')
+    await fn.call(systemPreferences, reason)
+  },
+})
 
 // P-NEW-7: keep recently-served SPA assets in memory so a hard reload
 // or a tight burst of subresource requests don't all hit the disk.
@@ -478,11 +511,34 @@ ipcMain.handle('geode:store-connections', async (_evt, raw: unknown) => {
 // operator-facing summary.
 // APP-01 R2: issue a single-use unlock token. The renderer calls this
 // from AuthProvider.performAuth immediately after a successful
-// apiLogin so the next saved-password read is gated. Future R3 work
-// can OR-in an OS-native re-auth step here.
+// apiLogin so the next saved-password read is gated. If the user has
+// opted into APP-01 R3 (biometric required), the issued token alone
+// does NOT clear the gate — the read still demands a successful
+// biometric prompt within the recent-success window.
 ipcMain.handle('geode:open-unlock-window', async () => {
   return unlockTokens.issue()
 })
+
+// APP-01 R3: read / write the `savedPasswordRequireBiometric` pref
+// from the secure-store doc. The renderer settings UI is out of
+// scope this commit; tests + a future settings panel call these
+// directly.
+ipcMain.handle('geode:get-saved-password-biometric-pref', async () => {
+  const doc = await secureStore().read()
+  return doc.savedPasswordRequireBiometric === true
+})
+ipcMain.handle(
+  'geode:set-saved-password-biometric-pref',
+  async (_evt, enabled: unknown) => {
+    if (typeof enabled !== 'boolean') return false
+    const doc = await secureStore().read()
+    await secureStore().write({
+      ...doc,
+      savedPasswordRequireBiometric: enabled,
+    })
+    return true
+  }
+)
 
 ipcMain.handle(
   'geode:get-stored-password',
@@ -492,10 +548,28 @@ ipcMain.handle(
     username: unknown,
     unlockToken: unknown
   ) => {
-    // APP-01 R2: the caller must present a single-use unlock token
-    // issued by `geode:open-unlock-window`. A renderer compromise
-    // without a token gets `null` from every read.
-    if (!unlockTokens.consume(unlockToken)) return null
+    const doc = await secureStore().read()
+    const requireBiometric = doc.savedPasswordRequireBiometric === true
+    // APP-01 R3: when biometric is required, attempt to satisfy via
+    // the recent-success cache (60 s window) or a fresh prompt. If
+    // the gate clears we can skip the R2 unlock-token check — the
+    // human-presence proof is at least as strong. If the gate fails
+    // the read returns null regardless of whether an R2 token was
+    // presented (fail-closed).
+    if (requireBiometric) {
+      let ok = biometricGate.hasRecentSuccess()
+      if (!ok) {
+        ok = await biometricGate.prompt('Unlock saved password')
+      }
+      if (!ok) return null
+      // Successful biometric obviates the R2 check; the unlock token
+      // (if presented) is still consumed so it cannot be replayed
+      // against the next read.
+      if (typeof unlockToken === 'string') unlockTokens.consume(unlockToken)
+    } else {
+      // APP-01 R2 only: require a single-use unlock token.
+      if (!unlockTokens.consume(unlockToken)) return null
+    }
     // S8 (#121): the read path takes the same untrusted input shape;
     // validate to prevent type-confused lookups (e.g. `{}` colliding
     // with the empty-string key, or a number coerced via the pwKey
@@ -512,8 +586,13 @@ ipcMain.handle(
     ) {
       return null
     }
-    const doc = await secureStore().read()
-    return doc.passwords?.[pwKey(profileName, username)] ?? null
+    // Re-read after the gate clears — the secure-store memo means this
+    // is an in-process Map lookup, not an IPC round-trip. Returning the
+    // pref-time doc would race a write between the gate decision and
+    // the password lookup; pulling a fresh read here keeps both paths
+    // coherent.
+    const fresh = await secureStore().read()
+    return fresh.passwords?.[pwKey(profileName, username)] ?? null
   }
 )
 

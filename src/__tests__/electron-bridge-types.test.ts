@@ -56,6 +56,9 @@ describe('GAP-Q4 / GAP-PSR-G07: bridge types are re-exported from a single sourc
       // contract; runtime behaviour is irrelevant for the structural
       // assertion this test enforces.
       openUnlockWindow: async () => 'stub-token',
+      // APP-01 R3: biometric pref read/write. Same stub pattern.
+      getSavedPasswordBiometricPref: async () => false,
+      setSavedPasswordBiometricPref: async () => true,
       getStoredPassword: async () => null,
       storeSavedPassword: async () => true,
       clearStoredPassword: async () => true,
