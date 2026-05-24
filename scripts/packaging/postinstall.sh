@@ -14,8 +14,19 @@
 set -e
 
 # 1. Ownership/perms. files were extracted root:root.
+#
+# `/var/lib/geode-ui` and `/var/log/geode-ui` are NOT shipped in the
+# package (see .goreleaser.yaml). dpkg deletes any empty
+# package-owned dir on `apt remove`, which would wipe an
+# operator's data-store on a non-purge remove if the dir happened
+# to be empty (smoke-test path, or a fresh install that hasn't
+# run yet). Creating the dirs here keeps them off the dpkg
+# ownership ledger so they survive `apt remove` and are only
+# cleared by postremove's explicit `purge` branch.
+mkdir -p /var/lib/geode-ui /var/lib/geode-ui/uploads /var/log/geode-ui
 chown -R geode-ui:geode-ui /var/lib/geode-ui /var/log/geode-ui
 chmod 750 /var/lib/geode-ui /var/log/geode-ui
+chmod 750 /var/lib/geode-ui/uploads
 # /etc/geode-ui is world-readable (config is non-sensitive); the seed
 # JSON drop-ins are mode 0640 so the geode-ui user can read but other
 # users cannot.

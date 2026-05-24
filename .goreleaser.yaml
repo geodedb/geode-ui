@@ -452,22 +452,27 @@ nfpms:
     dst: /usr/share/geode-ui/packaging/detect-local-geode.sh
     file_info: {mode: 0755}
 
-    # Runtime dirs (empty, mode 0750 — postinstall fixes ownership).
-  - dst: /var/lib/geode-ui
-    type: dir
-    file_info: {mode: 0750}
-  - dst: /var/lib/geode-ui/uploads
-    type: dir
-    file_info: {mode: 0750}
-  - dst: /var/log/geode-ui
-    type: dir
-    file_info: {mode: 0750}
+    # Config dirs only — these contain shipped files (geode-ui.conf,
+    # seed-profiles.d/README.md), so dpkg keeps them on `apt remove`
+    # and only wipes them on `apt purge` after the conffiles are
+    # cleared.
   - dst: /etc/geode-ui
     type: dir
     file_info: {mode: 0750}
   - dst: /etc/geode-ui/seed-profiles.d
     type: dir
     file_info: {mode: 0750}
+
+    # NOTE on /var/lib/geode-ui and /var/log/geode-ui:
+    # These are operator-data dirs (sqlite profile store, uploads,
+    # logs) created by `postinstall.sh` rather than shipped in the
+    # package. dpkg removes any *empty* package-owned dir on
+    # `apt remove`; the smoke test runs the binary with
+    # `-profile-store=:memory:`, so the data dir stays empty and
+    # would be wiped on a non-purge remove — failing the "data
+    # survives apt remove" invariant. Postinstall mkdir + chown
+    # keeps them off dpkg's directory ledger, so they only get
+    # removed when postremove handles the `purge` action.
 
   deb:
     compression: xz

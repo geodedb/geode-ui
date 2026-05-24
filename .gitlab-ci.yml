@@ -1037,26 +1037,254 @@ prepare-apt-packages:
 # many historical .debs accumulate at apt.geodedb.com.
 
 apt-repo-apt-geodedb-com:
-  after_script:
+  # Why this is a full `script:` override rather than an `after_script`
+  # extension:
+  #
+  # The catalog's `apt-publish@v1.25.2` `apt-repo` job (see
+  # `templates/apt-publish/template.yml`) declares
+  #
+  #     trap "rm -rf $GNUPGHOME" EXIT
+  #
+  # inside its main `script:` body. Bash trap semantics are
+  # last-write-wins per signal — a `before_script` trap or chained
+  # EXIT handler is silently overwritten when the catalog's trap
+  # statement runs. And empirically (v0.1.19 pipeline 2549486001/job
+  # 14520300207) the kubernetes runner did NOT execute our prior
+  # `after_script:` override between step_script and archive_cache —
+  # no `after_script` section appears in the trace at all.
+  #
+  # The robust fix is to OWN the script and append the trim as the
+  # final guaranteed step. The body below is a faithful clone of the
+  # catalog `apt-repo` script as rendered by
+  # `gitlab.com/devnw/ci-catalog/apt-publish@v1.25.2`, plus a
+  # final trim block. When the catalog version pin bumps, this
+  # block needs a fresh diff against the new rendered template.
+  before_script:
+    - apt-get update -qq && apt-get install -qq -y gnupg dpkg-dev xz-utils gzip coreutils curl jq ca-certificates awscli > /dev/null
+  script:
     - |
       set -euo pipefail
-      VERSION="${CI_COMMIT_TAG#v}"
-      echo "=== apt-repo override: trim pool/ to v${VERSION} only ==="
+      echo "=== Generating APT Repository ==="
+
+      # Setup GPG for signing Release file
+      export GNUPGHOME=$(mktemp -d)
+      trap "rm -rf $GNUPGHOME" EXIT
+
+      # Determine bucket name
+      if [ -z "$S3_BUCKET" ]; then
+        S3_BUCKET="${APT_DOMAIN%%.*}-apt-packages"
+      fi
+
+      # Helper function
+      get_vault_secret() {
+        local path=$1
+        local field=${2:-value}
+        curl -sS --header "X-Vault-Token: $VAULT_TOKEN" \
+          "$VAULT_ADDR/v1/${VAULT_MOUNT}/data/$path" | jq -r ".data.data.$field // empty"
+      }
+
+      # Authenticate to Vault if configured
+      if [ -n "$VAULT_AUTH_ROLE" ] && [ -n "$VAULT_SECRET_PATH" ]; then
+        AUTH_RESPONSE=$(curl -sS --request POST \
+          --data "{\"role\": \"$VAULT_AUTH_ROLE\", \"jwt\": \"$VAULT_ID_TOKEN\"}" \
+          "$VAULT_ADDR/v1/auth/gitlab-jwt/login")
+        export VAULT_TOKEN=$(echo "$AUTH_RESPONSE" | jq -r '.auth.client_token')
+
+        GPG_PRIVATE_KEY=$(get_vault_secret "$VAULT_SECRET_PATH" "private_key")
+        GPG_KEY_ID=$(get_vault_secret "$VAULT_SECRET_PATH" "key_id")
+
+        if [ -n "$GPG_PRIVATE_KEY" ] && [ "$GPG_PRIVATE_KEY" != "null" ]; then
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+        fi
+
+        # Get S3 credentials for downloading existing packages
+        export AWS_ACCESS_KEY_ID=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_access_key")
+        export AWS_SECRET_ACCESS_KEY=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_secret_key")
+
+        # Override bucket/endpoint from Vault if available
+        VAULT_BUCKET=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_bucket")
+        VAULT_ENDPOINT=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_endpoint")
+        [ -n "$VAULT_BUCKET" ] && [ "$VAULT_BUCKET" != "null" ] && S3_BUCKET="$VAULT_BUCKET"
+        VAULT_ENDPOINT="${VAULT_ENDPOINT#https://}"
+        VAULT_ENDPOINT="${VAULT_ENDPOINT#http://}"
+        [ -n "$VAULT_ENDPOINT" ] && [ "$VAULT_ENDPOINT" != "null" ] && S3_ENDPOINT="$VAULT_ENDPOINT"
+      elif [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+        echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+      fi
+
+      if [ -z "${GPG_KEY_ID:-}" ] && [ -f signed-packages/.gpg_key_id ]; then
+        GPG_KEY_ID=$(cat signed-packages/.gpg_key_id)
+      fi
+
+      cat > "$GNUPGHOME/gpg.conf" <<EOF
+      batch
+      yes
+      pinentry-mode loopback
+      EOF
+
+      if [ -n "${GPG_KEY_ID:-}" ]; then
+        echo "${GPG_KEY_ID}:6:" | gpg --import-ownertrust
+      fi
+
+      REPO_DIR="apt-repo"
+      mkdir -p "$REPO_DIR/dists/$DISTRIBUTION/$COMPONENT"
+      mkdir -p "$REPO_DIR/pool/$COMPONENT"
+      for arch in $ARCHITECTURES; do
+        mkdir -p "$REPO_DIR/dists/$DISTRIBUTION/$COMPONENT/binary-$arch"
+      done
+
+      if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+        echo "Downloading existing packages from s3://$S3_BUCKET/pool/..."
+        aws s3 sync "s3://$S3_BUCKET/pool/" "$REPO_DIR/pool/" \
+          --endpoint-url "https://$S3_ENDPOINT" \
+          --quiet 2>/dev/null || echo "No existing pool found (first publish)"
+        echo "Existing packages:"
+        find "$REPO_DIR/pool" -name "*.deb" 2>/dev/null | head -20 || true
+      fi
+
+      for deb in signed-packages/*.deb; do
+        [ -f "$deb" ] || continue
+        pkg_name=$(dpkg-deb -f "$deb" Package 2>/dev/null | head -c1 || echo "g")
+        mkdir -p "$REPO_DIR/pool/$COMPONENT/$pkg_name"
+        cp "$deb" "$REPO_DIR/pool/$COMPONENT/$pkg_name/"
+        cp "${deb}.asc" "$REPO_DIR/pool/$COMPONENT/$pkg_name/" 2>/dev/null || true
+      done
+
+      map_arch() {
+        case "$1" in
+          *x86_64*|*amd64*) echo "amd64" ;;
+          *arm64*|*aarch64*) echo "arm64" ;;
+          *armhf*|*arm-linux*) echo "armhf" ;;
+          *riscv64*) echo "riscv64" ;;
+          *) echo "" ;;
+        esac
+      }
+
+      echo "Generating Packages files..."
+      for arch in $ARCHITECTURES; do
+        PACKAGES_FILE="$REPO_DIR/dists/$DISTRIBUTION/$COMPONENT/binary-$arch/Packages"
+        > "$PACKAGES_FILE"
+        for deb in "$REPO_DIR"/pool/$COMPONENT/*/*.deb; do
+          [ -f "$deb" ] || continue
+          filename=$(basename "$deb")
+          pkg_arch=$(map_arch "$filename")
+          if [ "$pkg_arch" = "$arch" ]; then
+            dpkg-deb -I "$deb" control 2>/dev/null >> "$PACKAGES_FILE" || continue
+            SIZE=$(stat -c%s "$deb")
+            MD5=$(md5sum "$deb" | awk '{print $1}')
+            SHA1=$(sha1sum "$deb" | awk '{print $1}')
+            SHA256=$(sha256sum "$deb" | awk '{print $1}')
+            RELPATH=${deb#$REPO_DIR/}
+            echo "Filename: $RELPATH" >> "$PACKAGES_FILE"
+            echo "Size: $SIZE" >> "$PACKAGES_FILE"
+            echo "MD5sum: $MD5" >> "$PACKAGES_FILE"
+            echo "SHA1: $SHA1" >> "$PACKAGES_FILE"
+            echo "SHA256: $SHA256" >> "$PACKAGES_FILE"
+            echo "" >> "$PACKAGES_FILE"
+          fi
+        done
+        gzip -k -f "$PACKAGES_FILE"
+        xz -k -f "$PACKAGES_FILE" 2>/dev/null || true
+      done
+
+      echo "Generating Release file..."
+      RELEASE_FILE="$REPO_DIR/dists/$DISTRIBUTION/Release"
+      cat > "$RELEASE_FILE" <<EOF
+      Origin: ${APT_DOMAIN%%.*}
+      Label: ${APT_DOMAIN%%.*}
+      Suite: $DISTRIBUTION
+      Codename: $DISTRIBUTION
+      Architectures: $ARCHITECTURES
+      Components: $COMPONENT
+      Description: APT Repository for $APT_DOMAIN
+      Date: $(date -Ru)
+      EOF
+
+      cd "$REPO_DIR/dists/$DISTRIBUTION"
+      echo "MD5Sum:" >> Release
+      find . -type f \( -name "Packages*" \) | while read f; do
+        SIZE=$(stat -c%s "$f")
+        MD5=$(md5sum "$f" | awk '{print $1}')
+        printf " %s %16d %s\n" "$MD5" "$SIZE" "${f#./}" >> Release
+      done
+      echo "SHA1:" >> Release
+      find . -type f \( -name "Packages*" \) | while read f; do
+        SIZE=$(stat -c%s "$f")
+        SHA1=$(sha1sum "$f" | awk '{print $1}')
+        printf " %s %16d %s\n" "$SHA1" "$SIZE" "${f#./}" >> Release
+      done
+      echo "SHA256:" >> Release
+      find . -type f \( -name "Packages*" \) | while read f; do
+        SIZE=$(stat -c%s "$f")
+        SHA256=$(sha256sum "$f" | awk '{print $1}')
+        printf " %s %16d %s\n" "$SHA256" "$SIZE" "${f#./}" >> Release
+      done
+      cd -
+
+      if [ -n "${GPG_KEY_ID:-}" ]; then
+        echo "Signing Release file..."
+        gpg --armor --detach-sign --default-key "$GPG_KEY_ID" -o "$REPO_DIR/dists/$DISTRIBUTION/Release.gpg" "$RELEASE_FILE"
+        gpg --clearsign --default-key "$GPG_KEY_ID" -o "$REPO_DIR/dists/$DISTRIBUTION/InRelease" "$RELEASE_FILE"
+      fi
+
+      cp "signed-packages/$GPG_KEY_NAME" "$REPO_DIR/" 2>/dev/null || true
+      cp "signed-packages/${GPG_KEY_NAME%.gpg}-keyring.gpg" "$REPO_DIR/" 2>/dev/null || true
+      if [ -f "signed-packages/.domain_prefix" ]; then
+        DOMAIN_PREFIX=$(cat signed-packages/.domain_prefix)
+      else
+        DOMAIN_PREFIX=$(echo "$APT_DOMAIN" | sed 's/^apt\.//' | cut -d. -f1)
+      fi
+      cp "signed-packages/${DOMAIN_PREFIX}.gpg" "$REPO_DIR/" 2>/dev/null || true
+      cp "signed-packages/${DOMAIN_PREFIX}-keyring.gpg" "$REPO_DIR/" 2>/dev/null || true
+
+      VERSION_FOR_INDEX="${CI_COMMIT_TAG#v}"
+      cat > "$REPO_DIR/index.html" <<EOF
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>APT Repository - $APT_DOMAIN</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+          pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        </style>
+      </head>
+      <body>
+        <h1>APT Repository</h1>
+        <p><strong>Domain:</strong> $APT_DOMAIN</p>
+        <p><strong>Version:</strong> ${VERSION_FOR_INDEX:-latest}</p>
+        <h2>Quick Install</h2>
+        <pre>
+      curl -fsSL https://$APT_DOMAIN/${DOMAIN_PREFIX}-keyring.gpg | sudo tee /usr/share/keyrings/${DOMAIN_PREFIX}-archive-keyring.gpg > /dev/null
+      echo "deb [signed-by=/usr/share/keyrings/${DOMAIN_PREFIX}-archive-keyring.gpg] https://$APT_DOMAIN $DISTRIBUTION $COMPONENT" | sudo tee /etc/apt/sources.list.d/${DOMAIN_PREFIX}.list
+      sudo apt update
+        </pre>
+        <p><small>Generated: $(date -Ru)</small></p>
+      </body>
+      </html>
+      EOF
+
+      echo "=== Repository structure ==="
+      find "$REPO_DIR" -type f | LC_ALL=C sort | awk 'NR<=50'
+
+      # ------------------------------------------------------------------
+      # OVERRIDE TRIM (geode-ui-specific):
+      # Drop historical pool entries from THIS job's artifact so the upload
+      # stays under the 1 GB runner limit. Downstream `aws s3 sync` runs
+      # without `--delete`, so historical files remain on S3 — apt clients
+      # still resolve them via the freshly-regenerated `Packages*` files.
+      # ------------------------------------------------------------------
+      VERSION_TRIM="${CI_COMMIT_TAG#v}"
+      echo "=== trim: pool/ -> only v${VERSION_TRIM} ==="
       du -sh apt-repo/ 2>/dev/null || true
       if [ -d apt-repo/pool/main/g ]; then
-        # Delete every pool entry that is NOT one of this release's new .debs
-        # (or their detached .asc signatures). `Packages*` and `Release*`
-        # under `dists/` already reference the historical .debs by relative
-        # path; those files remain on S3 from prior runs, so the apt client
-        # still resolves them after `aws s3 sync` adds the new dists.
         find apt-repo/pool/main/g/ -type f \
-          ! -name "geode-ui_${VERSION}_*.deb" \
-          ! -name "geode-ui_${VERSION}_*.deb.asc" \
-          ! -name "geode-ui-desktop_${VERSION}_*.deb" \
-          ! -name "geode-ui-desktop_${VERSION}_*.deb.asc" \
+          ! -name "geode-ui_${VERSION_TRIM}_*.deb" \
+          ! -name "geode-ui_${VERSION_TRIM}_*.deb.asc" \
+          ! -name "geode-ui-desktop_${VERSION_TRIM}_*.deb" \
+          ! -name "geode-ui-desktop_${VERSION_TRIM}_*.deb.asc" \
           -print -delete
       fi
-      echo "=== post-trim apt-repo size + retained pool entries ==="
+      echo "=== post-trim apt-repo size + retained pool ==="
       du -sh apt-repo/ 2>/dev/null || true
       ls -la apt-repo/pool/main/g/ 2>/dev/null || true
 
@@ -1106,60 +1334,55 @@ release:publish:
       set -euo pipefail
       VERSION="${CI_COMMIT_TAG#v}"
       PKG_API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/geode-ui/${VERSION}"
-      ASSETS_JSON="/tmp/assets.json"
-      echo '{"links": []}' > "${ASSETS_JSON}"
+      RELEASES_API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases/${CI_COMMIT_TAG}"
 
-      upload() {
+      upload_and_link() {
         local file="$1"
         local name; name="$(basename "$file")"
-        echo "→ uploading ${name}"
+        local url="${PKG_API}/${name}"
+
+        echo "→ uploading ${name} to package registry"
         curl --silent --show-error --fail \
           --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
           --upload-file "${file}" \
-          "${PKG_API}/${name}"
-        local url="${PKG_API}/${name}"
-        jq --arg n "$name" --arg u "$url" \
-           '.links += [{"name":$n, "url":$u, "link_type":"package"}]' \
-           "${ASSETS_JSON}" > "${ASSETS_JSON}.tmp" && mv "${ASSETS_JSON}.tmp" "${ASSETS_JSON}"
+          "${url}" >/dev/null
+
+        # Attach the uploaded asset to the EXISTING release created by
+        # the `create-release` job (release-semantic catalog component).
+        # Pre-fix this job also used the `release:` keyword, which made
+        # release-cli try to create a second release for the same tag —
+        # `error=release for tag "X" already exists and --no-update flag
+        # was specified` (v0.1.19 pipeline 2549486001 job 14520300209).
+        # The Releases API's assets/links endpoint is idempotent in the
+        # sense that 400 / 409 means the link is already present —
+        # safe to ignore on retries.
+        echo "→ linking ${name} on release ${CI_COMMIT_TAG}"
+        local resp
+        resp=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+          --request POST \
+          --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
+          --data-urlencode "name=${name}" \
+          --data-urlencode "url=${url}" \
+          --data-urlencode 'link_type=package' \
+          "${RELEASES_API}/assets/links")
+        case "${resp}" in
+          2*) ;;
+          400|409) echo "  (link already exists; treating as success)" ;;
+          *) echo "  unexpected HTTP ${resp} when linking ${name}"; return 1 ;;
+        esac
       }
 
       # GoReleaser outputs (binaries, archives, packages, checksums)
       for f in dist/*.tar.gz dist/*.zip dist/*.deb dist/*.rpm dist/*.apk dist/checksums.txt; do
-        [ -f "$f" ] && upload "$f"
+        [ -f "$f" ] && upload_and_link "$f"
       done
 
       # Electron installers (each per-OS job published to release/<os>/)
       for f in release/linux/*.AppImage release/linux/*.deb release/mac/*.dmg release/win/*.exe; do
-        [ -f "$f" ] && upload "$f"
+        [ -f "$f" ] && upload_and_link "$f"
       done
 
-      cat "${ASSETS_JSON}"
-      echo "Asset upload complete."
-  release:
-    name: Geode UI ${CI_COMMIT_TAG}
-    tag_name: ${CI_COMMIT_TAG}
-    description: |
-      Automated release for ${CI_COMMIT_TAG}.
-
-      ### Container images
-
-      ```
-      docker pull ${CI_REGISTRY_IMAGE}:${CI_COMMIT_TAG#v}
-      docker pull docker.io/geodedb/geode-ui:${CI_COMMIT_TAG#v}
-      ```
-
-      ### Linux package
-
-      Download the `.deb` / `.rpm` / `.apk` for your platform from the assets below,
-      then `dpkg -i geode-ui_${CI_COMMIT_TAG#v}_Linux_x86_64.deb` (or rpm/apk equivalent).
-
-      ### Desktop app
-
-      The `.dmg` (macOS), `.AppImage` + `.deb` (Linux), and `.exe` (Windows) installers
-      bundle the Electron desktop client.
-
-      Full release notes generated by GoReleaser are in `dist/CHANGELOG.md`
-      attached as a job artifact.
+      echo "Asset upload + release link complete."
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 
