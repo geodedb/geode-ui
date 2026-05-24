@@ -705,38 +705,47 @@ e2e:playwright:
       tar -xzf /tmp/gr.tgz -C /tmp goreleaser
       install -m 0755 /tmp/goreleaser /usr/local/bin/goreleaser
       goreleaser --version
-    # Wait for the dind sidecar to bind. The company k8s runner
-    # sometimes takes >60s to spin up the docker:25-dind pod (observed
-    # v0.1.11). Bumping the window to 180s with per-attempt logging
-    # so a real outage surfaces as a clear failure instead of a
-    # truncated "Cannot connect to the Docker daemon" at job-end.
+    # Best-effort dind setup. v0.1.9–v0.1.14 hit repeated "Cannot
+    # connect to the Docker daemon" failures because the company
+    # runner's dind sidecar is unreliable — even on the k8s pool,
+    # even with a 180s wait. The release path now uses
+    # `goreleaser release --skip=docker`, so we only need dind for
+    # the OPTIONAL container-image push to GitLab Container Registry
+    # + Docker Hub. If dind doesn't come up within 30s, the script
+    # disables all docker push steps and continues to the .deb /
+    # .rpm / binary build + apt-publish path. Operators can re-cut
+    # a release later (once dind is fixed) for the container images.
     - |
-      for i in $(seq 1 180); do
+      DIND_READY=0
+      for i in $(seq 1 30); do
         if docker info >/dev/null 2>&1; then
           echo "dind ready after ${i}s"
+          DIND_READY=1
           break
         fi
         sleep 1
       done
-      docker info
-    # GitLab Container Registry login (always available).
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
-    # Optional Docker Hub login. SKIP_DOCKERHUB="true" silences the
-    # dockerhub image variants when credentials aren't present.
+      if [ "$DIND_READY" = "0" ]; then
+        echo "⚠ dind never came up — falling back to --skip=docker mode"
+      fi
+      echo "DIND_READY=$DIND_READY" > /tmp/dind.env
+    # Docker login + buildx ONLY when dind is up. Both wrapped in
+    # `|| true` so a transient login failure doesn't kill the job.
     - |
+      . /tmp/dind.env
       export SKIP_DOCKERHUB=true
-      if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
-        if echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin; then
-          export SKIP_DOCKERHUB=false
-          echo "✓ Docker Hub login successful (will push to docker.io/geodedb/geode-ui)"
-        else
-          echo "⚠ Docker Hub login failed — keeping SKIP_DOCKERHUB=true"
+      if [ "$DIND_READY" = "1" ]; then
+        docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY" || true
+        if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+          if echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin; then
+            export SKIP_DOCKERHUB=false
+            echo "✓ Docker Hub login successful"
+          fi
         fi
+        docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null || true
+        docker buildx inspect --bootstrap || true
       fi
       echo "SKIP_DOCKERHUB=$SKIP_DOCKERHUB" > /tmp/dockerhub.env
-    # Buildx for multi-arch image assembly.
-    - docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null
-    - docker buildx inspect --bootstrap
     # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
     - npm ci
     # go.mod has `replace geodedb.com/geode => ../geode-client-go`,
@@ -765,12 +774,17 @@ goreleaser-snapshot:
       artifacts: false
   timeout: 1h
   script:
+    - . /tmp/dind.env
     - . /tmp/dockerhub.env
-    - echo "SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
+    - echo "DIND_READY=${DIND_READY} SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
     # `--snapshot` skips git-tag validation, marks the build as a snapshot,
     # and short-circuits any release-publish step. Container images are
-    # still pushed (snapshot tags carry the `-snapshot-<sha>` suffix).
-    - goreleaser release --snapshot --clean --timeout 60m
+    # still pushed when dind is up (snapshot tags carry the
+    # `-snapshot-<sha>` suffix); skipped otherwise.
+    - |
+      SKIP_FLAG=""
+      if [ "$DIND_READY" = "0" ]; then SKIP_FLAG="--skip=docker"; fi
+      goreleaser release --snapshot --clean --timeout 60m $SKIP_FLAG
     - ls -la dist/
   artifacts:
     paths:
@@ -804,8 +818,15 @@ goreleaser-release:
     # otherwise turn the whole line into a YAML mapping (key=`echo "Building
     # release`, value=`...`). See the matching snapshot job above for the
     # bare-form template that's safe because it has no `: `.
-    - 'echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
-    - goreleaser release --clean --timeout 120m
+    - . /tmp/dind.env
+    - 'echo "Building release: ${CI_COMMIT_TAG} (DIND_READY=${DIND_READY} SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
+    # When dind didn't come up, skip the dockers stage so the .deb /
+    # .rpm / binary path still produces artifacts for apt-publish.
+    # Container images get a follow-up release once dind is fixed.
+    - |
+      SKIP_FLAG=""
+      if [ "$DIND_READY" = "0" ]; then SKIP_FLAG="--skip=docker"; fi
+      goreleaser release --clean --timeout 120m $SKIP_FLAG
     - ls -la dist/
   artifacts:
     paths:
