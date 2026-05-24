@@ -103,11 +103,16 @@ default:
     policy: pull
   # `linux` constrains job picking to the linux runner pool — without
   # it, the company-tag also matches the Windows runner (which lacks
-  # `npm` on PATH and would fail every node-based job). electron:mac
-  # and electron:win opt into their platform pools explicitly via
-  # their own tags.
+  # `npm` on PATH and would fail every node-based job). `k8s`
+  # additionally pins to the Company Cluster k8s pool (which mirrors
+  # the sibling ../geode default), avoiding Lab Servers (slow,
+  # 5+ min jobs) and OVH Dedicated Runners (dind broken, observed
+  # repeatedly across v0.1.9–v0.1.13 goreleaser-release failures).
+  # electron:mac and electron:win opt into their platform pools
+  # explicitly via their own tags.
   tags:
     - company
+    - k8s
     - linux
 
 stages:
@@ -669,11 +674,12 @@ e2e:playwright:
   image: docker:25
   services:
     - docker:25-dind
-  # Without `linux` the company-tag also matches the Windows runner
-  # (which lacks docker/npm on PATH and would parse the bash heredocs
-  # below as PowerShell). The dind service also assumes a Linux host.
+  # `linux` rules out Windows; `k8s` rules out Lab/OVH runners where
+  # dind has been unreliable across v0.1.9–v0.1.13. Mirrors the
+  # sibling ../geode default pinning.
   tags:
     - company
+    - k8s
     - linux
   variables:
     DOCKER_TLS_CERTDIR: ''
