@@ -30,8 +30,12 @@ mkdir -p /usr/bin
 printf '#!/bin/sh\n' > /usr/bin/geode
 chmod +x /usr/bin/geode
 
-# 1. Install.
-apt-get install -y "$DEB"
+# 1. Install. Resolve to an absolute path so apt-get treats it as a
+# file install rather than a `package=version=release` lookup (apt
+# interprets bare `dist/foo.deb` as "package=dist, version+release=
+# foo.deb" — adding `./` prefix or a full path disambiguates).
+DEB_ABS=$(readlink -f "$DEB")
+apt-get install -y "$DEB_ABS"
 
 # 2. User.
 getent passwd geode-ui >/dev/null
