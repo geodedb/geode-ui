@@ -441,6 +441,33 @@ ipcMain.handle('geode:store-connections', async (_evt, raw: unknown) => {
   return true
 })
 
+// SECURITY (APP-01) — Saved-password IPC trust boundary.
+//
+// The three handlers below — `geode:get-stored-password`,
+// `geode:store-saved-password`, `geode:clear-stored-password` — are
+// protected ONLY at the OS-user trust boundary. `safeStorage` encrypts
+// the on-disk file under the OS keyring entry for this user+app, so
+// another OS user cannot read the file directly. The renderer running
+// in the same OS user's process CAN: the IPC channel is the
+// authorised surface for that user, and a renderer compromise (XSS
+// surviving the CSP installed by APP-02, a compromised npm transitive
+// dependency, an operator pasting attacker code into devtools) is
+// sufficient to call `window.geode.getStoredPassword(profile,
+// username)` for any `(profile, username)` pair visible from
+// `getStoredConnections()` and exfiltrate the plaintext to a remote
+// server.
+//
+// Treat saved passwords as a UX convenience equivalent to a browser
+// password manager, NOT a privileged credential vault. A renderer
+// compromise can read every stored password.
+//
+// Follow-up controls land in subsequent commits:
+//   - APP-01 R2 (per-session unlock-token gate) — bounds the read
+//     channel to a freshly-authenticated unlock window.
+//   - APP-01 R3 (OS-native re-auth) — opt-in Touch ID / Windows
+//     Hello / polkit prompt before the read returns.
+// See `docs/ELECTRON.md#saved-password-trust-boundary-app-01` for the
+// operator-facing summary.
 ipcMain.handle(
   'geode:get-stored-password',
   async (_evt, profileName: unknown, username: unknown) => {

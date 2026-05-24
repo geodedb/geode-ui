@@ -186,6 +186,65 @@ follow-up.
   whitelists `https:` and `mailto:` — file:// or custom schemes
   cannot be launched.
 
+## Saved-password trust boundary (APP-01)
+
+Closes APP-01 R1 from `docs/APPSEC_REVIEW_2026-05-24_auth-ipc.md`.
+
+The Electron preload exposes three saved-password IPC channels on
+`window.geode`:
+
+- `getStoredPassword(profile, username): Promise<string | null>`
+- `storeSavedPassword(profile, username, password): Promise<boolean>`
+- `clearStoredPassword(profile, username): Promise<boolean>`
+
+The on-disk file (`<userData>/secure-store.json`) is encrypted via
+`safeStorage` under the OS keyring entry for the current user+app.
+That gates the file at rest against another OS user reading it
+directly. It does NOT gate the IPC channels against the renderer
+running in the same OS user's process — and the renderer IS the
+attack surface in the desktop threat model.
+
+**Threat:** A compromised renderer (DOM-XSS surviving the CSP from
+APP-02, a malicious npm transitive that runs in the SPA bundle, an
+operator who opens devtools and pastes attacker code) can enumerate
+visible `(profile, username)` pairs via `getStoredConnections()` and
+call `getStoredPassword(profile, username)` for each one. The plain
+text reaches the renderer and can be exfiltrated through any allowed
+`connect-src` (or via a CSP-bypass primitive).
+
+**Accepted risk (R1):** Saved passwords are a UX convenience
+equivalent to a browser password manager, not a privileged credential
+vault. The user/operator must understand that a renderer compromise
+exposes every stored credential.
+
+**Defense in depth (R2 + R3, landing in follow-up commits):**
+
+- **R2 unlock-token gate.** The main process tracks a per-session
+  unlock token issued at signIn and expires it after ~30 s. The IPC
+  handler requires a matching token before returning the password.
+  A renderer compromise that lacks the freshly-issued token gets
+  `null` from every `getStoredPassword` call.
+- **R3 OS-native re-auth.** Opt-in via the
+  `savedPasswordRequireBiometric` pref. macOS uses Touch ID
+  (`systemPreferences.canPromptTouchID`); Windows Hello and
+  Linux polkit are stubs that fail-closed in this commit (return
+  `null` when the pref is on), with full integration tracked as a
+  follow-up.
+
+**Operator playbook for verifying the threat is real today:**
+
+1. Build the desktop app.
+2. Open the app, sign in to a profile with `savePassword=true`.
+3. Open View > Toggle Developer Tools.
+4. In the devtools console, run:
+
+   ```js
+   await window.geode.getStoredPassword('<the profile>', '<the username>')
+   ```
+
+5. The plaintext password is returned. R2 will change the result to
+   `null` for any caller that lacks an unlock token.
+
 ## Secure-store MAC key (APP-04)
 
 Closes APP-04 from `docs/APPSEC_REVIEW_2026-05-24_auth-ipc.md`.
