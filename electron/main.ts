@@ -5,6 +5,7 @@ import {
   protocol,
   shell,
   ipcMain,
+  nativeImage,
   nativeTheme,
   safeStorage,
   dialog,
@@ -122,6 +123,29 @@ const assetCache = new AssetCache(defaultCacheOptions())
 // internal/ui/electron-dist/ at runtime; the SPA assets live at
 // ../../internal/ui/dist/ relative to that.
 const DIST_DIR = path.resolve(__dirname, '..', 'dist')
+
+// App icon. electron-builder packs `build/icon.png` (generated from
+// build/icon.svg via scripts/generate-icons.mjs) into the resources
+// dir; in dev we resolve to the repo's build/ directly. Both paths
+// are probed at window-creation time — first hit wins, missing icon
+// is a soft failure (BrowserWindow falls back to the platform default).
+const ICON_CANDIDATES = [
+  path.resolve(__dirname, '..', '..', '..', 'build', 'icon.png'),
+  path.join(process.resourcesPath ?? '', 'build', 'icon.png'),
+]
+
+async function resolveIconPath(): Promise<string | null> {
+  for (const p of ICON_CANDIDATES) {
+    if (!p) continue
+    try {
+      await fs.access(p)
+      return p
+    } catch {
+      // try next
+    }
+  }
+  return null
+}
 const PROTOCOL_NAME = 'geode'
 // Load the SPA from the protocol root so `location.pathname` is `/`,
 // which is what BrowserRouter expects as the initial route. Loading
@@ -295,97 +319,24 @@ function registerProtocol(): void {
   })
 }
 
+// The Geode desktop shell renders the full UI inside the renderer —
+// the OS application menu (File/Edit/View/Window/Help) would be a
+// redundant second top-level surface, so we suppress it entirely.
+// The SPA owns reload, devtools, and fullscreen affordances; quitting
+// is handled by the OS-native window controls (traffic lights on
+// macOS via titleBarStyle:'hiddenInset', overlay buttons on
+// Windows/Linux via titleBarOverlay).
 function buildMenu(): void {
-  const isMac = process.platform === 'darwin'
-  const template: Electron.MenuItemConstructorOptions[] = [
-    ...(isMac
-      ? [
-          {
-            label: app.name,
-            submenu: [
-              { role: 'about' as const },
-              { type: 'separator' as const },
-              { role: 'services' as const },
-              { type: 'separator' as const },
-              { role: 'hide' as const },
-              { role: 'hideOthers' as const },
-              { role: 'unhide' as const },
-              { type: 'separator' as const },
-              { role: 'quit' as const },
-            ],
-          },
-        ]
-      : []),
-    {
-      label: 'File',
-      submenu: [isMac ? { role: 'close' as const } : { role: 'quit' as const }],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' as const },
-        { role: 'redo' as const },
-        { type: 'separator' as const },
-        { role: 'cut' as const },
-        { role: 'copy' as const },
-        { role: 'paste' as const },
-        ...(isMac
-          ? [
-              { role: 'pasteAndMatchStyle' as const },
-              { role: 'delete' as const },
-              { role: 'selectAll' as const },
-            ]
-          : [
-              { role: 'delete' as const },
-              { type: 'separator' as const },
-              { role: 'selectAll' as const },
-            ]),
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' as const },
-        { role: 'forceReload' as const },
-        { role: 'toggleDevTools' as const },
-        { type: 'separator' as const },
-        { role: 'resetZoom' as const },
-        { role: 'zoomIn' as const },
-        { role: 'zoomOut' as const },
-        { type: 'separator' as const },
-        { role: 'togglefullscreen' as const },
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' as const },
-        { role: 'zoom' as const },
-        ...(isMac
-          ? [
-              { type: 'separator' as const },
-              { role: 'front' as const },
-              { type: 'separator' as const },
-              { role: 'window' as const },
-            ]
-          : [{ role: 'close' as const }]),
-      ],
-    },
-    {
-      role: 'help' as const,
-      submenu: [
-        {
-          label: 'Geode documentation',
-          click: () => shell.openExternal('https://geodedb.com/docs/'),
-        },
-      ],
-    },
-  ]
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  Menu.setApplicationMenu(null)
 }
 
 async function createWindow(): Promise<void> {
   const state = await loadWindowState()
+  const iconPath = await resolveIconPath()
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined
+  const isMac = process.platform === 'darwin'
+  const isLinux = process.platform === 'linux'
+
   const win = new BrowserWindow({
     width: state.width,
     height: state.height,
@@ -396,6 +347,25 @@ async function createWindow(): Promise<void> {
     backgroundColor: '#1c0f2e',
     title: 'Geode',
     show: false,
+    icon,
+    // Immersive shell: the SPA owns the entire viewport. On macOS we
+    // hide the title bar but keep the inset traffic-light controls
+    // (so the user can still close/minimize/maximize). On Windows we
+    // use the WCO (Window Controls Overlay) so the close/min/max
+    // glyphs float on top of the SPA's CSS-drawn drag region. On
+    // Linux there is no native overlay equivalent, so we go fully
+    // frameless and rely on the SPA's drag region (via the CSS
+    // `-webkit-app-region: drag` property in `src/styles/app.css`).
+    frame: isLinux ? false : undefined,
+    titleBarStyle: isMac ? 'hiddenInset' : isLinux ? undefined : 'hidden',
+    titleBarOverlay:
+      isMac || isLinux
+        ? undefined
+        : {
+            color: '#1c0f2e',
+            symbolColor: '#ffffff',
+            height: 36,
+          },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -720,8 +690,8 @@ void app.whenReady().then(() => {
       permissionRequestHandler(webContents, permission, callback)
     }
   )
-  session.defaultSession.setPermissionCheckHandler(
-    (webContents, permission) => permissionCheckHandler(webContents, permission)
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) =>
+    permissionCheckHandler(webContents, permission)
   )
 
   registerProtocol()

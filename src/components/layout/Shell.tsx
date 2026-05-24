@@ -56,6 +56,28 @@ const Top = styled.nav`
   overflow-x: clip;
   min-width: 0;
 
+  /* Electron drag region: the OS title bar is hidden in the desktop
+     shell (frame:false on Linux, titleBarStyle:'hiddenInset' on macOS,
+     titleBarOverlay on Windows), so the operator drags the window by
+     the SPA's own header. Interactive descendants opt out below so
+     clicks still register. A no-op in the browser build. */
+  -webkit-app-region: drag;
+
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  [role='button'],
+  [role='link'],
+  [role='menuitem'],
+  [role='combobox'],
+  [role='dialog'],
+  [tabindex='0'],
+  [tabindex] {
+    -webkit-app-region: no-drag;
+  }
+
   ${below('lg')`
     padding: ${({ theme }: { theme: DefaultTheme }) => theme.spacing.sm} ${({
       theme,

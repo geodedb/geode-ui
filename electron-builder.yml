@@ -26,6 +26,7 @@ directories:
 files:
 - internal/ui/electron-dist/**/*
 - internal/ui/dist/**/*
+- build/icon.png
 - package.json
 
 # Asar packs everything into a single archive. Off by default so debugging
@@ -39,9 +40,11 @@ mac:
     arch: [universal]
   hardenedRuntime: true
   gatekeeperAssess: false
-  # Provide an icon at build/icon.icns before publishing — placeholder
-  # falls back to electron's default during local builds.
-  # icon: build/icon.icns
+  # electron-builder rasterizes the 1024×1024 PNG into .icns at build
+  # time when a high-resolution PNG is provided here. The PNG itself
+  # is regenerated from build/icon.svg via `npm run electron:icons`
+  # (wired into electron:build) so the SVG remains the source of truth.
+  icon: build/icon.png
 
 linux:
   target:
@@ -52,12 +55,15 @@ linux:
   category: Development
   artifactName: geode-ui-desktop_${version}_${arch}.${ext}
   executableName: geode-ui-desktop
+  icon: build/icon.png
 
 win:
   target:
   - target: nsis
     arch: [x64]
-  # icon: build/icon.ico
+  # electron-builder derives the .ico from the PNG when no .ico is
+  # supplied; provides Start Menu / taskbar / installer iconography.
+  icon: build/icon.png
 
 nsis:
   oneClick: false
