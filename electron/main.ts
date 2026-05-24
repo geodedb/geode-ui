@@ -14,7 +14,9 @@ import path from 'node:path'
 import fs from 'node:fs/promises'
 
 import {
+  buildCspValue,
   buildPermissionHandlers,
+  cacheControlFor,
   contentTypeFor,
   isAllowedExternal,
   resolveProtocolAsset,
@@ -101,6 +103,13 @@ const APP_URL = `${PROTOCOL_NAME}://app/`
 // validation lives in ./lib/server-url.ts so it can be unit-tested
 // without `electron` in the import graph.
 const SERVER_URL = resolveServerUrl(process.env)
+
+// APP-02 + APP-09 (2026-05-24 appsec): the locked CSP value applied to
+// every `geode://` protocol response. Derived once at startup so the
+// header bytes are stable across requests and so a future serverUrl
+// rotation requires a process restart (which is the current operator
+// contract for `GEODE_SERVER_URL`).
+const CSP_VALUE = buildCspValue(SERVER_URL)
 
 // Persist window state across launches. The store lives next to the
 // userData dir so it travels with the user's profile.
@@ -205,18 +214,38 @@ function registerProtocol(): void {
         data = new Uint8Array(buf)
         assetCache.set(resolution.filePath, data)
       }
+      // APP-02 + APP-09: every successful response carries the locked
+      // CSP, the `nosniff` content-type pin, a no-referrer policy
+      // (renderer must not leak privileged-scheme paths to a server
+      // it just connected to), and an extension-keyed Cache-Control.
       return new Response(data, {
         status: 200,
-        headers: { 'Content-Type': contentTypeFor(resolution.filePath) },
+        headers: {
+          'Content-Type': contentTypeFor(resolution.filePath),
+          'Content-Security-Policy': CSP_VALUE,
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer',
+          'Cache-Control': cacheControlFor(resolution.filePath),
+        },
       })
     } catch {
       // SPA fallback: any unknown path returns index.html so client-side
       // routes (/, /schema, /admin, /ops) work after a hard reload.
       try {
         const data = await fs.readFile(path.join(DIST_DIR, 'index.html'))
+        // APP-02 + APP-09: SPA fallback inherits the same headers as
+        // the success branch. `index.html` is `no-store` so the SPA
+        // shell can never be stale, and the locked CSP applies even
+        // to the fallback path.
         return new Response(data, {
           status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Content-Security-Policy': CSP_VALUE,
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'no-referrer',
+            'Cache-Control': 'no-store',
+          },
         })
       } catch {
         return new Response('not found', { status: 404 })
