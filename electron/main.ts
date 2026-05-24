@@ -8,11 +8,13 @@ import {
   nativeTheme,
   safeStorage,
   dialog,
+  session,
 } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs/promises'
 
 import {
+  buildPermissionHandlers,
   contentTypeFor,
   isAllowedExternal,
   resolveProtocolAsset,
@@ -536,7 +538,32 @@ nativeTheme.on('updated', () => {
   }
 })
 
+// APP-05 (2026-05-24 appsec): the allow-list for OS-integration
+// permissions the privileged `geode://` scheme may request. The current
+// SPA needs none, so the set is empty — the deny-by-default handler in
+// `safety.ts/buildPermissionHandlers` will reject every prompt. To opt
+// in a future feature, add the permission name here AND document it in
+// `docs/ELECTRON.md`'s permission policy section.
+const ALLOWED_PERMS: ReadonlySet<string> = new Set<string>()
+
 void app.whenReady().then(() => {
+  // APP-05: install the deny-by-default permission handlers BEFORE the
+  // first window is created so the BrowserWindow inherits the policy
+  // for its initial paint. Both the request handler (called when the
+  // renderer triggers a prompt) and the check handler (called for
+  // permission-state queries like `navigator.permissions.query`) reject
+  // anything not in `ALLOWED_PERMS`.
+  const { permissionRequestHandler, permissionCheckHandler } =
+    buildPermissionHandlers(ALLOWED_PERMS)
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback) => {
+      permissionRequestHandler(webContents, permission, callback)
+    }
+  )
+  session.defaultSession.setPermissionCheckHandler(
+    (webContents, permission) => permissionCheckHandler(webContents, permission)
+  )
+
   registerProtocol()
   buildMenu()
   void createWindow()

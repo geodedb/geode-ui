@@ -186,6 +186,59 @@ follow-up.
   whitelists `https:` and `mailto:` — file:// or custom schemes
   cannot be launched.
 
+## Permission policy (APP-05)
+
+Closes APP-05 from `docs/APPSEC_REVIEW_2026-05-24_auth-ipc.md`.
+
+Electron's privileged `geode://` scheme inherits the default Chromium
+permission handlers for OS-integration APIs (media, clipboard-write,
+notifications, geolocation, mediaKeySystem, midi, pointerLock,
+fullscreen, display-capture). The current SPA exercises none of
+them — but a future feature or a compromised renderer that called
+`navigator.mediaDevices.getUserMedia(...)` could reach a default
+"allow" decision on some host platforms.
+
+`electron/main.ts` installs deny-by-default handlers at
+`app.whenReady`:
+
+```ts
+const ALLOWED_PERMS: ReadonlySet<string> = new Set<string>()
+
+const { permissionRequestHandler, permissionCheckHandler } =
+  buildPermissionHandlers(ALLOWED_PERMS)
+session.defaultSession.setPermissionRequestHandler(permissionRequestHandler)
+session.defaultSession.setPermissionCheckHandler(permissionCheckHandler)
+```
+
+The empty `ALLOWED_PERMS` set means every prompt (media, geolocation,
+notifications, clipboard, etc.) is denied. Both `request` and `check`
+paths are bound so `navigator.permissions.query({name:'…'})` reports
+`denied` without firing a user-facing prompt.
+
+To opt in a future feature:
+
+1. Add the permission name (the exact Electron string — see
+   [`session.setPermissionRequestHandler` API
+   docs](https://www.electronjs.org/docs/latest/api/session#sessessetpermissionrequesthandlerhandler))
+   to `ALLOWED_PERMS` in `electron/main.ts`.
+2. Add a row to the table below documenting why the SPA needs it and
+   which renderer feature consumes it.
+
+| Permission | Status | Consumer |
+|---|---|---|
+| _none_ | deny-by-default | (the SPA does not request any OS-integration permissions today) |
+
+Manual verification playbook: build the desktop app, open devtools,
+and evaluate:
+
+```js
+await navigator.permissions.query({ name: 'clipboard-write' })  // → state: 'denied'
+await navigator.mediaDevices.getUserMedia({ video: true })       // → rejects
+```
+
+Pure-function regression coverage lives in
+`__tests__/electron-safety.test.ts` (`buildPermissionHandlers`).
+
 ## Code signing in CI
 
 Signing is wired up in the release pipeline; see
