@@ -662,21 +662,31 @@ ipcMain.handle('geode:pick-pem-file', async (evt) => {
 // renderer never calls them on `process.platform === 'darwin'`.
 ipcMain.handle('geode:window-minimize', (evt) => {
   const win = BrowserWindow.fromWebContents(evt.sender)
-  win?.minimize()
+  if (!win) return false
+  win.minimize()
   return true
 })
 
 ipcMain.handle('geode:window-toggle-maximize', (evt) => {
+  // The authoritative new maximized state is delivered to the
+  // renderer via the `broadcastMaximized` forwarder (subscribed to
+  // win.on('maximize'/'unmaximize')). On some Linux WMs and
+  // Windows compositors maximize/unmaximize are asynchronous, so
+  // `isMaximized()` immediately after the toggle can read the
+  // pre-toggle state. Returning void keeps callers from latching
+  // on a potentially-stale value; they should subscribe to
+  // onWindowMaximizedChange instead.
   const win = BrowserWindow.fromWebContents(evt.sender)
   if (!win) return false
   if (win.isMaximized()) win.unmaximize()
   else win.maximize()
-  return win.isMaximized()
+  return true
 })
 
 ipcMain.handle('geode:window-close', (evt) => {
   const win = BrowserWindow.fromWebContents(evt.sender)
-  win?.close()
+  if (!win) return false
+  win.close()
   return true
 })
 
