@@ -92,4 +92,11 @@ export interface GeodeBridge {
   windowClose(): Promise<boolean>
   windowIsMaximized(): Promise<boolean>
   onWindowMaximizedChange(handler: (maximized: boolean) => void): () => void
+  // Fullscreen toggle. Distinct from maximize: native fullscreen
+  // hides the title bar (already frameless on Linux/Windows) AND
+  // suppresses the OS taskbar/dock. Subscribe to
+  // onWindowFullscreenChange for the icon/aria-label swap.
+  windowToggleFullscreen(): Promise<boolean>
+  windowIsFullscreen(): Promise<boolean>
+  onWindowFullscreenChange(handler: (fullscreen: boolean) => void): () => void
 }

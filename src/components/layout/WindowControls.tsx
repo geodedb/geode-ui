@@ -3,22 +3,34 @@ import { useTranslation } from 'react-i18next'
 import styled, { DefaultTheme } from 'styled-components'
 import { Icon } from '@geodedb/ui-core'
 
-// Themed window controls — minimize / toggle-maximize / close.
-// Renders on Linux + Windows (frameless windows) and is suppressed on
-// macOS where native traffic lights are kept via titleBarStyle:
-// 'hiddenInset'. The component is also suppressed in the browser
-// build (no window.geode bridge) so the same Top nav works for both
-// Electron and web.
+// Themed window controls — minimize / toggle-maximize / toggle-
+// fullscreen / close. Renders on Linux + Windows (frameless
+// windows) and is suppressed on macOS where native traffic lights
+// are kept via titleBarStyle: 'hiddenInset'. The component is also
+// suppressed in the browser build (no window.geode bridge) so the
+// same shell renders for both Electron and web.
+//
+// Mounted at the App root (above BrowserRouter), the Bar floats
+// fixed at top-right so the controls are visible on every route —
+// including `/login`, which sits outside the protected Shell. The
+// drag-region opt-out is set on the Bar itself so clicks reach the
+// buttons; on authed routes the Shell's Top nav still provides the
+// drag region for the rest of the title-bar height.
 
 const Bar = styled.div`
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: ${({ theme }) => theme.zIndex.sticky + 10};
   display: flex;
   align-items: stretch;
   gap: 0;
   /* Buttons must be clickable even though the parent Top nav is the
      Electron drag region. */
   -webkit-app-region: no-drag;
-  margin-left: ${({ theme }) => theme.spacing.sm};
-  flex-shrink: 0;
+  background: ${({ theme }) => theme.bg.surface};
+  border-bottom-left-radius: ${({ theme }) => theme.radii.md};
+  box-shadow: ${({ theme }) => theme.shadows.md};
 `
 
 type CtrlBtnProps = { theme: DefaultTheme; $danger?: boolean }
@@ -73,6 +85,7 @@ export const WindowControls: React.FC = () => {
   // identity) and avoids any spurious effect re-runs on render.
   const bridge = useMemo(() => getBridge(), [])
   const [maximized, setMaximized] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
   useEffect(() => {
     if (!bridge || bridge.platform === 'darwin') return undefined
@@ -80,16 +93,28 @@ export const WindowControls: React.FC = () => {
       .windowIsMaximized()
       .then(setMaximized)
       .catch(() => undefined)
+    bridge
+      .windowIsFullscreen()
+      .then(setFullscreen)
+      .catch(() => undefined)
     // Wrap the state-setter in a microtask so that calling the handler
     // from outside React (e.g. the Electron main-process event) does not
     // trigger a synchronous state update that React's act() gate would
     // flag as "not wrapped in act".
-    const unsubscribe = bridge.onWindowMaximizedChange((maximized) => {
+    const unMax = bridge.onWindowMaximizedChange((value) => {
       Promise.resolve()
-        .then(() => setMaximized(maximized))
+        .then(() => setMaximized(value))
         .catch(() => undefined)
     })
-    return unsubscribe
+    const unFull = bridge.onWindowFullscreenChange((value) => {
+      Promise.resolve()
+        .then(() => setFullscreen(value))
+        .catch(() => undefined)
+    })
+    return () => {
+      unMax()
+      unFull()
+    }
   }, [bridge])
 
   const onMinimize = useCallback(() => {
@@ -98,6 +123,10 @@ export const WindowControls: React.FC = () => {
 
   const onToggleMax = useCallback(() => {
     bridge?.windowToggleMaximize().catch(() => undefined)
+  }, [bridge])
+
+  const onToggleFullscreen = useCallback(() => {
+    bridge?.windowToggleFullscreen().catch(() => undefined)
   }, [bridge])
 
   const onClose = useCallback(() => {
@@ -123,6 +152,11 @@ export const WindowControls: React.FC = () => {
     : t('windowControls.maximize')
   const maximizeIcon = maximized ? 'clone' : 'square'
 
+  const fullscreenLabel = fullscreen
+    ? t('windowControls.exitFullscreen')
+    : t('windowControls.enterFullscreen')
+  const fullscreenIcon = fullscreen ? 'compress' : 'expand'
+
   return (
     <Bar ref={barRef}>
       <ControlButton
@@ -140,6 +174,14 @@ export const WindowControls: React.FC = () => {
         data-testid="window-control-maximize"
       >
         <Icon name={maximizeIcon} variant="regular" />
+      </ControlButton>
+      <ControlButton
+        type="button"
+        aria-label={fullscreenLabel}
+        onClick={onToggleFullscreen}
+        data-testid="window-control-fullscreen"
+      >
+        <Icon name={fullscreenIcon} variant="solid" />
       </ControlButton>
       <ControlButton
         type="button"

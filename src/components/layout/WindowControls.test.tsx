@@ -8,16 +8,22 @@ import '../../services/i18n'
 
 const minimizeMock = jest.fn().mockResolvedValue(true)
 const toggleMaxMock = jest.fn().mockResolvedValue(false)
+const toggleFullscreenMock = jest.fn().mockResolvedValue(false)
 const closeMock = jest.fn().mockResolvedValue(true)
 const isMaxMock = jest.fn().mockResolvedValue(false)
+const isFullscreenMock = jest.fn().mockResolvedValue(false)
 let onMaxChangeHandler: ((maximized: boolean) => void) | null = null
+let onFullscreenChangeHandler: ((fullscreen: boolean) => void) | null = null
 
 beforeEach(() => {
   minimizeMock.mockClear()
   toggleMaxMock.mockClear()
+  toggleFullscreenMock.mockClear()
   closeMock.mockClear()
   isMaxMock.mockClear()
+  isFullscreenMock.mockClear()
   onMaxChangeHandler = null
+  onFullscreenChangeHandler = null
 })
 
 function installBridge(platform: string): void {
@@ -34,6 +40,14 @@ function installBridge(platform: string): void {
       onMaxChangeHandler = handler
       return () => {
         onMaxChangeHandler = null
+      }
+    },
+    windowToggleFullscreen: toggleFullscreenMock,
+    windowIsFullscreen: isFullscreenMock,
+    onWindowFullscreenChange: (handler: (f: boolean) => void) => {
+      onFullscreenChangeHandler = handler
+      return () => {
+        onFullscreenChangeHandler = null
       }
     },
   } as unknown as Window['geode']
@@ -60,21 +74,27 @@ test('renders nothing on macOS even under Electron', () => {
   expect(container.firstChild).toBeNull()
 })
 
-test('renders three buttons on Linux', () => {
+test('renders four buttons on Linux', () => {
   installBridge('linux')
   wrap(<WindowControls />)
   expect(screen.getByRole('button', { name: /minimize/i })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /maximize/i })).toBeInTheDocument()
   expect(
+    screen.getByRole('button', { name: /enter full screen/i })
+  ).toBeInTheDocument()
+  expect(
     screen.getByRole('button', { name: /close window/i })
   ).toBeInTheDocument()
 })
 
-test('renders three buttons on Windows', () => {
+test('renders four buttons on Windows', () => {
   installBridge('win32')
   wrap(<WindowControls />)
   expect(screen.getByRole('button', { name: /minimize/i })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /maximize/i })).toBeInTheDocument()
+  expect(
+    screen.getByRole('button', { name: /enter full screen/i })
+  ).toBeInTheDocument()
   expect(
     screen.getByRole('button', { name: /close window/i })
   ).toBeInTheDocument()
@@ -101,18 +121,42 @@ test('clicking maximize invokes windowToggleMaximize', async () => {
   await waitFor(() => expect(toggleMaxMock).toHaveBeenCalled())
 })
 
+test('clicking fullscreen invokes windowToggleFullscreen', async () => {
+  installBridge('linux')
+  wrap(<WindowControls />)
+  fireEvent.click(screen.getByRole('button', { name: /enter full screen/i }))
+  await waitFor(() => expect(toggleFullscreenMock).toHaveBeenCalled())
+})
+
 test('button label switches to Restore when window becomes maximized', async () => {
   installBridge('linux')
   wrap(<WindowControls />)
   expect(screen.getByRole('button', { name: /maximize/i })).toBeInTheDocument()
+
   onMaxChangeHandler!(true)
   await waitFor(() =>
     expect(screen.getByRole('button', { name: /restore/i })).toBeInTheDocument()
   )
+
   onMaxChangeHandler!(false)
   await waitFor(() =>
     expect(
       screen.getByRole('button', { name: /maximize/i })
+    ).toBeInTheDocument()
+  )
+})
+
+test('fullscreen label switches when window enters/exits fullscreen', async () => {
+  installBridge('linux')
+  wrap(<WindowControls />)
+  expect(
+    screen.getByRole('button', { name: /enter full screen/i })
+  ).toBeInTheDocument()
+
+  onFullscreenChangeHandler!(true)
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: /exit full screen/i })
     ).toBeInTheDocument()
   )
 })

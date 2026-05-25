@@ -41,6 +41,8 @@ export const en = {
     minimize: 'Minimize',
     maximize: 'Maximize',
     restore: 'Restore',
+    enterFullscreen: 'Enter full screen',
+    exitFullscreen: 'Exit full screen',
     close: 'Close window',
   },
 

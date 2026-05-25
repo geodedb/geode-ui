@@ -15,7 +15,11 @@ import { GeodeLogo as Logo } from '../brand/GeodeLogo'
 import { AddConnectionModal } from './AddConnectionModal'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 import { ThemeSelector } from './ThemeSelector'
-import { WindowControls } from './WindowControls'
+// WindowControls now mounts at the App root (src/App.tsx) so it
+// renders on every route, including /login (which is OUTSIDE the
+// protected Shell). The component is a fixed top-right overlay; the
+// Top nav below it still owns the drag region for the rest of the
+// title-bar height.
 
 const SkipLink = styled.a`
   position: absolute;
@@ -326,7 +330,6 @@ export const Shell: React.FC = () => {
         >
           <Icon name={drawerOpen ? 'xmark' : 'bars'} fixedWidth />
         </MobileToggle>
-        <WindowControls />
       </Top>
       <Drawer
         id="primary-drawer"

@@ -37,6 +37,7 @@ test.describe('Electron app — window.geode bridge', () => {
         'getSystemTheme',
         'getVersion',
         'onSystemThemeChange',
+        'onWindowFullscreenChange',
         'onWindowMaximizedChange',
         'openExternal',
         'openUnlockWindow',
@@ -45,8 +46,10 @@ test.describe('Electron app — window.geode bridge', () => {
         'storeConnections',
         'storeSavedPassword',
         'windowClose',
+        'windowIsFullscreen',
         'windowIsMaximized',
         'windowMinimize',
+        'windowToggleFullscreen',
         'windowToggleMaximize',
       ])
     } finally {

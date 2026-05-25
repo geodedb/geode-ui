@@ -9,6 +9,7 @@ import type { ConnectionState } from './api/connections'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { RoleGate } from './auth/RoleGate'
 import { Shell } from './components/layout/Shell'
+import { WindowControls } from './components/layout/WindowControls'
 import { ErrorBoundary } from './components/layout/ErrorBoundary'
 import { LoginPage } from './pages/LoginPage'
 import { QueryPage } from './pages/QueryPage'
@@ -179,6 +180,14 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
           lazyHydrate={lazyHydrate}
         >
           <AuthProvider>
+            {/* WindowControls renders fixed at the top-right of the
+                viewport on every route. It must sit OUTSIDE the
+                BrowserRouter's Routes so it covers /login (which is
+                outside the ProtectedShell) as well as every authed
+                route. The component returns null in the browser
+                build (no window.geode bridge) and on macOS (native
+                traffic lights handle the same operations). */}
+            <WindowControls />
             <BrowserRouter>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />

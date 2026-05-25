@@ -69,6 +69,9 @@ describe('GAP-Q4 / GAP-PSR-G07: bridge types are re-exported from a single sourc
       windowClose: async () => true,
       windowIsMaximized: async () => false,
       onWindowMaximizedChange: () => () => undefined,
+      windowToggleFullscreen: async () => true,
+      windowIsFullscreen: async () => false,
+      onWindowFullscreenChange: () => () => undefined,
     }
     const asRenderer: RendererGeodeBridge = stub
     expect(asRenderer.isElectron).toBe(true)

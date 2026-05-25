@@ -108,6 +108,19 @@ const bridge: GeodeBridge = {
       ipcRenderer.removeListener('geode:window-maximized-changed', listener)
     }
   },
+  windowToggleFullscreen: () =>
+    ipcRenderer.invoke('geode:window-toggle-fullscreen') as Promise<boolean>,
+  windowIsFullscreen: () =>
+    ipcRenderer.invoke('geode:window-is-fullscreen') as Promise<boolean>,
+  onWindowFullscreenChange: (handler) => {
+    const listener = (_evt: unknown, fullscreen: boolean): void => {
+      handler(fullscreen)
+    }
+    ipcRenderer.on('geode:window-fullscreen-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('geode:window-fullscreen-changed', listener)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('geode', bridge)

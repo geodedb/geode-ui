@@ -25,10 +25,12 @@ test.describe('Electron app — themed window controls', () => {
 
       const minimize = window.getByTestId('window-control-minimize')
       const maximize = window.getByTestId('window-control-maximize')
+      const fullscreen = window.getByTestId('window-control-fullscreen')
       const close = window.getByTestId('window-control-close')
 
       await expect(minimize).toBeVisible({ timeout: 10_000 })
       await expect(maximize).toBeVisible()
+      await expect(fullscreen).toBeVisible()
       await expect(close).toBeVisible()
 
       // The buttons' wrapping Bar must opt out of the title-bar drag
@@ -57,6 +59,9 @@ test.describe('Electron app — themed window controls', () => {
         return [
           'windowMinimize',
           'windowToggleMaximize',
+          'windowToggleFullscreen',
+          'windowIsFullscreen',
+          'onWindowFullscreenChange',
           'windowClose',
           'windowIsMaximized',
           'onWindowMaximizedChange',

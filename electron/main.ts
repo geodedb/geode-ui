@@ -381,6 +381,14 @@ async function createWindow(): Promise<void> {
   win.on('maximize', broadcastMaximized)
   win.on('unmaximize', broadcastMaximized)
 
+  // Same forwarder pattern for fullscreen so the renderer can swap
+  // the fullscreen / compress icons + aria labels.
+  const broadcastFullscreen = (): void => {
+    win.webContents.send('geode:window-fullscreen-changed', win.isFullScreen())
+  }
+  win.on('enter-full-screen', broadcastFullscreen)
+  win.on('leave-full-screen', broadcastFullscreen)
+
   // Force any external link to open in the user's default browser
   // rather than a new electron window. Pre-S1 the URL was passed
   // straight to shell.openExternal; that bypassed the
@@ -693,6 +701,18 @@ ipcMain.handle('geode:window-close', (evt) => {
 ipcMain.handle('geode:window-is-maximized', (evt) => {
   const win = BrowserWindow.fromWebContents(evt.sender)
   return win?.isMaximized() === true
+})
+
+ipcMain.handle('geode:window-toggle-fullscreen', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  if (!win) return false
+  win.setFullScreen(!win.isFullScreen())
+  return true
+})
+
+ipcMain.handle('geode:window-is-fullscreen', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  return win?.isFullScreen() === true
 })
 
 nativeTheme.on('updated', () => {

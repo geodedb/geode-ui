@@ -160,9 +160,7 @@ if (typeof globalThis.PerformanceObserver === 'undefined') {
 // test in the worker to re-apply the patch. If a future test needs to
 // assert the unpatched jsdom behavior, expose a `restoreCss()` helper
 // from this file and call it inside that test's `beforeEach`.
-if (
-  typeof globalThis.CSSStyleDeclaration !== 'undefined'
-) {
+if (typeof globalThis.CSSStyleDeclaration !== 'undefined') {
   const cssProto = globalThis.CSSStyleDeclaration.prototype
   if (typeof cssProto._origSetProperty === 'undefined') {
     cssProto._origSetProperty = cssProto.setProperty
