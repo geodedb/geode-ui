@@ -91,6 +91,23 @@ const bridge: GeodeBridge = {
     ) as Promise<boolean>,
   pickPemFile: () =>
     ipcRenderer.invoke('geode:pick-pem-file') as Promise<string | null>,
+  windowMinimize: () =>
+    ipcRenderer.invoke('geode:window-minimize') as Promise<boolean>,
+  windowToggleMaximize: () =>
+    ipcRenderer.invoke('geode:window-toggle-maximize') as Promise<boolean>,
+  windowClose: () =>
+    ipcRenderer.invoke('geode:window-close') as Promise<boolean>,
+  windowIsMaximized: () =>
+    ipcRenderer.invoke('geode:window-is-maximized') as Promise<boolean>,
+  onWindowMaximizedChange: (handler) => {
+    const listener = (_evt: unknown, maximized: boolean): void => {
+      handler(maximized)
+    }
+    ipcRenderer.on('geode:window-maximized-changed', listener)
+    return () => {
+      ipcRenderer.removeListener('geode:window-maximized-changed', listener)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('geode', bridge)

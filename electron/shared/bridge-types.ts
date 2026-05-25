@@ -79,4 +79,17 @@ export interface GeodeBridge {
   ): Promise<boolean>
   clearStoredPassword(profileName: string, username: string): Promise<boolean>
   pickPemFile(): Promise<string | null>
+  // Window controls (Linux frameless + Windows frame:false).
+  // Each method round-trips through ipcMain.handle and returns
+  // when the BrowserWindow operation completes. macOS callers
+  // typically don't reach these — the native traffic lights handle
+  // the same operations — but the bridge surface is platform-
+  // agnostic. The toggle does NOT return the new maximized state
+  // (transitions are async on some compositors); subscribe to
+  // onWindowMaximizedChange for the authoritative value.
+  windowMinimize(): Promise<boolean>
+  windowToggleMaximize(): Promise<boolean>
+  windowClose(): Promise<boolean>
+  windowIsMaximized(): Promise<boolean>
+  onWindowMaximizedChange(handler: (maximized: boolean) => void): () => void
 }

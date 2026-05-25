@@ -64,6 +64,11 @@ describe('GAP-Q4 / GAP-PSR-G07: bridge types are re-exported from a single sourc
       storeSavedPassword: async () => true,
       clearStoredPassword: async () => true,
       pickPemFile: async () => null,
+      windowMinimize: async () => true,
+      windowToggleMaximize: async () => true,
+      windowClose: async () => true,
+      windowIsMaximized: async () => false,
+      onWindowMaximizedChange: () => () => undefined,
     }
     const asRenderer: RendererGeodeBridge = stub
     expect(asRenderer.isElectron).toBe(true)
