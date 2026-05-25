@@ -322,10 +322,9 @@ function registerProtocol(): void {
 // The Geode desktop shell renders the full UI inside the renderer —
 // the OS application menu (File/Edit/View/Window/Help) would be a
 // redundant second top-level surface, so we suppress it entirely.
-// The SPA owns reload, devtools, and fullscreen affordances; quitting
-// is handled by the OS-native window controls (traffic lights on
-// macOS via titleBarStyle:'hiddenInset', overlay buttons on
-// Windows/Linux via titleBarOverlay).
+// The SPA owns reload, devtools, fullscreen, and window-control
+// affordances (WindowControls.tsx on Linux/Windows; native traffic
+// lights on macOS via titleBarStyle:'hiddenInset').
 function buildMenu(): void {
   Menu.setApplicationMenu(null)
 }
@@ -348,24 +347,13 @@ async function createWindow(): Promise<void> {
     title: 'Geode',
     show: false,
     icon,
-    // Immersive shell: the SPA owns the entire viewport. On macOS we
-    // hide the title bar but keep the inset traffic-light controls
-    // (so the user can still close/minimize/maximize). On Windows we
-    // use the WCO (Window Controls Overlay) so the close/min/max
-    // glyphs float on top of the SPA's CSS-drawn drag region. On
-    // Linux there is no native overlay equivalent, so we go fully
-    // frameless and rely on the SPA's drag region (via the CSS
-    // `-webkit-app-region: drag` property in `src/styles/app.css`).
-    frame: isLinux ? false : undefined,
-    titleBarStyle: isMac ? 'hiddenInset' : isLinux ? undefined : 'hidden',
-    titleBarOverlay:
-      isMac || isLinux
-        ? undefined
-        : {
-            color: '#1c0f2e',
-            symbolColor: '#ffffff',
-            height: 36,
-          },
+    // Window chrome — custom themed controls live in the SPA's Top
+    // nav (src/components/layout/WindowControls.tsx). macOS keeps its
+    // native traffic lights via titleBarStyle: 'hiddenInset' since the
+    // platform convention is top-left. Linux + Windows are fully
+    // frameless so the SPA owns the entire top-right corner.
+    frame: isMac ? undefined : false,
+    titleBarStyle: isMac ? 'hiddenInset' : undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -385,6 +373,14 @@ async function createWindow(): Promise<void> {
   win.on('resize', persist)
   win.on('move', persist)
   win.on('close', persist)
+
+  // Forward maximize state so the renderer's WindowControls can
+  // switch between the maximize and restore icons.
+  const broadcastMaximized = (): void => {
+    win.webContents.send('geode:window-maximized-changed', win.isMaximized())
+  }
+  win.on('maximize', broadcastMaximized)
+  win.on('unmaximize', broadcastMaximized)
 
   // Force any external link to open in the user's default browser
   // rather than a new electron window. Pre-S1 the URL was passed
@@ -659,6 +655,37 @@ ipcMain.handle('geode:pick-pem-file', async (evt) => {
     return null
   }
 })
+
+// Window-controls IPC (Linux frameless + Windows frame:false windows
+// render their own themed minimize/maximize/close buttons via
+// src/components/layout/WindowControls.tsx). On macOS the native
+// traffic lights remain; these handlers are still installed but the
+// renderer never calls them on `process.platform === 'darwin'`.
+ipcMain.handle('geode:window-minimize', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  win?.minimize()
+  return true
+})
+
+ipcMain.handle('geode:window-toggle-maximize', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  if (!win) return false
+  if (win.isMaximized()) win.unmaximize()
+  else win.maximize()
+  return win.isMaximized()
+})
+
+ipcMain.handle('geode:window-close', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  win?.close()
+  return true
+})
+
+ipcMain.handle('geode:window-is-maximized', (evt) => {
+  const win = BrowserWindow.fromWebContents(evt.sender)
+  return win?.isMaximized() === true
+})
+
 nativeTheme.on('updated', () => {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send(
