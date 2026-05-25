@@ -147,6 +147,35 @@ if (typeof globalThis.PerformanceObserver === 'undefined') {
   globalThis.PerformanceObserver = NodePerformanceObserver
 }
 
+// jsdom's CSS property store only recognises W3C-standardised properties.
+// Electron's -webkit-app-region (which opts button surfaces out of the
+// frameless-window drag region) is a non-standard Chromium extension that
+// jsdom silently drops when set via setProperty or inline style. Patch the
+// CSSStyleDeclaration prototype so tests can assert
+// `element.style.getPropertyValue('-webkit-app-region')`.
+if (
+  typeof globalThis.CSSStyleDeclaration !== 'undefined'
+) {
+  const cssProto = globalThis.CSSStyleDeclaration.prototype
+  if (typeof cssProto._origSetProperty === 'undefined') {
+    cssProto._origSetProperty = cssProto.setProperty
+    cssProto._origGetPropertyValue = cssProto.getPropertyValue
+    cssProto.setProperty = function patchedSetProperty(prop, value, priority) {
+      if (prop === '-webkit-app-region') {
+        this._webkitAppRegionValue = value
+        return
+      }
+      return cssProto._origSetProperty.call(this, prop, value, priority)
+    }
+    cssProto.getPropertyValue = function patchedGetPropertyValue(prop) {
+      if (prop === '-webkit-app-region') {
+        return this._webkitAppRegionValue || ''
+      }
+      return cssProto._origGetPropertyValue.call(this, prop)
+    }
+  }
+}
+
 // jsdom ships HTMLDialogElement but stubs `.showModal()` / `.show()` /
 // `.close()` as missing. Web Awesome's <wa-dialog> calls `showModal()`
 // on its internal native <dialog> as soon as `open` flips true, which

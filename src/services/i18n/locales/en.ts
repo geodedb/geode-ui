@@ -37,6 +37,13 @@ export const en = {
     elapsed: '{{ms}} ms',
   },
 
+  windowControls: {
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    restore: 'Restore',
+    close: 'Close window',
+  },
+
   brand: {
     home: 'Geode home',
   },
