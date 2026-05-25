@@ -46,6 +46,7 @@ describe('GAP-Q4 / GAP-PSR-G07: bridge types are re-exported from a single sourc
     const stub: SharedGeodeBridge = {
       isElectron: true,
       serverUrl: 'http://localhost:8080',
+      platform: 'linux',
       getVersion: async () => 'v',
       openExternal: async () => true,
       getSystemTheme: async () => 'light',
