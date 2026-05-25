@@ -31,15 +31,23 @@ test.describe('Electron app — window.geode bridge', () => {
       // lockstep) and this test acts as the contract test for that.
       expect(bridge?.methods).toEqual([
         'clearStoredPassword',
+        'getSavedPasswordBiometricPref',
         'getStoredConnections',
         'getStoredPassword',
         'getSystemTheme',
         'getVersion',
         'onSystemThemeChange',
+        'onWindowMaximizedChange',
         'openExternal',
+        'openUnlockWindow',
         'pickPemFile',
+        'setSavedPasswordBiometricPref',
         'storeConnections',
         'storeSavedPassword',
+        'windowClose',
+        'windowIsMaximized',
+        'windowMinimize',
+        'windowToggleMaximize',
       ])
     } finally {
       await app.close()
