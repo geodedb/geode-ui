@@ -334,7 +334,6 @@ async function createWindow(): Promise<void> {
   const iconPath = await resolveIconPath()
   const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined
   const isMac = process.platform === 'darwin'
-  const isLinux = process.platform === 'linux'
 
   const win = new BrowserWindow({
     width: state.width,
