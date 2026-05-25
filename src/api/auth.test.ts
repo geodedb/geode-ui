@@ -51,8 +51,13 @@ test('login posts credentials and returns the parsed body', async () => {
   global.fetch = fetchMock as unknown as typeof fetch
   const r = await login('alice', 'p', 'default')
   expect(r.access_token).toBe('jwt-here')
+  // resolveBaseUrl() returns window.location.origin in jsdom
+  // (http://localhost). Pre-fix the URL was the bare relative path;
+  // post-fix every auth fetch goes through apiUrl(), which prepends
+  // the bridge/browser origin so the Electron renderer (running under
+  // a geode:// origin) hits the real geode-ui server.
   expect(fetchMock).toHaveBeenCalledWith(
-    '/api/v1/auth/login',
+    'http://localhost/api/v1/auth/login',
     expect.objectContaining({
       method: 'POST',
       credentials: 'same-origin',
@@ -121,7 +126,7 @@ test('logout posts to the server (no legacy storage to clear)', async () => {
   global.fetch = fetchMock as unknown as typeof fetch
   await logout()
   expect(fetchMock).toHaveBeenCalledWith(
-    '/api/v1/auth/logout',
+    'http://localhost/api/v1/auth/logout',
     expect.objectContaining({ method: 'POST', credentials: 'same-origin' })
   )
 })

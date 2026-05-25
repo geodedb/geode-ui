@@ -25,6 +25,8 @@
 // compromised renderer cannot flip the flag and wait for the next
 // login cycle to harvest a JWT.
 
+import { apiUrl } from './baseUrl'
+
 const PROFILE_KEY = 'geode-ui.profile'
 
 export type LoginResult = {
@@ -40,7 +42,7 @@ export async function login(
   profile: string
 ): Promise<LoginResult> {
   const body = new URLSearchParams({ username, password, profile })
-  const res = await fetch('/api/v1/auth/login', {
+  const res = await fetch(apiUrl('/api/v1/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -94,7 +96,7 @@ export type WhoAmIResult = {
  */
 export async function fetchWhoAmI(): Promise<WhoAmIResult | null> {
   try {
-    const res = await fetch('/api/v1/auth/whoami', {
+    const res = await fetch(apiUrl('/api/v1/auth/whoami'), {
       method: 'GET',
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
@@ -116,7 +118,7 @@ export async function logout(): Promise<void> {
     // a client that has lost its CSRF token must still be able to
     // clear its session. Sending the header if we have one is harmless.
     const csrf = readCsrfCookie()
-    await fetch('/api/v1/auth/logout', {
+    await fetch(apiUrl('/api/v1/auth/logout'), {
       method: 'POST',
       credentials: 'same-origin',
       headers: csrf ? { 'X-CSRF-Token': csrf } : {},
@@ -158,7 +160,7 @@ export type PublicProfile = {
 // this endpoint is unauthenticated and we shouldn't drag a fake
 // Authorization header along.
 export async function fetchPublicProfiles(): Promise<PublicProfile[]> {
-  const res = await fetch('/api/v1/profiles/public', {
+  const res = await fetch(apiUrl('/api/v1/profiles/public'), {
     method: 'GET',
     credentials: 'omit',
   })
@@ -199,7 +201,7 @@ export interface OnboardResponse {
 export async function onboardProfile(
   req: OnboardRequest
 ): Promise<OnboardResponse> {
-  const res = await fetch('/api/v1/profiles/onboard', {
+  const res = await fetch(apiUrl('/api/v1/profiles/onboard'), {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },

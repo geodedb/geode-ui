@@ -10,8 +10,10 @@
 // don't re-fetch on every request. On a 403 the caller can call
 // refreshCsrfToken() to mint a new one.
 
+import { apiUrl } from './baseUrl'
+
 const CSRF_COOKIE_NAME = 'geode-ui-csrf'
-const CSRF_ENDPOINT = '/api/v1/csrf'
+const CSRF_ENDPOINT_PATH = '/api/v1/csrf'
 
 let cachedToken: string | null = null
 
@@ -67,7 +69,7 @@ export function refreshCsrfToken(): Promise<string | null> {
 
 async function doRefreshCsrfToken(): Promise<string | null> {
   try {
-    const res = await fetch(CSRF_ENDPOINT, {
+    const res = await fetch(apiUrl(CSRF_ENDPOINT_PATH), {
       method: 'GET',
       credentials: 'same-origin',
     })

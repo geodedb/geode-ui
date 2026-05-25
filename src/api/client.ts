@@ -1,7 +1,15 @@
 // eslint-disable-next-line import/no-unresolved
 import { createClient } from '@api'
+import { resolveBaseUrl } from './baseUrl'
 import { getLatestToken, getTokenForConnection } from './connections'
 import { getCsrfToken, isCsrfRequired, refreshCsrfToken } from './csrf'
+
+// Re-exported so the existing public surface (resolveBaseUrl imported
+// from `./client` in metrics.ts + client.test.ts) keeps working without
+// churn. The implementation now lives in `./baseUrl` so `csrf.ts` and
+// `auth.ts` can pull the same helper without dragging the generated
+// client + the csrf module into a cycle.
+export { resolveBaseUrl }
 
 // APP-08 (2026-05-24 appsec): the fetch wrapper accepts an optional
 // `connectionId` field on `RequestInit`. Call sites that target a
@@ -19,35 +27,6 @@ function resolveBearer(init?: ConnectionScopedInit): string | null {
     if (explicit) return explicit
   }
   return getLatestToken()
-}
-
-// Exported for unit tests (src/api/client.test.ts). Not part of the
-// public API — call sites use the constructed `client` below.
-export function resolveBaseUrl(): string {
-  // Under Electron the renderer is hosted on the privileged `geode://`
-  // scheme, which the generated client refuses ("base URL must use
-  // http or https"). The preload exposes a separate operator-supplied
-  // HTTP(S) origin on window.geode.serverUrl — use that whenever it's
-  // present so the same SPA bundle works for both the browser-served
-  // build and the desktop wrapper.
-  if (
-    typeof window !== 'undefined' &&
-    window.geode &&
-    typeof window.geode.serverUrl === 'string' &&
-    window.geode.serverUrl.length > 0
-  ) {
-    return window.geode.serverUrl
-  }
-  if (
-    typeof window !== 'undefined' &&
-    window.location &&
-    window.location.origin &&
-    (window.location.origin.startsWith('http:') ||
-      window.location.origin.startsWith('https:'))
-  ) {
-    return window.location.origin
-  }
-  return 'http://localhost'
 }
 
 // makeFetchImpl wraps the global fetch with two cross-cutting concerns

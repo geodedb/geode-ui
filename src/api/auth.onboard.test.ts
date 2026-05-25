@@ -36,8 +36,11 @@ test('onboardProfile posts JSON to /api/v1/profiles/onboard and returns the pars
     admin_password: 'pw', // pragma: allowlist secret -- test stub literal
   })
 
+  // resolveBaseUrl() returns http://localhost in jsdom (see auth.ts:
+  // every fetch routes through apiUrl() now so the Electron renderer
+  // bypasses the geode:// SPA-fallback).
   expect(global.fetch).toHaveBeenCalledWith(
-    '/api/v1/profiles/onboard',
+    'http://localhost/api/v1/profiles/onboard',
     expect.objectContaining({
       method: 'POST',
       headers: expect.objectContaining({

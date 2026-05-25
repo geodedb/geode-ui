@@ -102,7 +102,7 @@ test('refreshCsrfToken parses the body token and caches it', async () => {
   expect(tok).toBe('fresh-token')
   expect(getCsrfToken()).toBe('fresh-token')
   expect(fetchMock).toHaveBeenCalledWith(
-    '/api/v1/csrf',
+    'http://localhost/api/v1/csrf',
     expect.objectContaining({ method: 'GET' })
   )
 })
