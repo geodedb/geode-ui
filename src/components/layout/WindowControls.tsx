@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled, { DefaultTheme } from 'styled-components'
 import { Icon } from '@geodedb/ui-core'
@@ -66,7 +66,12 @@ function getBridge(): typeof window.geode | undefined {
 
 export const WindowControls: React.FC = () => {
   const { t } = useTranslation()
-  const bridge = getBridge()
+  // `window.geode` is a frozen module-level global assigned by the
+  // preload bridge at startup. Memoizing the reference makes the
+  // effect's identity dependency explicit (the linter / future code
+  // reader sees a stable reference rather than a coincidental
+  // identity) and avoids any spurious effect re-runs on render.
+  const bridge = useMemo(() => getBridge(), [])
   const [maximized, setMaximized] = useState(false)
 
   useEffect(() => {

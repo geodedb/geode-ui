@@ -153,6 +153,13 @@ if (typeof globalThis.PerformanceObserver === 'undefined') {
 // jsdom silently drops when set via setProperty or inline style. Patch the
 // CSSStyleDeclaration prototype so tests can assert
 // `element.style.getPropertyValue('-webkit-app-region')`.
+//
+// This patch is intentionally permanent for the Jest worker lifetime
+// (no afterAll teardown): no test in the suite exercises absence of
+// the property as a signal, and a per-test restore would force every
+// test in the worker to re-apply the patch. If a future test needs to
+// assert the unpatched jsdom behavior, expose a `restoreCss()` helper
+// from this file and call it inside that test's `beforeEach`.
 if (
   typeof globalThis.CSSStyleDeclaration !== 'undefined'
 ) {
