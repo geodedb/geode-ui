@@ -30,6 +30,7 @@ const SERVER_URL = ipcRenderer.sendSync('geode:get-server-url-sync') as string
 const bridge: GeodeBridge = {
   isElectron: true,
   serverUrl: SERVER_URL,
+  platform: process.platform,
   getVersion: () => ipcRenderer.invoke('geode:get-version') as Promise<string>,
   openExternal: (url: string) =>
     ipcRenderer.invoke('geode:open-external', url) as Promise<boolean>,

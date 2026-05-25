@@ -41,6 +41,11 @@ export interface GeodeBridge {
   // http://localhost:8080 to match the docker-compose stack a
   // developer runs locally beside the desktop build.
   readonly serverUrl: string
+  // Process platform name (`'darwin' | 'linux' | 'win32' | string`)
+  // read at preload time from process.platform. The renderer uses
+  // this to gate per-OS behavior (e.g. window controls that should
+  // not render on macOS where native traffic lights are present).
+  readonly platform: string
   getVersion(): Promise<string>
   openExternal(url: string): Promise<boolean>
   getSystemTheme(): Promise<ThemeVariant>
