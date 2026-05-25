@@ -15,6 +15,7 @@ import { GeodeLogo as Logo } from '../brand/GeodeLogo'
 import { AddConnectionModal } from './AddConnectionModal'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 import { ThemeSelector } from './ThemeSelector'
+import { WindowControls } from './WindowControls'
 
 const SkipLink = styled.a`
   position: absolute;
@@ -322,6 +323,7 @@ export const Shell: React.FC = () => {
         >
           <Icon name={drawerOpen ? 'xmark' : 'bars'} fixedWidth />
         </MobileToggle>
+        <WindowControls />
       </Top>
       <Drawer
         id="primary-drawer"
