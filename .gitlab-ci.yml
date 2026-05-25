@@ -1289,6 +1289,162 @@ apt-repo-apt-geodedb-com:
       ls -la apt-repo/pool/main/g/ 2>/dev/null || true
 
 # ============================================================================
+# CATALOG OVERRIDE — apt-publish post-sync verification + retry
+# ============================================================================
+#
+# The catalog `apt-publish-apt-geodedb-com` job runs a two-phase
+# `aws s3 sync` (phase 1 upload-only, phase 2 upload + `--delete`)
+# against `apt-repo/`. On Cloudflare R2 (the bucket backend for
+# apt.geodedb.com) the sync is racy under eventual consistency:
+# files that phase 1 uploaded successfully can be DELETED by phase 2
+# when R2's list endpoint returns them as orphans (the local source
+# listing temporarily disagrees with R2's view).
+#
+# v0.1.23 hit this on `geode-ui-desktop_0.1.23_amd64.deb` — the trace
+# shows the file uploaded at 13:01:20, re-uploaded by phase 2 at
+# 13:03:19, then `delete:` at 13:03:57 with no subsequent re-upload.
+# Net result: 404 on `apt install geode-ui-desktop` from the live
+# repo. (https://gitlab.com/devnw/codepros/geode/geode-ui/-/pipelines/2551013784)
+#
+# Fix: after the catalog's sync runs, verify every .deb / .deb.asc
+# under `apt-repo/pool/main/g/` is present in S3 via `aws s3api
+# head-object`; re-upload via `aws s3 cp` if missing. Single-shot
+# verification, no recursion — if a file vanishes again between
+# verify and `head-object` the operator can re-trigger the job.
+#
+# The override extends the job's `script:` via the same full-replace
+# pattern as `apt-repo-apt-geodedb-com` (catalog `script:` overrides
+# don't support YAML-level append; pre-job tools like before_script
+# run in a different shell on the kubernetes executor so a trap-on-EXIT
+# wouldn't fire). We inline the catalog's body verbatim and add the
+# verification block at the end.
+
+apt-publish-apt-geodedb-com:
+  script:
+    - |
+      set -euo pipefail
+      echo "=== APT Repository Upload ==="
+
+      if [ -z "$S3_BUCKET" ]; then
+        S3_BUCKET="${APT_DOMAIN%%.*}-apt-packages"
+      fi
+
+      get_vault_secret() {
+        local path=$1
+        local field=${2:-value}
+        curl -sS --header "X-Vault-Token: $VAULT_TOKEN" \
+          "$VAULT_ADDR/v1/${VAULT_MOUNT}/data/$path" | jq -r ".data.data.$field // empty"
+      }
+
+      if [ -n "$VAULT_AUTH_ROLE" ] && [ -n "$VAULT_SECRET_PATH" ]; then
+        echo "Retrieving S3 credentials from Vault..."
+        AUTH_RESPONSE=$(curl -sS --request POST \
+          --data "{\"role\": \"$VAULT_AUTH_ROLE\", \"jwt\": \"$VAULT_ID_TOKEN\"}" \
+          "$VAULT_ADDR/v1/auth/gitlab-jwt/login")
+        export VAULT_TOKEN=$(echo "$AUTH_RESPONSE" | jq -r '.auth.client_token')
+
+        if [ -z "$VAULT_TOKEN" ] || [ "$VAULT_TOKEN" = "null" ]; then
+          echo "ERROR: Failed to authenticate to Vault"
+          exit 1
+        fi
+
+        export AWS_ACCESS_KEY_ID=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_access_key")
+        export AWS_SECRET_ACCESS_KEY=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_secret_key")
+
+        VAULT_BUCKET=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_bucket")
+        VAULT_ENDPOINT=$(get_vault_secret "$VAULT_SECRET_PATH" "s3_endpoint")
+        [ -n "$VAULT_BUCKET" ] && [ "$VAULT_BUCKET" != "null" ] && S3_BUCKET="$VAULT_BUCKET"
+        VAULT_ENDPOINT="${VAULT_ENDPOINT#https://}"
+        VAULT_ENDPOINT="${VAULT_ENDPOINT#http://}"
+        [ -n "$VAULT_ENDPOINT" ] && [ "$VAULT_ENDPOINT" != "null" ] && S3_ENDPOINT="$VAULT_ENDPOINT"
+      elif [ -n "${APT_S3_ACCESS_KEY:-}" ]; then
+        export AWS_ACCESS_KEY_ID="$APT_S3_ACCESS_KEY"
+        export AWS_SECRET_ACCESS_KEY="$APT_S3_SECRET_KEY"
+      else
+        echo "ERROR: No S3 credentials available"
+        exit 1
+      fi
+
+      echo "Uploading to: s3://$S3_BUCKET via $S3_ENDPOINT"
+      echo "Domain: https://$APT_DOMAIN"
+
+      if [ "$DRY_RUN" = "true" ]; then
+        echo "DRY RUN - would upload:"
+        find apt-repo/ -type f | sort
+        exit 0
+      fi
+
+      # Phase 1: upload everything, no delete.
+      aws s3 sync apt-repo/ "s3://$S3_BUCKET/" \
+        --endpoint-url "https://$S3_ENDPOINT" \
+        --acl "$S3_ACL" \
+        --exclude "*.html" \
+        --exclude "*.gpg"
+
+      # Phase 2: upload + delete orphans. (The R2 race that this
+      # override exists to mitigate happens during this step.)
+      aws s3 sync apt-repo/ "s3://$S3_BUCKET/" \
+        --endpoint-url "https://$S3_ENDPOINT" \
+        --acl "$S3_ACL" \
+        --delete \
+        --exclude "*.html" \
+        --exclude "*.gpg"
+
+      aws s3 cp apt-repo/index.html "s3://$S3_BUCKET/index.html" \
+        --endpoint-url "https://$S3_ENDPOINT" \
+        --acl "$S3_ACL" \
+        --content-type "text/html"
+
+      for gpg_file in apt-repo/*.gpg; do
+        [ -f "$gpg_file" ] || continue
+        aws s3 cp "$gpg_file" "s3://$S3_BUCKET/$(basename "$gpg_file")" \
+          --endpoint-url "https://$S3_ENDPOINT" \
+          --acl "$S3_ACL" \
+          --content-type "application/pgp-keys"
+      done
+
+      # ----------------------------------------------------------------
+      # OVERRIDE — post-sync verification + re-upload of any pool entry
+      # the two-phase sync ate. This is the actual race-mitigation; the
+      # catalog's "two-phase" alone is insufficient against R2.
+      # ----------------------------------------------------------------
+      echo ""
+      echo "=== post-sync pool verification ==="
+      MISSING_COUNT=0
+      REUPLOAD_COUNT=0
+      if [ -d apt-repo/pool/main/g ]; then
+        for f in apt-repo/pool/main/g/*; do
+          [ -f "$f" ] || continue
+          key="pool/main/g/$(basename "$f")"
+          if aws s3api head-object \
+               --endpoint-url "https://$S3_ENDPOINT" \
+               --bucket "$S3_BUCKET" \
+               --key "$key" >/dev/null 2>&1
+          then
+            continue
+          fi
+          MISSING_COUNT=$((MISSING_COUNT + 1))
+          echo "MISSING: s3://$S3_BUCKET/$key — re-uploading"
+          if aws s3 cp "$f" "s3://$S3_BUCKET/$key" \
+               --endpoint-url "https://$S3_ENDPOINT" \
+               --acl "$S3_ACL"
+          then
+            REUPLOAD_COUNT=$((REUPLOAD_COUNT + 1))
+          else
+            echo "ERROR: re-upload failed for $key"
+            exit 1
+          fi
+        done
+      fi
+      echo "verified pool: ${MISSING_COUNT} missing, ${REUPLOAD_COUNT} re-uploaded"
+
+      DOMAIN_PREFIX=$(echo "$APT_DOMAIN" | sed 's/^apt\.//' | cut -d. -f1)
+
+      echo ""
+      echo "=== Upload complete ==="
+      echo "APT repository published to: https://$APT_DOMAIN"
+
+# ============================================================================
 # PUBLISH STAGE - Attach goreleaser + electron artifacts to GitLab Release
 # ============================================================================
 #
