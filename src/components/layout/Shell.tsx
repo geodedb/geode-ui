@@ -58,10 +58,13 @@ const Top = styled.nav`
   min-width: 0;
 
   /* Electron drag region: the OS title bar is hidden in the desktop
-     shell (frame:false on Linux, titleBarStyle:'hiddenInset' on macOS,
-     titleBarOverlay on Windows), so the operator drags the window by
-     the SPA's own header. Interactive descendants opt out below so
-     clicks still register. A no-op in the browser build. */
+     shell (frame:false on Linux + Windows, titleBarStyle:'hiddenInset'
+     on macOS) so the operator drags the window by the SPA's own
+     header. Linux + Windows additionally render <WindowControls />
+     (minimize/maximize/close) inside this nav at the far right; the
+     component carries its own -webkit-app-region: no-drag wrapper so
+     clicks register. Interactive descendants opt out below for the
+     same reason. A no-op in the browser build. */
   -webkit-app-region: drag;
 
   a,
