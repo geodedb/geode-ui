@@ -1,4 +1,5 @@
 // Tests for the SPA CSRF helper (SEC-F7 / #62 S3c).
+import type { GeodeBridge } from '../types/electron'
 import {
   clearCsrfToken,
   getCsrfToken,
@@ -7,6 +8,19 @@ import {
   refreshCsrfToken,
   resetCsrfTokenForTests,
 } from './csrf'
+
+function setBridge(serverUrl: string | undefined): void {
+  const w = window as unknown as { geode?: GeodeBridge }
+  if (serverUrl === undefined) {
+    delete w.geode
+    return
+  }
+  w.geode = {
+    isElectron: true,
+    serverUrl,
+    platform: 'linux',
+  } as unknown as GeodeBridge
+}
 
 const realFetch = global.fetch
 
@@ -19,6 +33,28 @@ beforeEach(() => {
 
 afterEach(() => {
   global.fetch = realFetch
+  setBridge(undefined)
+})
+
+// Regression for the Electron login bug: a bare relative URL resolves
+// against the geode:// origin and hits the SPA-fallback branch of the
+// custom protocol handler, which returns `index.html` rather than the
+// CSRF JSON. Under Electron the fetch URL must be the absolute form
+// against the bridge-supplied server origin.
+test('refreshCsrfToken targets the bridge-supplied origin on Electron', async () => {
+  setBridge('http://localhost:9999')
+  const fetchMock = jest.fn(() =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ token: 'tok' }),
+    } as unknown as Response)
+  )
+  global.fetch = fetchMock as unknown as typeof fetch
+  await refreshCsrfToken()
+  expect(fetchMock).toHaveBeenCalledWith(
+    'http://localhost:9999/api/v1/csrf',
+    expect.objectContaining({ method: 'GET' })
+  )
 })
 
 test('readCsrfCookie returns null when no cookie is set', () => {
