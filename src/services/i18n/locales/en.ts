@@ -81,6 +81,7 @@ export const en = {
     adminTabBackToSnapshots: '← Back to Snapshots',
     adminTabMigrations: 'Migrations',
     adminTabAudit: 'Audit',
+    cluster: 'Cluster',
   },
 
   admin: {
@@ -429,6 +430,36 @@ export const en = {
       'The server has been up for {{uptime}} but every counter still reports 0. The geode-ui pipeline is fine; the upstream Geode build is not wired to increment these instruments yet.',
     metricsUpstreamAdvisoryLink: 'See the upstream bug report',
     metricsUpstreamAdvisoryDismiss: 'Dismiss',
+  },
+
+  cluster: {
+    title: 'Cluster',
+    subtitle: 'Live Raft cluster membership for the connected Geode instance.',
+    refresh: 'Refresh',
+    refreshAria: 'Refresh cluster status',
+    refreshing: 'Refreshing…',
+    lastUpdated: 'Last updated {{when}}',
+    standaloneTitle: 'Standalone instance',
+    standaloneBody:
+      'This Geode instance is not part of a Raft cluster. Start Geode with --cluster-port and --peers (or set GEODE_CLUSTER_TOKEN) to enable distributed mode.',
+    errorTitle: 'Cluster status unavailable',
+    loading: 'Loading cluster status…',
+    membersHeading: 'Members',
+    selfBadge: 'this node',
+    leaderBadge: 'leader',
+    followerBadge: 'follower',
+    candidateBadge: 'candidate',
+    shutdownBadge: 'shutdown',
+    unknownBadge: 'unknown',
+    freshnessFresh: 'fresh',
+    freshnessStale: 'stale',
+    freshnessLost: 'lost',
+    columnNodeId: 'Node',
+    columnRole: 'Role',
+    columnTerm: 'Term',
+    columnLeader: 'Leader',
+    columnEndpoint: 'Endpoint',
+    columnLastContact: 'Last contact',
   },
 
   schema: {
