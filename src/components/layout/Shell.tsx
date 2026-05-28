@@ -304,6 +304,7 @@ export const Shell: React.FC = () => {
           <NavLink to="/dashboard">{t('nav.dashboard')}</NavLink>
           <NavLink to="/query">{t('nav.query')}</NavLink>
           <NavLink to="/schema">{t('nav.schema')}</NavLink>
+          <NavLink to="/cluster">{t('nav.cluster')}</NavLink>
           {/*
             SEC issue 264: hide the /admin entry-point for non-admins.
             The route itself is RoleGate-protected, so a direct nav
@@ -339,6 +340,7 @@ export const Shell: React.FC = () => {
         <NavLink to="/dashboard">{t('nav.dashboard')}</NavLink>
         <NavLink to="/query">{t('nav.query')}</NavLink>
         <NavLink to="/schema">{t('nav.schema')}</NavLink>
+        <NavLink to="/cluster">{t('nav.cluster')}</NavLink>
         {isAdmin && <NavLink to="/admin">{t('nav.admin')}</NavLink>}
         <NavLink to="/profiles">{t('nav.profiles')}</NavLink>
         <NavLink to="/docs">{t('nav.docs')}</NavLink>
