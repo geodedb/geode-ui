@@ -21,6 +21,7 @@ import { QueryPage } from './pages/QueryPage'
 // query editor. The Suspense boundary lets the chunk fetch happen
 // without blocking the initial paint of the protected shell.
 import { SchemaPage } from './pages/SchemaPage'
+import { ClusterPage } from './pages/ClusterPage'
 import { AdminPage } from './pages/AdminPage'
 import { UsersPage } from './components/admin/UsersPage'
 import { RolesPage } from './components/admin/RolesPage'
@@ -213,6 +214,7 @@ const App: React.FC<AppProps> = ({ initialConnections, lazyHydrate }) => (
                     element={<SuspenseDashboardRoute />}
                   />
                   <Route path="schema" element={<SchemaPage />} />
+                  <Route path="cluster" element={<ClusterPage />} />
                   {/*
                     SEC issue 264: /admin/* is wrapped in a client-side
                     RoleGate so the route itself short-circuits for
