@@ -1,11 +1,13 @@
 /// <reference types="@testing-library/jest-dom" />
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { ThemeProvider } from 'styled-components'
 import { MemoryRouter } from 'react-router-dom'
 import { LocalizationProvider } from '../services/i18n'
 import { testTheme as theme } from '../test-utils/theme'
 import type { OverviewData } from '../lib/useOverviewData'
+import type { ClusterStatusSnapshot } from '../api/cluster'
+import type { UseClusterStatusResult } from '../lib/useClusterStatus'
 
 // Mock the overview hook so the page renders deterministically without
 // touching the network. The fixture exercises every card in its
@@ -61,6 +63,35 @@ const metricsFixture: {
 }
 jest.mock('../lib/useMetricsPolling', () => ({
   useMetricsPolling: (): typeof metricsFixture => metricsFixture,
+}))
+
+// Stub useClusterStatus so the dashboard render is deterministic without
+// the WS polling loop. Default fixture is the standalone single-row
+// snapshot so the existing assertions never see a Cluster card; the
+// dedicated test at the bottom of this file mutates the fixture to
+// exercise the clustered render path.
+const standaloneClusterSnap: ClusterStatusSnapshot = {
+  members: [
+    {
+      nodeId: 0,
+      role: 'standalone',
+      term: 0,
+      leaderId: 0,
+      endpoint: '0.0.0.0:0',
+      lastContactMs: 0,
+    },
+  ],
+  selfNodeId: 0,
+  fetchedAt: 1,
+}
+const clusterFixture: UseClusterStatusResult = {
+  snapshot: standaloneClusterSnap,
+  loading: false,
+  error: null,
+  refresh: jest.fn(),
+}
+jest.mock('../lib/useClusterStatus', () => ({
+  useClusterStatus: (): UseClusterStatusResult => clusterFixture,
 }))
 
 // AuditEventMixCard pulls from /api/v1/audit via useApiResource, which
@@ -219,5 +250,58 @@ describe('DashboardPage', () => {
     // Reset for subsequent tests in this file.
     metricsFixture.state = 'disabled'
     metricsFixture.latest = null
+  })
+
+  // ClusterCard wiring. The card hides itself in standalone mode
+  // (snapshot.members[0].role === 'standalone') and renders when the
+  // backend reports any other role. The DashboardPage simply wires the
+  // hook output into the card props — this spec pins that wiring by
+  // flipping the shared cluster fixture between the two states and
+  // asserting the card's presence in the DOM.
+  it('renders the cluster card when clustered, hides it in standalone', () => {
+    // Standalone: card must be absent.
+    clusterFixture.snapshot = standaloneClusterSnap
+    renderPage()
+    expect(
+      screen.queryByTestId('dashboard-cluster-card')
+    ).not.toBeInTheDocument()
+
+    // Unmount the first tree before mounting the second so the
+    // queryByTestId / getByTestId calls below address exactly one
+    // DashboardPage. Testing-library's render appends a new container
+    // under document.body on every call, but DashboardPage renders a
+    // handful of cards with stable test-ids that would otherwise be
+    // matched twice (the existing dashboard cards all use
+    // dashboard-*-card test-ids, mirroring the new ClusterCard).
+    cleanup()
+
+    // Clustered: card must mount.
+    clusterFixture.snapshot = {
+      members: [
+        {
+          nodeId: 1,
+          role: 'leader',
+          term: 2,
+          leaderId: 1,
+          endpoint: 'h:1',
+          lastContactMs: 0,
+        },
+        {
+          nodeId: 2,
+          role: 'follower',
+          term: 2,
+          leaderId: 1,
+          endpoint: 'h:2',
+          lastContactMs: 0,
+        },
+      ],
+      selfNodeId: 1,
+      fetchedAt: 1,
+    }
+    renderPage()
+    expect(screen.getByTestId('dashboard-cluster-card')).toBeInTheDocument()
+
+    // Reset for subsequent tests in this file.
+    clusterFixture.snapshot = standaloneClusterSnap
   })
 })

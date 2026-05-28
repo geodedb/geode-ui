@@ -24,6 +24,8 @@ import {
 } from '../components/dashboard/MetricsCards'
 import { MetricsUpstreamAdvisory } from '../components/dashboard/MetricsUpstreamAdvisory'
 import { AuditEventMixCard } from '../components/dashboard/AuditEventMixCard'
+import { ClusterCard } from '../components/dashboard/ClusterCard'
+import { useClusterStatus } from '../lib/useClusterStatus'
 
 // Grid — Bootstrap-migrated to a plain <div>. The auto-fill grid track
 // expression has no Bootstrap utility equivalent so it stays inline,
@@ -52,6 +54,7 @@ export const DashboardPage: React.FC = () => {
   // GEODE_METRICS_URL on the geode-ui server); in that case metricsHidden
   // is true and the metrics cards drop out of the grid entirely.
   const metrics = useMetricsPolling()
+  const cluster = useClusterStatus()
   const showMetrics = !metricsHidden(metrics)
   return (
     <div>
@@ -98,6 +101,11 @@ export const DashboardPage: React.FC = () => {
             sense of activity mix, even when GEODE_METRICS_URL is
             empty. */}
         <AuditEventMixCard />
+        <ClusterCard
+          snapshot={cluster.snapshot}
+          loading={cluster.loading}
+          error={cluster.error}
+        />
       </div>
     </div>
   )
