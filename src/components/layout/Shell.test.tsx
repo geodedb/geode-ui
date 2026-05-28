@@ -32,6 +32,19 @@ jest.mock('./AddConnectionModal', () => ({
     return open ? <div data-testid="add-modal" /> : null
   },
 }))
+// Shell now mounts useClusterStatus() to drive the topbar ClusterRoleChip
+// (Plan 3). The real hook reads useActiveConnection() and opens a WS
+// poll every 30 s, neither of which we want firing in layout tests —
+// stub it to a null snapshot so the chip renders nothing and the
+// existing assertions stay intact.
+jest.mock('../../lib/useClusterStatus', () => ({
+  useClusterStatus: () => ({
+    snapshot: null,
+    loading: false,
+    error: null,
+    refresh: jest.fn().mockResolvedValue(undefined),
+  }),
+}))
 
 const renderShell = (initialPath = '/') =>
   render(

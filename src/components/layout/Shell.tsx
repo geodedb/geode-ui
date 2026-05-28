@@ -11,8 +11,10 @@ import styled, { DefaultTheme } from 'styled-components'
 import { above, below } from '@geodedb/ui-core/theme'
 import { Button, Icon, Spacer } from '@geodedb/ui-core'
 import { useAuth } from '../../auth/AuthProvider'
+import { useClusterStatus } from '../../lib/useClusterStatus'
 import { GeodeLogo as Logo } from '../brand/GeodeLogo'
 import { AddConnectionModal } from './AddConnectionModal'
+import { ClusterRoleChip } from './ClusterRoleChip'
 import { ConnectionSwitcher } from './ConnectionSwitcher'
 import { ThemeSelector } from './ThemeSelector'
 // WindowControls now mounts at the App root (src/App.tsx) so it
@@ -254,6 +256,13 @@ export const Shell: React.FC = () => {
   const { t } = useTranslation()
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  // Plan 3: ambient cluster-role chip in the top nav. Polls every 30 s —
+  // looser cadence than the dashboard ClusterCard (10 s) and the
+  // dedicated /cluster page (5 s) because the chip is an ambient
+  // indicator and a stale-by-a-few-seconds role is acceptable. The
+  // chip itself renders null in standalone mode so single-node
+  // operators don't see an inert badge.
+  const cluster = useClusterStatus({ intervalMs: 30_000 })
   // 2026-05-22 ConnectionSwitcher fix: when the operator picks a
   // configured-but-not-active profile from the dropdown, that profile
   // name flows into AddConnectionModal's `initialProfile` prop so the
@@ -294,6 +303,7 @@ export const Shell: React.FC = () => {
             setAddOpen(true)
           }}
         />
+        <ClusterRoleChip snapshot={cluster.snapshot} />
         <DesktopNav>
           {/*
             Bug 1 (2026-05-21 bug-fix bundle): Dashboard is the new
