@@ -155,6 +155,8 @@ export const sel = {
     p.getByTestId('dashboard-recent-row'),
   dashboardConnectionCard: (p: Page): Locator =>
     p.getByTestId('dashboard-connection-card'),
+  dashboardClusterCard: (p: Page): Locator =>
+    p.getByTestId('dashboard-cluster-card'),
   dashboardStatsLoad: (p: Page): Locator =>
     p.getByTestId('dashboard-stats-load'),
 
