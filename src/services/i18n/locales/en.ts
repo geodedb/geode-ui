@@ -82,6 +82,7 @@ export const en = {
     adminTabMigrations: 'Migrations',
     adminTabAudit: 'Audit',
     cluster: 'Cluster',
+    clusterChipAria: 'Cluster role: {{role}}. View cluster details.',
   },
 
   admin: {
@@ -413,6 +414,8 @@ export const en = {
     clusterNoLeader: 'no leader elected',
     clusterError: 'Cluster status unavailable: {{message}}',
     clusterLoading: 'Loading cluster status…',
+    connectionClusterRow: 'Cluster',
+    connectionClusterNodesFmt: '{{count}} nodes',
     metricsServerDegraded: 'Degraded',
     metricsServerProbeError: 'Probe error',
     metricsServerUptime: 'uptime',

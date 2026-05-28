@@ -12,6 +12,14 @@
 // the lookup misses). Once the downstream consumers ship, this file
 // stays — it's a cheap regression guard against accidental key
 // deletion during locale-file refactors.
+//
+// Plan 3 extension: the same orphan-key gate covers the three new
+// keys added for the topbar chip + ConnectionCard cluster row. The
+// chip key (`nav.clusterChipAria`) ships its consumer in Plan 3 Task 2
+// alongside this entry; the two `dashboard.connectionCluster*` keys
+// are consumed in Plan 3 Task 3, so the literal references below keep
+// them alive in the meantime. References remain after Task 3 lands —
+// cheap contract test, same rationale as the Plan 2 batch above.
 import { i18n } from '..'
 
 describe('plan-2 cluster page keys exist in en', () => {
@@ -47,5 +55,17 @@ describe('plan-2 cluster page keys exist in en', () => {
       'cluster.columnLastContact'
     )
     expect(i18n.t('nav.cluster')).not.toBe('nav.cluster')
+  })
+})
+
+describe('plan-3 cluster topbar + connection card keys exist in en', () => {
+  test('nav.clusterChipAria + dashboard.connectionCluster* all resolve', () => {
+    expect(i18n.t('nav.clusterChipAria')).not.toBe('nav.clusterChipAria')
+    expect(i18n.t('dashboard.connectionClusterRow')).not.toBe(
+      'dashboard.connectionClusterRow'
+    )
+    expect(i18n.t('dashboard.connectionClusterNodesFmt')).not.toBe(
+      'dashboard.connectionClusterNodesFmt'
+    )
   })
 })
