@@ -85,6 +85,7 @@ export const DashboardPage: React.FC = () => {
           adminWritable={ov.adminWritable}
           loading={ov.loading}
           error={ov.capsError}
+          clusterSnapshot={cluster.snapshot}
         />
         {showMetrics && (
           <>
