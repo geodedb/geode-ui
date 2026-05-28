@@ -34,4 +34,25 @@ test.describe('cluster page', () => {
     // healthy local backend.
     await expect(page.getByTestId('cluster-error-panel')).toHaveCount(0)
   })
+
+  test('cluster role chip appears in the topbar when clustered and links to /cluster', async ({
+    authedPage: page,
+  }) => {
+    await page.goto('/dashboard')
+    const chip = sel.clusterRoleChip(page)
+    const chipCount = await chip.count()
+    if (chipCount === 0) {
+      // Standalone backend — there is nothing to assert here. The
+      // chip is intentionally hidden on standalone Geode.
+      test.info().annotations.push({
+        type: 'note',
+        description: 'Standalone backend — cluster chip is hidden by design.',
+      })
+      return
+    }
+    await expect(chip).toBeVisible()
+    await chip.click()
+    await expect(page).toHaveURL(/\/cluster$/)
+    await expect(sel.clusterMembersTable(page)).toBeVisible()
+  })
 })

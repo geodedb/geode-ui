@@ -285,6 +285,7 @@ export const sel = {
     p.getByTestId('cluster-refresh-btn'),
   clusterStandalonePanel: (p: Page): Locator =>
     p.getByTestId('cluster-standalone-panel'),
+  clusterRoleChip: (p: Page): Locator => p.getByTestId('cluster-role-chip'),
 }
 
 // Translated layout-picker labels (en.ts: graph.layout.*). Tests use
