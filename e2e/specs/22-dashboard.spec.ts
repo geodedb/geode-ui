@@ -16,6 +16,19 @@ test.describe('overview dashboard', () => {
   }) => {
     await page.goto('/dashboard')
     await expect(sel.dashboardGraphsCard(page)).toBeVisible()
+    // Cluster card: against the standalone e2e backend (docker-compose
+    // brings up a single-node Geode) the card should NOT render. If the
+    // local backend has been swapped to a clustered one the card MUST
+    // render — assert one of the two states.
+    const clusterCard = sel.dashboardClusterCard(page)
+    const count = await clusterCard.count()
+    expect(count === 0 || count === 1).toBe(true)
+    if (count === 1) {
+      await expect(clusterCard).toBeVisible()
+      await expect(
+        clusterCard.getByTestId('dashboard-cluster-role')
+      ).toBeVisible()
+    }
     await expect(
       sel.dashboardGraphsCard(page).getByText(seed.graph)
     ).toBeVisible()

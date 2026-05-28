@@ -35,6 +35,7 @@ export const sel = {
   // role=menuitemradio. Tests that previously did .selectOption(...)
   // need to click the trigger then click the desired menuitemradio.
   navProfiles: (p: Page): Locator => p.getByRole('link', { name: 'Profiles' }),
+  navCluster: (p: Page): Locator => p.getByRole('link', { name: 'Cluster' }),
   connectionTrigger: (p: Page): Locator =>
     p.getByRole('button', { name: /default/i, exact: false }).first(),
 
@@ -155,6 +156,8 @@ export const sel = {
     p.getByTestId('dashboard-recent-row'),
   dashboardConnectionCard: (p: Page): Locator =>
     p.getByTestId('dashboard-connection-card'),
+  dashboardClusterCard: (p: Page): Locator =>
+    p.getByTestId('dashboard-cluster-card'),
   dashboardStatsLoad: (p: Page): Locator =>
     p.getByTestId('dashboard-stats-load'),
 
@@ -268,6 +271,21 @@ export const sel = {
     p.getByRole('button', { name: `Disconnect: ${profileName}` }),
   connectionMenuItemRadio: (p: Page, profileName: string): Locator =>
     p.getByRole('menuitemradio', { name: profileName }),
+
+  // Cluster page (30-cluster.spec.ts) — full Raft membership view at
+  // /cluster. The page branches on hook state and always exposes a
+  // refresh button. Either the members table OR the standalone panel
+  // is present at any given time depending on whether the connected
+  // Geode is clustered.
+  clusterMembersTable: (p: Page): Locator =>
+    p.getByTestId('cluster-members-table'),
+  clusterMemberRow: (p: Page): Locator =>
+    p.getByTestId('cluster-member-row'),
+  clusterRefreshBtn: (p: Page): Locator =>
+    p.getByTestId('cluster-refresh-btn'),
+  clusterStandalonePanel: (p: Page): Locator =>
+    p.getByTestId('cluster-standalone-panel'),
+  clusterRoleChip: (p: Page): Locator => p.getByTestId('cluster-role-chip'),
 }
 
 // Translated layout-picker labels (en.ts: graph.layout.*). Tests use

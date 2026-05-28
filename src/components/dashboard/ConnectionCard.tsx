@@ -4,6 +4,7 @@ import styled from 'styled-components'
 
 import { Card } from './Card'
 import type { AdminWritable } from '../../api/capabilities'
+import { isClusterMode, type ClusterStatusSnapshot } from '../../api/cluster'
 
 // ConnectionCard — the overview card showing which Geode build the SPA
 // is talking to (`geode_version`) and whether each admin DDL family is
@@ -49,6 +50,50 @@ export interface ConnectionCardProps {
   adminWritable: AdminWritable | null
   loading: boolean
   error: string | null
+  // Plan 3: when the connected Geode is part of a Raft cluster, the
+  // dashboard's DashboardPage threads the snapshot down here so the
+  // card can render a single-line "Cluster: N nodes — Role" row at
+  // the bottom. Undefined / standalone snapshots leave the row
+  // entirely hidden so single-node operators don't see an inert row.
+  clusterSnapshot?: ClusterStatusSnapshot | null
+}
+
+// ClusterRow — hoisted local component (the alternative in-line IIFE
+// trips `react/no-unstable-nested-components`). Renders the single
+// "Cluster | N nodes — Role" row at the bottom of the connection
+// card. Caller is responsible for the isClusterMode short-circuit;
+// this component assumes the snapshot is a real cluster snapshot.
+const ROLE_I18N_KEYS = {
+  leader: 'dashboard.clusterRoleLeader',
+  follower: 'dashboard.clusterRoleFollower',
+  candidate: 'dashboard.clusterRoleCandidate',
+  shutdown: 'dashboard.clusterRoleShutdown',
+} as const
+
+const ClusterRow: React.FC<{ snapshot: ClusterStatusSnapshot }> = ({
+  snapshot,
+}) => {
+  const { t } = useTranslation()
+  const self = snapshot.members.find((m) => m.nodeId === snapshot.selfNodeId)
+  const role = self?.role ?? 'unknown'
+  const roleKey =
+    (ROLE_I18N_KEYS as Record<string, string>)[role] ??
+    'dashboard.clusterRoleUnknown'
+  return (
+    <li
+      data-testid="connection-card-cluster-row"
+      className="d-flex align-items-center justify-content-between text-body-secondary"
+      style={{ fontSize: '13px' }}
+    >
+      <span>{t('dashboard.connectionClusterRow')}</span>
+      <span>
+        {t('dashboard.connectionClusterNodesFmt', {
+          count: snapshot.members.length,
+        })}{' '}
+        — {t(roleKey)}
+      </span>
+    </li>
+  )
 }
 
 export const ConnectionCard: React.FC<ConnectionCardProps> = ({
@@ -56,6 +101,7 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
   adminWritable,
   loading,
   error,
+  clusterSnapshot,
 }) => {
   const { t } = useTranslation()
 
@@ -107,6 +153,9 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
               </li>
             )
           })}
+          {clusterSnapshot && isClusterMode(clusterSnapshot.members) ? (
+            <ClusterRow snapshot={clusterSnapshot} />
+          ) : null}
         </ul>
       </>
     )
