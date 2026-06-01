@@ -518,16 +518,27 @@ func respectLoginLatencyFloor(start time.Time, floor time.Duration) {
 	}
 }
 
-// injectCreds rewrites a Geode DSN to carry the supplied username and
-// password in its userinfo segment. If the original DSN already has
-// credentials they are stripped first. Returns the original DSN
-// unchanged if it has no `://` (test seam — lets a non-URL DSN flow
-// through the stub driver in tests without panicking).
+// injectCreds rewrites a Geode DSN to embed the supplied credentials.
+// Uses geode.ParseDSN and Config.FormatDSN for correctness when the DSN
+// uses a supported scheme (quic:// or grpc://), including proper
+// percent-encoding of special characters in credentials. For unsupported
+// schemes, falls back to simple URL reconstruction. For scheme-less test
+// stubs, returns the original DSN unchanged.
 func injectCreds(dsn, username, password string) string {
-	idx := strings.Index(dsn, "://")
-	if idx < 0 {
+	// Test stub DSNs without a scheme pass through unchanged
+	if !strings.Contains(dsn, "://") {
 		return dsn
 	}
+	cfg, err := geode.ParseDSN(dsn)
+	if err == nil {
+		// Successfully parsed by geode — use FormatDSN for proper encoding
+		cfg.Username = username
+		cfg.Password = password
+		return cfg.FormatDSN()
+	}
+	// Unsupported scheme — fall back to simple string manipulation
+	// to preserve backwards compatibility with non-geode schemes.
+	idx := strings.Index(dsn, "://")
 	scheme := dsn[:idx+3]
 	rest := dsn[idx+3:]
 	if at := strings.Index(rest, "@"); at >= 0 {
