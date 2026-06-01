@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	geode "geodedb.com/geode"
 )
 
 // endpointError is a structured handler error that carries both an HTTP
@@ -145,10 +147,8 @@ func isWireFeatureMissing(err error) bool {
 	if errors.Is(err, errWireFeatureMissing) {
 		return true
 	}
-	// 2: typed StatusClass — driver-supplied 42000 reading.
-	type statusClasser interface{ StatusClass() string }
-	var sc statusClasser
-	if errors.As(err, &sc) && sc.StatusClass() == "42000" {
+	// 2: typed StatusClass via driver helper.
+	if geode.IsSyntaxError(err) {
 		return true
 	}
 	// 3: substring fallback — drivers that don't expose StatusClass()

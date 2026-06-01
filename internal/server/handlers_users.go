@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -140,13 +141,13 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 		if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
 			return passwordPolicyEndpointError(vErr)
 		}
-		pw, pErr := quoteString(req.Password)
+		pw, pErr := geode.QuoteString(req.Password)
 		if pErr != nil {
 			return badRequest(ErrCodeInvalidPassword, pErr.Error())
 		}
 		stmt := "CREATE USER " + uname + " SET PASSWORD " + pw
 		if req.Email != "" {
-			email, qErr := quoteString(req.Email)
+			email, qErr := geode.QuoteString(req.Email)
 			if qErr != nil {
 				return badRequest(ErrCodeInvalidEmail, qErr.Error())
 			}
@@ -157,7 +158,7 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 		// CREATE USER so the audit trail is unchanged.
 		inlineRole := ""
 		if len(req.Roles) > 0 {
-			roleIdent, rErr := quoteIdent(req.Roles[0])
+			roleIdent, rErr := geode.QuoteIdent(req.Roles[0])
 			if rErr != nil {
 				return badRequest(ErrCodeInvalidRole, rErr.Error())
 			}
@@ -262,7 +263,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		var email string
 		if req.Email != "" {
 			var qErr error
-			email, qErr = quoteString(req.Email)
+			email, qErr = geode.QuoteString(req.Email)
 			if qErr != nil {
 				return badRequest(ErrCodeInvalidEmail, qErr.Error())
 			}
@@ -274,7 +275,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 				return passwordPolicyEndpointError(vErr)
 			}
 			var qErr error
-			pw, qErr = quoteString(req.Password)
+			pw, qErr = geode.QuoteString(req.Password)
 			if qErr != nil {
 				return badRequest(ErrCodeInvalidPassword, qErr.Error())
 			}
@@ -318,7 +319,7 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			}
 		}
 		for _, role := range req.Roles {
-			roleIdent, qErr := quoteIdent(role)
+			roleIdent, qErr := geode.QuoteIdent(role)
 			if qErr != nil {
 				return badRequest(ErrCodeInvalidRole, qErr.Error())
 			}
@@ -431,7 +432,7 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 		if vErr := validatePassword(r.Context(), req.NewPassword, req.Username, s.cfg.PasswordPolicy); vErr != nil {
 			return passwordPolicyEndpointError(vErr)
 		}
-		pw, qErr := quoteString(req.NewPassword)
+		pw, qErr := geode.QuoteString(req.NewPassword)
 		if qErr != nil {
 			return badRequest(ErrCodeInvalidPassword, qErr.Error())
 		}
@@ -545,7 +546,7 @@ func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, use
 // `geode.auth.user_assign_role`, which is idempotent on re-assigning
 // the user's current role (no auth_version bump, no audit row).
 func assignRole(ctx context.Context, db *sql.DB, uname, role string) error {
-	roleIdent, err := quoteIdent(role)
+	roleIdent, err := geode.QuoteIdent(role)
 	if err != nil {
 		return badRequest(ErrCodeInvalidRole, err.Error())
 	}
@@ -570,7 +571,7 @@ func (s *GraphServer) withConnDBAndIdent(ctx context.Context, name string, fn fu
 	if err != nil {
 		return err
 	}
-	qname, err := quoteIdent(name)
+	qname, err := geode.QuoteIdent(name)
 	if err != nil {
 		return badRequest(ErrCodeInvalidUsername, err.Error())
 	}

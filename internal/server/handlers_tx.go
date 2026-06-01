@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -123,7 +124,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 		return nil, nil
 	}
 	if req.Graph != "" {
-		if _, err := tx.ExecContext(r.Context(), "USE GRAPH "+sanitizeGraphName(req.Graph)); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "USE GRAPH "+geode.SanitizeGraphName(req.Graph)); err != nil {
 			_ = tx.Rollback()
 			writeEndpointError(w, &endpointError{
 				status:      http.StatusUnprocessableEntity,

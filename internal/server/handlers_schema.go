@@ -11,6 +11,7 @@ import (
 
 	"encoding/json/jsontext"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -309,7 +310,7 @@ func prefixUseGraph(graph, stmt string) string {
 	if graph == "" {
 		return stmt
 	}
-	return "USE GRAPH " + sanitizeGraphName(graph) + "; " + stmt
+	return "USE GRAPH " + geode.SanitizeGraphName(graph) + "; " + stmt
 }
 
 // schemaErr wraps a driver-level error from a catalog statement as a 422

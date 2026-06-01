@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	geode "geodedb.com/geode"
 	"geodedb.com/geode-ui/gen/pkg/wsx"
 	genws "geodedb.com/geode-ui/gen/ws"
 )
@@ -233,7 +234,7 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 
 	stmt := first.Statement
 	if first.Graph != "" {
-		stmt = "USE GRAPH " + sanitizeGraphName(first.Graph) + "; " + stmt
+		stmt = "USE GRAPH " + geode.SanitizeGraphName(first.Graph) + "; " + stmt
 	}
 
 	// Spawn the single cancel-reader goroutine (PERF #218): it watches

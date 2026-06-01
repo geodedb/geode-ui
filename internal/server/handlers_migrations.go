@@ -7,6 +7,7 @@ import (
 
 	"encoding/json/jsontext"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -133,13 +134,13 @@ func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req
 	if err := sanitizeBackupFile(req.Name); err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
-	mname, err := quoteIdent(req.Name)
+	mname, err := geode.QuoteIdent(req.Name)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
 	stmt := "CREATE MIGRATION " + mname
 	if req.Description != "" {
-		desc, qErr := quoteString(req.Description)
+		desc, qErr := geode.QuoteString(req.Description)
 		if qErr != nil {
 			return nil, respondErr(w, badRequest(ErrCodeInvalidDescription, qErr.Error()))
 		}
@@ -164,7 +165,7 @@ func (s *GraphServer) Sign(w http.ResponseWriter, r *http.Request, req *gentypes
 	if err := sanitizeBackupFile(req.Name); err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}
-	mname, err := quoteIdent(req.Name)
+	mname, err := geode.QuoteIdent(req.Name)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
 	}

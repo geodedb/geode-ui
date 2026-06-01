@@ -3,6 +3,8 @@ package server
 import (
 	"strings"
 	"testing"
+
+	geode "geodedb.com/geode"
 )
 
 // GAP-N1 (#63): adversarial test corpus for `quoteString` and
@@ -100,7 +102,7 @@ func TestQuoteString_Adversarial(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := quoteString(tc.in)
+			got, err := geode.QuoteString(tc.in)
 			if tc.mustError {
 				if err == nil {
 					t.Fatalf("quoteString(%q)=%q,nil; want non-nil err", tc.in, got)
@@ -164,7 +166,7 @@ func TestQuoteString_BackslashEscape(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := quoteString(tc.in)
+			got, err := geode.QuoteString(tc.in)
 			if err != nil {
 				t.Fatalf("quoteString(%q): unexpected err %v", tc.in, err)
 			}
@@ -181,7 +183,7 @@ func TestQuoteString_BackslashEscape(t *testing.T) {
 	// Control chars containing a backslash byte are still rejected
 	// outright (the backslash escape runs only on the accepted path).
 	for _, in := range []string{"a\\\nb", "\\\x00", "\\\t"} {
-		if got, err := quoteString(in); err == nil {
+		if got, err := geode.QuoteString(in); err == nil {
 			t.Fatalf("quoteString(%q) = %q, nil; want non-nil err (control char)", in, got)
 		}
 	}
@@ -274,7 +276,7 @@ func TestQuoteIdent_Adversarial(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := quoteIdent(tc.in)
+			got, err := geode.QuoteIdent(tc.in)
 			if tc.mustError {
 				if err == nil {
 					t.Fatalf("quoteIdent(%q)=%q,nil; want non-nil err", tc.in, got)

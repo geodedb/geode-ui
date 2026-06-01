@@ -4,19 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	geode "geodedb.com/geode"
 )
 
-// fakeStatusClasser implements the unexported `statusClasser`
-// interface that `isWireFeatureMissing` and `isAuthError` look for via
-// errors.As. It pins the typed-error path so a driver that DOES
-// expose StatusClass() bypasses the substring fallback entirely.
-type fakeStatusClasser struct {
-	cls string
-	msg string
+// newDriverErr returns a real *geode.DriverError carrying the given
+// status class. `isWireFeatureMissing` and `isAuthError` now delegate
+// to the driver's geode.IsSyntaxError / geode.IsAuthError helpers,
+// which detect the concrete *geode.DriverError type via errors.As —
+// so the typed-error path must be pinned with the real driver type
+// rather than a local duck-typed double.
+func newDriverErr(cls, msg string) *geode.DriverError {
+	return &geode.DriverError{Class: cls, Message: msg}
 }
-
-func (e *fakeStatusClasser) Error() string       { return "fake: " + e.cls + ": " + e.msg }
-func (e *fakeStatusClasser) StatusClass() string { return e.cls }
 
 // TestIsWireFeatureMissing_TypedSentinel pins the GAP-Q6 sentinel
 // path: callers that wrap errWireFeatureMissing via %w must be
@@ -52,7 +52,7 @@ func TestIsWireFeatureMissing_TypedStatusClass(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := &fakeStatusClasser{cls: tc.cls, msg: "anything"}
+			err := newDriverErr(tc.cls, "anything")
 			if got := isWireFeatureMissing(err); got != tc.want {
 				t.Fatalf("got=%v want=%v", got, tc.want)
 			}
@@ -136,7 +136,7 @@ func TestWireErr_UpgradesToNotImplementedOnMissingFeature(t *testing.T) {
 		},
 		{
 			name:       "typed_42000_yields_501",
-			in:         &fakeStatusClasser{cls: "42000", msg: "parse error"},
+			in:         newDriverErr("42000", "parse error"),
 			wantStatus: 501,
 			wantCode:   "wire_feature_missing",
 		},

@@ -8,12 +8,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -460,31 +460,10 @@ func appendUnique(roles []string, s string) []string {
 	return append(roles, s)
 }
 
-// isAuthError reports whether err carries a GQL status class that
-// indicates an authentication problem rather than an unrelated query
-// or transport failure. Handles both wrapped and bare errors via
-// errors.As + a fallback string match for transports that don't yet
-// expose a typed StatusClass.
+// isAuthError reports whether err is a Geode authentication failure.
+// Delegates to geode.IsAuthError (status class 28000 or 08P01).
 func isAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-	type statusClasser interface{ StatusClass() string }
-	var sc statusClasser
-	if errors.As(err, &sc) {
-		switch sc.StatusClass() {
-		case "28000", // invalid_authorization_specification
-			"08P01": // password reset required (Geode-specific)
-			return true
-		}
-		return false
-	}
-	// Fallback: substring match. Older driver versions wrap the
-	// status_class JSON into a generic error.
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "authentication failed") ||
-		strings.Contains(msg, "invalid credentials") ||
-		strings.Contains(msg, "password reset required")
+	return geode.IsAuthError(err)
 }
 
 // newConnectionID returns a 16-byte hex-encoded random identifier
@@ -539,16 +518,27 @@ func respectLoginLatencyFloor(start time.Time, floor time.Duration) {
 	}
 }
 
-// injectCreds rewrites a Geode DSN to carry the supplied username and
-// password in its userinfo segment. If the original DSN already has
-// credentials they are stripped first. Returns the original DSN
-// unchanged if it has no `://` (test seam — lets a non-URL DSN flow
-// through the stub driver in tests without panicking).
+// injectCreds rewrites a Geode DSN to embed the supplied credentials.
+// Uses geode.ParseDSN and Config.FormatDSN for correctness when the DSN
+// uses a supported scheme (quic:// or grpc://), including proper
+// percent-encoding of special characters in credentials. For unsupported
+// schemes, falls back to simple URL reconstruction. For scheme-less test
+// stubs, returns the original DSN unchanged.
 func injectCreds(dsn, username, password string) string {
-	idx := strings.Index(dsn, "://")
-	if idx < 0 {
+	// Test stub DSNs without a scheme pass through unchanged
+	if !strings.Contains(dsn, "://") {
 		return dsn
 	}
+	cfg, err := geode.ParseDSN(dsn)
+	if err == nil {
+		// Successfully parsed by geode — use FormatDSN for proper encoding
+		cfg.Username = username
+		cfg.Password = password
+		return cfg.FormatDSN()
+	}
+	// Unsupported scheme — fall back to simple string manipulation
+	// to preserve backwards compatibility with non-geode schemes.
+	idx := strings.Index(dsn, "://")
 	scheme := dsn[:idx+3]
 	rest := dsn[idx+3:]
 	if at := strings.Index(rest, "@"); at >= 0 {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -194,13 +195,13 @@ func buildGrant(req *gentypes.GrantReq, verb, preposition string) (string, error
 	default:
 		return "", badRequest(ErrCodeInvalidGranteeKind, "grantee_kind must be 'user' or 'role'")
 	}
-	grantee, err := quoteIdent(req.Grantee)
+	grantee, err := geode.QuoteIdent(req.Grantee)
 	if err != nil {
 		return "", badRequest(ErrCodeInvalidGrantee, err.Error())
 	}
 	stmt := verb + " " + priv
 	if req.Resource != "" {
-		res, qErr := quoteIdent(req.Resource)
+		res, qErr := geode.QuoteIdent(req.Resource)
 		if qErr != nil {
 			return "", badRequest(ErrCodeInvalidResource, qErr.Error())
 		}
