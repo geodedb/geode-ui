@@ -4,18 +4,17 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
-	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -116,10 +115,10 @@ func acquireGraphSummaryAccum() *graphSummaryAccum {
 func releaseGraphSummaryAccum(a *graphSummaryAccum) {
 	// Drop references so the pool does not pin graph maps in memory.
 	for i := range a.out.Nodes {
-		a.out.Nodes[i] = GraphNode{}
+		a.out.Nodes[i] = geode.Node{}
 	}
 	for i := range a.out.Edges {
-		a.out.Edges[i] = GraphEdge{}
+		a.out.Edges[i] = geode.Edge{}
 	}
 	a.out.Nodes = a.out.Nodes[:0]
 	a.out.Edges = a.out.Edges[:0]
@@ -615,27 +614,12 @@ func scanQueryResult(rows queryRowScanner, start time.Time) (*gentypes.QueryResp
 	}, nil
 }
 
-// GraphNode is the JSON-friendly representation of a Geode node row cell.
-type GraphNode struct {
-	ID         int64          `json:"id"`
-	Labels     []string       `json:"labels"`
-	Properties map[string]any `json:"properties"`
-}
-
-// GraphEdge is the JSON-friendly representation of a Geode edge row cell.
-type GraphEdge struct {
-	ID         int64          `json:"id"`
-	StartNode  int64          `json:"start_node"`
-	EndNode    int64          `json:"end_node"`
-	Type       string         `json:"type"`
-	Properties map[string]any `json:"properties"`
-}
-
 // GraphSummary is the deduplicated set of nodes and edges the UI needs to
-// render a graph view alongside the tabular result.
+// render a graph view alongside the tabular result. Nodes and edges use the
+// driver's exported geode.Node / geode.Edge types.
 type GraphSummary struct {
-	Nodes []GraphNode `json:"nodes"`
-	Edges []GraphEdge `json:"edges"`
+	Nodes []geode.Node `json:"nodes"`
+	Edges []geode.Edge `json:"edges"`
 }
 
 // graphSummaryAccum is the streaming state used by scanQueryResult to
@@ -665,16 +649,16 @@ func newGraphSummaryAccum() *graphSummaryAccum {
 func (a *graphSummaryAccum) visit(v any) {
 	switch t := v.(type) {
 	case map[string]any:
-		if id, ok := nodeID(t); ok {
-			if _, dup := a.seenNode[id]; !dup {
-				a.out.Nodes = append(a.out.Nodes, asNode(t))
-				a.seenNode[id] = struct{}{}
+		if n, ok := geode.AsNode(t); ok {
+			if _, dup := a.seenNode[n.ID]; !dup {
+				a.out.Nodes = append(a.out.Nodes, n)
+				a.seenNode[n.ID] = struct{}{}
 			}
 		}
-		if id, ok := edgeID(t); ok {
-			if _, dup := a.seenEdge[id]; !dup {
-				a.out.Edges = append(a.out.Edges, asEdge(t))
-				a.seenEdge[id] = struct{}{}
+		if e, ok := geode.AsEdge(t); ok {
+			if _, dup := a.seenEdge[e.ID]; !dup {
+				a.out.Edges = append(a.out.Edges, e)
+				a.seenEdge[e.ID] = struct{}{}
 			}
 		}
 		if nodes, ok := t["nodes"].([]any); ok {
@@ -721,108 +705,4 @@ func extractGraphSummary(rows [][]any) GraphSummary {
 		a.visitRow(row)
 	}
 	return a.finish()
-}
-
-// toInt64 best-effort coerces a decoded JSON value into an int64. JSON
-// decoders (especially v2 / encoding/json with UseNumber) can hand us
-// numbers as float64, json.Number, int, or various sized integers depending
-// on the path the value travelled, so we accept all of them and reject
-// anything that would lose precision or overflow.
-func toInt64(v any) (int64, bool) {
-	switch x := v.(type) {
-	case int64:
-		return x, true
-	case int:
-		return int64(x), true
-	case int32:
-		return int64(x), true
-	case uint32:
-		return int64(x), true
-	case uint64:
-		if x > math.MaxInt64 {
-			return 0, false
-		}
-		return int64(x), true
-	case float64:
-		if math.IsNaN(x) || math.IsInf(x, 0) {
-			return 0, false
-		}
-		if math.Trunc(x) != x {
-			return 0, false
-		}
-		if x < math.MinInt64 || x > math.MaxInt64 {
-			return 0, false
-		}
-		return int64(x), true
-	case stdjson.Number:
-		n, err := x.Int64()
-		if err != nil {
-			return 0, false
-		}
-		return n, true
-	}
-	return 0, false
-}
-
-// asStringSlice coerces a decoded JSON value into a []string. JSON arrays
-// arrive as []any after a generic decode, so we drop non-string entries
-// rather than stringifying numbers/objects (which would surprise UI users
-// who expect labels to be authored strings).
-func asStringSlice(v any) []string {
-	switch x := v.(type) {
-	case []string:
-		return x
-	case []any:
-		out := make([]string, 0, len(x))
-		for _, item := range x {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
-func nodeID(m map[string]any) (int64, bool) {
-	if _, hasStart := m["start_node"]; hasStart {
-		return 0, false
-	}
-	id, ok := toInt64(m["id"])
-	if !ok {
-		return 0, false
-	}
-	if _, ok := m["labels"]; !ok {
-		return 0, false
-	}
-	return id, true
-}
-
-func edgeID(m map[string]any) (int64, bool) {
-	id, ok := toInt64(m["id"])
-	if !ok {
-		return 0, false
-	}
-	_, hasStart := m["start_node"]
-	_, hasEnd := m["end_node"]
-	if !hasStart || !hasEnd {
-		return 0, false
-	}
-	return id, true
-}
-
-func asNode(m map[string]any) GraphNode {
-	id, _ := toInt64(m["id"])
-	labels := asStringSlice(m["labels"])
-	props, _ := m["properties"].(map[string]any)
-	return GraphNode{ID: id, Labels: labels, Properties: props}
-}
-
-func asEdge(m map[string]any) GraphEdge {
-	id, _ := toInt64(m["id"])
-	s, _ := toInt64(m["start_node"])
-	e, _ := toInt64(m["end_node"])
-	t, _ := m["type"].(string)
-	props, _ := m["properties"].(map[string]any)
-	return GraphEdge{ID: id, StartNode: s, EndNode: e, Type: t, Properties: props}
 }
