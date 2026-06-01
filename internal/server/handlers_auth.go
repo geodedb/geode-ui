@@ -8,12 +8,12 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -460,31 +460,10 @@ func appendUnique(roles []string, s string) []string {
 	return append(roles, s)
 }
 
-// isAuthError reports whether err carries a GQL status class that
-// indicates an authentication problem rather than an unrelated query
-// or transport failure. Handles both wrapped and bare errors via
-// errors.As + a fallback string match for transports that don't yet
-// expose a typed StatusClass.
+// isAuthError reports whether err is a Geode authentication failure.
+// Delegates to geode.IsAuthError (status class 28000 or 08P01).
 func isAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-	type statusClasser interface{ StatusClass() string }
-	var sc statusClasser
-	if errors.As(err, &sc) {
-		switch sc.StatusClass() {
-		case "28000", // invalid_authorization_specification
-			"08P01": // password reset required (Geode-specific)
-			return true
-		}
-		return false
-	}
-	// Fallback: substring match. Older driver versions wrap the
-	// status_class JSON into a generic error.
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "authentication failed") ||
-		strings.Contains(msg, "invalid credentials") ||
-		strings.Contains(msg, "password reset required")
+	return geode.IsAuthError(err)
 }
 
 // newConnectionID returns a 16-byte hex-encoded random identifier
