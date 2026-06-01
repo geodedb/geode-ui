@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -728,7 +729,7 @@ func TestUsers_QuoteIdent(t *testing.T) {
 		{"alice\x7fbob", "", true},              // DEL rejected
 	}
 	for _, tc := range cases {
-		got, err := quoteIdent(tc.in)
+		got, err := geode.QuoteIdent(tc.in)
 		if tc.wantErr {
 			if err == nil {
 				t.Errorf("quoteIdent(%q)=%q,nil; want err", tc.in, got)
@@ -762,7 +763,7 @@ func TestUsers_QuoteString(t *testing.T) {
 		{"unicode 漢字", "'unicode 漢字'", false},
 	}
 	for _, tc := range cases {
-		got, err := quoteString(tc.in)
+		got, err := geode.QuoteString(tc.in)
 		if tc.wantErr {
 			if err == nil {
 				t.Errorf("quoteString(%q)=%q,nil; want err", tc.in, got)

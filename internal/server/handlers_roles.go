@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -107,7 +108,7 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	rname, err := quoteIdent(req.Name)
+	rname, err := geode.QuoteIdent(req.Name)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidRole, err.Error()))
 	}
@@ -119,7 +120,7 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	}
 	stmt := "CREATE ROLE " + rname
 	if req.Description != "" {
-		desc, qErr := quoteString(req.Description)
+		desc, qErr := geode.QuoteString(req.Description)
 		if qErr != nil {
 			return nil, respondErr(w, badRequest(ErrCodeInvalidDescription, qErr.Error()))
 		}
@@ -154,7 +155,7 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 	// Validate the identifier so a malformed `role` param surfaces a
 	// 400 before any driver work runs. Quoted ident not needed for the
 	// SHOW ROLES emit (we filter result rows in-process).
-	if _, err := quoteIdent(req.Role); err != nil {
+	if _, err := geode.QuoteIdent(req.Role); err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidRole, err.Error()))
 	}
 	rows, cols, err := runQuery(r.Context(), db, "SHOW ROLES")
@@ -202,7 +203,7 @@ func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *ge
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	rname, err := quoteIdent(req.Role)
+	rname, err := geode.QuoteIdent(req.Role)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidRole, err.Error()))
 	}

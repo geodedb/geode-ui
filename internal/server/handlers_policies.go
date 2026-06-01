@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -89,17 +90,17 @@ func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	pname, err := quoteIdent(req.Name)
+	pname, err := geode.QuoteIdent(req.Name)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidPolicyName, err.Error()))
 	}
-	expr, err := quoteString(req.Expression)
+	expr, err := geode.QuoteString(req.Expression)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidExpression, err.Error()))
 	}
 	stmt := "CREATE POLICY " + pname
 	if req.Resource != "" {
-		res, qErr := quoteIdent(req.Resource)
+		res, qErr := geode.QuoteIdent(req.Resource)
 		if qErr != nil {
 			return nil, respondErr(w, badRequest(ErrCodeInvalidResource, qErr.Error()))
 		}
@@ -127,7 +128,7 @@ func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *genty
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	pname, err := quoteIdent(req.Name)
+	pname, err := geode.QuoteIdent(req.Name)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidPolicyName, err.Error()))
 	}
@@ -151,7 +152,7 @@ func (s *GraphServer) DeleteName(w http.ResponseWriter, r *http.Request, req *ge
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	pname, err := quoteIdent(req.Name)
+	pname, err := geode.QuoteIdent(req.Name)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidPolicyName, err.Error()))
 	}

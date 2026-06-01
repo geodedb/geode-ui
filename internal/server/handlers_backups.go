@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -85,14 +86,14 @@ func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *g
 	}
 	stmt := "BACKUP CREATE"
 	if req.Graph != "" {
-		gname, qErr := quoteIdent(req.Graph)
+		gname, qErr := geode.QuoteIdent(req.Graph)
 		if qErr != nil {
 			return nil, respondErr(w, badRequest(ErrCodeInvalidGraph, qErr.Error()))
 		}
 		stmt += " GRAPH " + gname
 	}
 	if req.Output != "" {
-		out, qErr := quoteString(req.Output)
+		out, qErr := geode.QuoteString(req.Output)
 		if qErr != nil {
 			return nil, respondErr(w, badRequest(ErrCodeInvalidOutput, qErr.Error()))
 		}
@@ -133,7 +134,7 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 	// per parseBackupStatement / parseRestoreStatement in
 	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
 	// identifier-shape rule rejects valid filenames containing `.`.
-	fname, err := quoteString(req.File)
+	fname, err := geode.QuoteString(req.File)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
@@ -164,7 +165,7 @@ func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *ge
 	// per parseBackupStatement / parseRestoreStatement in
 	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
 	// identifier-shape rule rejects valid filenames containing `.`.
-	fname, err := quoteString(req.File)
+	fname, err := geode.QuoteString(req.File)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
@@ -218,13 +219,13 @@ func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *genty
 	// per parseBackupStatement / parseRestoreStatement in
 	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
 	// identifier-shape rule rejects valid filenames containing `.`.
-	fname, err := quoteString(req.File)
+	fname, err := geode.QuoteString(req.File)
 	if err != nil {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
 	}
 	stmt := "RESTORE " + fname
 	if req.TargetTime != "" {
-		tt, qErr := quoteString(req.TargetTime)
+		tt, qErr := geode.QuoteString(req.TargetTime)
 		if qErr != nil {
 			return nil, respondErr(w, badRequest(ErrCodeInvalidTargetTime, qErr.Error()))
 		}
@@ -250,7 +251,7 @@ func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *genty
 // cannot rely on the GQL parser to reject path traversal in it.
 func sanitizeBackupFile(name string) error {
 	if name == "" {
-		return errInvalidIdent
+		return geode.ErrInvalidIdent
 	}
 	if name[0] == '.' {
 		return fmt.Errorf("backup file must not start with '.'")

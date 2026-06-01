@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	geode "geodedb.com/geode"
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
@@ -107,7 +108,7 @@ func (s *GraphServer) Query(w http.ResponseWriter, r *http.Request, req *gentype
 func (s *GraphServer) runQuery(ctx context.Context, req *gentypes.QueryReq) (*sql.Rows, time.Time, error) {
 	stmt := req.Statement
 	if req.Graph != "" {
-		stmt = "USE GRAPH " + sanitizeGraphName(req.Graph) + "; " + stmt
+		stmt = "USE GRAPH " + geode.SanitizeGraphName(req.Graph) + "; " + stmt
 	}
 
 	db, err := s.cfg.Pool.DB(profileFromContextOrDefault(ctx))
