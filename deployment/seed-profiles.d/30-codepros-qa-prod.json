@@ -1,0 +1,16 @@
+[
+  {
+    "name": "prod",
+    "dsn": "quic://prod.geodedb.com:3141",
+    "description": "Production geode cluster (prod.geodedb.com). Log in with your geode credentials.",
+    "is_default": true,
+    "saved_username": "geode"
+  },
+  {
+    "name": "qa",
+    "dsn": "quic://qa.geodedb.com:3141",
+    "description": "QA geode cluster (qa.geodedb.com). Log in with your geode credentials.",
+    "is_default": false,
+    "saved_username": "geode"
+  }
+]
