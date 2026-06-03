@@ -12,6 +12,17 @@ and 2026-05-17. Entries are grouped by the date the cohort closed, then
 by Keep-a-Changelog subsection. Issue numbers reference
 `gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/<id>`.
 
+### Added (2026-06-03 — OpenTelemetry export)
+
+- **OTLP telemetry export.** `cmd/server` now wires OTLP/HTTP trace + metric
+  exporters (`startTelemetry`) from the standard `OTEL_EXPORTER_OTLP_*`
+  environment and registers them with `obsx`, so the HTTP tracing middleware
+  and metric instruments actually export. Opt-in: a no-op (noop tracers/meters)
+  unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, so uninstrumented deployments and
+  bootstrap tests are unaffected. The batch span processor + periodic metric
+  reader are flushed on graceful shutdown. Point it at a collector with e.g.
+  `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.observability.svc.cluster.local:4318`.
+
 ### Fixed (2026-06-03 — release container image)
 
 - **The release pipeline now reliably publishes a deployable container

@@ -429,6 +429,24 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	// buffered fatal line to the wire before the error text reaches stderr.
 	defer obsx.FlushLogs()
 
+	// OTEL export wiring: opt-in via OTEL_EXPORTER_OTLP_ENDPOINT. When unset
+	// this is a no-op and obsx keeps its noop tracers/meters, so uninstrumented
+	// deployments and bootstrap tests are unaffected. The shutdown closure
+	// flushes the batch span processor + metric reader on graceful exit.
+	// Started before newApp so spans/metrics from startup onward are captured.
+	telShutdown, err := startTelemetry(getenv)
+	if err != nil {
+		slog.Error("telemetry startup", "err", err)
+		obsx.FlushLogs()
+		_, _ = fmt.Fprintln(stderr, err)
+		return 1
+	}
+	defer func() {
+		if terr := telShutdown(context.Background()); terr != nil {
+			slog.Warn("telemetry shutdown", "err", terr)
+		}
+	}()
+
 	a, err := newApp(cfg, getenv)
 	if err != nil {
 		slog.Error("startup", "err", err)
