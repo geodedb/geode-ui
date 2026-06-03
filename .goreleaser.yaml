@@ -10,6 +10,12 @@
 #   - Build 4 docker images: debian + alpine, each in amd64 + arm64; push to
 #     both GitLab Container Registry (CI_REGISTRY_IMAGE) and Docker Hub
 #     (geodedb/geode-ui), with multi-arch manifest tags.
+#     NOTE: in CI this docker pipe is ALWAYS skipped (`--skip=docker`) — it
+#     requires buildx/dind, which was unreliable on the company k8s runner
+#     (v0.1.9–v0.1.28). The deployable container image is now published by
+#     the daemonless kaniko `docker:release` job in .gitlab-ci.yml. The
+#     dockers:/docker_manifests: blocks below are retained for LOCAL
+#     multi-arch builds and a future buildx revival only.
 #   - Produce nfpm packages (.deb, .rpm, .apk) so operators can `apt install
 #     geode-ui` from a downloaded deb.
 #   - GitLab Release publishing is owned by .gitlab-ci.yml's release-semantic
@@ -129,10 +135,17 @@ changelog:
 # =============================================================================
 # Docker Images - 4 variants × 2 registries
 # =============================================================================
-# CI requirements:
+# CI SKIPS THIS ENTIRE PIPE (`goreleaser release --skip=docker`). It needs
+# buildx + a Docker daemon (dind), which was unreliable on the company k8s
+# runner. The deployable image is published by the daemonless kaniko
+# `docker:release` job in .gitlab-ci.yml instead. Kept here for LOCAL
+# multi-arch builds (`goreleaser release --snapshot` on a workstation with
+# buildx) and a possible future buildx revival.
+#
+# For a local multi-arch build:
 #   • GitLab: $CI_REGISTRY_IMAGE is auto-populated; CI_JOB_TOKEN authenticates.
-#   • Docker Hub: DOCKERHUB_USERNAME + DOCKERHUB_TOKEN CI variables.
-#     SKIP_DOCKERHUB=true (set in CI when login fails) bypasses the push.
+#   • Docker Hub: DOCKERHUB_USERNAME + DOCKERHUB_TOKEN; SKIP_DOCKERHUB=true
+#     bypasses the push.
 #
 # Each image is single-arch; the docker_manifests section below stitches them
 # into multi-arch tags.

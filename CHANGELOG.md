@@ -12,6 +12,23 @@ and 2026-05-17. Entries are grouped by the date the cohort closed, then
 by Keep-a-Changelog subsection. Issue numbers reference
 `gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/<id>`.
 
+### Fixed (2026-06-03 — release container image)
+
+- **The release pipeline now reliably publishes a deployable container
+  image.** Image publishing moved off GoReleaser's buildx / Docker-in-Docker
+  path — unreliable on the company k8s runner, which left v0.1.9–v0.1.28
+  releases shipping with `.deb`/binary artifacts but no auto-deployable image
+  (v0.1.28 had to be built and pushed by hand) — to a new daemonless
+  **kaniko** `docker:release` job. It builds `deploy/Dockerfile.release` from
+  GoReleaser's production binary and pushes
+  `registry.gitlab.com/devnw/codepros/geode/geode-ui:<version>` + `:latest`
+  (and `docker.io/geodedb/geode-ui` when `DOCKERHUB_USERNAME` /
+  `DOCKERHUB_TOKEN` are set). GoReleaser now runs with `--skip=docker` and
+  the dind apparatus is removed from the release jobs. A new guard,
+  `scripts/check-release-image.sh` (pre-commit + CI `release-image-check`),
+  locks the daemonless contract in. The arda ArgoCD Image Updater can now
+  auto-deploy each release.
+
 ### Added (2026-05-24 — Geode 0.5.20 policy subsystem)
 
 - **Admin / RLS Deny Policies** (`/admin/rls-deny`): list, add, and

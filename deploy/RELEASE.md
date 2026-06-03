@@ -4,14 +4,19 @@ This repo ships three artifact families on every tag:
 
 | Artifact | Where | Built by |
 |---|---|---|
-| Container images | GitLab Container Registry + `docker.io/geodedb/geode-ui` | GoReleaser (`.goreleaser.yaml`) |
+| Container image | GitLab Container Registry (always) + `docker.io/geodedb/geode-ui` (when Docker Hub creds set) | **kaniko** — `docker:release` job (daemonless, no dind) |
 | Linux packages (.deb / .rpm / .apk) | GitLab Release page assets | GoReleaser nFPM |
 | Electron desktop installers (.dmg / .AppImage / .deb / .exe) | GitLab Release page assets | electron-builder |
 
-The pipeline mirrors `../geode/.gitlab-ci.yml` — same `goreleaser:snapshot` /
-`goreleaser:release` two-track model, same `SKIP_DOCKERHUB` gate, same
-manifest tag conventions (`latest`, `vMAJOR`, `vMAJOR.MINOR`,
-`<version>-alpine`, etc.).
+The binary + package pipeline mirrors `../geode/.gitlab-ci.yml`'s
+`goreleaser-snapshot` / `goreleaser-release` two-track model. GoReleaser runs
+with `--skip=docker` in CI; the deployable **container image** is built and
+pushed separately by the daemonless **kaniko** `docker:release` job. This
+avoids Docker-in-Docker, which was unreliable on the company k8s runner and
+left several releases (v0.1.9–v0.1.28) shipping with no auto-deployable image
+(v0.1.28 had to be built and pushed by hand). The kaniko job consumes the
+exact production binary GoReleaser builds (`dist/`) and feeds it to the
+hardened `deploy/Dockerfile.release`.
 
 ## Required CI variables
 
@@ -84,8 +89,11 @@ the new build will silently change behaviour:
    ```
 
 4. The pipeline triggered by the tag runs:
-   - `goreleaser:release` — builds binaries, packages, container images
-     for both registries.
+   - `goreleaser-release` — builds the Go binary + Linux packages
+     (.deb/.rpm/.apk) and exposes its `dist/` binary as an artifact.
+   - `docker:release` — kaniko (no dind) builds `deploy/Dockerfile.release`
+     from that binary and pushes the container image to the GitLab Container
+     Registry (and Docker Hub when `DOCKERHUB_*` are set).
    - `electron:linux` / `electron:mac` / `electron:win` — build platform
      installers (mac + win are `allow_failure: true` until those runners
      are registered).
@@ -98,25 +106,31 @@ The Release page lands at
 
 ## What gets published, by tag
 
+The kaniko `docker:release` job pushes a `linux/amd64` image on every release:
+
 | Tag | GitLab Container Registry | Docker Hub |
 |---|---|---|
-| `<version>` (e.g. `0.2.0`) | ✓ | ✓ |
-| `<version>-alpine` | ✓ | ✓ |
-| `<version>-amd64` / `-arm64` (single-arch) | ✓ | ✓ |
-| `<version>-alpine-amd64` / `-alpine-arm64` | ✓ | ✓ |
-| `latest` (multi-arch) | ✓ | ✓ |
-| `alpine` (multi-arch alpine) | ✓ | ✓ |
-| `vMAJOR` (e.g. `v0`) | ✓ | ✓ |
-| `vMAJOR.MINOR` (e.g. `v0.2`) | ✓ | ✓ |
+| `<version>` (e.g. `0.2.0`) — the tag ArgoCD Image Updater watches | ✓ (always) | ✓ (when `DOCKERHUB_*` set) |
+| `latest` | ✓ (always) | ✓ (when `DOCKERHUB_*` set) |
+
+> The multi-arch (arm64) and alpine variants in `.goreleaser.yaml`'s
+> `dockers:` / `docker_manifests:` blocks are **not** published by CI — they
+> require buildx and only ever succeeded when dind happened to be healthy.
+> They remain available for local `goreleaser release --snapshot` builds.
+> Restoring multi-arch in CI is a follow-up (kaniko per-arch jobs + a
+> manifest-merge step, or a buildx revival once a reliable arm64 runner
+> exists). The arda cluster runs amd64, so the single-arch image is
+> deployable today.
 
 ## Snapshot builds (main branch)
 
-Every push to `main` triggers `goreleaser:snapshot` (allow_failure):
+Every push to `main` triggers `goreleaser-snapshot` (allow_failure):
 
-- Builds the Go binary + 4 container images locally.
-- Pushes container tags `<version>-snapshot-<sha>` to GitLab Container
-  Registry only (Docker Hub is skipped on snapshots).
+- Builds the Go binary + Linux packages locally (`--skip=docker`; no images).
 - Skips Electron installer builds (they're tag-only).
+
+The main-branch container image used by the e2e stack is built separately by
+the `docker:build` job, which pushes `$CI_REGISTRY_IMAGE:<commit-sha>`.
 
 Snapshot artifacts expire after 3 days.
 

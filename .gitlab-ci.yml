@@ -266,6 +266,24 @@ ci-pins-check:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+# Release-image publishing guard. Mirrors the pre-commit hook of the same
+# name at MR time so a contributor who skips pre-commit still blocks here
+# if an edit removes the daemonless kaniko docker:release job or re-couples
+# the release-image path to docker:dind. See scripts/check-release-image.sh.
+release-image-check:
+  stage: lint
+  needs: []
+  # image-pin: 2026-05-16 @ alpine:3 floating major tag — refresh per cadence.
+  image: alpine:3
+  before_script: []
+  cache: []
+  script:
+    - apk add --no-cache bash grep
+    - bash scripts/check-release-image.sh
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # QUALITY #233: image-pin staleness gate. Walks .gitlab-ci.yml and
 # deploy/Dockerfile* looking for the
 # `# image-pin: <YYYY-MM-DD> @ <reason>` marker we use to date every
@@ -679,20 +697,19 @@ e2e:playwright:
 # pipe-to-shell), authenticate to registries, then invoke goreleaser.
 
 .goreleaser-base:
-  # image-pin: 2026-05-16 @ docker:25 + docker:25-dind; refresh per cadence.
+  # image-pin: 2026-05-16 @ docker:25 used only as the Alpine toolchain
+  # base (apk add go/node/npm below) — NOT for dind. Image publishing
+  # moved to the daemonless kaniko `docker:release` job and GoReleaser
+  # runs with `--skip=docker`, so this job never needs a Docker daemon.
+  # Refresh per scripts/check-image-pins.sh cadence.
   image: docker:25
-  services:
-    - docker:25-dind
-  # `linux` rules out Windows; `k8s` rules out Lab/OVH runners where
-  # dind has been unreliable across v0.1.9–v0.1.13. Mirrors the
-  # sibling ../geode default pinning.
+  # `linux` rules out Windows; `k8s` rules out Lab/OVH runners. Mirrors
+  # the sibling ../geode default pinning.
   tags:
     - company
     - k8s
     - linux
   variables:
-    DOCKER_TLS_CERTDIR: ''
-    DOCKER_BUILDKIT: '1'
     GIT_DEPTH: '0'
     # The alpine `go` package ships with GOTOOLCHAIN=local (no
     # auto-download), but our go.mod requires Go 1.26.3 while alpine
@@ -702,6 +719,10 @@ e2e:playwright:
     # process itself; this variable governs the pre-build "loading
     # go mod information" step that runs with the shell env.
     GOTOOLCHAIN: auto
+    # GoReleaser's docker pipe is always skipped in CI (kaniko owns
+    # image publishing — see docker:release). Exported defensively so
+    # any eager template eval of the retained dockers: config is inert.
+    SKIP_DOCKERHUB: 'true'
   before_script:
     # Tools: alpine package set + node (for the npm-build before-hook)
     # + go (the goreleaser default builder for the geode-ui binary;
@@ -714,47 +735,6 @@ e2e:playwright:
       tar -xzf /tmp/gr.tgz -C /tmp goreleaser
       install -m 0755 /tmp/goreleaser /usr/local/bin/goreleaser
       goreleaser --version
-    # Best-effort dind setup. v0.1.9–v0.1.14 hit repeated "Cannot
-    # connect to the Docker daemon" failures because the company
-    # runner's dind sidecar is unreliable — even on the k8s pool,
-    # even with a 180s wait. The release path now uses
-    # `goreleaser release --skip=docker`, so we only need dind for
-    # the OPTIONAL container-image push to GitLab Container Registry
-    # + Docker Hub. If dind doesn't come up within 30s, the script
-    # disables all docker push steps and continues to the .deb /
-    # .rpm / binary build + apt-publish path. Operators can re-cut
-    # a release later (once dind is fixed) for the container images.
-    - |
-      DIND_READY=0
-      for i in $(seq 1 30); do
-        if docker info >/dev/null 2>&1; then
-          echo "dind ready after ${i}s"
-          DIND_READY=1
-          break
-        fi
-        sleep 1
-      done
-      if [ "$DIND_READY" = "0" ]; then
-        echo "⚠ dind never came up — falling back to --skip=docker mode"
-      fi
-      echo "DIND_READY=$DIND_READY" > /tmp/dind.env
-    # Docker login + buildx ONLY when dind is up. Both wrapped in
-    # `|| true` so a transient login failure doesn't kill the job.
-    - |
-      . /tmp/dind.env
-      export SKIP_DOCKERHUB=true
-      if [ "$DIND_READY" = "1" ]; then
-        docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY" || true
-        if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
-          if echo "$DOCKERHUB_TOKEN" | docker login docker.io -u "$DOCKERHUB_USERNAME" --password-stdin; then
-            export SKIP_DOCKERHUB=false
-            echo "✓ Docker Hub login successful"
-          fi
-        fi
-        docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null || true
-        docker buildx inspect --bootstrap || true
-      fi
-      echo "SKIP_DOCKERHUB=$SKIP_DOCKERHUB" > /tmp/dockerhub.env
     # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
     - npm ci
     # go.mod has `replace geodedb.com/geode => ../geode-client-go`,
@@ -783,17 +763,13 @@ goreleaser-snapshot:
       artifacts: false
   timeout: 1h
   script:
-    - . /tmp/dind.env
-    - . /tmp/dockerhub.env
-    - echo "DIND_READY=${DIND_READY} SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
     # `--snapshot` skips git-tag validation, marks the build as a snapshot,
-    # and short-circuits any release-publish step. Container images are
-    # still pushed when dind is up (snapshot tags carry the
-    # `-snapshot-<sha>` suffix); skipped otherwise.
-    - |
-      SKIP_FLAG=""
-      if [ "$DIND_READY" = "0" ]; then SKIP_FLAG="--skip=docker"; fi
-      goreleaser release --snapshot --clean --timeout 60m $SKIP_FLAG
+    # and short-circuits any release-publish step. Image publishing is
+    # owned by the daemonless kaniko `docker:release` job (tag pipelines
+    # only); main-branch e2e images come from `docker:build`. The snapshot
+    # job therefore only produces local binary/nfpm artifacts and always
+    # skips GoReleaser's (dind-dependent) docker pipe.
+    - goreleaser release --snapshot --clean --timeout 60m --skip=docker
     - ls -la dist/
   artifacts:
     paths:
@@ -822,25 +798,133 @@ goreleaser-release:
       optional: true
   timeout: 2h
   script:
-    - . /tmp/dockerhub.env
     # The single quotes are load-bearing: the `: ` inside the message would
     # otherwise turn the whole line into a YAML mapping (key=`echo "Building
-    # release`, value=`...`). See the matching snapshot job above for the
-    # bare-form template that's safe because it has no `: `.
-    - . /tmp/dind.env
-    - 'echo "Building release: ${CI_COMMIT_TAG} (DIND_READY=${DIND_READY} SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
-    # When dind didn't come up, skip the dockers stage so the .deb /
-    # .rpm / binary path still produces artifacts for apt-publish.
-    # Container images get a follow-up release once dind is fixed.
-    - |
-      SKIP_FLAG=""
-      if [ "$DIND_READY" = "0" ]; then SKIP_FLAG="--skip=docker"; fi
-      goreleaser release --clean --timeout 120m $SKIP_FLAG
+    # release`, value=`...`).
+    - 'echo "Building release: ${CI_COMMIT_TAG} (container image delegated to docker:release / kaniko)"'
+    # GoReleaser builds ONLY the binary + nfpm (.deb/.rpm/.apk) artifacts and
+    # publishes the GitLab Release. The deployable container image is built
+    # and pushed by the daemonless kaniko `docker:release` job, which consumes
+    # this job's dist/ binary — so the unreliable dind/buildx docker pipe is
+    # always skipped here. The dockers:/docker_manifests: config is retained
+    # in .goreleaser.yaml for local multi-arch builds and a future buildx
+    # revival, but CI never runs it.
+    - goreleaser release --clean --timeout 120m --skip=docker
     - ls -la dist/
   artifacts:
     paths:
       - dist/
     expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+# ============================================================================
+# RELEASE STAGE - Container image (kaniko, daemonless — no DinD)
+# ============================================================================
+#
+# Publishes the deployable geode-ui container image on every `v*` tag.
+#
+# WHY KANIKO (not GoReleaser's buildx/dind path): the company k8s runner's
+# docker:dind sidecar was unreliable across v0.1.9–v0.1.28; whenever it
+# failed, goreleaser-release silently fell back to `--skip=docker` and the
+# release shipped .deb/.rpm/binary artifacts but NO container image — so the
+# arda cluster's ArgoCD Image Updater (which watches
+# registry.gitlab.com/devnw/codepros/geode/geode-ui for `^\d+\.\d+\.\d+$`
+# tags) had nothing new to deploy (v0.1.28 had to be built + pushed by hand).
+# Kaniko builds + pushes OCI images from userspace with NO Docker daemon, so
+# it runs reliably on the same k8s pool. Guarded by
+# scripts/check-release-image.sh.
+#
+# Docker Hub: set protected CI vars DOCKERHUB_USERNAME + DOCKERHUB_TOKEN
+# (like the sibling ../geode server) to ALSO push docker.io/geodedb/geode-ui.
+# When unset, only the GitLab Container Registry (the deploy source of truth)
+# is pushed — the release still produces a deployable image.
+docker:release:
+  stage: release
+  # image-pin: 2026-06-03 @ kaniko v1.23.2-debug — daemonless image builder
+  # (no dind). The `-debug` tag ships a busybox shell so before/script can
+  # stage the build context. Refresh per scripts/check-image-pins.sh cadence.
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: ['']
+  tags:
+    - company
+    - k8s
+    - linux
+  interruptible: false
+  timeout: 1h
+  # Consume goreleaser-release's dist/ — it holds the production geode-ui
+  # binary (built from the safe, no-E2E-backdoor SPA bundle that goreleaser's
+  # before:hooks `npm run build` produces and embeds). deploy/Dockerfile.release
+  # just COPYs that binary into a hardened debian-slim runtime image, so the
+  # production bundle's dead-code-eliminated Playwright backdoor stays out
+  # (unlike deploy/Dockerfile, which is the E2E image — see GAP-S2 / #115).
+  needs:
+    - job: goreleaser-release
+      artifacts: true
+  # Skip the default node before_script (npm registry setup): kaniko's busybox
+  # image has no npm and this job needs none.
+  before_script: []
+  cache: []
+  script:
+    - |
+      set -eu
+      VERSION="${CI_COMMIT_TAG#v}"
+      echo "Publishing geode-ui container image: version=${VERSION}"
+
+      # Locate the production linux/amd64 binary GoReleaser placed in dist/.
+      # (arda nodes are amd64; arm64/alpine variants are a follow-up — they
+      # only ever published when dind happened to work, which it did not.)
+      BIN="$(find dist -type f -name geode-ui -path '*linux_amd64*' | head -n1 || true)"
+      if [ -z "${BIN}" ]; then
+        echo "FATAL: no linux/amd64 geode-ui binary in dist/ (goreleaser-release artifact)"
+        ls -R dist || true
+        exit 1
+      fi
+      echo "Using binary: ${BIN}"
+
+      # Stage a minimal build context: Dockerfile.release expects the binary
+      # at the context root as `geode-ui`.
+      mkdir -p /tmp/imgctx
+      cp "${BIN}" /tmp/imgctx/geode-ui
+      cp deploy/Dockerfile.release /tmp/imgctx/Dockerfile
+
+      # Kaniko registry auth: GitLab Container Registry always; Docker Hub
+      # only when both creds are present.
+      mkdir -p /kaniko/.docker
+      gitlab_auth="$(printf '%s:%s' "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')"
+      {
+        printf '{"auths":{'
+        printf '"%s":{"auth":"%s"}' "${CI_REGISTRY}" "${gitlab_auth}"
+        if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+          dh_auth="$(printf '%s:%s' "${DOCKERHUB_USERNAME}" "${DOCKERHUB_TOKEN}" | base64 | tr -d '\n')"
+          printf ',"https://index.docker.io/v1/":{"auth":"%s"}' "${dh_auth}"
+        fi
+        printf '}}'
+      } > /kaniko/.docker/config.json
+
+      # Destinations: the plain-semver tag ArgoCD Image Updater watches, plus
+      # :latest. Docker Hub mirrors when creds are set.
+      set -- \
+        --destination "${CI_REGISTRY_IMAGE}:${VERSION}" \
+        --destination "${CI_REGISTRY_IMAGE}:latest"
+      if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+        set -- "$@" \
+          --destination "docker.io/geodedb/geode-ui:${VERSION}" \
+          --destination "docker.io/geodedb/geode-ui:latest"
+        echo "Docker Hub push: ENABLED"
+      else
+        echo "Docker Hub push: SKIPPED (set DOCKERHUB_USERNAME + DOCKERHUB_TOKEN to enable)"
+      fi
+
+      /kaniko/executor \
+        --context "dir:///tmp/imgctx" \
+        --dockerfile "Dockerfile" \
+        --label "org.opencontainers.image.version=${VERSION}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.created=${CI_JOB_STARTED_AT}" \
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
+        "$@"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 

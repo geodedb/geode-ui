@@ -113,6 +113,18 @@ repos:
     pass_filenames: false
     files: ^(\.gitlab-ci\.yml|scripts/bench-gate\.sh)$
 
+      # Release-image publishing guard: the release pipeline must publish a
+      # deployable container image via the daemonless kaniko docker:release
+      # job (no dind), and goreleaser-release must delegate images with
+      # --skip=docker. Locks out the regression that left v0.1.9–v0.1.28
+      # shipping with no auto-deployable image when dind flaked.
+  - id: check-release-image
+    name: release-image publishing guard
+    entry: scripts/check-release-image.sh .gitlab-ci.yml
+    language: system
+    pass_filenames: false
+    files: ^\.gitlab-ci\.yml$
+
       # Error-code seam guard: every server error code the SPA branches on
       # (exported from src/api/serverErrorCodes.ts) must still exist as an
       # ErrCode* constant in internal/server/errorcodes.go. Catches silent
