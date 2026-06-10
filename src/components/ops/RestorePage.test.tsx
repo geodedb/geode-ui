@@ -100,7 +100,7 @@ test('submitting the form fires client.restore with file + target_time', async (
   await waitFor(() => {
     expect(restoreFn).toHaveBeenCalledWith({
       file: 'snap.tar.gz',
-      target_time: '2025-01-01T00:00:00Z',
+      targetTime: '2025-01-01T00:00:00Z',
     })
   })
   expect(await screen.findByRole('status')).toHaveTextContent(

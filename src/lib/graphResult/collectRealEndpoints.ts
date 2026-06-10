@@ -1,4 +1,5 @@
 import type { GqlEdge, GqlNode } from '../graphResult'
+import { edgeEndNode, edgeStartNode } from '../graphResult'
 
 // collectRealEndpoints builds two sets out of graph_summary:
 //
@@ -22,8 +23,10 @@ export function collectRealEndpoints(
   const danglingIds = new Set<number>()
   if (Array.isArray(edges)) {
     edges.forEach((e) => {
-      if (!realNodeIds.has(e.start_node)) danglingIds.add(e.start_node)
-      if (!realNodeIds.has(e.end_node)) danglingIds.add(e.end_node)
+      const s = edgeStartNode(e)
+      const t = edgeEndNode(e)
+      if (!realNodeIds.has(s)) danglingIds.add(s)
+      if (!realNodeIds.has(t)) danglingIds.add(t)
     })
   }
   return { realNodeIds, danglingIds }

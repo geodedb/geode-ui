@@ -173,8 +173,42 @@ func (c *Client) do(req *http.Request, authMode string) (*http.Response, error) 
 	return c.httpClient.Do(req)
 }
 
+// resolveClientAuthMode reduces a route's auth expression to the single
+// application-layer credential the client can present. Single-token values
+// pass through. For a composite expression (e.g. "cac || jwt", "mtls && jwt")
+// the client can only inject an app-layer credential — mtls/cac/piv are TLS
+// client-certificate gates satisfied by the transport, not a header — so it
+// applies the first app-layer token found (jwt > cookie > api_key) and injects
+// nothing for a transport-only expression. The server enforces the full composite.
+func resolveClientAuthMode(authMode string) string {
+	raw := strings.TrimSpace(strings.ToLower(authMode))
+	if !strings.ContainsAny(raw, "|&()") {
+		return raw
+	}
+	tokens := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '|' || r == '&' || r == '(' || r == ')' || r == ' '
+	})
+	has := func(t string) bool {
+		for _, tk := range tokens {
+			if tk == t {
+				return true
+			}
+		}
+		return false
+	}
+	for _, pref := range []string{"jwt", "cookie", "api_key"} {
+		if has(pref) {
+			return pref
+		}
+	}
+	if has("public") || has("none") {
+		return "none"
+	}
+	return ""
+}
+
 func (c *Client) applyHTTPAuth(req *http.Request, authMode string) error {
-	switch strings.TrimSpace(strings.ToLower(authMode)) {
+	switch resolveClientAuthMode(authMode) {
 	case "", "none", "unauthenticated":
 		return nil
 	case "jwt":
@@ -194,6 +228,10 @@ func (c *Client) applyHTTPAuth(req *http.Request, authMode string) error {
 			return ErrMissingAPIKeySecret
 		}
 		return securex.SignAPIKeyRequest(req, c.apiKeySecret, time.Now())
+	case "cookie":
+		// Cookie auth: the session cookie is carried by the http.Client's
+		// cookie jar (configure one via WithHTTPClient). Nothing to inject here.
+		return nil
 	default:
 		return fmt.Errorf("unsupported auth mode %q", authMode)
 	}
@@ -223,7 +261,7 @@ func (c *Client) websocketHeaders(rawURL, authMode string) (http.Header, error) 
 	if headers == nil {
 		headers = make(http.Header)
 	}
-	switch strings.TrimSpace(strings.ToLower(authMode)) {
+	switch resolveClientAuthMode(authMode) {
 	case "", "none", "unauthenticated":
 		return headers, nil
 	case "jwt":

@@ -6,12 +6,13 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
-	"geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/gen/pkg/mcpx"
 	"geodedb.com/geode-ui/gen/pkg/obsx"
+	"geodedb.com/geode-ui/gen/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -44,9 +45,21 @@ func NewTools(srv MCPServerInterface) map[string]mcpx.Tool {
 				trace.WithAttributes(attribute.String("mcp.tool", "query")))
 			defer _span.End()
 			_start := time.Now()
+			// APPSEC-Gen-F-009: enforce a per-tool body cap at the
+			// jsontext.Value level so any transport (HTTP, WebSocket,
+			// stdio) inherits the same defense. 1 MiB matches the HTTP
+			// path's default; tighter caps are tracked via the per-tool
+			// MaxBodyBytes config.
+			if len(p) > 1048576 {
+				return nil, fmt.Errorf("mcp tool query: payload exceeds %d bytes", 1048576)
+			}
 			var req types.QueryReq
-			if err := json.Unmarshal(p, &req); err != nil { return nil, err }
-			if err := req.Valid(); err != nil { return nil, err }
+			if err := json.Unmarshal(p, &req); err != nil {
+				return nil, err
+			}
+			if err := req.Valid(); err != nil {
+				return nil, err
+			}
 			resp, err := srv.Query(ctx, &req)
 			_dur := float64(time.Since(_start).Milliseconds())
 			if err != nil {
@@ -62,31 +75,74 @@ func NewTools(srv MCPServerInterface) map[string]mcpx.Tool {
 	}
 }
 
+// ToolDescriptors returns the MCP tools/list metadata for every generated
+// tool: name, optional title/description, and the inputSchema (a JSON Schema
+// object that is the union of the tool's body, path, and query parameters).
+// Register passes these to mcpx.SetToolDescriptors so tools/list advertises a
+// spec-compliant descriptor for each tool.
+func ToolDescriptors() []mcpx.ToolDescriptor {
+	return []mcpx.ToolDescriptor{
+		{
+			Name:        "query",
+			InputSchema: jsontext.Value(`{"properties":{"graph":{"example":"x","maxLength":256,"pattern":"^.*$","type":"string"},"page_size":{"example":1,"format":"int32","maximum":10000,"minimum":1,"type":"integer"},"params":{"example":{},"type":"object"},"statement":{"example":"x","maxLength":524288,"minLength":1,"pattern":"^.*$","type":"string"},"timeout_ms":{"example":1,"format":"int32","maximum":600000,"minimum":1,"type":"integer"}},"required":["statement"],"type":"object"}`),
+		},
+	}
+}
+
 // MCPHandler is an http.Handler for MCP JSON-RPC. Set by Register.
 var MCPHandler http.Handler
+
+// MCPWSHandler is an http.Handler for MCP over WebSocket. Set by Register.
+var MCPWSHandler http.Handler
 
 // MCPSTDIOFunc starts the MCP stdio JSON-RPC loop. Set by Register.
 var MCPSTDIOFunc func() error
 
 // Register configures the MCP tools with the given server implementation.
 // Call this during application startup before serving.
+//
+// GEN-2026-05-29-06: the rate/burst arguments to mcpx.SetToolBuckets are
+// derived from the operator's MCP config block (security.MCP.Rate /
+// MCP.Burst). When the config leaves them unset the generator emits the
+// historic defaults (100 rps / 20 burst) so existing consumers keep
+// working unchanged; operators who need a tighter ceiling for a
+// sensitive MCP surface can now configure it at codegen time.
 func Register(srv MCPServerInterface) {
 	tools := NewTools(srv)
 	mcpx.SetToolBuckets(tools, 100, 20)
+	mcpx.SetToolDescriptors(ToolDescriptors())
+	mcpx.SetServerInfo("Generated API", "1.0.0")
 	MCPHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mcpx.HandleHTTP(w, r, tools)
+	})
+	MCPWSHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mcpx.ServeWS(w, r, tools)
 	})
 	MCPSTDIOFunc = func() error { return mcpx.ServeSTDIO(tools) }
 }
 
 // HandleMCPHTTP is an http.Handler for MCP JSON-RPC. Call Register first.
 func HandleMCPHTTP(w http.ResponseWriter, r *http.Request) {
-	if MCPHandler != nil { MCPHandler.ServeHTTP(w, r); return }
+	if MCPHandler != nil {
+		MCPHandler.ServeHTTP(w, r)
+		return
+	}
+	http.Error(w, "mcp not configured: call Register first", 503)
+}
+
+// HandleMCPWS is an http.Handler for MCP over WebSocket. Call Register first.
+func HandleMCPWS(w http.ResponseWriter, r *http.Request) {
+	if MCPWSHandler != nil {
+		MCPWSHandler.ServeHTTP(w, r)
+		return
+	}
 	http.Error(w, "mcp not configured: call Register first", 503)
 }
 
 // ServeSTDIO starts the MCP stdio JSON-RPC loop. Call Register first.
 func ServeSTDIO() error {
-	if MCPSTDIOFunc != nil { return MCPSTDIOFunc() }
+	if MCPSTDIOFunc != nil {
+		return MCPSTDIOFunc()
+	}
 	return errors.New("mcp not configured: call Register first")
 }

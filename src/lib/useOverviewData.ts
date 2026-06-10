@@ -387,14 +387,14 @@ export function useOverviewData(): OverviewData {
         const [nodesResp, edgesResp] = await Promise.all([
           client.query({
             statement: 'MATCH (n) RETURN count(n) AS c',
-            page_size: 1000,
-            timeout_ms: 30000,
+            pageSize: 1000,
+            timeoutMs: 30000,
             graph,
           }),
           client.query({
             statement: 'MATCH ()-[r]->() RETURN count(r) AS c',
-            page_size: 1000,
-            timeout_ms: 30000,
+            pageSize: 1000,
+            timeoutMs: 30000,
             graph,
           }),
         ])
@@ -496,14 +496,14 @@ export function useOverviewData(): OverviewData {
       Promise.all([
         client.query({
           statement: 'MATCH (n) RETURN count(n) AS c',
-          page_size: 1000,
-          timeout_ms: 30000,
+          pageSize: 1000,
+          timeoutMs: 30000,
           graph,
         }),
         client.query({
           statement: 'MATCH ()-[r]->() RETURN count(r) AS c',
-          page_size: 1000,
-          timeout_ms: 30000,
+          pageSize: 1000,
+          timeoutMs: 30000,
           graph,
         }),
       ])

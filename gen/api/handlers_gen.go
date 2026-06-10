@@ -7,18 +7,67 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
 	"geodedb.com/geode-ui/gen/pkg/gen"
-	"geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/gen/pkg/httpx"
 	"geodedb.com/geode-ui/gen/pkg/obsx"
 	"geodedb.com/geode-ui/gen/pkg/securex"
+	"geodedb.com/geode-ui/gen/pkg/securex/csrfx"
+	"geodedb.com/geode-ui/gen/types"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ErrNotImplemented is returned by UnimplementedServer methods.
-var ErrNotImplemented = errors.New("not implemented")
+// Generated handler error sentinels. Returning one of these from a
+// ServerInterface method maps to the matching HTTP status code via the
+// per-route error-mapping switch. Anything else non-nil falls through to
+// 500. A *StatusError lets a handler carry a custom code + message while
+// still using the generated response envelope.
+//
+// A-NEW-4 (docs/GENERATOR_BUGS.md).
+var ErrNotImplemented = errors.New("not implemented") // → 501
+var ErrNotFound = errors.New("not found")             // → 404
+var ErrConflict = errors.New("conflict")              // → 409
+var ErrUnprocessable = errors.New("unprocessable")    // → 422
+var ErrForbidden = errors.New("forbidden")            // → 403 (post-auth business denial)
+var ErrBadRequest = errors.New("bad request")         // → 400 (post-validation business 400)
+
+// StatusError lets a handler return a custom HTTP status code + message
+// while still using the standard JSON error envelope. Use this for codes
+// the sentinel set does not cover (410 Gone, 423 Locked, etc.) or when
+// the message needs to be more specific than the sentinel's default text.
+// Optionally wrap a sentinel via Err for callers that errors.Is them.
+type StatusError struct {
+	Code    int
+	Message string
+	Err     error
+}
+
+func (e *StatusError) Error() string { return e.Message }
+func (e *StatusError) Unwrap() error { return e.Err }
+
+// OAuth2Error is the RFC 6749 §5.2 error response shape, used for OIDC /
+// OAuth2 protocol routes (oidc_token, oidc_authorize, oidc_userinfo,
+// oidc_revoke, oidc_introspect, etc.). Returning it from a ServerInterface
+// method causes the generated wrapper to render
+// {"error": Code, "error_description": Description, "error_uri": URI}
+// with Cache-Control: no-store and Pragma: no-cache per RFC 6749 §5.1.
+//
+// Status defaults to 400 when zero — use 401 for invalid_client per
+// §5.2.
+//
+// A-NEW-5 (docs/GENERATOR_BUGS.md).
+type OAuth2Error struct {
+	Code        string
+	Description string
+	URI         string
+	Status      int
+	Err         error
+}
+
+func (e *OAuth2Error) Error() string { return e.Code + ": " + e.Description }
+func (e *OAuth2Error) Unwrap() error { return e.Err }
 
 // ServerInterface defines the business logic contract for generated HTTP endpoints.
 // Embed UnimplementedServer and override only the methods you need.
@@ -76,7 +125,7 @@ type ServerInterface interface {
 	Query(w http.ResponseWriter, r *http.Request, req *types.QueryReq) error
 	Restore(w http.ResponseWriter, r *http.Request, req *types.RestoreReq) (*types.Empty, error)
 	GetRoles(w http.ResponseWriter, r *http.Request, req *types.Empty) (*types.RoleList, error)
-	PostApiRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error)
+	PostAPIRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error)
 	DeleteRole(w http.ResponseWriter, r *http.Request, req *types.RoleParam) (*types.Empty, error)
 	GetRole(w http.ResponseWriter, r *http.Request, req *types.RoleParam) (*types.Role, error)
 	Tx(w http.ResponseWriter, r *http.Request, req *types.TxBeginReq) (*types.TxBeginResp, error)
@@ -98,6 +147,14 @@ type ServerInterface interface {
 
 // UnimplementedServer returns 501 Not Implemented for every endpoint.
 // Embed it in your server struct and override the methods you implement.
+//
+// Task 4.2 (GENWA-R1/C1): for the four webauthn_* profiles the body is
+// specialized to dispatch the ceremony into the package-level
+// webAuthnSrv (built by RegisterGeneratedAPI from security.webauthn).
+// Consumers that embed UnimplementedServer inherit a working ceremony
+// out of the box; consumers that override the method on their own
+// ServerInterface impl still own the dispatch (Pattern A — preserves
+// the override surface).
 type UnimplementedServer struct{}
 
 func (UnimplementedServer) Audit(_ http.ResponseWriter, _ *http.Request, _ *types.AuditQuery) (*types.AuditList, error) {
@@ -236,7 +293,7 @@ func (UnimplementedServer) GetRoles(_ http.ResponseWriter, _ *http.Request, _ *t
 	return nil, ErrNotImplemented
 }
 
-func (UnimplementedServer) PostApiRoles(_ http.ResponseWriter, _ *http.Request, _ *types.RoleCreateReq) (*types.Role, error) {
+func (UnimplementedServer) PostAPIRoles(_ http.ResponseWriter, _ *http.Request, _ *types.RoleCreateReq) (*types.Role, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -308,7 +365,6 @@ func (UnimplementedServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *ty
 	return nil, ErrNotImplemented
 }
 
-
 // RouteInfo describes one generated HTTP route for catch-all handlers.
 type RouteInfo struct {
 	Method             string
@@ -330,6 +386,27 @@ type RouteInfo struct {
 	RequiredRoles      []string
 	RequiredScopes     []string
 	RequiredAttributes map[string]string
+	// APPSEC-Gen-F-006: surface the per-route WebAuthn ceremony policy
+	// (ceremony, phase, attestation, user_verification, discoverable)
+	// so catch-all handlers can read it without re-parsing the config.
+	Webauthn *WebauthnInfo
+	// APPSEC-15 (Plan 02 follow-up): per-route mTLS CA bundle path so
+	// catch-all handlers can construct their own per-route
+	// mtlsx.Verifier. Empty when the operation declares no mtls block
+	// or no ca_bundle_path. Server-construction-time wiring still
+	// goes through api.WithMTLS for the listener.
+	MTLSCABundlePath string
+}
+
+// WebauthnInfo mirrors the per-route webauthn block (cmd/genapi
+// WebauthnContract). Nil when the route does not declare any ceremony.
+type WebauthnInfo struct {
+	Ceremony                string
+	Phase                   string
+	Attestation             string
+	AuthenticatorAttachment string
+	UserVerification        string
+	Discoverable            bool
 }
 
 // CatchAllServerInterface adapts one generic handler to the generated ServerInterface.
@@ -408,6 +485,8 @@ func (s catchAllServer) Audit(w http.ResponseWriter, r *http.Request, req *types
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -432,6 +511,8 @@ func (s catchAllServer) Login(w http.ResponseWriter, r *http.Request, req *types
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -456,6 +537,8 @@ func (s catchAllServer) GetBackups(w http.ResponseWriter, r *http.Request, req *
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -480,6 +563,8 @@ func (s catchAllServer) PostBackups(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -504,6 +589,8 @@ func (s catchAllServer) Cleanup(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -528,6 +615,8 @@ func (s catchAllServer) BackupUpload(w http.ResponseWriter, r *http.Request, req
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -552,6 +641,8 @@ func (s catchAllServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -576,6 +667,8 @@ func (s catchAllServer) GetFile(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -600,6 +693,8 @@ func (s catchAllServer) GetCapabilities(w http.ResponseWriter, r *http.Request, 
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -624,6 +719,8 @@ func (s catchAllServer) Grants(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -648,6 +745,8 @@ func (s catchAllServer) Revoke(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -672,6 +771,8 @@ func (s catchAllServer) Graphs(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -696,6 +797,8 @@ func (s catchAllServer) Constraints(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -720,6 +823,8 @@ func (s catchAllServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *t
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -744,6 +849,8 @@ func (s catchAllServer) Indexes(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -768,6 +875,8 @@ func (s catchAllServer) Labels(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -792,6 +901,8 @@ func (s catchAllServer) GetMigrations(w http.ResponseWriter, r *http.Request, re
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -816,6 +927,8 @@ func (s catchAllServer) PostMigrations(w http.ResponseWriter, r *http.Request, r
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -840,6 +953,8 @@ func (s catchAllServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -864,6 +979,8 @@ func (s catchAllServer) MigrationUpload(w http.ResponseWriter, r *http.Request, 
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -888,6 +1005,8 @@ func (s catchAllServer) Sign(w http.ResponseWriter, r *http.Request, req *types.
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -912,6 +1031,8 @@ func (s catchAllServer) GetPolicies(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -936,6 +1057,8 @@ func (s catchAllServer) PostPolicies(w http.ResponseWriter, r *http.Request, req
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -960,6 +1083,8 @@ func (s catchAllServer) DeleteName(w http.ResponseWriter, r *http.Request, req *
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -984,6 +1109,8 @@ func (s catchAllServer) GetName(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1008,6 +1135,8 @@ func (s catchAllServer) GetProfiles(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1032,6 +1161,8 @@ func (s catchAllServer) PostProfiles(w http.ResponseWriter, r *http.Request, req
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1056,6 +1187,8 @@ func (s catchAllServer) Public(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1080,6 +1213,8 @@ func (s catchAllServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, 
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1104,6 +1239,8 @@ func (s catchAllServer) GetProfileid(w http.ResponseWriter, r *http.Request, req
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1128,6 +1265,8 @@ func (s catchAllServer) PatchProfileid(w http.ResponseWriter, r *http.Request, r
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1152,6 +1291,8 @@ func (s catchAllServer) Query(w http.ResponseWriter, r *http.Request, req *types
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1176,6 +1317,8 @@ func (s catchAllServer) Restore(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1200,15 +1343,17 @@ func (s catchAllServer) GetRoles(w http.ResponseWriter, r *http.Request, req *ty
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
-func (s catchAllServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error) {
+func (s catchAllServer) PostAPIRoles(w http.ResponseWriter, r *http.Request, req *types.RoleCreateReq) (*types.Role, error) {
 	return callCatchAll[*types.Role](s.handler, w, r, RouteInfo{
 		Method:             "POST",
 		Path:               "/api/v1/roles",
 		MuxPattern:         "POST /api/v1/roles",
-		MethodName:         "PostApiRoles",
+		MethodName:         "PostAPIRoles",
 		BodyMode:           "json",
 		Auth:               "jwt",
 		Surface:            "public",
@@ -1224,6 +1369,8 @@ func (s catchAllServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1248,6 +1395,8 @@ func (s catchAllServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1272,6 +1421,8 @@ func (s catchAllServer) GetRole(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1296,6 +1447,8 @@ func (s catchAllServer) Tx(w http.ResponseWriter, r *http.Request, req *types.Tx
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1320,6 +1473,8 @@ func (s catchAllServer) Commit(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1344,6 +1499,8 @@ func (s catchAllServer) Rollback(w http.ResponseWriter, r *http.Request, req *ty
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1368,6 +1525,8 @@ func (s catchAllServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1392,6 +1551,8 @@ func (s catchAllServer) GetUsers(w http.ResponseWriter, r *http.Request, req *ty
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1416,6 +1577,8 @@ func (s catchAllServer) PostUsers(w http.ResponseWriter, r *http.Request, req *t
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1440,6 +1603,8 @@ func (s catchAllServer) DeleteUsername(w http.ResponseWriter, r *http.Request, r
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1464,6 +1629,8 @@ func (s catchAllServer) GetUsername(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1488,6 +1655,8 @@ func (s catchAllServer) PatchUsername(w http.ResponseWriter, r *http.Request, re
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1512,6 +1681,8 @@ func (s catchAllServer) Disable(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1536,6 +1707,8 @@ func (s catchAllServer) Enable(w http.ResponseWriter, r *http.Request, req *type
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1560,6 +1733,8 @@ func (s catchAllServer) Password(w http.ResponseWriter, r *http.Request, req *ty
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1584,6 +1759,8 @@ func (s catchAllServer) Permissions(w http.ResponseWriter, r *http.Request, req 
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1608,6 +1785,8 @@ func (s catchAllServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request
 		RequiredRoles:      []string{"admin"},
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
@@ -1632,34 +1811,84 @@ func (s catchAllServer) Healthz(w http.ResponseWriter, r *http.Request, req *typ
 		RequiredRoles:      []string(nil),
 		RequiredScopes:     []string(nil),
 		RequiredAttributes: map[string]string(nil),
+		Webauthn:           nil,
+		MTLSCABundlePath:   "",
 	}, req)
 }
 
 // APIOptions configures cross-cutting concerns for generated routes.
 type APIOptions struct {
-	Auth        func(*http.Request) error
-	AuthJWT     func(*http.Request) error
+	Auth    func(*http.Request) error
+	AuthJWT func(*http.Request) error
 	// AuthMTLS is invoked for routes whose config declared auth: "mtls"
 	// AFTER the basic securex.VerifyMTLS gate has accepted the request.
 	// Use this hook to enforce deployment-specific issuer-label policy
 	// (PIV/CAC/custom) using policy.SupportedIssuers. Returning a non-nil
 	// error rejects the request with 401.
-	AuthMTLS    func(*http.Request, securex.MTLSPolicy) error
-	GlobalRate  float64
-	GlobalBurst float64
+	AuthMTLS func(*http.Request, securex.MTLSPolicy) error
+	// AuthWebhook resolves a per-route HMAC secret keyed on the
+	// WebhookPolicy.Name supplied at codegen. Returning (nil, err)
+	// rejects the request with a generic 401 envelope before any
+	// signature check. The generator wires server.go.tmpl to populate
+	// this from rc.Security.Webhooks; consumers that supply their own
+	// resolver (e.g. a Vault-backed lookup) pass it via
+	// APIOptions{AuthWebhook: myFunc}.
+	AuthWebhook func(name string) ([]byte, error)
+	// CookieName is the name of the HttpOnly cookie carrying the session JWT
+	// for routes with auth: "cookie". Empty falls back to "session" at
+	// request time. Wired by server_lib from security.auth.cookie_name.
+	CookieName string
+	// CSRF, when non-nil, enforces signed double-submit CSRF tokens on
+	// cookie-authenticated state-changing requests and powers the issuance
+	// endpoint. Wired by server_lib from security.csrf.
+	CSRF           *csrfx.Signer
+	CSRFCookieName string
+	CSRFHeaderName string
+	// CSRFSessionID extracts the session identifier a token is bound to
+	// (default: verified claims Subject).
+	CSRFSessionID func(*http.Request) string
+	GlobalRate    float64
+	GlobalBurst   float64
 }
 
 // RegisterGeneratedAPI registers generated HTTP routes with validation and middleware.
+//
+// GAP-0076: when the configuration declares at least one route with
+// auth: "jwt" but the caller supplied a nil opts.AuthJWT, this function
+// panics with a fmt.Errorf wrapping securex.ErrAuthVerifierRequired
+// BEFORE any route is registered. The same guard fires for auth:
+// "api_key" + nil opts.Auth via securex.ErrAuthAPIKeyRequired. Use
+// securex.NewTestVerifier() as the unit-test escape hatch.
 func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptions) {
+	// GAP-0076: bootstrap-fail on nil JWT verifier when the spec declares
+	// any route with auth: "jwt". Panic at registration time so the
+	// misconfiguration cannot ship -- a per-request 401 fallback masked
+	// "forgot to wire AuthJWT" as "rejected by the verifier". Cookie routes
+	// (auth: "cookie") also depend on opts.AuthJWT: they lift the session
+	// JWT from the HttpOnly cookie into the Authorization header and reuse
+	// the same verifier, so this guard fires for them too.
+	if opts.AuthJWT == nil {
+		panic(fmt.Errorf("%w", securex.ErrAuthVerifierRequired))
+	}
 	// globalRateBkt is a single server-wide aggregate token bucket shared by
 	// every generated route. It is a coarse ceiling enforced per request (after
 	// auth/authz, just before the per-route bucket); it does not replace the
 	// per-route rateLimit buckets or the per-IP limiter. Disabled when
 	// opts.GlobalRate or opts.GlobalBurst is 0.
 	var globalRateBkt *securex.Bucket
-	if opts.GlobalRate > 0 && opts.GlobalBurst > 0 { globalRateBkt = securex.NewBucket(opts.GlobalRate, opts.GlobalBurst) }
+	if opts.GlobalRate > 0 && opts.GlobalBurst > 0 {
+		globalRateBkt = securex.NewBucket(opts.GlobalRate, opts.GlobalBurst)
+	}
 	var bkt_get_Audit *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Audit = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_Audit = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Audit",
 			trace.WithAttributes(
@@ -1668,37 +1897,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -1707,7 +1944,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -1716,21 +1954,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -1740,30 +1981,118 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Audit != nil { _allowed, _snap := bkt_get_Audit.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Audit != nil {
+			_allowed, _snap := bkt_get_Audit.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/audit")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.AuditQuery
-		req.Event = r.URL.Query().Get("event")
-		req.Since = r.URL.Query().Get("since")
-		req.User = r.URL.Query().Get("user")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Event = _q.Get("event")
+		req.Since = _q.Get("since")
+		req.User = _q.Get("user")
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Audit(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Login *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Login = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_Login = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Login",
 			trace.WithAttributes(
@@ -1772,39 +2101,138 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 4096 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Login != nil { _allowed, _snap := bkt_post_Login.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if err := r.ParseForm(); err != nil { writeJSONError(w, "bad request", 400); return }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Login != nil {
+			_allowed, _snap := bkt_post_Login.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/auth/login")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		var req types.LoginReq
 		req.Password = r.FormValue("password")
 		req.Profile = r.FormValue("profile")
 		req.Username = r.FormValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Login(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetBackups *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetBackups = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_GetBackups = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetBackups",
 			trace.WithAttributes(
@@ -1813,37 +2241,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -1852,7 +2288,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -1861,21 +2298,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -1885,27 +2325,111 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetBackups != nil { _allowed, _snap := bkt_get_GetBackups.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetBackups != nil {
+			_allowed, _snap := bkt_get_GetBackups.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetBackups(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostBackups *securex.Bucket
-	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_PostBackups = securex.NewBucket(10, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (10) > 0 {
+		bkt_post_PostBackups = securex.NewBucket(10, 10)
+	}
 	mux.HandleFunc("POST /api/v1/backups", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostBackups",
 			trace.WithAttributes(
@@ -1914,37 +2438,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 4096 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -1953,7 +2485,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -1962,21 +2495,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -1986,28 +2522,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostBackups != nil { _allowed, _snap := bkt_post_PostBackups.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostBackups != nil {
+			_allowed, _snap := bkt_post_PostBackups.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.BackupCreateReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostBackups(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Cleanup *securex.Bucket
-	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_Cleanup = securex.NewBucket(10, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (10) > 0 {
+		bkt_post_Cleanup = securex.NewBucket(10, 10)
+	}
 	mux.HandleFunc("POST /api/v1/backups/cleanup", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Cleanup",
 			trace.WithAttributes(
@@ -2016,37 +2640,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2055,7 +2687,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2064,21 +2697,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -2088,28 +2724,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Cleanup != nil { _allowed, _snap := bkt_post_Cleanup.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Cleanup != nil {
+			_allowed, _snap := bkt_post_Cleanup.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/cleanup")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Cleanup(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_BackupUpload *securex.Bucket
-	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_BackupUpload = securex.NewBucket(10, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (10) > 0 {
+		bkt_post_BackupUpload = securex.NewBucket(10, 10)
+	}
 	mux.HandleFunc("POST /api/v1/backups/upload", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "BackupUpload",
 			trace.WithAttributes(
@@ -2118,37 +2842,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 67108864 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 67108864)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 67108864 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 67108864)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2157,7 +2889,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2166,21 +2899,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -2190,40 +2926,134 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_BackupUpload != nil { _allowed, _snap := bkt_post_BackupUpload.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_BackupUpload != nil {
+			_allowed, _snap := bkt_post_BackupUpload.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/upload")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if err := r.ParseMultipartForm(_multipartMaxMemory); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		defer func() {
-			if r.MultipartForm != nil { _ = r.MultipartForm.RemoveAll() }
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
 		}()
 		var req types.BackupUploadReq
 		{
 			_f, _fh, _ferr := r.FormFile("file")
 			if _ferr == nil {
-				if _fh.Size > 67108864 { writeJSONError(w, fmt.Sprintf("file 'file' exceeds maximum size of 67108864 bytes"), 400); return }
+				if _fh.Size > 67108864 {
+					writeJSONError(w, fmt.Sprintf("file 'file' exceeds maximum size of 67108864 bytes"), 400)
+					return
+				}
 				req.File = &gen.FileUpload{Filename: _fh.Filename, Size: _fh.Size, ContentType: _fh.Header.Get("Content-Type"), Reader: _f}
 			} else {
-				writeJSONError(w, "missing required file 'file'", 400); return
+				writeJSONError(w, "missing required file 'file'", 400)
+				return
 			}
 		}
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.BackupUpload(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_delete_DeleteFile *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteFile = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_delete_DeleteFile = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("DELETE /api/v1/backups/{file}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteFile",
 			trace.WithAttributes(
@@ -2232,37 +3062,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2271,7 +3109,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2280,21 +3119,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -2304,29 +3146,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteFile != nil { _allowed, _snap := bkt_delete_DeleteFile.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_delete_DeleteFile != nil {
+			_allowed, _snap := bkt_delete_DeleteFile.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.BackupFileParam
-		req.File = r.URL.Query().Get("file")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.File = _q.Get("file")
 		req.File = r.PathValue("file")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.DeleteFile(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetFile *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetFile = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_GetFile = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/backups/{file}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetFile",
 			trace.WithAttributes(
@@ -2335,37 +3265,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2374,7 +3312,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2383,21 +3322,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -2407,29 +3349,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetFile != nil { _allowed, _snap := bkt_get_GetFile.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetFile != nil {
+			_allowed, _snap := bkt_get_GetFile.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/backups/{file}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.BackupFileParam
-		req.File = r.URL.Query().Get("file")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.File = _q.Get("file")
 		req.File = r.PathValue("file")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetFile(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetCapabilities *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetCapabilities = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetCapabilities = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/capabilities", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetCapabilities",
 			trace.WithAttributes(
@@ -2438,45 +3468,141 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetCapabilities != nil { _allowed, _snap := bkt_get_GetCapabilities.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetCapabilities != nil {
+			_allowed, _snap := bkt_get_GetCapabilities.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/capabilities")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetCapabilities(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Grants *securex.Bucket
-	if (30) > 0 && opts.GlobalBurst > 0 { bkt_post_Grants = securex.NewBucket(30, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (30) > 0 {
+		bkt_post_Grants = securex.NewBucket(30, 30)
+	}
 	mux.HandleFunc("POST /api/v1/grants", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Grants",
 			trace.WithAttributes(
@@ -2485,37 +3611,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2524,7 +3658,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2533,21 +3668,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -2557,28 +3695,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Grants != nil { _allowed, _snap := bkt_post_Grants.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Grants != nil {
+			_allowed, _snap := bkt_post_Grants.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.GrantReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Grants(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Revoke *securex.Bucket
-	if (30) > 0 && opts.GlobalBurst > 0 { bkt_post_Revoke = securex.NewBucket(30, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (30) > 0 {
+		bkt_post_Revoke = securex.NewBucket(30, 30)
+	}
 	mux.HandleFunc("POST /api/v1/grants/revoke", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Revoke",
 			trace.WithAttributes(
@@ -2587,37 +3813,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2626,7 +3860,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2635,21 +3870,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -2659,28 +3897,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Revoke != nil { _allowed, _snap := bkt_post_Revoke.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Revoke != nil {
+			_allowed, _snap := bkt_post_Revoke.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/grants/revoke")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.GrantReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Revoke(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Graphs *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Graphs = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_Graphs = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/graphs", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Graphs",
 			trace.WithAttributes(
@@ -2689,45 +4015,141 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Graphs != nil { _allowed, _snap := bkt_get_Graphs.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Graphs != nil {
+			_allowed, _snap := bkt_get_Graphs.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Graphs(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Constraints *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Constraints = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_Constraints = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/graphs/{graph}/constraints", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Constraints",
 			trace.WithAttributes(
@@ -2736,47 +4158,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Constraints != nil { _allowed, _snap := bkt_get_Constraints.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Constraints != nil {
+			_allowed, _snap := bkt_get_Constraints.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/constraints")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.GraphParam
-		req.Graph = r.URL.Query().Get("graph")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Graph = _q.Get("graph")
 		req.Graph = r.PathValue("graph")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Constraints(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_EdgeTypes *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_EdgeTypes = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_EdgeTypes = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/graphs/{graph}/edge-types", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "EdgeTypes",
 			trace.WithAttributes(
@@ -2785,47 +4307,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_EdgeTypes != nil { _allowed, _snap := bkt_get_EdgeTypes.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_EdgeTypes != nil {
+			_allowed, _snap := bkt_get_EdgeTypes.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/edge-types")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.GraphParam
-		req.Graph = r.URL.Query().Get("graph")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Graph = _q.Get("graph")
 		req.Graph = r.PathValue("graph")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.EdgeTypes(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Indexes *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Indexes = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_Indexes = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/graphs/{graph}/indexes", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Indexes",
 			trace.WithAttributes(
@@ -2834,47 +4456,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Indexes != nil { _allowed, _snap := bkt_get_Indexes.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Indexes != nil {
+			_allowed, _snap := bkt_get_Indexes.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/indexes")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.GraphParam
-		req.Graph = r.URL.Query().Get("graph")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Graph = _q.Get("graph")
 		req.Graph = r.PathValue("graph")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Indexes(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Labels *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Labels = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_Labels = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/graphs/{graph}/labels", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Labels",
 			trace.WithAttributes(
@@ -2883,47 +4605,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Labels != nil { _allowed, _snap := bkt_get_Labels.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Labels != nil {
+			_allowed, _snap := bkt_get_Labels.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/graphs/{graph}/labels")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.GraphParam
-		req.Graph = r.URL.Query().Get("graph")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Graph = _q.Get("graph")
 		req.Graph = r.PathValue("graph")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Labels(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetMigrations *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetMigrations = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_GetMigrations = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/migrations", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetMigrations",
 			trace.WithAttributes(
@@ -2932,37 +4754,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -2971,7 +4801,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -2980,21 +4811,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3004,27 +4838,111 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetMigrations != nil { _allowed, _snap := bkt_get_GetMigrations.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetMigrations != nil {
+			_allowed, _snap := bkt_get_GetMigrations.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetMigrations(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostMigrations *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_PostMigrations = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_PostMigrations = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/migrations", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostMigrations",
 			trace.WithAttributes(
@@ -3033,37 +4951,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 4096 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3072,7 +4998,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3081,21 +5008,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3105,28 +5035,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostMigrations != nil { _allowed, _snap := bkt_post_PostMigrations.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostMigrations != nil {
+			_allowed, _snap := bkt_post_PostMigrations.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.MigrationCreateReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostMigrations(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostMigrationsRun *securex.Bucket
-	if (5) > 0 && opts.GlobalBurst > 0 { bkt_post_PostMigrationsRun = securex.NewBucket(5, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (5) > 0 {
+		bkt_post_PostMigrationsRun = securex.NewBucket(5, 5)
+	}
 	mux.HandleFunc("POST /api/v1/migrations/run", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostMigrationsRun",
 			trace.WithAttributes(
@@ -3135,37 +5153,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3174,7 +5200,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3183,21 +5210,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3207,28 +5237,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostMigrationsRun != nil { _allowed, _snap := bkt_post_PostMigrationsRun.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostMigrationsRun != nil {
+			_allowed, _snap := bkt_post_PostMigrationsRun.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/run")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostMigrationsRun(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_MigrationUpload *securex.Bucket
-	if (10) > 0 && opts.GlobalBurst > 0 { bkt_post_MigrationUpload = securex.NewBucket(10, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (10) > 0 {
+		bkt_post_MigrationUpload = securex.NewBucket(10, 10)
+	}
 	mux.HandleFunc("POST /api/v1/migrations/upload", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "MigrationUpload",
 			trace.WithAttributes(
@@ -3237,37 +5355,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 67108864 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 67108864)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 67108864 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 67108864)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3276,7 +5402,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3285,21 +5412,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3309,40 +5439,134 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_MigrationUpload != nil { _allowed, _snap := bkt_post_MigrationUpload.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if err := r.ParseMultipartForm(int64(67108864)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_MigrationUpload != nil {
+			_allowed, _snap := bkt_post_MigrationUpload.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/upload")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if err := r.ParseMultipartForm(_multipartMaxMemory); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		defer func() {
-			if r.MultipartForm != nil { _ = r.MultipartForm.RemoveAll() }
+			if r.MultipartForm != nil {
+				_ = r.MultipartForm.RemoveAll()
+			}
 		}()
 		var req types.MigrationUploadReq
 		{
 			_f, _fh, _ferr := r.FormFile("file")
 			if _ferr == nil {
-				if _fh.Size > 67108864 { writeJSONError(w, fmt.Sprintf("file 'file' exceeds maximum size of 67108864 bytes"), 400); return }
+				if _fh.Size > 67108864 {
+					writeJSONError(w, fmt.Sprintf("file 'file' exceeds maximum size of 67108864 bytes"), 400)
+					return
+				}
 				req.File = &gen.FileUpload{Filename: _fh.Filename, Size: _fh.Size, ContentType: _fh.Header.Get("Content-Type"), Reader: _f}
 			} else {
-				writeJSONError(w, "missing required file 'file'", 400); return
+				writeJSONError(w, "missing required file 'file'", 400)
+				return
 			}
 		}
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.MigrationUpload(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Sign *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Sign = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_Sign = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/migrations/{name}/sign", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Sign",
 			trace.WithAttributes(
@@ -3351,37 +5575,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3390,7 +5622,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3399,21 +5632,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3423,29 +5659,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Sign != nil { _allowed, _snap := bkt_post_Sign.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Sign != nil {
+			_allowed, _snap := bkt_post_Sign.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/migrations/{name}/sign")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.MigrationParam
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Name = r.PathValue("name")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Sign(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetPolicies *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetPolicies = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetPolicies = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetPolicies",
 			trace.WithAttributes(
@@ -3454,37 +5778,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3493,7 +5825,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3502,21 +5835,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3526,27 +5862,111 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetPolicies != nil { _allowed, _snap := bkt_get_GetPolicies.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetPolicies != nil {
+			_allowed, _snap := bkt_get_GetPolicies.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetPolicies(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostPolicies *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_PostPolicies = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_post_PostPolicies = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("POST /api/v1/policies", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostPolicies",
 			trace.WithAttributes(
@@ -3555,37 +5975,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3594,7 +6022,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3603,21 +6032,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3627,28 +6059,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostPolicies != nil { _allowed, _snap := bkt_post_PostPolicies.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostPolicies != nil {
+			_allowed, _snap := bkt_post_PostPolicies.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.PolicyCreateReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostPolicies(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_delete_DeleteName *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteName = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_delete_DeleteName = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("DELETE /api/v1/policies/{name}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteName",
 			trace.WithAttributes(
@@ -3657,37 +6177,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3696,7 +6224,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3705,21 +6234,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3729,29 +6261,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteName != nil { _allowed, _snap := bkt_delete_DeleteName.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_delete_DeleteName != nil {
+			_allowed, _snap := bkt_delete_DeleteName.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.PolicyParam
-		req.Name = r.URL.Query().Get("name")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Name = _q.Get("name")
 		req.Name = r.PathValue("name")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.DeleteName(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetName *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetName = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetName = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/policies/{name}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetName",
 			trace.WithAttributes(
@@ -3760,37 +6380,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -3799,7 +6427,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -3808,21 +6437,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -3832,29 +6464,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetName != nil { _allowed, _snap := bkt_get_GetName.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetName != nil {
+			_allowed, _snap := bkt_get_GetName.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/policies/{name}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.PolicyParam
-		req.Name = r.URL.Query().Get("name")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Name = _q.Get("name")
 		req.Name = r.PathValue("name")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetName(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetProfiles *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetProfiles = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_GetProfiles = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetProfiles",
 			trace.WithAttributes(
@@ -3863,45 +6583,141 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetProfiles != nil { _allowed, _snap := bkt_get_GetProfiles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetProfiles != nil {
+			_allowed, _snap := bkt_get_GetProfiles.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetProfiles(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostProfiles *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_PostProfiles = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_PostProfiles = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/profiles", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostProfiles",
 			trace.WithAttributes(
@@ -3910,46 +6726,146 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostProfiles != nil { _allowed, _snap := bkt_post_PostProfiles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostProfiles != nil {
+			_allowed, _snap := bkt_post_PostProfiles.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.CreateProfileReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostProfiles(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Public *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Public = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_Public = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/profiles/public", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Public",
 			trace.WithAttributes(
@@ -3958,35 +6874,131 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Public != nil { _allowed, _snap := bkt_get_Public.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Public != nil {
+			_allowed, _snap := bkt_get_Public.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/public")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Public(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_delete_DeleteProfileid *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteProfileid = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_delete_DeleteProfileid = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("DELETE /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteProfileid",
 			trace.WithAttributes(
@@ -3995,47 +7007,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteProfileid != nil { _allowed, _snap := bkt_delete_DeleteProfileid.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_delete_DeleteProfileid != nil {
+			_allowed, _snap := bkt_delete_DeleteProfileid.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.ProfileIDPath
-		req.ProfileID = r.URL.Query().Get("profile_id")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.ProfileID = _q.Get("profile_id")
 		req.ProfileID = r.PathValue("profileId")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.DeleteProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetProfileid *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_GetProfileid = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_GetProfileid = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetProfileid",
 			trace.WithAttributes(
@@ -4044,47 +7156,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetProfileid != nil { _allowed, _snap := bkt_get_GetProfileid.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetProfileid != nil {
+			_allowed, _snap := bkt_get_GetProfileid.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.ProfileIDPath
-		req.ProfileID = r.URL.Query().Get("profile_id")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.ProfileID = _q.Get("profile_id")
 		req.ProfileID = r.PathValue("profileId")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_patch_PatchProfileid *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_patch_PatchProfileid = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_patch_PatchProfileid = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("PATCH /api/v1/profiles/{profileId}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PatchProfileid",
 			trace.WithAttributes(
@@ -4093,47 +7305,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_patch_PatchProfileid != nil { _allowed, _snap := bkt_patch_PatchProfileid.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_patch_PatchProfileid != nil {
+			_allowed, _snap := bkt_patch_PatchProfileid.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/profiles/{profileId}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UpdateProfileReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.ProfileID = r.PathValue("profileId")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PatchProfileid(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Query *securex.Bucket
-	if (2000) > 0 && opts.GlobalBurst > 0 { bkt_post_Query = securex.NewBucket(2000, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (2000) > 0 {
+		bkt_post_Query = securex.NewBucket(2000, 2000)
+	}
 	mux.HandleFunc("POST /api/v1/query", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Query",
 			trace.WithAttributes(
@@ -4142,29 +7454,69 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 524288 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 524288)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 524288 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 524288)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Query != nil { _allowed, _snap := bkt_post_Query.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/query"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/query")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Query != nil {
+			_allowed, _snap := bkt_post_Query.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/query")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.QueryReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		err := srv.Query(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
@@ -4173,18 +7525,77 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			// returns an error after writing bytes the headers are already
 			// on the wire and writeJSONError's WriteHeader is a no-op; we
 			// still emit the envelope so a pre-write failure is reported.
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// The same caveat applies to every status code below (404, 409,
+			// 422, 403, 400, and any *StatusError-supplied code).
+			//
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm. A handler may return *OAuth2Error{Err: someStatusError}
+			// to attach an OAuth2 protocol code to a custom HTTP status;
+			// if errors.As(err, &se) ran first it would Unwrap the chain,
+			// match the StatusError, and collapse the response to the
+			// plain envelope — losing error/error_description/error_uri.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A handler may wrap a sentinel inside a *StatusError to choose
+			// a non-default code (e.g. *StatusError{Err: ErrNotImplemented,
+			// Code: 410}); if errors.Is(ErrNotImplemented) ran first it
+			// would Unwrap, match, and emit 501 — shadowing the explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// Streaming route: response body was written by the handler. Flush
 		// any buffered bytes so the client sees end-of-stream promptly.
-		if f, ok := w.(http.Flusher); ok { f.Flush() }
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
 	})
 	var bkt_post_Restore *securex.Bucket
-	if (5) > 0 && opts.GlobalBurst > 0 { bkt_post_Restore = securex.NewBucket(5, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (5) > 0 {
+		bkt_post_Restore = securex.NewBucket(5, 5)
+	}
 	mux.HandleFunc("POST /api/v1/restore", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Restore",
 			trace.WithAttributes(
@@ -4193,37 +7604,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 4096 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4232,7 +7651,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -4241,21 +7661,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -4265,28 +7688,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Restore != nil { _allowed, _snap := bkt_post_Restore.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Restore != nil {
+			_allowed, _snap := bkt_post_Restore.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/restore")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.RestoreReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Restore(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetRoles *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetRoles = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetRoles = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/roles", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetRoles",
 			trace.WithAttributes(
@@ -4295,37 +7806,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4334,7 +7853,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -4343,21 +7863,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -4367,66 +7890,158 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetRoles != nil { _allowed, _snap := bkt_get_GetRoles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetRoles != nil {
+			_allowed, _snap := bkt_get_GetRoles.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetRoles(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
-	var bkt_post_PostApiRoles *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_PostApiRoles = securex.NewBucket(50, opts.GlobalBurst) }
+	var bkt_post_PostAPIRoles *securex.Bucket
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_post_PostAPIRoles = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("POST /api/v1/roles", func(w http.ResponseWriter, r *http.Request) {
-		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostApiRoles",
+		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostAPIRoles",
 			trace.WithAttributes(
 				attribute.String("http.route", "/api/v1/roles"),
 				attribute.String("http.method", "POST"),
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4435,7 +8050,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -4444,21 +8060,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -4468,28 +8087,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostApiRoles != nil { _allowed, _snap := bkt_post_PostApiRoles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostAPIRoles != nil {
+			_allowed, _snap := bkt_post_PostAPIRoles.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.RoleCreateReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		resp, err := srv.PostApiRoles(w, r, &req)
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		resp, err := srv.PostAPIRoles(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_delete_DeleteRole *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteRole = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_delete_DeleteRole = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("DELETE /api/v1/roles/{role}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteRole",
 			trace.WithAttributes(
@@ -4498,37 +8205,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4537,7 +8252,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -4546,21 +8262,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -4570,29 +8289,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteRole != nil { _allowed, _snap := bkt_delete_DeleteRole.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_delete_DeleteRole != nil {
+			_allowed, _snap := bkt_delete_DeleteRole.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.RoleParam
-		req.Role = r.URL.Query().Get("role")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Role = _q.Get("role")
 		req.Role = r.PathValue("role")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.DeleteRole(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetRole *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetRole = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetRole = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/roles/{role}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetRole",
 			trace.WithAttributes(
@@ -4601,37 +8408,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4640,7 +8455,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -4649,21 +8465,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -4673,29 +8492,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetRole != nil { _allowed, _snap := bkt_get_GetRole.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetRole != nil {
+			_allowed, _snap := bkt_get_GetRole.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/roles/{role}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.RoleParam
-		req.Role = r.URL.Query().Get("role")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Role = _q.Get("role")
 		req.Role = r.PathValue("role")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetRole(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Tx *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_Tx = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_post_Tx = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("POST /api/v1/tx", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Tx",
 			trace.WithAttributes(
@@ -4704,46 +8611,146 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 4096 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 4096)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 4096 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Tx != nil { _allowed, _snap := bkt_post_Tx.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Tx != nil {
+			_allowed, _snap := bkt_post_Tx.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.TxBeginReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Tx(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Commit *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_Commit = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_post_Commit = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("POST /api/v1/tx/{txid}/commit", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Commit",
 			trace.WithAttributes(
@@ -4752,47 +8759,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Commit != nil { _allowed, _snap := bkt_post_Commit.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Commit != nil {
+			_allowed, _snap := bkt_post_Commit.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/commit")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.TxIDParam
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Txid = r.PathValue("txid")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Commit(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Rollback *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_Rollback = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_post_Rollback = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("POST /api/v1/tx/{txid}/rollback", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Rollback",
 			trace.WithAttributes(
@@ -4801,47 +8908,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Rollback != nil { _allowed, _snap := bkt_post_Rollback.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Rollback != nil {
+			_allowed, _snap := bkt_post_Rollback.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/rollback")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.TxIDParam
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Txid = r.PathValue("txid")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Rollback(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostTxidRun *securex.Bucket
-	if (200) > 0 && opts.GlobalBurst > 0 { bkt_post_PostTxidRun = securex.NewBucket(200, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (200) > 0 {
+		bkt_post_PostTxidRun = securex.NewBucket(200, 200)
+	}
 	mux.HandleFunc("POST /api/v1/tx/{txid}/run", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostTxidRun",
 			trace.WithAttributes(
@@ -4850,47 +9057,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 524288 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 524288)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 524288 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 524288)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostTxidRun != nil { _allowed, _snap := bkt_post_PostTxidRun.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostTxidRun != nil {
+			_allowed, _snap := bkt_post_PostTxidRun.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/tx/{txid}/run")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.TxRunReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Txid = r.PathValue("txid")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostTxidRun(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetUsers *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetUsers = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetUsers = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetUsers",
 			trace.WithAttributes(
@@ -4899,37 +9206,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -4938,7 +9253,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -4947,21 +9263,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -4971,27 +9290,111 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetUsers != nil { _allowed, _snap := bkt_get_GetUsers.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetUsers != nil {
+			_allowed, _snap := bkt_get_GetUsers.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetUsers(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostUsers *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_post_PostUsers = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_post_PostUsers = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("POST /api/v1/users", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostUsers",
 			trace.WithAttributes(
@@ -5000,37 +9403,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5039,7 +9450,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5048,21 +9460,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5072,28 +9487,116 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostUsers != nil { _allowed, _snap := bkt_post_PostUsers.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostUsers != nil {
+			_allowed, _snap := bkt_post_PostUsers.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UserCreateReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostUsers(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_delete_DeleteUsername *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_delete_DeleteUsername = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_delete_DeleteUsername = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("DELETE /api/v1/users/{username}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "DeleteUsername",
 			trace.WithAttributes(
@@ -5102,37 +9605,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5141,7 +9652,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5150,21 +9662,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5174,29 +9689,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_delete_DeleteUsername != nil { _allowed, _snap := bkt_delete_DeleteUsername.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_delete_DeleteUsername != nil {
+			_allowed, _snap := bkt_delete_DeleteUsername.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UsernameParam
-		req.Username = r.URL.Query().Get("username")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Username = _q.Get("username")
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.DeleteUsername(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_GetUsername *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_GetUsername = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_GetUsername = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/users/{username}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "GetUsername",
 			trace.WithAttributes(
@@ -5205,37 +9808,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5244,7 +9855,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5253,21 +9865,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5277,29 +9892,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_GetUsername != nil { _allowed, _snap := bkt_get_GetUsername.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_GetUsername != nil {
+			_allowed, _snap := bkt_get_GetUsername.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UsernameParam
-		req.Username = r.URL.Query().Get("username")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Username = _q.Get("username")
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.GetUsername(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_patch_PatchUsername *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_patch_PatchUsername = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_patch_PatchUsername = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("PATCH /api/v1/users/{username}", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PatchUsername",
 			trace.WithAttributes(
@@ -5308,37 +10011,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5347,7 +10058,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5356,21 +10068,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5380,29 +10095,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_patch_PatchUsername != nil { _allowed, _snap := bkt_patch_PatchUsername.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_patch_PatchUsername != nil {
+			_allowed, _snap := bkt_patch_PatchUsername.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UserUpdateReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PatchUsername(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Disable *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Disable = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_Disable = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/users/{username}/disable", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Disable",
 			trace.WithAttributes(
@@ -5411,37 +10214,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5450,7 +10261,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5459,21 +10271,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5483,29 +10298,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Disable != nil { _allowed, _snap := bkt_post_Disable.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Disable != nil {
+			_allowed, _snap := bkt_post_Disable.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/disable")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UsernameParam
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Disable(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Enable *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Enable = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_Enable = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/users/{username}/enable", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Enable",
 			trace.WithAttributes(
@@ -5514,37 +10417,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5553,7 +10464,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5562,21 +10474,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5586,29 +10501,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Enable != nil { _allowed, _snap := bkt_post_Enable.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Enable != nil {
+			_allowed, _snap := bkt_post_Enable.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/enable")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UsernameParam
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Enable(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_Password *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_Password = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_Password = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/users/{username}/password", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Password",
 			trace.WithAttributes(
@@ -5617,47 +10620,147 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_Password != nil { _allowed, _snap := bkt_post_Password.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_Password != nil {
+			_allowed, _snap := bkt_post_Password.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/password")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.PasswordChangeReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Password(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Permissions *securex.Bucket
-	if (100) > 0 && opts.GlobalBurst > 0 { bkt_get_Permissions = securex.NewBucket(100, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (100) > 0 {
+		bkt_get_Permissions = securex.NewBucket(100, 100)
+	}
 	mux.HandleFunc("GET /api/v1/users/{username}/permissions", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Permissions",
 			trace.WithAttributes(
@@ -5666,37 +10769,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5705,7 +10816,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5714,21 +10826,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5738,29 +10853,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Permissions != nil { _allowed, _snap := bkt_get_Permissions.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Permissions != nil {
+			_allowed, _snap := bkt_get_Permissions.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/permissions")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.UsernameParam
-		req.Username = r.URL.Query().Get("username")
+		// APPSEC-Gen / A-P2.1: parse query string once per request instead of
+		// per-field. Pre-A-P2.1 the template emitted `r.URL.Query().Get(...)`
+		// on every field, paying the parse cost N times with N allocations.
+		_q := r.URL.Query()
+		req.Username = _q.Get("username")
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Permissions(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_post_PostUsernameRoles *securex.Bucket
-	if (20) > 0 && opts.GlobalBurst > 0 { bkt_post_PostUsernameRoles = securex.NewBucket(20, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (20) > 0 {
+		bkt_post_PostUsernameRoles = securex.NewBucket(20, 20)
+	}
 	mux.HandleFunc("POST /api/v1/users/{username}/roles", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "PostUsernameRoles",
 			trace.WithAttributes(
@@ -5769,37 +10972,45 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-		if opts.AuthJWT == nil {
-			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
-			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
-			_span.SetStatus(codes.Error, "unauthorized")
-			writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
 			return
 		}
-		if err := opts.AuthJWT(r); err != nil { obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitAuthAttempt(r.Context(), "jwt", false); _span.SetStatus(codes.Error, "unauthorized"); writeJSONError(w, securex.ErrAuthFailed.Error(), 401); return }
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-Q6: same — bootstrap-time nil guard makes per-request check dead.
+		if err := opts.AuthJWT(r); err != nil {
+			obsx.LogAudit("http_auth_fail", map[string]any{"path": r.URL.Path, "id": _reqID})
+			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
+			_span.SetStatus(codes.Error, "unauthorized")
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
+			return
+		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-		// S-NEW-3: prefer claims stashed in r.Context() by the
-		// APIOptions.AuthJWT verifier (or any earlier middleware that
-		// already validated the bearer). Falls back to re-parsing
-		// Authorization: Bearer when the context is empty so callers
-		// that haven't migrated their verifier still authorize.
+		obsx.LogAudit("http_auth_ok", map[string]any{"path": r.URL.Path, "id": _reqID})
+		// S-NEW-3 / F4 (APPSEC): authorize ONLY from verifier-attested claims
+		// stashed in r.Context() by the APIOptions.AuthJWT verifier. The
+		// built-in HS256 gate stashes claims via securex.ContextWithClaims
+		// after signature verification (F4). We deliberately do NOT re-parse
+		// the bearer here: securex.ParseClaims does not check the signature,
+		// so trusting it for RBAC would let an authenticated caller forge
+		// "roles"/"scopes" and escalate. A custom WithAuthJWT verifier MUST
+		// call securex.ContextWithClaims for any RBAC-gated route; if it does
+		// not, the route fails closed (403) rather than trusting unverified
+		// claims.
 		claims, ok := securex.ClaimsFromContext(r.Context())
 		if !ok {
-			authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-			authParts := strings.Fields(authHeader)
-			if len(authParts) != 2 || !strings.EqualFold(authParts[0], "Bearer") {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			parsed, err := securex.ParseClaims(authParts[1])
-			if err != nil {
-				writeJSONError(w, securex.ErrAuthFailed.Error(), 401)
-				return
-			}
-			claims = parsed
+			obsx.LogAudit("http_authz_no_claims", map[string]any{"path": r.URL.Path, "id": _reqID})
+			securex.WriteForbidden(w, securex.ErrInsufficientRole)
+			return
 		}
 		requiredRoles := []string{"admin"}
 		if len(requiredRoles) > 0 {
@@ -5808,7 +11019,8 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			for _, roleName := range requiredRoles {
 				requiredRole, convErr := securex.RoleFromString(roleName)
 				if convErr != nil {
-					writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+					// A-005: generic 403 body; internal sentinel logged only.
+					securex.WriteForbidden(w, securex.ErrInsufficientRole)
 					return
 				}
 				if userRole.HasRole(requiredRole) {
@@ -5817,21 +11029,24 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 				}
 			}
 			if !allowed {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredScopes := []string(nil)
 		for _, scope := range requiredScopes {
 			if !claims.HasScope(scope) {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
 		requiredAttrs := map[string]string(nil)
 		for key, val := range requiredAttrs {
 			if claims.Attributes == nil || claims.Attributes[key] != val {
-				writeJSONError(w, securex.ErrInsufficientRole.Error(), 403)
+				// A-005: generic 403 body; internal sentinel logged only.
+				securex.WriteForbidden(w, securex.ErrInsufficientRole)
 				return
 			}
 		}
@@ -5841,29 +11056,117 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_post_PostUsernameRoles != nil { _allowed, _snap := bkt_post_PostUsernameRoles.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_post_PostUsernameRoles != nil {
+			_allowed, _snap := bkt_post_PostUsernameRoles.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/api/v1/users/{username}/roles")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.AssignRoleReq
-		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := json.UnmarshalRead(r.Body, &req, json.RejectUnknownMembers(true)); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		req.Username = r.PathValue("username")
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.PostUsernameRoles(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 	var bkt_get_Healthz *securex.Bucket
-	if (50) > 0 && opts.GlobalBurst > 0 { bkt_get_Healthz = securex.NewBucket(50, opts.GlobalBurst) }
+	// APPSEC-Gen-F-005: per-route bucket's burst was previously sourced
+	// from opts.GlobalBurst — meaning GlobalBurst=0 silently disabled
+	// every per-route limiter (the entire `if` collapsed). Source the
+	// burst from the per-route RateLit instead. The bucket is enabled
+	// whenever the route declared a non-zero rateLimit; the global
+	// limiter still gates above it.
+	if (50) > 0 {
+		bkt_get_Healthz = securex.NewBucket(50, 50)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_ctx, _span := obsx.Tracer("genapi.api").Start(r.Context(), "Healthz",
 			trace.WithAttributes(
@@ -5872,31 +11175,119 @@ func RegisterGeneratedAPI(mux *http.ServeMux, srv ServerInterface, opts APIOptio
 			))
 		defer _span.End()
 		r = r.WithContext(_ctx)
-			if r.ContentLength > 0 && r.ContentLength > 1048576 { obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413); return }
-			r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+		// A-P3.1: compute request id once per handler. Pre-A-P3.1 every
+		// audit event called _reqID independently — and
+		// because RequestIDFrom synthesises a NEW id via NewRequestID()
+		// when no X-Request-ID header is present, audit events for the
+		// same request would diverge (an http_auth_fail and an
+		// http_handler_err would carry different ids). Compute once and
+		// reuse so the audit chain is stable per request.
+		_reqID := obsx.RequestIDFrom(r)
+		if r.ContentLength > 0 && r.ContentLength > 1048576 {
+			obsx.LogAudit("http_body_toolarge", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, httpx.ErrBodyTooLarge.Error(), 413)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 1048576)
 		// The aggregate bucket sets X-RateLimit-* headers; if this route also has a
 		// per-route bucket (the tighter ceiling), the block below overwrites them on
 		// success, by design. PERF #167: AllowAndSnapshot takes the bucket mutex
 		// ONCE per request instead of the legacy Snapshot+Allow pair; the snapshot
 		// reflects exactly the state at admit-time (no torn read between the two
 		// lock cycles).
-		if globalRateBkt != nil { _allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
-		if bkt_get_Healthz != nil { _allowed, _snap := bkt_get_Healthz.AllowAndSnapshot(r.Context()); securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset); if !_allowed { obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)}); obsx.EmitRateLimitReject(r.Context(), "/healthz"); _span.SetStatus(codes.Error, "rate limited"); writeJSONError(w, securex.ErrRateLimited.Error(), 429); return } }
+		if globalRateBkt != nil {
+			_allowed, _snap := globalRateBkt.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/healthz")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
+		if bkt_get_Healthz != nil {
+			_allowed, _snap := bkt_get_Healthz.AllowAndSnapshot(r.Context())
+			securex.SetRateHeaders(w, _snap.Limit, _snap.Remaining, _snap.Reset)
+			if !_allowed {
+				obsx.LogAudit("http_ratelimited", map[string]any{"path": r.URL.Path, "id": _reqID})
+				obsx.EmitRateLimitReject(r.Context(), "/healthz")
+				_span.SetStatus(codes.Error, "rate limited")
+				writeJSONError(w, securex.ErrRateLimited.Error(), 429)
+				return
+			}
+		}
 		var req types.Empty
-		if err := req.Valid(); err != nil { writeJSONError(w, "bad request: "+err.Error(), 400); return }
+		if err := req.Valid(); err != nil {
+			obsx.LogAudit("http_bad_request", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": err.Error()})
+			writeJSONError(w, "bad request", 400)
+			return
+		}
 		resp, err := srv.Healthz(w, r, &req)
 		if err != nil {
 			_span.RecordError(err)
 			_span.SetStatus(codes.Error, "handler error")
-			if errors.Is(err, ErrNotImplemented) { writeJSONError(w, "not implemented", 501); return }
-			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
-			writeJSONError(w, "internal server error", 500); return
+			// A-NEW-5: errors.As(err, &oauth2) MUST come before the
+			// *StatusError arm so a *OAuth2Error wrapping a StatusError
+			// does not get shadowed into the plain envelope.
+			//
+			// A-NEW-4: errors.As(err, &se) MUST come before any errors.Is.
+			// A *StatusError can wrap a sentinel via Err; if errors.Is(...)
+			// for the wrapped sentinel ran first it would shadow the
+			// handler's explicit Code.
+			var oauth2 *OAuth2Error
+			var se *StatusError
+			if errors.As(err, &oauth2) {
+				writeOAuth2Error(w, oauth2)
+				return
+			}
+			if errors.As(err, &se) {
+				writeJSONError(w, se.Message, se.Code)
+				return
+			}
+			if errors.Is(err, ErrNotImplemented) {
+				writeJSONError(w, "not implemented", 501)
+				return
+			}
+			if errors.Is(err, ErrNotFound) {
+				writeJSONError(w, "not found", 404)
+				return
+			}
+			if errors.Is(err, ErrConflict) {
+				writeJSONError(w, "conflict", 409)
+				return
+			}
+			if errors.Is(err, ErrUnprocessable) {
+				writeJSONError(w, "unprocessable entity", 422)
+				return
+			}
+			if errors.Is(err, ErrForbidden) {
+				writeJSONError(w, "forbidden", 403)
+				return
+			}
+			if errors.Is(err, ErrBadRequest) {
+				writeJSONError(w, "bad request", 400)
+				return
+			}
+			obsx.LogAudit("http_handler_err", map[string]any{"path": r.URL.Path, "id": _reqID})
+			writeJSONError(w, "internal server error", 500)
+			return
 		}
 		_span.SetStatus(codes.Ok, "")
-		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
+		obsx.LogAudit("http_route", map[string]any{"path": r.URL.Path, "id": _reqID})
 		if resp != nil {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.MarshalWrite(w, resp)
+			// A-Q7: surface response-encode errors. Once we have committed
+			// status+headers we cannot rewrite the response, but a marshal
+			// failure here yields a TRUNCATED 200 to the client — the
+			// previous template silently dropped that signal. Audit-log
+			// and annotate the span so operators see truncated responses
+			// instead of mysterious silent failures downstream.
+			if _err := json.MarshalWrite(w, resp); _err != nil {
+				obsx.LogAudit("http_encode_err", map[string]any{"path": r.URL.Path, "id": _reqID, "reason": _err.Error()})
+				_span.RecordError(_err)
+				_span.SetStatus(codes.Error, "response encode failed")
+			}
 		}
 	})
 }
@@ -5906,6 +11297,35 @@ func writeJSONError(w http.ResponseWriter, msg string, code int) {
 	w.WriteHeader(code)
 	_ = json.MarshalWrite(w, map[string]string{"error": msg})
 }
+
+// writeOAuth2Error renders the RFC 6749 §5.2 error envelope and sets the
+// §5.1 cache-control headers. When e.Status is zero the helper defaults
+// to 400.
+func writeOAuth2Error(w http.ResponseWriter, e *OAuth2Error) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Content-Type", "application/json")
+	status := e.Status
+	if status == 0 {
+		status = 400
+	}
+	w.WriteHeader(status)
+	body := map[string]string{"error": e.Code}
+	if e.Description != "" {
+		body["error_description"] = e.Description
+	}
+	if e.URI != "" {
+		body["error_uri"] = e.URI
+	}
+	_ = json.MarshalWrite(w, body)
+}
+
+// _multipartMaxMemory caps the in-memory portion of a parsed multipart form
+// (SEC-0051/QG-072). The total request-body ceiling is enforced separately by
+// http.MaxBytesReader (route maxBodyBytes / server.limits.max_body_bytes —
+// validated positive for multipart routes at generate time); this constant
+// only bounds RAM before multipart parts spill to temp files.
+const _multipartMaxMemory = 10 << 20 // 10 MiB
 
 func isAllowedType(ct string, allowed []string) bool {
 	for _, a := range allowed {

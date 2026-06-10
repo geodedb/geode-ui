@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net/textproto"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
+
 	"geodedb.com/geode-ui/gen/pkg/gen"
 	"geodedb.com/geode-ui/gen/types"
 )
@@ -224,6 +225,7 @@ func sanitizeMultipartHeaderValue(value string) string {
 	).Replace(value)
 	return strings.TrimSpace(value)
 }
+
 // Audit performs GET /api/v1/audit.
 func (c *Client) Audit(ctx context.Context, req *types.AuditQuery) (*types.AuditList, error) {
 	target, err := c.buildURL("/api/v1/audit")
@@ -262,6 +264,7 @@ func (c *Client) Audit(ctx context.Context, req *types.AuditQuery) (*types.Audit
 	}
 	return &out, nil
 }
+
 // Login performs POST /api/v1/auth/login.
 func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginResp, error) {
 	target, err := c.buildURL("/api/v1/auth/login")
@@ -302,6 +305,7 @@ func (c *Client) Login(ctx context.Context, req *types.LoginReq) (*types.LoginRe
 	}
 	return &out, nil
 }
+
 // GetBackups performs GET /api/v1/backups.
 func (c *Client) GetBackups(ctx context.Context, req *types.Empty) (*types.BackupList, error) {
 	target, err := c.buildURL("/api/v1/backups")
@@ -340,6 +344,7 @@ func (c *Client) GetBackups(ctx context.Context, req *types.Empty) (*types.Backu
 	}
 	return &out, nil
 }
+
 // PostBackups performs POST /api/v1/backups.
 func (c *Client) PostBackups(ctx context.Context, req *types.BackupCreateReq) (*types.BackupRef, error) {
 	target, err := c.buildURL("/api/v1/backups")
@@ -380,6 +385,7 @@ func (c *Client) PostBackups(ctx context.Context, req *types.BackupCreateReq) (*
 	}
 	return &out, nil
 }
+
 // Cleanup performs POST /api/v1/backups/cleanup.
 func (c *Client) Cleanup(ctx context.Context, req *types.Empty) (*types.BackupCleanupResp, error) {
 	target, err := c.buildURL("/api/v1/backups/cleanup")
@@ -420,6 +426,7 @@ func (c *Client) Cleanup(ctx context.Context, req *types.Empty) (*types.BackupCl
 	}
 	return &out, nil
 }
+
 // BackupUpload performs POST /api/v1/backups/upload.
 func (c *Client) BackupUpload(ctx context.Context, req *types.BackupUploadReq) (*types.UploadResp, error) {
 	target, err := c.buildURL("/api/v1/backups/upload")
@@ -460,6 +467,7 @@ func (c *Client) BackupUpload(ctx context.Context, req *types.BackupUploadReq) (
 	}
 	return &out, nil
 }
+
 // DeleteFile performs DELETE /api/v1/backups/{file}.
 func (c *Client) DeleteFile(ctx context.Context, req *types.BackupFileParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/backups/{file}")
@@ -498,6 +506,7 @@ func (c *Client) DeleteFile(ctx context.Context, req *types.BackupFileParam) (*t
 	}
 	return &out, nil
 }
+
 // GetFile performs GET /api/v1/backups/{file}.
 func (c *Client) GetFile(ctx context.Context, req *types.BackupFileParam) (*types.BackupInfo, error) {
 	target, err := c.buildURL("/api/v1/backups/{file}")
@@ -536,6 +545,7 @@ func (c *Client) GetFile(ctx context.Context, req *types.BackupFileParam) (*type
 	}
 	return &out, nil
 }
+
 // GetCapabilities performs GET /api/v1/capabilities.
 func (c *Client) GetCapabilities(ctx context.Context, req *types.Empty) (*types.Capabilities, error) {
 	target, err := c.buildURL("/api/v1/capabilities")
@@ -574,6 +584,7 @@ func (c *Client) GetCapabilities(ctx context.Context, req *types.Empty) (*types.
 	}
 	return &out, nil
 }
+
 // Grants performs POST /api/v1/grants.
 func (c *Client) Grants(ctx context.Context, req *types.GrantReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/grants")
@@ -614,6 +625,7 @@ func (c *Client) Grants(ctx context.Context, req *types.GrantReq) (*types.Empty,
 	}
 	return &out, nil
 }
+
 // Revoke performs POST /api/v1/grants/revoke.
 func (c *Client) Revoke(ctx context.Context, req *types.GrantReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/grants/revoke")
@@ -654,6 +666,7 @@ func (c *Client) Revoke(ctx context.Context, req *types.GrantReq) (*types.Empty,
 	}
 	return &out, nil
 }
+
 // Graphs performs GET /api/v1/graphs.
 func (c *Client) Graphs(ctx context.Context, req *types.Empty) (*types.GraphList, error) {
 	target, err := c.buildURL("/api/v1/graphs")
@@ -692,6 +705,7 @@ func (c *Client) Graphs(ctx context.Context, req *types.Empty) (*types.GraphList
 	}
 	return &out, nil
 }
+
 // Constraints performs GET /api/v1/graphs/{graph}/constraints.
 func (c *Client) Constraints(ctx context.Context, req *types.GraphParam) (*types.ConstraintList, error) {
 	target, err := c.buildURL("/api/v1/graphs/{graph}/constraints")
@@ -730,6 +744,7 @@ func (c *Client) Constraints(ctx context.Context, req *types.GraphParam) (*types
 	}
 	return &out, nil
 }
+
 // EdgeTypes performs GET /api/v1/graphs/{graph}/edge-types.
 func (c *Client) EdgeTypes(ctx context.Context, req *types.GraphParam) (*types.EdgeTypeList, error) {
 	target, err := c.buildURL("/api/v1/graphs/{graph}/edge-types")
@@ -768,6 +783,7 @@ func (c *Client) EdgeTypes(ctx context.Context, req *types.GraphParam) (*types.E
 	}
 	return &out, nil
 }
+
 // Indexes performs GET /api/v1/graphs/{graph}/indexes.
 func (c *Client) Indexes(ctx context.Context, req *types.GraphParam) (*types.IndexList, error) {
 	target, err := c.buildURL("/api/v1/graphs/{graph}/indexes")
@@ -806,6 +822,7 @@ func (c *Client) Indexes(ctx context.Context, req *types.GraphParam) (*types.Ind
 	}
 	return &out, nil
 }
+
 // Labels performs GET /api/v1/graphs/{graph}/labels.
 func (c *Client) Labels(ctx context.Context, req *types.GraphParam) (*types.LabelList, error) {
 	target, err := c.buildURL("/api/v1/graphs/{graph}/labels")
@@ -844,6 +861,7 @@ func (c *Client) Labels(ctx context.Context, req *types.GraphParam) (*types.Labe
 	}
 	return &out, nil
 }
+
 // GetMigrations performs GET /api/v1/migrations.
 func (c *Client) GetMigrations(ctx context.Context, req *types.Empty) (*types.MigrationStatus, error) {
 	target, err := c.buildURL("/api/v1/migrations")
@@ -882,6 +900,7 @@ func (c *Client) GetMigrations(ctx context.Context, req *types.Empty) (*types.Mi
 	}
 	return &out, nil
 }
+
 // PostMigrations performs POST /api/v1/migrations.
 func (c *Client) PostMigrations(ctx context.Context, req *types.MigrationCreateReq) (*types.MigrationRef, error) {
 	target, err := c.buildURL("/api/v1/migrations")
@@ -922,6 +941,7 @@ func (c *Client) PostMigrations(ctx context.Context, req *types.MigrationCreateR
 	}
 	return &out, nil
 }
+
 // PostMigrationsRun performs POST /api/v1/migrations/run.
 func (c *Client) PostMigrationsRun(ctx context.Context, req *types.Empty) (*types.MigrationRunResp, error) {
 	target, err := c.buildURL("/api/v1/migrations/run")
@@ -962,6 +982,7 @@ func (c *Client) PostMigrationsRun(ctx context.Context, req *types.Empty) (*type
 	}
 	return &out, nil
 }
+
 // MigrationUpload performs POST /api/v1/migrations/upload.
 func (c *Client) MigrationUpload(ctx context.Context, req *types.MigrationUploadReq) (*types.UploadResp, error) {
 	target, err := c.buildURL("/api/v1/migrations/upload")
@@ -1002,6 +1023,7 @@ func (c *Client) MigrationUpload(ctx context.Context, req *types.MigrationUpload
 	}
 	return &out, nil
 }
+
 // Sign performs POST /api/v1/migrations/{name}/sign.
 func (c *Client) Sign(ctx context.Context, req *types.MigrationParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/migrations/{name}/sign")
@@ -1042,6 +1064,7 @@ func (c *Client) Sign(ctx context.Context, req *types.MigrationParam) (*types.Em
 	}
 	return &out, nil
 }
+
 // GetPolicies performs GET /api/v1/policies.
 func (c *Client) GetPolicies(ctx context.Context, req *types.Empty) (*types.PolicyList, error) {
 	target, err := c.buildURL("/api/v1/policies")
@@ -1080,6 +1103,7 @@ func (c *Client) GetPolicies(ctx context.Context, req *types.Empty) (*types.Poli
 	}
 	return &out, nil
 }
+
 // PostPolicies performs POST /api/v1/policies.
 func (c *Client) PostPolicies(ctx context.Context, req *types.PolicyCreateReq) (*types.Policy, error) {
 	target, err := c.buildURL("/api/v1/policies")
@@ -1120,6 +1144,7 @@ func (c *Client) PostPolicies(ctx context.Context, req *types.PolicyCreateReq) (
 	}
 	return &out, nil
 }
+
 // DeleteName performs DELETE /api/v1/policies/{name}.
 func (c *Client) DeleteName(ctx context.Context, req *types.PolicyParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/policies/{name}")
@@ -1158,6 +1183,7 @@ func (c *Client) DeleteName(ctx context.Context, req *types.PolicyParam) (*types
 	}
 	return &out, nil
 }
+
 // GetName performs GET /api/v1/policies/{name}.
 func (c *Client) GetName(ctx context.Context, req *types.PolicyParam) (*types.Policy, error) {
 	target, err := c.buildURL("/api/v1/policies/{name}")
@@ -1196,6 +1222,7 @@ func (c *Client) GetName(ctx context.Context, req *types.PolicyParam) (*types.Po
 	}
 	return &out, nil
 }
+
 // GetProfiles performs GET /api/v1/profiles.
 func (c *Client) GetProfiles(ctx context.Context, req *types.Empty) (*types.ProfileList, error) {
 	target, err := c.buildURL("/api/v1/profiles")
@@ -1234,6 +1261,7 @@ func (c *Client) GetProfiles(ctx context.Context, req *types.Empty) (*types.Prof
 	}
 	return &out, nil
 }
+
 // PostProfiles performs POST /api/v1/profiles.
 func (c *Client) PostProfiles(ctx context.Context, req *types.CreateProfileReq) (*types.Profile, error) {
 	target, err := c.buildURL("/api/v1/profiles")
@@ -1274,6 +1302,7 @@ func (c *Client) PostProfiles(ctx context.Context, req *types.CreateProfileReq) 
 	}
 	return &out, nil
 }
+
 // Public performs GET /api/v1/profiles/public.
 func (c *Client) Public(ctx context.Context, req *types.Empty) (*types.PublicProfileList, error) {
 	target, err := c.buildURL("/api/v1/profiles/public")
@@ -1312,6 +1341,7 @@ func (c *Client) Public(ctx context.Context, req *types.Empty) (*types.PublicPro
 	}
 	return &out, nil
 }
+
 // DeleteProfileid performs DELETE /api/v1/profiles/{profileId}.
 func (c *Client) DeleteProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/profiles/{profileId}")
@@ -1350,6 +1380,7 @@ func (c *Client) DeleteProfileid(ctx context.Context, req *types.ProfileIDPath) 
 	}
 	return &out, nil
 }
+
 // GetProfileid performs GET /api/v1/profiles/{profileId}.
 func (c *Client) GetProfileid(ctx context.Context, req *types.ProfileIDPath) (*types.Profile, error) {
 	target, err := c.buildURL("/api/v1/profiles/{profileId}")
@@ -1388,6 +1419,7 @@ func (c *Client) GetProfileid(ctx context.Context, req *types.ProfileIDPath) (*t
 	}
 	return &out, nil
 }
+
 // PatchProfileid performs PATCH /api/v1/profiles/{profileId}.
 func (c *Client) PatchProfileid(ctx context.Context, req *types.UpdateProfileReq) (*types.Profile, error) {
 	target, err := c.buildURL("/api/v1/profiles/{profileId}")
@@ -1428,6 +1460,7 @@ func (c *Client) PatchProfileid(ctx context.Context, req *types.UpdateProfileReq
 	}
 	return &out, nil
 }
+
 // Query performs POST /api/v1/query.
 func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryResp, error) {
 	target, err := c.buildURL("/api/v1/query")
@@ -1468,6 +1501,7 @@ func (c *Client) Query(ctx context.Context, req *types.QueryReq) (*types.QueryRe
 	}
 	return &out, nil
 }
+
 // Restore performs POST /api/v1/restore.
 func (c *Client) Restore(ctx context.Context, req *types.RestoreReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/restore")
@@ -1508,6 +1542,7 @@ func (c *Client) Restore(ctx context.Context, req *types.RestoreReq) (*types.Emp
 	}
 	return &out, nil
 }
+
 // GetRoles performs GET /api/v1/roles.
 func (c *Client) GetRoles(ctx context.Context, req *types.Empty) (*types.RoleList, error) {
 	target, err := c.buildURL("/api/v1/roles")
@@ -1546,8 +1581,9 @@ func (c *Client) GetRoles(ctx context.Context, req *types.Empty) (*types.RoleLis
 	}
 	return &out, nil
 }
-// PostApiRoles performs POST /api/v1/roles.
-func (c *Client) PostApiRoles(ctx context.Context, req *types.RoleCreateReq) (*types.Role, error) {
+
+// PostAPIRoles performs POST /api/v1/roles.
+func (c *Client) PostAPIRoles(ctx context.Context, req *types.RoleCreateReq) (*types.Role, error) {
 	target, err := c.buildURL("/api/v1/roles")
 	if err != nil {
 		return nil, err
@@ -1586,6 +1622,7 @@ func (c *Client) PostApiRoles(ctx context.Context, req *types.RoleCreateReq) (*t
 	}
 	return &out, nil
 }
+
 // DeleteRole performs DELETE /api/v1/roles/{role}.
 func (c *Client) DeleteRole(ctx context.Context, req *types.RoleParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/roles/{role}")
@@ -1624,6 +1661,7 @@ func (c *Client) DeleteRole(ctx context.Context, req *types.RoleParam) (*types.E
 	}
 	return &out, nil
 }
+
 // GetRole performs GET /api/v1/roles/{role}.
 func (c *Client) GetRole(ctx context.Context, req *types.RoleParam) (*types.Role, error) {
 	target, err := c.buildURL("/api/v1/roles/{role}")
@@ -1662,6 +1700,7 @@ func (c *Client) GetRole(ctx context.Context, req *types.RoleParam) (*types.Role
 	}
 	return &out, nil
 }
+
 // Tx performs POST /api/v1/tx.
 func (c *Client) Tx(ctx context.Context, req *types.TxBeginReq) (*types.TxBeginResp, error) {
 	target, err := c.buildURL("/api/v1/tx")
@@ -1702,6 +1741,7 @@ func (c *Client) Tx(ctx context.Context, req *types.TxBeginReq) (*types.TxBeginR
 	}
 	return &out, nil
 }
+
 // Commit performs POST /api/v1/tx/{txid}/commit.
 func (c *Client) Commit(ctx context.Context, req *types.TxIDParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/tx/{txid}/commit")
@@ -1742,6 +1782,7 @@ func (c *Client) Commit(ctx context.Context, req *types.TxIDParam) (*types.Empty
 	}
 	return &out, nil
 }
+
 // Rollback performs POST /api/v1/tx/{txid}/rollback.
 func (c *Client) Rollback(ctx context.Context, req *types.TxIDParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/tx/{txid}/rollback")
@@ -1782,6 +1823,7 @@ func (c *Client) Rollback(ctx context.Context, req *types.TxIDParam) (*types.Emp
 	}
 	return &out, nil
 }
+
 // PostTxidRun performs POST /api/v1/tx/{txid}/run.
 func (c *Client) PostTxidRun(ctx context.Context, req *types.TxRunReq) (*types.QueryResp, error) {
 	target, err := c.buildURL("/api/v1/tx/{txid}/run")
@@ -1822,6 +1864,7 @@ func (c *Client) PostTxidRun(ctx context.Context, req *types.TxRunReq) (*types.Q
 	}
 	return &out, nil
 }
+
 // GetUsers performs GET /api/v1/users.
 func (c *Client) GetUsers(ctx context.Context, req *types.Empty) (*types.UserList, error) {
 	target, err := c.buildURL("/api/v1/users")
@@ -1860,6 +1903,7 @@ func (c *Client) GetUsers(ctx context.Context, req *types.Empty) (*types.UserLis
 	}
 	return &out, nil
 }
+
 // PostUsers performs POST /api/v1/users.
 func (c *Client) PostUsers(ctx context.Context, req *types.UserCreateReq) (*types.User, error) {
 	target, err := c.buildURL("/api/v1/users")
@@ -1900,6 +1944,7 @@ func (c *Client) PostUsers(ctx context.Context, req *types.UserCreateReq) (*type
 	}
 	return &out, nil
 }
+
 // DeleteUsername performs DELETE /api/v1/users/{username}.
 func (c *Client) DeleteUsername(ctx context.Context, req *types.UsernameParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/users/{username}")
@@ -1938,6 +1983,7 @@ func (c *Client) DeleteUsername(ctx context.Context, req *types.UsernameParam) (
 	}
 	return &out, nil
 }
+
 // GetUsername performs GET /api/v1/users/{username}.
 func (c *Client) GetUsername(ctx context.Context, req *types.UsernameParam) (*types.User, error) {
 	target, err := c.buildURL("/api/v1/users/{username}")
@@ -1976,6 +2022,7 @@ func (c *Client) GetUsername(ctx context.Context, req *types.UsernameParam) (*ty
 	}
 	return &out, nil
 }
+
 // PatchUsername performs PATCH /api/v1/users/{username}.
 func (c *Client) PatchUsername(ctx context.Context, req *types.UserUpdateReq) (*types.User, error) {
 	target, err := c.buildURL("/api/v1/users/{username}")
@@ -2016,6 +2063,7 @@ func (c *Client) PatchUsername(ctx context.Context, req *types.UserUpdateReq) (*
 	}
 	return &out, nil
 }
+
 // Disable performs POST /api/v1/users/{username}/disable.
 func (c *Client) Disable(ctx context.Context, req *types.UsernameParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/users/{username}/disable")
@@ -2056,6 +2104,7 @@ func (c *Client) Disable(ctx context.Context, req *types.UsernameParam) (*types.
 	}
 	return &out, nil
 }
+
 // Enable performs POST /api/v1/users/{username}/enable.
 func (c *Client) Enable(ctx context.Context, req *types.UsernameParam) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/users/{username}/enable")
@@ -2096,6 +2145,7 @@ func (c *Client) Enable(ctx context.Context, req *types.UsernameParam) (*types.E
 	}
 	return &out, nil
 }
+
 // Password performs POST /api/v1/users/{username}/password.
 func (c *Client) Password(ctx context.Context, req *types.PasswordChangeReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/users/{username}/password")
@@ -2136,6 +2186,7 @@ func (c *Client) Password(ctx context.Context, req *types.PasswordChangeReq) (*t
 	}
 	return &out, nil
 }
+
 // Permissions performs GET /api/v1/users/{username}/permissions.
 func (c *Client) Permissions(ctx context.Context, req *types.UsernameParam) (*types.PermissionList, error) {
 	target, err := c.buildURL("/api/v1/users/{username}/permissions")
@@ -2174,6 +2225,7 @@ func (c *Client) Permissions(ctx context.Context, req *types.UsernameParam) (*ty
 	}
 	return &out, nil
 }
+
 // PostUsernameRoles performs POST /api/v1/users/{username}/roles.
 func (c *Client) PostUsernameRoles(ctx context.Context, req *types.AssignRoleReq) (*types.Empty, error) {
 	target, err := c.buildURL("/api/v1/users/{username}/roles")
@@ -2214,6 +2266,7 @@ func (c *Client) PostUsernameRoles(ctx context.Context, req *types.AssignRoleReq
 	}
 	return &out, nil
 }
+
 // Healthz performs GET /healthz.
 func (c *Client) Healthz(ctx context.Context, req *types.Empty) (*types.HealthResp, error) {
 	target, err := c.buildURL("/healthz")

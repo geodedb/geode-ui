@@ -6,16 +6,26 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
 	"geodedb.com/geode-ui/gen/types"
 )
 
 func Test_Generated_NotImplemented(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterGeneratedAPI(mux, UnimplementedServer{}, APIOptions{})
+	// GAP-0076: wire BOTH Auth and AuthJWT slots whenever the config
+	// has at least one route declaring the corresponding scheme. The
+	// new RegisterGeneratedAPI bootstrap-fail guard panics if any
+	// jwt-route exists with opts.AuthJWT == nil (or api_key + opts.Auth
+	// == nil), even when the route under test below is unauthenticated.
+	_apiOpts := APIOptions{}
+	_apiOpts.AuthJWT = func(*http.Request) error { return nil }
+	RegisterGeneratedAPI(mux, UnimplementedServer{}, _apiOpts)
 	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != 501 { t.Fatalf("expected 501 Not Implemented, got %d", w.Code) }
+	if w.Code != 501 {
+		t.Fatalf("expected 501 Not Implemented, got %d", w.Code)
+	}
 }
 
 type testServer struct{ UnimplementedServer }
@@ -26,15 +36,22 @@ func (s *testServer) Login(_ http.ResponseWriter, _ *http.Request, req *types.Lo
 
 func Test_Generated_Validators(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterGeneratedAPI(mux, &testServer{}, APIOptions{})
+	// GAP-0076: same defensive wiring as Test_Generated_NotImplemented.
+	_validOpts := APIOptions{}
+	_validOpts.AuthJWT = func(*http.Request) error { return nil }
+	RegisterGeneratedAPI(mux, &testServer{}, _validOpts)
 	req, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`password=&username=x`))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code == 200 { t.Fatalf("expected reject for invalid payload") }
+	if w.Code == 200 {
+		t.Fatalf("expected reject for invalid payload")
+	}
 	req2, _ := http.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`password=x&username=x`))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w2 := httptest.NewRecorder()
 	mux.ServeHTTP(w2, req2)
-	if w2.Code != 200 { t.Fatalf("expected accept got %d", w2.Code) }
+	if w2.Code != 200 {
+		t.Fatalf("expected accept got %d", w2.Code)
+	}
 }

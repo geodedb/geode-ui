@@ -200,8 +200,8 @@ export function useGraphActions(
           // Scale page_size with the requested limit (so a small expand
           // doesn't pull a large window) but keep the legacy 200 default
           // for unbounded callers.
-          page_size: opts?.limit ? Math.max(opts.limit, 1) * 2 : 200,
-          timeout_ms: 30000,
+          pageSize: opts?.limit ? Math.max(opts.limit, 1) * 2 : 200,
+          timeoutMs: 30000,
         })
         .then((result) => {
           const live = cyRef.current

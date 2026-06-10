@@ -38,7 +38,7 @@ function renderPanel(): void {
       <LocalizationProvider>
         <ThemeProvider theme={theme}>
           <ResultPanel
-            resp={{ columns: [], rows: [], row_count: 0, elapsed_ms: 0 }}
+            resp={{ columns: [], rows: [], rowCount: 0, elapsedMs: 0 }}
             query=""
             tab="table"
             onTabChange={() => {}}

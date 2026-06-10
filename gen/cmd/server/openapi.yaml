@@ -158,9 +158,10 @@ components:
         BackupCleanupResp:
             description: Generated schema for BackupCleanupResp
             example:
+                freed_bytes: 0
                 removed: 0
             properties:
-                freedBytes:
+                freed_bytes:
                     example: 0
                     format: int32
                     maximum: 2147483647
@@ -195,12 +196,12 @@ components:
             example:
                 file: x
             properties:
-                createdAt:
+                created_at:
                     example: x
                     maxLength: 2048
                     pattern: ^.*$
                     type: string
-                edgeCount:
+                edge_count:
                     example: 1
                     format: int32
                     maximum: 2147483647
@@ -211,13 +212,13 @@ components:
                     maxLength: 2048
                     pattern: ^.*$
                     type: string
-                graphCount:
+                graph_count:
                     example: 1
                     format: int32
                     maximum: 2147483647
                     minimum: -2147483648
                     type: integer
-                nodeCount:
+                node_count:
                     example: 1
                     format: int32
                     maximum: 2147483647
@@ -228,7 +229,7 @@ components:
                     maxLength: 2048
                     pattern: ^.*$
                     type: string
-                sizeBytes:
+                size_bytes:
                     example: 1
                     format: int32
                     maximum: 2147483647
@@ -254,8 +255,9 @@ components:
             description: Generated schema for BackupRef
             example:
                 file: x
+                size_bytes: 0
             properties:
-                createdAt:
+                created_at:
                     example: x
                     maxLength: 64
                     pattern: ^.*$
@@ -271,7 +273,7 @@ components:
                     maxLength: 1024
                     pattern: ^.*$
                     type: string
-                sizeBytes:
+                size_bytes:
                     example: 0
                     format: int32
                     maximum: 2147483647
@@ -296,23 +298,23 @@ components:
         Capabilities:
             description: Generated schema for Capabilities
             example:
-                adminWritable: {}
-                geodeVersion: x
+                admin_writable: {}
+                geode_version: x
             properties:
-                adminWritable:
+                admin_writable:
                     example: {}
                     type: object
-                geodeVersion:
+                geode_version:
                     example: x
                     maxLength: 256
                     pattern: ^.*$
                     type: string
-                metricsEnabled:
+                metrics_enabled:
                     example: true
                     type: boolean
             required:
-                - geodeVersion
-                - adminWritable
+                - geode_version
+                - admin_writable
             type: object
         ConstraintList:
             description: Generated schema for ConstraintList
@@ -347,7 +349,7 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                isDefault:
+                is_default:
                     example: true
                     type: boolean
                 name:
@@ -356,10 +358,10 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                poolOverrides:
+                pool_overrides:
                     example: {}
                     type: object
-                savedUsername:
+                saved_username:
                     example: x
                     maxLength: 128
                     pattern: ^.*$
@@ -416,6 +418,7 @@ components:
             description: Generated schema for GrantReq
             example:
                 grantee: x
+                grantee_kind: ""
                 permission: x
             properties:
                 grantee:
@@ -424,7 +427,7 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                granteeKind:
+                grantee_kind:
                     enum:
                         - ""
                         - user
@@ -524,6 +527,7 @@ components:
             description: Generated schema for LoginReq
             example:
                 password: x
+                profile: x
                 username: x
             properties:
                 password:
@@ -551,30 +555,30 @@ components:
         LoginResp:
             description: Generated schema for LoginResp
             example:
-                accessToken: x
-                connectionId: x
-                expiresIn: 1
-                tokenType: Bearer
+                access_token: x
+                connection_id: x
+                expires_in: 1
+                token_type: Bearer
             properties:
-                accessToken:
+                access_token:
                     example: x
                     maxLength: 8192
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                connectionId:
+                connection_id:
                     example: x
                     maxLength: 64
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                expiresIn:
+                expires_in:
                     example: 1
                     format: int32
                     maximum: 86400
                     minimum: 1
                     type: integer
-                tokenType:
+                token_type:
                     enum:
                         - Bearer
                     example: Bearer
@@ -582,10 +586,10 @@ components:
                     pattern: ^.*$
                     type: string
             required:
-                - accessToken
-                - tokenType
-                - expiresIn
-                - connectionId
+                - access_token
+                - token_type
+                - expires_in
+                - connection_id
             type: object
         MigrationCreateReq:
             description: Generated schema for MigrationCreateReq
@@ -625,7 +629,7 @@ components:
             example:
                 name: x
             properties:
-                createdAt:
+                created_at:
                     example: x
                     maxLength: 2048
                     pattern: ^.*$
@@ -700,16 +704,16 @@ components:
         PasswordChangeReq:
             description: Generated schema for PasswordChangeReq
             example:
-                newPassword: xxxxxxxx
+                new_password: xxxxxxxx
                 username: x
             properties:
-                newPassword:
+                new_password:
                     example: xxxxxxxx
                     maxLength: 2048
                     minLength: 8
                     pattern: ^.*$
                     type: string
-                oldPassword:
+                old_password:
                     example: x
                     maxLength: 2048
                     pattern: ^.*$
@@ -721,7 +725,7 @@ components:
                     type: string
             required:
                 - username
-                - newPassword
+                - new_password
             type: object
         Permission:
             description: Generated schema for Permission
@@ -860,7 +864,7 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                isDefault:
+                is_default:
                     example: true
                     type: boolean
                 name:
@@ -869,15 +873,15 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                ownerUserId:
+                owner_user_id:
                     example: x
                     maxLength: 2048
                     pattern: ^.*$
                     type: string
-                poolOverrides:
+                pool_overrides:
                     example: {}
                     type: object
-                savedUsername:
+                saved_username:
                     example: x
                     maxLength: 128
                     pattern: ^.*$
@@ -946,14 +950,16 @@ components:
         QueryReq:
             description: Generated schema for QueryReq
             example:
+                page_size: 1
                 statement: x
+                timeout_ms: 1
             properties:
                 graph:
                     example: x
                     maxLength: 256
                     pattern: ^.*$
                     type: string
-                pageSize:
+                page_size:
                     example: 1
                     format: int32
                     maximum: 10000
@@ -968,7 +974,7 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                timeoutMs:
+                timeout_ms:
                     example: 1
                     format: int32
                     maximum: 600000
@@ -982,8 +988,8 @@ components:
             example:
                 columns:
                     - {}
-                elapsedMs: 0
-                rowCount: 0
+                elapsed_ms: 0
+                row_count: 0
                 rows: []
             properties:
                 columns:
@@ -992,16 +998,16 @@ components:
                         type: object
                     maxItems: 100
                     type: array
-                elapsedMs:
+                elapsed_ms:
                     example: 0
                     format: int32
                     maximum: 2147483647
                     minimum: 0
                     type: integer
-                graphSummary:
+                graph_summary:
                     example: {}
                     type: object
-                rowCount:
+                row_count:
                     example: 0
                     format: int32
                     maximum: 2147483647
@@ -1016,13 +1022,15 @@ components:
             required:
                 - columns
                 - rows
-                - rowCount
-                - elapsedMs
+                - row_count
+                - elapsed_ms
             type: object
         QueryStreamMsg:
             description: Generated schema for QueryStreamMsg
             example:
+                elapsed_ms: 0
                 kind: start
+                row_count: 0
             properties:
                 code:
                     example: x
@@ -1034,7 +1042,7 @@ components:
                     items: {}
                     maxItems: 100
                     type: array
-                elapsedMs:
+                elapsed_ms:
                     example: 0
                     format: int32
                     maximum: 2147483647
@@ -1071,7 +1079,7 @@ components:
                     items: {}
                     maxItems: 100
                     type: array
-                rowCount:
+                row_count:
                     example: 0
                     format: int32
                     maximum: 2147483647
@@ -1096,7 +1104,7 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                targetTime:
+                target_time:
                     example: x
                     maxLength: 64
                     pattern: ^.*$
@@ -1180,7 +1188,7 @@ components:
                     maxLength: 256
                     pattern: ^.*$
                     type: string
-                readOnly:
+                read_only:
                     example: true
                     type: boolean
             type: object
@@ -1239,7 +1247,9 @@ components:
         UpdateProfileReq:
             description: Generated schema for UpdateProfileReq
             example:
-                profileId: x
+                dsn: x
+                name: x
+                profile_id: x
             properties:
                 description:
                     example: x
@@ -1252,7 +1262,7 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                isDefault:
+                is_default:
                     example: true
                     type: boolean
                 name:
@@ -1261,16 +1271,16 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                poolOverrides:
+                pool_overrides:
                     example: {}
                     type: object
-                profileId:
+                profile_id:
                     example: x
                     maxLength: 64
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                savedUsername:
+                saved_username:
                     example: x
                     maxLength: 128
                     pattern: ^.*$
@@ -1279,15 +1289,15 @@ components:
                     example: {}
                     type: object
             required:
-                - profileId
+                - profile_id
             type: object
         UploadResp:
             description: Generated schema for UploadResp
             example:
                 file: x
                 path: x
-                sizeBytes: 0
-                uploadedAt: x
+                size_bytes: 0
+                uploaded_at: x
             properties:
                 file:
                     example: x
@@ -1301,13 +1311,13 @@ components:
                     minLength: 1
                     pattern: ^.*$
                     type: string
-                sizeBytes:
+                size_bytes:
                     example: 0
                     format: int32
                     maximum: 2147483647
                     minimum: 0
                     type: integer
-                uploadedAt:
+                uploaded_at:
                     example: x
                     maxLength: 64
                     minLength: 1
@@ -1315,9 +1325,9 @@ components:
                     type: string
             required:
                 - file
-                - sizeBytes
+                - size_bytes
                 - path
-                - uploadedAt
+                - uploaded_at
             type: object
         User:
             description: Generated schema for User
@@ -1333,7 +1343,7 @@ components:
                     maxLength: 2048
                     pattern: ^.*$
                     type: string
-                mfaEnrolled:
+                mfa_enrolled:
                     example: true
                     type: boolean
                 roles:
@@ -1469,12 +1479,12 @@ info:
         url: https://opensource.org/licenses/MIT
     title: Generated API
     version: 1.0.0
-openapi: 3.0.3
+openapi: 3.1.0
 paths:
     /api/v1/audit:
         get:
             description: GET /api/v1/audit operation
-            operationId: getApiV1Audit
+            operationId: getAPIV1Audit
             parameters:
                 - description: GET /api/v1/audit query param event
                   in: query
@@ -1540,7 +1550,7 @@ paths:
     /api/v1/auth/login:
         post:
             description: POST /api/v1/auth/login operation
-            operationId: postApiV1AuthLogin
+            operationId: postAPIV1AuthLogin
             requestBody:
                 content:
                     application/x-www-form-urlencoded:
@@ -1584,7 +1594,7 @@ paths:
     /api/v1/backups:
         get:
             description: GET /api/v1/backups operation
-            operationId: getApiV1Backups
+            operationId: getAPIV1Backups
             responses:
                 "200":
                     content:
@@ -1624,7 +1634,7 @@ paths:
                 required_scopes: []
         post:
             description: POST /api/v1/backups operation
-            operationId: postApiV1Backups
+            operationId: postAPIV1Backups
             requestBody:
                 content:
                     application/json:
@@ -1672,7 +1682,7 @@ paths:
     /api/v1/backups/{file}:
         delete:
             description: DELETE /api/v1/backups/{file} operation
-            operationId: deleteApiV1BackupsFile
+            operationId: deleteAPIV1BackupsFile
             parameters:
                 - description: DELETE /api/v1/backups/{file} path parameter file
                   in: path
@@ -1721,7 +1731,7 @@ paths:
                 required_scopes: []
         get:
             description: GET /api/v1/backups/{file} operation
-            operationId: getApiV1BackupsFile
+            operationId: getAPIV1BackupsFile
             parameters:
                 - description: GET /api/v1/backups/{file} path parameter file
                   in: path
@@ -1771,7 +1781,7 @@ paths:
     /api/v1/backups/cleanup:
         post:
             description: POST /api/v1/backups/cleanup operation
-            operationId: postApiV1BackupsCleanup
+            operationId: postAPIV1BackupsCleanup
             requestBody:
                 content:
                     application/json:
@@ -1819,7 +1829,7 @@ paths:
     /api/v1/backups/upload:
         post:
             description: POST /api/v1/backups/upload operation
-            operationId: postApiV1BackupsUpload
+            operationId: postAPIV1BackupsUpload
             requestBody:
                 content:
                     multipart/form-data:
@@ -1867,7 +1877,7 @@ paths:
     /api/v1/capabilities:
         get:
             description: GET /api/v1/capabilities operation
-            operationId: getApiV1Capabilities
+            operationId: getAPIV1Capabilities
             responses:
                 "200":
                     content:
@@ -1904,7 +1914,7 @@ paths:
     /api/v1/grants:
         post:
             description: POST /api/v1/grants operation
-            operationId: postApiV1Grants
+            operationId: postAPIV1Grants
             requestBody:
                 content:
                     application/json:
@@ -1952,7 +1962,7 @@ paths:
     /api/v1/grants/revoke:
         post:
             description: POST /api/v1/grants/revoke operation
-            operationId: postApiV1GrantsRevoke
+            operationId: postAPIV1GrantsRevoke
             requestBody:
                 content:
                     application/json:
@@ -2000,7 +2010,7 @@ paths:
     /api/v1/graphs:
         get:
             description: GET /api/v1/graphs operation
-            operationId: getApiV1Graphs
+            operationId: getAPIV1Graphs
             responses:
                 "200":
                     content:
@@ -2037,7 +2047,7 @@ paths:
     /api/v1/graphs/{graph}/constraints:
         get:
             description: GET /api/v1/graphs/{graph}/constraints operation
-            operationId: getApiV1GraphsGraphConstraints
+            operationId: getAPIV1GraphsGraphConstraints
             parameters:
                 - description: GET /api/v1/graphs/{graph}/constraints path parameter graph
                   in: path
@@ -2083,7 +2093,7 @@ paths:
     /api/v1/graphs/{graph}/edge-types:
         get:
             description: GET /api/v1/graphs/{graph}/edge-types operation
-            operationId: getApiV1GraphsGraphEdgeTypes
+            operationId: getAPIV1GraphsGraphEdgeTypes
             parameters:
                 - description: GET /api/v1/graphs/{graph}/edge-types path parameter graph
                   in: path
@@ -2129,7 +2139,7 @@ paths:
     /api/v1/graphs/{graph}/indexes:
         get:
             description: GET /api/v1/graphs/{graph}/indexes operation
-            operationId: getApiV1GraphsGraphIndexes
+            operationId: getAPIV1GraphsGraphIndexes
             parameters:
                 - description: GET /api/v1/graphs/{graph}/indexes path parameter graph
                   in: path
@@ -2175,7 +2185,7 @@ paths:
     /api/v1/graphs/{graph}/labels:
         get:
             description: GET /api/v1/graphs/{graph}/labels operation
-            operationId: getApiV1GraphsGraphLabels
+            operationId: getAPIV1GraphsGraphLabels
             parameters:
                 - description: GET /api/v1/graphs/{graph}/labels path parameter graph
                   in: path
@@ -2221,7 +2231,7 @@ paths:
     /api/v1/migrations:
         get:
             description: GET /api/v1/migrations operation
-            operationId: getApiV1Migrations
+            operationId: getAPIV1Migrations
             responses:
                 "200":
                     content:
@@ -2261,7 +2271,7 @@ paths:
                 required_scopes: []
         post:
             description: POST /api/v1/migrations operation
-            operationId: postApiV1Migrations
+            operationId: postAPIV1Migrations
             requestBody:
                 content:
                     application/json:
@@ -2309,7 +2319,7 @@ paths:
     /api/v1/migrations/{name}/sign:
         post:
             description: POST /api/v1/migrations/{name}/sign operation
-            operationId: postApiV1MigrationsNameSign
+            operationId: postAPIV1MigrationsNameSign
             parameters:
                 - description: POST /api/v1/migrations/{name}/sign path parameter name
                   in: path
@@ -2366,7 +2376,7 @@ paths:
     /api/v1/migrations/run:
         post:
             description: POST /api/v1/migrations/run operation
-            operationId: postApiV1MigrationsRun
+            operationId: postAPIV1MigrationsRun
             requestBody:
                 content:
                     application/json:
@@ -2414,7 +2424,7 @@ paths:
     /api/v1/migrations/upload:
         post:
             description: POST /api/v1/migrations/upload operation
-            operationId: postApiV1MigrationsUpload
+            operationId: postAPIV1MigrationsUpload
             requestBody:
                 content:
                     multipart/form-data:
@@ -2462,7 +2472,7 @@ paths:
     /api/v1/policies:
         get:
             description: GET /api/v1/policies operation
-            operationId: getApiV1Policies
+            operationId: getAPIV1Policies
             responses:
                 "200":
                     content:
@@ -2502,7 +2512,7 @@ paths:
                 required_scopes: []
         post:
             description: POST /api/v1/policies operation
-            operationId: postApiV1Policies
+            operationId: postAPIV1Policies
             requestBody:
                 content:
                     application/json:
@@ -2550,7 +2560,7 @@ paths:
     /api/v1/policies/{name}:
         delete:
             description: DELETE /api/v1/policies/{name} operation
-            operationId: deleteApiV1PoliciesName
+            operationId: deleteAPIV1PoliciesName
             parameters:
                 - description: DELETE /api/v1/policies/{name} path parameter name
                   in: path
@@ -2599,7 +2609,7 @@ paths:
                 required_scopes: []
         get:
             description: GET /api/v1/policies/{name} operation
-            operationId: getApiV1PoliciesName
+            operationId: getAPIV1PoliciesName
             parameters:
                 - description: GET /api/v1/policies/{name} path parameter name
                   in: path
@@ -2649,7 +2659,7 @@ paths:
     /api/v1/profiles:
         get:
             description: GET /api/v1/profiles operation
-            operationId: getApiV1Profiles
+            operationId: getAPIV1Profiles
             responses:
                 "200":
                     content:
@@ -2685,7 +2695,7 @@ paths:
                 - Profiles
         post:
             description: POST /api/v1/profiles operation
-            operationId: postApiV1Profiles
+            operationId: postAPIV1Profiles
             requestBody:
                 content:
                     application/json:
@@ -2729,7 +2739,7 @@ paths:
     /api/v1/profiles/{profileId}:
         delete:
             description: DELETE /api/v1/profiles/{profileId} operation
-            operationId: deleteApiV1ProfilesProfileid
+            operationId: deleteAPIV1ProfilesProfileid
             parameters:
                 - description: DELETE /api/v1/profiles/{profileId} path parameter profileId
                   in: path
@@ -2741,7 +2751,7 @@ paths:
                     type: string
                 - description: DELETE /api/v1/profiles/{profileId} query param profile_id
                   in: query
-                  name: profileId
+                  name: profile_id
                   required: true
                   schema:
                     maxLength: 64
@@ -2783,7 +2793,7 @@ paths:
                 - Profileid
         get:
             description: GET /api/v1/profiles/{profileId} operation
-            operationId: getApiV1ProfilesProfileid
+            operationId: getAPIV1ProfilesProfileid
             parameters:
                 - description: GET /api/v1/profiles/{profileId} path parameter profileId
                   in: path
@@ -2795,7 +2805,7 @@ paths:
                     type: string
                 - description: GET /api/v1/profiles/{profileId} query param profile_id
                   in: query
-                  name: profileId
+                  name: profile_id
                   required: true
                   schema:
                     maxLength: 64
@@ -2837,7 +2847,7 @@ paths:
                 - Profileid
         patch:
             description: PATCH /api/v1/profiles/{profileId} operation
-            operationId: patchApiV1ProfilesProfileid
+            operationId: patchAPIV1ProfilesProfileid
             parameters:
                 - description: PATCH /api/v1/profiles/{profileId} path parameter profileId
                   in: path
@@ -2890,7 +2900,7 @@ paths:
     /api/v1/profiles/public:
         get:
             description: GET /api/v1/profiles/public operation
-            operationId: getApiV1ProfilesPublic
+            operationId: getAPIV1ProfilesPublic
             responses:
                 "200":
                     content:
@@ -2927,7 +2937,7 @@ paths:
     /api/v1/query:
         post:
             description: POST /api/v1/query operation
-            operationId: postApiV1Query
+            operationId: postAPIV1Query
             requestBody:
                 content:
                     application/json:
@@ -2971,7 +2981,7 @@ paths:
     /api/v1/restore:
         post:
             description: POST /api/v1/restore operation
-            operationId: postApiV1Restore
+            operationId: postAPIV1Restore
             requestBody:
                 content:
                     application/json:
@@ -3019,7 +3029,7 @@ paths:
     /api/v1/roles:
         get:
             description: GET /api/v1/roles operation
-            operationId: getApiV1Roles
+            operationId: getAPIV1Roles
             responses:
                 "200":
                     content:
@@ -3059,7 +3069,7 @@ paths:
                 required_scopes: []
         post:
             description: POST /api/v1/roles operation
-            operationId: postApiV1Roles
+            operationId: postAPIV1Roles
             requestBody:
                 content:
                     application/json:
@@ -3107,7 +3117,7 @@ paths:
     /api/v1/roles/{role}:
         delete:
             description: DELETE /api/v1/roles/{role} operation
-            operationId: deleteApiV1RolesRole
+            operationId: deleteAPIV1RolesRole
             parameters:
                 - description: DELETE /api/v1/roles/{role} path parameter role
                   in: path
@@ -3156,7 +3166,7 @@ paths:
                 required_scopes: []
         get:
             description: GET /api/v1/roles/{role} operation
-            operationId: getApiV1RolesRole
+            operationId: getAPIV1RolesRole
             parameters:
                 - description: GET /api/v1/roles/{role} path parameter role
                   in: path
@@ -3206,7 +3216,7 @@ paths:
     /api/v1/tx:
         post:
             description: POST /api/v1/tx operation
-            operationId: postApiV1Tx
+            operationId: postAPIV1Tx
             requestBody:
                 content:
                     application/json:
@@ -3250,7 +3260,7 @@ paths:
     /api/v1/tx/{txid}/commit:
         post:
             description: POST /api/v1/tx/{txid}/commit operation
-            operationId: postApiV1TxTxidCommit
+            operationId: postAPIV1TxTxidCommit
             parameters:
                 - description: POST /api/v1/tx/{txid}/commit path parameter txid
                   in: path
@@ -3303,7 +3313,7 @@ paths:
     /api/v1/tx/{txid}/rollback:
         post:
             description: POST /api/v1/tx/{txid}/rollback operation
-            operationId: postApiV1TxTxidRollback
+            operationId: postAPIV1TxTxidRollback
             parameters:
                 - description: POST /api/v1/tx/{txid}/rollback path parameter txid
                   in: path
@@ -3356,7 +3366,7 @@ paths:
     /api/v1/tx/{txid}/run:
         post:
             description: POST /api/v1/tx/{txid}/run operation
-            operationId: postApiV1TxTxidRun
+            operationId: postAPIV1TxTxidRun
             parameters:
                 - description: POST /api/v1/tx/{txid}/run path parameter txid
                   in: path
@@ -3409,7 +3419,7 @@ paths:
     /api/v1/users:
         get:
             description: GET /api/v1/users operation
-            operationId: getApiV1Users
+            operationId: getAPIV1Users
             responses:
                 "200":
                     content:
@@ -3449,7 +3459,7 @@ paths:
                 required_scopes: []
         post:
             description: POST /api/v1/users operation
-            operationId: postApiV1Users
+            operationId: postAPIV1Users
             requestBody:
                 content:
                     application/json:
@@ -3497,7 +3507,7 @@ paths:
     /api/v1/users/{username}:
         delete:
             description: DELETE /api/v1/users/{username} operation
-            operationId: deleteApiV1UsersUsername
+            operationId: deleteAPIV1UsersUsername
             parameters:
                 - description: DELETE /api/v1/users/{username} path parameter username
                   in: path
@@ -3546,7 +3556,7 @@ paths:
                 required_scopes: []
         get:
             description: GET /api/v1/users/{username} operation
-            operationId: getApiV1UsersUsername
+            operationId: getAPIV1UsersUsername
             parameters:
                 - description: GET /api/v1/users/{username} path parameter username
                   in: path
@@ -3595,7 +3605,7 @@ paths:
                 required_scopes: []
         patch:
             description: PATCH /api/v1/users/{username} operation
-            operationId: patchApiV1UsersUsername
+            operationId: patchAPIV1UsersUsername
             parameters:
                 - description: PATCH /api/v1/users/{username} path parameter username
                   in: path
@@ -3652,7 +3662,7 @@ paths:
     /api/v1/users/{username}/disable:
         post:
             description: POST /api/v1/users/{username}/disable operation
-            operationId: postApiV1UsersUsernameDisable
+            operationId: postAPIV1UsersUsernameDisable
             parameters:
                 - description: POST /api/v1/users/{username}/disable path parameter username
                   in: path
@@ -3709,7 +3719,7 @@ paths:
     /api/v1/users/{username}/enable:
         post:
             description: POST /api/v1/users/{username}/enable operation
-            operationId: postApiV1UsersUsernameEnable
+            operationId: postAPIV1UsersUsernameEnable
             parameters:
                 - description: POST /api/v1/users/{username}/enable path parameter username
                   in: path
@@ -3766,7 +3776,7 @@ paths:
     /api/v1/users/{username}/password:
         post:
             description: POST /api/v1/users/{username}/password operation
-            operationId: postApiV1UsersUsernamePassword
+            operationId: postAPIV1UsersUsernamePassword
             parameters:
                 - description: POST /api/v1/users/{username}/password path parameter username
                   in: path
@@ -3819,7 +3829,7 @@ paths:
     /api/v1/users/{username}/permissions:
         get:
             description: GET /api/v1/users/{username}/permissions operation
-            operationId: getApiV1UsersUsernamePermissions
+            operationId: getAPIV1UsersUsernamePermissions
             parameters:
                 - description: GET /api/v1/users/{username}/permissions path parameter username
                   in: path
@@ -3869,7 +3879,7 @@ paths:
     /api/v1/users/{username}/roles:
         post:
             description: POST /api/v1/users/{username}/roles operation
-            operationId: postApiV1UsersUsernameRoles
+            operationId: postAPIV1UsersUsernameRoles
             parameters:
                 - description: POST /api/v1/users/{username}/roles path parameter username
                   in: path
@@ -3963,7 +3973,7 @@ paths:
     /ws/ping:
         get:
             description: WebSocket /ws/ping endpoint
-            operationId: wsWsPing
+            operationId: wsWSPing
             responses:
                 "101":
                     content:
@@ -4001,7 +4011,7 @@ paths:
     /ws/query:
         get:
             description: WebSocket /ws/query endpoint
-            operationId: wsWsQuery
+            operationId: wsWSQuery
             responses:
                 "101":
                     content:

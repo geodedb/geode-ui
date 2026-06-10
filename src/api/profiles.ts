@@ -2,6 +2,18 @@
 // site is typed against the wire contract directly. fromWireProfile()
 // still accepts `unknown` to keep the parser fail-closed, but the
 // listProfiles() reader no longer carries the legacy `unknown[]` cast.
+//
+// genapi 0.11.1: the generated client now performs camelCase<->snake_case
+// conversion at the wire boundary -- request bodies are converted
+// camelCase->snake_case on the way OUT, responses snake_case->camelCase on
+// the way IN (gen/client/react/client.ts: toWire/fromWire). The SPA
+// therefore works in camelCase END TO END: the builders below emit
+// camelCase DTOs (the client snakes them for the wire) and fromWireProfile
+// reads the camelCase response the client hands back. The ONLY snake_case
+// the SPA still sees is the LEGACY JSON-STRING form of `tls` /
+// `pool_overrides`: convertKeys does not descend into string values, so a
+// string-encoded payload decodes to its original snake_case keys. The
+// nested parsers below accept EITHER casing to stay robust to both forms.
 import type { CreateProfileReq, Profile as GenProfile } from '@api'
 import { client } from './client'
 
@@ -66,13 +78,22 @@ function parseMaybe(v: unknown): Record<string, unknown> | null {
   return null
 }
 
+// parseTls / parsePoolOverrides read the nested object the generated client
+// hands back. The current object form arrives camelCase (the client
+// converted it); the legacy JSON-STRING form decodes to snake_case (the
+// client skips strings). Read camelCase first, fall back to snake_case so
+// both forms narrow correctly.
 function parseTls(raw: unknown): TLSMaterial | undefined {
   const obj = parseMaybe(raw)
   if (!obj) return undefined
   return {
-    caPem: (obj.ca_pem as string | undefined) || undefined,
-    clientCertPem: (obj.client_cert_pem as string | undefined) || undefined,
-    clientKeyPem: (obj.client_key_pem as string | undefined) || undefined,
+    caPem: ((obj.caPem ?? obj.ca_pem) as string | undefined) || undefined,
+    clientCertPem:
+      ((obj.clientCertPem ?? obj.client_cert_pem) as string | undefined) ||
+      undefined,
+    clientKeyPem:
+      ((obj.clientKeyPem ?? obj.client_key_pem) as string | undefined) ||
+      undefined,
   }
 }
 
@@ -80,38 +101,44 @@ function parsePoolOverrides(raw: unknown): PoolOverrides | undefined {
   const obj = parseMaybe(raw)
   if (!obj) return undefined
   return {
-    maxOpenConns: obj.max_open_conns as number | undefined,
-    maxIdleConns: obj.max_idle_conns as number | undefined,
-    connMaxLifetimeMs: obj.conn_max_lifetime_ms as number | undefined,
-    connMaxIdleMs: obj.conn_max_idle_ms as number | undefined,
+    maxOpenConns: (obj.maxOpenConns ?? obj.max_open_conns) as
+      | number
+      | undefined,
+    maxIdleConns: (obj.maxIdleConns ?? obj.max_idle_conns) as
+      | number
+      | undefined,
+    connMaxLifetimeMs: (obj.connMaxLifetimeMs ?? obj.conn_max_lifetime_ms) as
+      | number
+      | undefined,
+    connMaxIdleMs: (obj.connMaxIdleMs ?? obj.conn_max_idle_ms) as
+      | number
+      | undefined,
   }
 }
 
-// WireProfile mirrors the server's Profile shape (see
-// gen/types/types.gen.go:614 `type Profile struct`). All scalar fields
-// are present on the wire (the server emits zero values rather than
-// omitting keys), so they are typed required-but-possibly-empty.
-// `tls` and `pool_overrides` arrive as either a nested JSON object
-// (current server output) or a JSON-encoded string (legacy / test
-// form); typed `unknown` here so `parseTls` / `parsePoolOverrides`
-// own the narrowing.
+// WireProfile mirrors the camelCase Profile the generated client returns
+// (gen/client/react/client.ts `interface Profile`). The client already
+// converted the server's snake_case response, so every scalar field is
+// camelCase here. `tls` and `pool_overrides` arrive as either a nested
+// object (current server output, already camelCased) or a JSON-encoded
+// string (legacy/test form, still snake_case); typed `unknown` here so
+// `parseTls` / `parsePoolOverrides` own the narrowing.
 //
-// IMPORTANT: this type is the SPA's view of the wire contract, not a
-// re-export of the genapi Go struct. If `gen/types/types.gen.go`'s
-// Profile shape changes, this type and `fromWireProfile` below must
-// move with it. Keeping it co-located with `fromWireProfile` avoids
-// the indirection of a separate types file for one consumer.
+// IMPORTANT: this type is the SPA's view of the (post-conversion) client
+// contract, not a re-export of the genapi Go struct. If
+// `gen/types/types.gen.go`'s Profile shape changes, this type and
+// `fromWireProfile` below must move with it.
 export type WireProfile = {
   id?: string
   scope?: string
-  owner_user_id?: string
+  ownerUserId?: string
   name?: string
   dsn?: string
   description?: string
-  saved_username?: string
-  is_default?: boolean
+  savedUsername?: string
+  isDefault?: boolean
   tls?: unknown
-  pool_overrides?: unknown
+  poolOverrides?: unknown
 }
 
 // isWireProfile narrows an unknown value to WireProfile.
@@ -130,10 +157,11 @@ export function isWireProfile(x: unknown): x is WireProfile {
   return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
 
-// fromWireProfile parses the server's Profile shape into the SPA's typed
-// ProfileView. tls and pool_overrides are accepted as either a nested JSON
-// object (current server output) or a JSON-encoded string (legacy/test
-// form), so the two sides can be deployed independently.
+// fromWireProfile parses the (camelCase) Profile the generated client
+// returns into the SPA's typed ProfileView. tls and pool_overrides are
+// accepted as either a nested object (current client output) or a
+// JSON-encoded string (legacy/test form), so the two sides can be deployed
+// independently.
 //
 // Closes GAP-Q1 (#89): the parameter is typed `unknown`, narrowed via
 // `isWireProfile`. A non-object input (null, array, string, number,
@@ -153,23 +181,25 @@ export function fromWireProfile(wire: unknown): ProfileView {
   return {
     id: wire.id ?? '',
     scope: (wire.scope ?? 'system') as Scope,
-    ownerUserId: wire.owner_user_id || undefined,
+    ownerUserId: wire.ownerUserId || undefined,
     name: wire.name ?? '',
     dsn: wire.dsn || undefined,
     description: wire.description || undefined,
-    savedUsername: wire.saved_username || undefined,
-    isDefault: !!wire.is_default,
+    savedUsername: wire.savedUsername || undefined,
+    isDefault: !!wire.isDefault,
     tls: parseTls(wire.tls),
-    poolOverrides: parsePoolOverrides(wire.pool_overrides),
+    poolOverrides: parsePoolOverrides(wire.poolOverrides),
   }
 }
 
 type WireTLS = {
-  ca_pem?: string
-  client_cert_pem?: string
-  client_key_pem?: string
+  caPem?: string
+  clientCertPem?: string
+  clientKeyPem?: string
 }
-// tlsToWire serialises the SPA TLSMaterial onto the JSON wire shape.
+// tlsToWire serialises the SPA TLSMaterial into the camelCase DTO the
+// generated client expects; the client converts the keys to snake_case on
+// the wire (ca_pem / client_cert_pem / client_key_pem).
 //
 // PSR-G02 contract:
 //   - undefined input -> undefined output (caller did not provide the key
@@ -183,31 +213,32 @@ type WireTLS = {
 function tlsToWire(t?: TLSMaterial): WireTLS | undefined {
   if (t === undefined) return undefined
   const out: WireTLS = {}
-  if (t.caPem) out.ca_pem = t.caPem
-  if (t.clientCertPem) out.client_cert_pem = t.clientCertPem
-  if (t.clientKeyPem) out.client_key_pem = t.clientKeyPem
+  if (t.caPem) out.caPem = t.caPem
+  if (t.clientCertPem) out.clientCertPem = t.clientCertPem
+  if (t.clientKeyPem) out.clientKeyPem = t.clientKeyPem
   return out
 }
 
 type WirePO = {
-  max_open_conns?: number
-  max_idle_conns?: number
-  conn_max_lifetime_ms?: number
-  conn_max_idle_ms?: number
+  maxOpenConns?: number
+  maxIdleConns?: number
+  connMaxLifetimeMs?: number
+  connMaxIdleMs?: number
 }
 // poToWire mirrors tlsToWire's PSR-G02 contract: undefined means
 // "absent" (preserve server state); a defined object (even an empty
 // one) means the caller explicitly intends the new state, so an empty
-// `{}` clears every override on the server.
+// `{}` clears every override on the server. The generated client
+// converts the keys to snake_case (max_open_conns / ...) on the wire.
 function poToWire(o?: PoolOverrides): WirePO | undefined {
   if (o === undefined) return undefined
   const out: WirePO = {}
-  if (o.maxOpenConns !== undefined) out.max_open_conns = o.maxOpenConns
-  if (o.maxIdleConns !== undefined) out.max_idle_conns = o.maxIdleConns
+  if (o.maxOpenConns !== undefined) out.maxOpenConns = o.maxOpenConns
+  if (o.maxIdleConns !== undefined) out.maxIdleConns = o.maxIdleConns
   if (o.connMaxLifetimeMs !== undefined) {
-    out.conn_max_lifetime_ms = o.connMaxLifetimeMs
+    out.connMaxLifetimeMs = o.connMaxLifetimeMs
   }
-  if (o.connMaxIdleMs !== undefined) out.conn_max_idle_ms = o.connMaxIdleMs
+  if (o.connMaxIdleMs !== undefined) out.connMaxIdleMs = o.connMaxIdleMs
   return out
 }
 
@@ -219,10 +250,10 @@ export function toWireCreateRequest(
     name: input.name,
     dsn: input.dsn,
     description: input.description ?? '',
-    saved_username: input.savedUsername ?? '',
-    is_default: input.isDefault,
+    savedUsername: input.savedUsername ?? '',
+    isDefault: input.isDefault,
     tls: tlsToWire(input.tls),
-    pool_overrides: poToWire(input.poolOverrides),
+    poolOverrides: poToWire(input.poolOverrides),
   }
 }
 
@@ -234,12 +265,12 @@ export function toWireUpdateRequest(
   if (input.dsn !== undefined) out.dsn = input.dsn
   if (input.description !== undefined) out.description = input.description
   if (input.savedUsername !== undefined) {
-    out.saved_username = input.savedUsername
+    out.savedUsername = input.savedUsername
   }
-  if (input.isDefault !== undefined) out.is_default = input.isDefault
+  if (input.isDefault !== undefined) out.isDefault = input.isDefault
   if (input.tls !== undefined) out.tls = tlsToWire(input.tls)
   if (input.poolOverrides !== undefined) {
-    out.pool_overrides = poToWire(input.poolOverrides)
+    out.poolOverrides = poToWire(input.poolOverrides)
   }
   return out
 }
@@ -276,13 +307,14 @@ export async function updateProfile(
   input: UpdateProfileInput
 ): Promise<ProfileView> {
   const wire = toWireUpdateRequest(input)
-  // genapi#216 (Q02 / #90): the generated client's expandPath now maps the
-  // {profileId} URL token to the schema field `profile_id`, so we pass a
-  // typed UpdateProfileReq directly -- no `as unknown as {...}` cast.
-  const r = await client.patchProfileid({ ...wire, profile_id: id })
+  // genapi 0.11.1: the generated client maps the {profileId} URL token to
+  // the schema field `profileId` (camelCase) and converts it to the
+  // snake_case `profile_id` path segment on the wire, so we pass a typed
+  // UpdateProfileReq directly -- no `as unknown as {...}` cast.
+  const r = await client.patchProfileid({ ...wire, profileId: id })
   return fromWireProfile(r)
 }
 
 export async function deleteProfile(id: string): Promise<void> {
-  await client.deleteProfileid({ profile_id: id })
+  await client.deleteProfileid({ profileId: id })
 }

@@ -148,8 +148,8 @@ function streamStateToResp(s: StreamState): QueryResp {
   return {
     columns: s.columns as unknown as Array<Record<string, unknown>>,
     rows: s.rows as Array<Array<unknown>>,
-    row_count: s.rowCount || s.rows.length,
-    elapsed_ms: s.elapsedMs,
+    rowCount: s.rowCount || s.rows.length,
+    elapsedMs: s.elapsedMs,
   }
 }
 
@@ -381,8 +381,8 @@ export const QueryPage: React.FC = () => {
       // defaults so the synchronous query path is usable.
       const r = await client.query({
         statement: ranStmt,
-        page_size: 1000,
-        timeout_ms: 30000,
+        pageSize: 1000,
+        timeoutMs: 30000,
       })
       // QUAL #289: only write the result + history entry if this
       // promise is still the latest sync run. Without this guard, a
@@ -393,7 +393,7 @@ export const QueryPage: React.FC = () => {
       setResp(r)
       useQueryHistory.getState().record(historyProfile, {
         statement: ranStmt,
-        rowCount: r.row_count ?? r.rows.length,
+        rowCount: r.rowCount ?? r.rows.length,
         ok: true,
       })
     } catch (e: unknown) {
@@ -719,8 +719,8 @@ export const QueryPage: React.FC = () => {
         </Dropdown>
         {activeResp && (
           <span>
-            {t('common.rowCount', { count: activeResp.row_count ?? 0 })} ·{' '}
-            {t('common.elapsed', { ms: activeResp.elapsed_ms })}
+            {t('common.rowCount', { count: activeResp.rowCount ?? 0 })} ·{' '}
+            {t('common.elapsed', { ms: activeResp.elapsedMs })}
           </span>
         )}
         {activeErr && <span className="text-danger">{activeErr}</span>}

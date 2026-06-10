@@ -192,7 +192,7 @@ const CreateRoleModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         draft.length > 0 && !permissions.includes(draft)
           ? [...permissions, draft]
           : permissions
-      await client.postApiRoles({ name, description, permissions: perms })
+      await client.postAPIRoles({ name, description, permissions: perms })
       onClose()
     } catch (e2: unknown) {
       if (isWireFeatureMissingError(e2)) {

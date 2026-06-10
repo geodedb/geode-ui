@@ -11,19 +11,21 @@ beforeEach(() => {
 })
 
 describe('fetchCapabilities — security subsystem flags', () => {
-  it('exposes attributes/rlsDenyPolicies/rlsAttributePolicies from admin_writable', async () => {
+  it('exposes attributes/rlsDenyPolicies/rlsAttributePolicies from adminWritable', async () => {
+    // genapi 0.11.1: the generated client returns camelCase (it converts the
+    // snake_case wire response), so the mock mirrors the client's output.
     getCapabilities.mockResolvedValue({
-      geode_version: '0.5.20',
-      admin_writable: {
+      geodeVersion: '0.5.20',
+      adminWritable: {
         users: true,
         roles: true,
         policies: true,
         grants: true,
         attributes: true,
-        rls_deny_policies: true,
-        rls_attribute_policies: true,
+        rlsDenyPolicies: true,
+        rlsAttributePolicies: true,
       },
-      metrics_enabled: true,
+      metricsEnabled: true,
     })
     const caps = await fetchCapabilities()
     expect(caps.adminWritable.attributes).toBe(true)
@@ -34,14 +36,14 @@ describe('fetchCapabilities — security subsystem flags', () => {
 
   it('defaults the new flags to false when omitted from the response', async () => {
     getCapabilities.mockResolvedValue({
-      geode_version: '0.5.19',
-      admin_writable: {
+      geodeVersion: '0.5.19',
+      adminWritable: {
         users: true,
         roles: true,
         policies: true,
         grants: true,
       },
-      metrics_enabled: false,
+      metricsEnabled: false,
     })
     const caps = await fetchCapabilities()
     expect(caps.adminWritable.attributes).toBe(false)

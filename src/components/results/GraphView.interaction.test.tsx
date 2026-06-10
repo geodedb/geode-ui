@@ -489,13 +489,13 @@ describe('Phase 2: Explore neighbours', () => {
     expect(queryMock).toHaveBeenCalledTimes(1)
     const arg = queryMock.mock.calls[0][0] as {
       statement: string
-      page_size?: number
-      timeout_ms?: number
+      pageSize?: number
+      timeoutMs?: number
     }
     expect(arg.statement).toMatch(/id\([^)]*\)\s*=\s*1\b/)
     expect(arg.statement).toMatch(/RETURN/i)
-    expect(arg.page_size).toBe(200)
-    expect(arg.timeout_ms).toBe(30000)
+    expect(arg.pageSize).toBe(200)
+    expect(arg.timeoutMs).toBe(30000)
     const addedIds = ((lastCy().__addCalls as unknown[]) ?? [])
       .flatMap((c) => (Array.isArray(c) ? c : [c]))
       .map((e) => (e as { data?: { id?: unknown } })?.data?.id)

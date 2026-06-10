@@ -3,6 +3,7 @@ package ws
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -41,52 +42,158 @@ func (UnimplementedWSServer) Query(conn *wsx.Conn) error {
 type WSOptions struct {
 	Auth    func(*http.Request) error
 	AuthJWT func(*http.Request) error
+	// Limiters is an optional per-path override of the auto-built
+	// process-local *wsx.Limiter. Use to wire e.g. a Redis-backed
+	// limiter for cross-pod accounting. A path not present in the map
+	// gets the auto-built limiter. GAP-0075.
+	Limiters map[string]*wsx.Limiter
+}
+
+// WithWSLimiter installs a custom *wsx.Limiter for a single path.
+// Pass to the caller's option-builder when assembling WSOptions. The
+// override survives ws.go.tmpl regeneration: a consumer that wires a
+// Redis-backed cap need not patch the template. GAP-0075.
+func WithWSLimiter(opts *WSOptions, path string, lim *wsx.Limiter) {
+	if opts == nil || lim == nil {
+		return
+	}
+	if opts.Limiters == nil {
+		opts.Limiters = make(map[string]*wsx.Limiter)
+	}
+	opts.Limiters[path] = lim
 }
 
 // wsOptions contains statically generated wsx.Options per path.
 var wsOptions = map[string]wsx.Options{
 	"/ws/ping": {
-		PingInterval: 30000 * time.Millisecond,
-		MaxFrame:     65536,
-		MaxMessage:   1048576,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		CheckOrigin: true,
+		PingInterval:     30000 * time.Millisecond,
+		MaxFrame:         65536,
+		MaxMessage:       1048576,
+		ReadTimeout:      30 * time.Second,
+		WriteTimeout:     30 * time.Second,
+		CheckOrigin:      true,
 		AllowEmptyOrigin: true,
-		SameOriginOnly: true,
+		SameOriginOnly:   true,
 	},
 	"/ws/query": {
-		PingInterval: 15000 * time.Millisecond,
-		MaxFrame:     1048576,
-		MaxMessage:   16777216,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		CheckOrigin: true,
+		PingInterval:     15000 * time.Millisecond,
+		MaxFrame:         1048576,
+		MaxMessage:       16777216,
+		ReadTimeout:      30 * time.Second,
+		WriteTimeout:     30 * time.Second,
+		CheckOrigin:      true,
 		AllowEmptyOrigin: true,
-		SameOriginOnly: true,
+		SameOriginOnly:   true,
 	},
 }
 
+// wsLimiters is the per-path pre-handshake connection-cap gate
+// (GAP-0075). Built lazily on first registration so callers can
+// override individual paths via WithWSLimiter before
+// RegisterGeneratedWS runs. All paths fall back to a process-local
+// limiter assembled from the per-path cap fields in the config (or
+// pkg/wsx defaults when fields are zero).
+var wsLimiters = map[string]*wsx.Limiter{}
+
 // RegisterGeneratedWS registers WebSocket endpoints; srv handles business logic.
+//
+// GAP-0076: when the configuration declares at least one WebSocket
+// endpoint with auth: "jwt" but the caller supplied a nil opts.AuthJWT,
+// this function panics with a fmt.Errorf wrapping
+// securex.ErrAuthVerifierRequired BEFORE any endpoint is registered.
+// The same guard fires for auth: "api_key" + nil opts.Auth via
+// securex.ErrAuthAPIKeyRequired. Use securex.NewTestVerifier() as the
+// unit-test escape hatch.
 func RegisterGeneratedWS(mux *http.ServeMux, srv WSServerInterface, opts WSOptions) {
+	// GAP-0076: bootstrap-fail on nil JWT verifier when the spec
+	// declares any WebSocket endpoint with auth: "jwt".
+	if opts.AuthJWT == nil {
+		panic(fmt.Errorf("%w", securex.ErrAuthVerifierRequired))
+	}
+	// GAP-0075: build the per-path limiter table at registration time.
+	// Caller overrides (opts.Limiters) win; otherwise we build a
+	// process-local *wsx.Limiter from the cap fields in wsOptions.
+	if l, ok := opts.Limiters["/ws/ping"]; ok && l != nil {
+		wsLimiters["/ws/ping"] = l
+	} else {
+		_o := wsOptions["/ws/ping"]
+		wsLimiters["/ws/ping"] = wsx.NewLimiter(wsx.LimiterConfig{
+			MaxConnections:      _o.MaxConnections,
+			MaxConnectionsPerIP: _o.MaxConnectionsPerIP,
+			UpgradeRatePerMin:   _o.UpgradeRatePerMin,
+		})
+	}
+	if l, ok := opts.Limiters["/ws/query"]; ok && l != nil {
+		wsLimiters["/ws/query"] = l
+	} else {
+		_o := wsOptions["/ws/query"]
+		wsLimiters["/ws/query"] = wsx.NewLimiter(wsx.LimiterConfig{
+			MaxConnections:      _o.MaxConnections,
+			MaxConnectionsPerIP: _o.MaxConnectionsPerIP,
+			UpgradeRatePerMin:   _o.UpgradeRatePerMin,
+		})
+	}
 	mux.HandleFunc("/ws/ping", func(w http.ResponseWriter, r *http.Request) {
-		authReq := securex.RequestWithAuthPolicy(r, securex.RequestAuthPolicy{AllowAuthorizationHeader: true, AllowSubprotocolBearer: true, AllowSubprotocolSignature: true, AllowQueryBearer: false, AllowQuerySignature: false})
+		// L-30: the verifier runs on authReq (a clone with auth headers lifted
+		// from the configured WS transports for authed routes; r itself for
+		// public routes). The OTel span and conn.WithContext below derive from
+		// authReq.Context() so a verifier that stashes verified claims in-place
+		// (*r = *r.WithContext(securex.ContextWithClaims(...))) is visible to the
+		// handler via securex.ClaimsFromContext(conn.Context()) -- exactly as REST
+		// handlers see it (api.go.tmpl runs opts.AuthJWT(r) on the same r).
+		authReq := r
+		authReq = securex.RequestWithAuthPolicy(r, securex.RequestAuthPolicy{AllowAuthorizationHeader: true, AllowSubprotocolBearer: true, AllowSubprotocolSignature: true, AllowQueryBearer: false, AllowQuerySignature: false})
 		if opts.AuthJWT == nil {
-			http.Error(w, "unauthorized", 401)
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
 			obsx.LogAudit("ws_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
 			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
 			return
 		}
 		if err := opts.AuthJWT(authReq); err != nil {
-			http.Error(w, "unauthorized", 401)
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
 			obsx.LogAudit("ws_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
 			return
 		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		_ctx, _span := obsx.Tracer("genapi.ws").Start(r.Context(), "WS Ping",
+		_ctx, _span := obsx.Tracer("genapi.ws").Start(authReq.Context(), "WS Ping",
 			trace.WithAttributes(attribute.String("ws.path", "/ws/ping")))
 		defer _span.End()
+		// GAP-0075: pre-handshake connection-cap gate. Rejects at HTTP
+		// 503 + Retry-After BEFORE the WS handshake completes -- ~10x
+		// cheaper than the post-handshake 1013 close-frame fallback.
+		// On a non-nil sentinel from Acquire we emit the obsx counter,
+		// stamp the OTel span, and return without touching UpgradeStrict.
+		if _lim := wsLimiters["/ws/ping"]; _lim != nil {
+			if _err := _lim.Acquire(r.RemoteAddr); _err != nil {
+				_reason := "other"
+				_retry := 60
+				switch {
+				case errors.Is(_err, wsx.ErrTotalCap):
+					_reason = "total_cap"
+				case errors.Is(_err, wsx.ErrPerIPCap):
+					_reason = "per_ip_cap"
+				case errors.Is(_err, wsx.ErrRateCap):
+					_reason = "rate"
+					if win := _lim.RateWindow(); win > 0 {
+						_retry = int(win.Seconds())
+						if _retry < 1 {
+							_retry = 1
+						}
+					}
+				}
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", _retry))
+				_span.SetAttributes(
+					attribute.Bool("ws.upgrade.rejected", true),
+					attribute.String("ws.upgrade.rejected.reason", _reason),
+				)
+				_span.SetStatus(codes.Error, "ws upgrade rejected")
+				obsx.EmitWSUpgradeRejected(_ctx, "/ws/ping", _reason)
+				obsx.LogAudit("ws_upgrade_rejected", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": _reason})
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		_wsStart := time.Now()
 		obsx.EmitWSConnect(_ctx, "/ws/ping")
 		o := wsOptions["/ws/ping"]
@@ -100,13 +207,28 @@ func RegisterGeneratedWS(mux *http.ServeMux, srv WSServerInterface, opts WSOptio
 		// rejection path to avoid double-writing.
 		conn, err := wsx.UpgradeStrict(w, r, o)
 		if err != nil {
+			// Limiter Acquire already counted this attempt; release it
+			// since UpgradeStrict rejected (e.g. bad origin).
+			if _lim := wsLimiters["/ws/ping"]; _lim != nil {
+				_lim.Release(r.RemoteAddr)
+			}
 			if !errors.Is(err, wsx.ErrOriginNotAllowed) {
 				w.WriteHeader(http.StatusBadRequest)
 			}
 			return
 		}
+		// GAP-0075: release the limiter slot when the connection
+		// closes so the per-pod / per-IP counters reflect live
+		// connections rather than upgrade attempts.
+		defer func() {
+			if _lim := wsLimiters["/ws/ping"]; _lim != nil {
+				_lim.Release(r.RemoteAddr)
+			}
+		}()
 		// Attach the spanned context so handlers see the otel span / request-id
-		// derived from r.Context() rather than the bare request context.
+		// AND any verified auth claims a verifier stashed in-place -- _ctx is
+		// derived from authReq.Context() (the verified request), not the bare r.
+		// L-30.
 		conn.WithContext(_ctx)
 		defer func() { _ = conn.Close() }()
 		defer obsx.LogAudit("ws_close", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
@@ -120,23 +242,66 @@ func RegisterGeneratedWS(mux *http.ServeMux, srv WSServerInterface, opts WSOptio
 		}
 	})
 	mux.HandleFunc("/ws/query", func(w http.ResponseWriter, r *http.Request) {
-		authReq := securex.RequestWithAuthPolicy(r, securex.RequestAuthPolicy{AllowAuthorizationHeader: true, AllowSubprotocolBearer: true, AllowSubprotocolSignature: true, AllowQueryBearer: false, AllowQuerySignature: false})
+		// L-30: the verifier runs on authReq (a clone with auth headers lifted
+		// from the configured WS transports for authed routes; r itself for
+		// public routes). The OTel span and conn.WithContext below derive from
+		// authReq.Context() so a verifier that stashes verified claims in-place
+		// (*r = *r.WithContext(securex.ContextWithClaims(...))) is visible to the
+		// handler via securex.ClaimsFromContext(conn.Context()) -- exactly as REST
+		// handlers see it (api.go.tmpl runs opts.AuthJWT(r) on the same r).
+		authReq := r
+		authReq = securex.RequestWithAuthPolicy(r, securex.RequestAuthPolicy{AllowAuthorizationHeader: true, AllowSubprotocolBearer: true, AllowSubprotocolSignature: true, AllowQueryBearer: false, AllowQuerySignature: false})
 		if opts.AuthJWT == nil {
-			http.Error(w, "unauthorized", 401)
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
 			obsx.LogAudit("ws_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": "missing jwt verifier"})
 			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
 			return
 		}
 		if err := opts.AuthJWT(authReq); err != nil {
-			http.Error(w, "unauthorized", 401)
+			securex.WriteUnauthorized(w, securex.ErrAuthFailed)
 			obsx.LogAudit("ws_auth_fail", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})
 			obsx.EmitAuthAttempt(r.Context(), "jwt", false)
 			return
 		}
 		obsx.EmitAuthAttempt(r.Context(), "jwt", true)
-		_ctx, _span := obsx.Tracer("genapi.ws").Start(r.Context(), "WS Query",
+		_ctx, _span := obsx.Tracer("genapi.ws").Start(authReq.Context(), "WS Query",
 			trace.WithAttributes(attribute.String("ws.path", "/ws/query")))
 		defer _span.End()
+		// GAP-0075: pre-handshake connection-cap gate. Rejects at HTTP
+		// 503 + Retry-After BEFORE the WS handshake completes -- ~10x
+		// cheaper than the post-handshake 1013 close-frame fallback.
+		// On a non-nil sentinel from Acquire we emit the obsx counter,
+		// stamp the OTel span, and return without touching UpgradeStrict.
+		if _lim := wsLimiters["/ws/query"]; _lim != nil {
+			if _err := _lim.Acquire(r.RemoteAddr); _err != nil {
+				_reason := "other"
+				_retry := 60
+				switch {
+				case errors.Is(_err, wsx.ErrTotalCap):
+					_reason = "total_cap"
+				case errors.Is(_err, wsx.ErrPerIPCap):
+					_reason = "per_ip_cap"
+				case errors.Is(_err, wsx.ErrRateCap):
+					_reason = "rate"
+					if win := _lim.RateWindow(); win > 0 {
+						_retry = int(win.Seconds())
+						if _retry < 1 {
+							_retry = 1
+						}
+					}
+				}
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", _retry))
+				_span.SetAttributes(
+					attribute.Bool("ws.upgrade.rejected", true),
+					attribute.String("ws.upgrade.rejected.reason", _reason),
+				)
+				_span.SetStatus(codes.Error, "ws upgrade rejected")
+				obsx.EmitWSUpgradeRejected(_ctx, "/ws/query", _reason)
+				obsx.LogAudit("ws_upgrade_rejected", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r), "reason": _reason})
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		_wsStart := time.Now()
 		obsx.EmitWSConnect(_ctx, "/ws/query")
 		o := wsOptions["/ws/query"]
@@ -150,13 +315,28 @@ func RegisterGeneratedWS(mux *http.ServeMux, srv WSServerInterface, opts WSOptio
 		// rejection path to avoid double-writing.
 		conn, err := wsx.UpgradeStrict(w, r, o)
 		if err != nil {
+			// Limiter Acquire already counted this attempt; release it
+			// since UpgradeStrict rejected (e.g. bad origin).
+			if _lim := wsLimiters["/ws/query"]; _lim != nil {
+				_lim.Release(r.RemoteAddr)
+			}
 			if !errors.Is(err, wsx.ErrOriginNotAllowed) {
 				w.WriteHeader(http.StatusBadRequest)
 			}
 			return
 		}
+		// GAP-0075: release the limiter slot when the connection
+		// closes so the per-pod / per-IP counters reflect live
+		// connections rather than upgrade attempts.
+		defer func() {
+			if _lim := wsLimiters["/ws/query"]; _lim != nil {
+				_lim.Release(r.RemoteAddr)
+			}
+		}()
 		// Attach the spanned context so handlers see the otel span / request-id
-		// derived from r.Context() rather than the bare request context.
+		// AND any verified auth claims a verifier stashed in-place -- _ctx is
+		// derived from authReq.Context() (the verified request), not the bare r.
+		// L-30.
 		conn.WithContext(_ctx)
 		defer func() { _ = conn.Close() }()
 		defer obsx.LogAudit("ws_close", map[string]any{"path": r.URL.Path, "id": obsx.RequestIDFrom(r)})

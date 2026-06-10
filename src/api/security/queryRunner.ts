@@ -61,7 +61,7 @@ export async function runProcedure(
   return {
     columns,
     rows,
-    rowCount: resp.row_count ?? rows.length,
-    elapsedMs: resp.elapsed_ms ?? 0,
+    rowCount: resp.rowCount ?? rows.length,
+    elapsedMs: resp.elapsedMs ?? 0,
   }
 }

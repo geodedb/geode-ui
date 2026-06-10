@@ -1,5 +1,6 @@
 import type { EdgeBinding, ParsedMatch } from '../matchPattern'
 import type { GqlColumnLike, GqlEdge } from '../graphResult'
+import { edgeEndNode, edgeStartNode } from '../graphResult'
 import { applyParsedMatchLabels } from './applyParsedMatchLabels'
 
 // isNodeShape / isEdgeShape mirror the in-row predicates from the
@@ -15,9 +16,12 @@ function isNodeShape(v: unknown): boolean {
 function isEdgeShape(v: unknown): v is GqlEdge {
   if (!v || typeof v !== 'object') return false
   const o = v as Record<string, unknown>
+  // genapi 0.11.1: edge endpoints arrive as startNode/endNode (camelCase)
+  // on the generated-client path and start_node/end_node (snake_case) on
+  // the raw streaming path. Accept either spelling.
   return (
-    typeof o.start_node === 'number' &&
-    typeof o.end_node === 'number' &&
+    (typeof o.start_node === 'number' || typeof o.startNode === 'number') &&
+    (typeof o.end_node === 'number' || typeof o.endNode === 'number') &&
     typeof o.id === 'number'
   )
 }
@@ -136,8 +140,8 @@ export function buildPlaceholderMap(
         const label = byVar ?? fallback
         if (label !== null) placeholderLabels.set(endpoint, label)
       }
-      assign(edge.start_node, eb?.fromVar)
-      assign(edge.end_node, eb?.toVar)
+      assign(edgeStartNode(edge), eb?.fromVar)
+      assign(edgeEndNode(edge), eb?.toVar)
     })
   })
   return { placeholderLabels, placeholderTypeLabels }

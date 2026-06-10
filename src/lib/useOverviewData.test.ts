@@ -32,12 +32,13 @@ import {
 } from './useOverviewData'
 
 // fetchCapabilities (src/api/capabilities.ts) internally calls
-// client.getCapabilities({}) and normalises the raw {geode_version,
-// admin_writable} response, so the mock above resolves the *raw* shape and
-// fetchCapabilities does the narrowing into {geodeVersion, adminWritable}.
+// client.getCapabilities({}). genapi 0.11.1's generated client converts the
+// snake_case wire response to camelCase, so the mock resolves the
+// camelCase {geodeVersion, adminWritable} shape the client actually returns
+// and fetchCapabilities narrows it into the typed Capabilities.
 const rawCaps = {
-  geode_version: 'v0.5.11',
-  admin_writable: {
+  geodeVersion: 'v0.5.11',
+  adminWritable: {
     users: false,
     roles: false,
     policies: false,
@@ -510,11 +511,11 @@ describe('useOverviewData', () => {
       capsMock
         .mockResolvedValueOnce({
           ...rawCaps,
-          geode_version: 'v0.5.11-default',
+          geodeVersion: 'v0.5.11-default',
         })
         .mockResolvedValueOnce({
           ...rawCaps,
-          geode_version: 'v0.5.19-social',
+          geodeVersion: 'v0.5.19-social',
         })
 
       const { result, rerender } = renderHook(() => useOverviewData())

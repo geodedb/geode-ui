@@ -1,5 +1,6 @@
 import type { ElementDefinition } from 'cytoscape'
 import type { GqlEdge, GqlNode } from '../graphResult'
+import { edgeEndNode, edgeStartNode } from '../graphResult'
 
 // pushRealNodes appends every NODE-typed entry the server returned in
 // graph_summary.nodes onto `out`. Pure write-through; preserves the
@@ -77,8 +78,8 @@ export function pushRealEdges(
       group: 'edges',
       data: {
         id: `e${e.id}`,
-        source: String(e.start_node),
-        target: String(e.end_node),
+        source: String(edgeStartNode(e)),
+        target: String(edgeEndNode(e)),
         type: e.type,
         label: e.type,
         // edgeType is the IMMUTABLE color seed for edges, the analogue

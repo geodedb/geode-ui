@@ -62,22 +62,23 @@ function asBool(v: unknown): boolean {
 // loosely-typed response into the narrowed shape above.
 export async function fetchCapabilities(): Promise<Capabilities> {
   const raw = await client.getCapabilities({})
-  const aw = (raw.admin_writable ?? {}) as Record<string, unknown>
+  // genapi 0.11.1: the generated client converts the snake_case response to
+  // camelCase (gen/client/react/client.ts: fromWire), including the keys of
+  // the free-form `adminWritable` object, so `rls_deny_policies` arrives as
+  // `rlsDenyPolicies`. Read the camelCase keys the client hands back.
+  const aw = (raw.adminWritable ?? {}) as Record<string, unknown>
   return {
-    geodeVersion:
-      typeof raw.geode_version === 'string' ? raw.geode_version : '',
+    geodeVersion: typeof raw.geodeVersion === 'string' ? raw.geodeVersion : '',
     adminWritable: {
       users: asBool(aw.users),
       roles: asBool(aw.roles),
       policies: asBool(aw.policies),
       grants: asBool(aw.grants),
       attributes: asBool(aw.attributes),
-      rlsDenyPolicies: asBool(aw.rls_deny_policies),
-      rlsAttributePolicies: asBool(aw.rls_attribute_policies),
+      rlsDenyPolicies: asBool(aw.rlsDenyPolicies),
+      rlsAttributePolicies: asBool(aw.rlsAttributePolicies),
     },
-    metricsEnabled: asBool(
-      (raw as unknown as Record<string, unknown>).metrics_enabled
-    ),
+    metricsEnabled: asBool(raw.metricsEnabled),
   }
 }
 

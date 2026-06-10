@@ -5,18 +5,21 @@ import {
   toWireUpdateRequest,
 } from './profiles'
 
-test('fromWireProfile parses tls and pool_overrides from object inputs', () => {
+// genapi 0.11.1: the generated client converts the server's snake_case
+// response to camelCase before handing it to fromWireProfile, so these
+// inputs use camelCase to mirror what the SPA actually receives at runtime.
+test('fromWireProfile parses tls and poolOverrides from object inputs', () => {
   const wire = {
     id: 'abc',
     scope: 'personal',
-    owner_user_id: 'alice',
+    ownerUserId: 'alice',
     name: 'p1',
     dsn: 'quic://x',
     description: 'desc',
-    saved_username: 'alice',
-    is_default: true,
-    tls: { ca_pem: '---CA---', client_cert_pem: '', client_key_pem: '' },
-    pool_overrides: { max_open_conns: 32, conn_max_lifetime_ms: 90000 },
+    savedUsername: 'alice',
+    isDefault: true,
+    tls: { caPem: '---CA---', clientCertPem: '', clientKeyPem: '' },
+    poolOverrides: { maxOpenConns: 32, connMaxLifetimeMs: 90000 },
   }
   const got = fromWireProfile(wire)
   expect(got.id).toBe('abc')
@@ -26,21 +29,24 @@ test('fromWireProfile parses tls and pool_overrides from object inputs', () => {
   expect(got.poolOverrides?.connMaxLifetimeMs).toBe(90_000)
 })
 
+// The legacy JSON-STRING form is NOT descended into by the client's
+// camel<->snake converter (convertKeys skips string values), so it still
+// decodes to snake_case keys. parseTls / parsePoolOverrides accept both.
 test('fromWireProfile also accepts legacy string inputs (defensive)', () => {
   const wire = {
     id: 'abc',
     scope: 'personal',
     name: 'p1',
-    is_default: false,
+    isDefault: false,
     tls: '{"ca_pem":"X"}',
-    pool_overrides: '{"max_open_conns":8}',
+    poolOverrides: '{"max_open_conns":8}',
   }
   const got = fromWireProfile(wire)
   expect(got.tls?.caPem).toBe('X')
   expect(got.poolOverrides?.maxOpenConns).toBe(8)
 })
 
-test('toWireCreateRequest emits tls/pool_overrides as nested objects', () => {
+test('toWireCreateRequest emits tls/poolOverrides as nested camelCase objects', () => {
   const got = toWireCreateRequest({
     scope: 'system',
     name: 'p',
@@ -50,15 +56,17 @@ test('toWireCreateRequest emits tls/pool_overrides as nested objects', () => {
     poolOverrides: { maxOpenConns: 16 },
   })
   expect(got.scope).toBe('system')
-  expect(got.tls).toEqual({ ca_pem: 'CA' })
-  expect(got.pool_overrides).toEqual({ max_open_conns: 16 })
+  // The generated client converts these to snake_case (ca_pem /
+  // max_open_conns) on the wire; the builder's job is the camelCase DTO.
+  expect(got.tls).toEqual({ caPem: 'CA' })
+  expect(got.poolOverrides).toEqual({ maxOpenConns: 16 })
 })
 
 test('toWireUpdateRequest omits keys that were not provided', () => {
   const got = toWireUpdateRequest({ description: 'new' })
   expect(got.description).toBe('new')
   expect(got.tls).toBeUndefined()
-  expect(got.pool_overrides).toBeUndefined()
+  expect(got.poolOverrides).toBeUndefined()
 })
 
 // PSR-G02: clearing TLS material via PATCH must round-trip as
@@ -74,10 +82,10 @@ test('toWireUpdateRequest emits tls:{} when caller passes empty TLS (clear)', ()
   expect(got.tls).toEqual({})
 })
 
-test('toWireUpdateRequest emits pool_overrides:{} when caller passes empty PoolOverrides (clear)', () => {
+test('toWireUpdateRequest emits poolOverrides:{} when caller passes empty PoolOverrides (clear)', () => {
   const got = toWireUpdateRequest({ poolOverrides: {} })
-  expect(got).toHaveProperty('pool_overrides')
-  expect(got.pool_overrides).toEqual({})
+  expect(got).toHaveProperty('poolOverrides')
+  expect(got.poolOverrides).toEqual({})
 })
 
 test('toWireUpdateRequest preserves explicit nonzero TLS / pool fields', () => {
@@ -85,14 +93,14 @@ test('toWireUpdateRequest preserves explicit nonzero TLS / pool fields', () => {
     tls: { caPem: 'CA' },
     poolOverrides: { maxOpenConns: 8 },
   })
-  expect(got.tls).toEqual({ ca_pem: 'CA' })
-  expect(got.pool_overrides).toEqual({ max_open_conns: 8 })
+  expect(got.tls).toEqual({ caPem: 'CA' })
+  expect(got.poolOverrides).toEqual({ maxOpenConns: 8 })
 })
 
 test('toWireUpdateRequest set->clear round-trip for TLS', () => {
   // First call: set CA PEM
   const set = toWireUpdateRequest({ tls: { caPem: 'X' } })
-  expect(set.tls).toEqual({ ca_pem: 'X' })
+  expect(set.tls).toEqual({ caPem: 'X' })
   // Second call: clear by passing empty
   const clear = toWireUpdateRequest({ tls: {} })
   expect(clear.tls).toEqual({})
@@ -100,9 +108,9 @@ test('toWireUpdateRequest set->clear round-trip for TLS', () => {
 
 test('toWireUpdateRequest set->clear round-trip for pool overrides', () => {
   const set = toWireUpdateRequest({ poolOverrides: { maxOpenConns: 16 } })
-  expect(set.pool_overrides).toEqual({ max_open_conns: 16 })
+  expect(set.poolOverrides).toEqual({ maxOpenConns: 16 })
   const clear = toWireUpdateRequest({ poolOverrides: {} })
-  expect(clear.pool_overrides).toEqual({})
+  expect(clear.poolOverrides).toEqual({})
 })
 
 // PSR-G02-followup (#124): nullable scalar fields. With genapi now
@@ -111,7 +119,7 @@ test('toWireUpdateRequest set->clear round-trip for pool overrides', () => {
 //   - clear-to-empty  (input key '')        -> wire key present with ''
 //   - set-to-value    (input key 'foo')     -> wire key present with 'foo'
 //
-// And for is_default:
+// And for isDefault:
 //   - absent (undefined) -> wire key omitted
 //   - explicit false     -> wire key present with false (clears default)
 //   - explicit true      -> wire key present with true  (sets default)
@@ -130,25 +138,25 @@ test('toWireUpdateRequest distinguishes absent vs explicit empty for description
   expect(set.description).toBe('hello')
 })
 
-test('toWireUpdateRequest distinguishes absent vs explicit false for is_default', () => {
+test('toWireUpdateRequest distinguishes absent vs explicit false for isDefault', () => {
   const absent = toWireUpdateRequest({})
-  expect(absent).not.toHaveProperty('is_default')
+  expect(absent).not.toHaveProperty('isDefault')
 
   const cleared = toWireUpdateRequest({ isDefault: false })
-  expect(cleared).toHaveProperty('is_default')
-  expect(cleared.is_default).toBe(false)
+  expect(cleared).toHaveProperty('isDefault')
+  expect(cleared.isDefault).toBe(false)
 
   const set = toWireUpdateRequest({ isDefault: true })
-  expect(set.is_default).toBe(true)
+  expect(set.isDefault).toBe(true)
 })
 
-test('toWireUpdateRequest distinguishes absent vs explicit empty for saved_username and dsn', () => {
+test('toWireUpdateRequest distinguishes absent vs explicit empty for savedUsername and dsn', () => {
   const absent = toWireUpdateRequest({})
-  expect(absent).not.toHaveProperty('saved_username')
+  expect(absent).not.toHaveProperty('savedUsername')
   expect(absent).not.toHaveProperty('dsn')
 
   const cleared = toWireUpdateRequest({ savedUsername: '', dsn: '' })
-  expect(cleared.saved_username).toBe('')
+  expect(cleared.savedUsername).toBe('')
   expect(cleared.dsn).toBe('')
 })
 

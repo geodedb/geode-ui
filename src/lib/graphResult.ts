@@ -15,12 +15,30 @@ export type GqlNode = {
   properties: Record<string, unknown>
 }
 
+// genapi 0.11.1: the generated client camelCases response keys at the wire
+// boundary, so an edge's endpoints arrive as `startNode`/`endNode` on the
+// sync (client.query) path but stay `start_node`/`end_node` on the raw
+// streaming path (the WS worker does not convert). Both spellings are
+// optional here; read them through edgeStartNode/edgeEndNode below.
 export type GqlEdge = {
   id: number
-  start_node: number
-  end_node: number
+  start_node?: number
+  end_node?: number
+  startNode?: number
+  endNode?: number
   type: string
   properties: Record<string, unknown>
+}
+
+// edgeStartNode/edgeEndNode resolve an edge endpoint regardless of the
+// casing the producing path used (camelCase from the generated client,
+// snake_case from the raw streaming worker). Returns NaN-safe -1 only if
+// neither spelling is present (treated as a dangling endpoint upstream).
+export function edgeStartNode(e: GqlEdge): number {
+  return (e.startNode ?? e.start_node) as number
+}
+export function edgeEndNode(e: GqlEdge): number {
+  return (e.endNode ?? e.end_node) as number
 }
 
 // columns metadata is sourced from the gen client which types it as
@@ -34,6 +52,11 @@ export type GqlColumnLike = { name?: unknown; type?: unknown } & Record<
 export type QueryRespLike = {
   columns?: GqlColumnLike[]
   rows?: unknown[][]
+  // genapi 0.11.1: `graphSummary` (camelCase) on the generated-client path;
+  // `graph_summary` (snake_case) on the raw streaming path. Accept either.
+  graphSummary?:
+    | { nodes?: GqlNode[]; edges?: GqlEdge[] }
+    | Record<string, unknown>
   graph_summary?:
     | { nodes?: GqlNode[]; edges?: GqlEdge[] }
     | Record<string, unknown>
@@ -78,7 +101,7 @@ export function extractElements(
   query?: string
 ): ElementDefinition[] {
   const els: ElementDefinition[] = []
-  const summary = resp.graph_summary
+  const summary = resp.graphSummary ?? resp.graph_summary
   if (!isGraphSummary(summary)) return els
   const nodes = (summary as { nodes?: GqlNode[] }).nodes
   const edges = (summary as { edges?: GqlEdge[] }).edges

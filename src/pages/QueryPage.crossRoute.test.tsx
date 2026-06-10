@@ -117,8 +117,8 @@ describe('QueryPage cross-route persistence (queryPageStore)', () => {
     useQueryPageStore.getState().setResp({
       columns: [{ name: 'n', type: 'NODE' }] as never,
       rows: [] as never,
-      row_count: 0,
-      elapsed_ms: 1,
+      rowCount: 0,
+      elapsedMs: 1,
     })
     useQueryPageStore.getState().setSubmittedStmt('RETURN 1')
 

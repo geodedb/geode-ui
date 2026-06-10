@@ -52,9 +52,11 @@ const renderPage = (): ReturnType<typeof render> =>
 
 const capsWritable = (
   users: boolean
-): { geode_version: string; admin_writable: Record<string, boolean> } => ({
-  geode_version: 'v0.5.11-2-gcdf1b54c',
-  admin_writable: { users, roles: users, policies: users, grants: users },
+): { geodeVersion: string; adminWritable: Record<string, boolean> } => ({
+  // genapi 0.11.1: the generated client returns camelCase (converts the
+  // snake_case wire response), so this mock mirrors the client's output.
+  geodeVersion: 'v0.5.11-2-gcdf1b54c',
+  adminWritable: { users, roles: users, policies: users, grants: users },
 })
 
 beforeEach(() => {

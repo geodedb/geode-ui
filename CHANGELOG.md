@@ -12,6 +12,35 @@ and 2026-05-17. Entries are grouped by the date the cohort closed, then
 by Keep-a-Changelog subsection. Issue numbers reference
 `gitlab.com/devnw/codepros/geode/geode-ui/-/work_items/<id>`.
 
+### Changed (2026-06-10 — genapi v0.11.1 regeneration)
+
+- **Regenerated the API boundary with genapi v0.11.1** (was v0.3.3); the
+  generator pins in `.gitlab-ci.yml` and `scripts/install-tools.sh` move
+  in lockstep so the `go:generate-verify` drift gate stays green.
+  `geode.json` gains the v0.11.1 contract requirements: the three public
+  routes (`/healthz`, `/api/v1/auth/login`, `/api/v1/profiles/public`) are
+  marked `auth: "public"` and the `query` MCP tool is marked
+  `authn: "public"` (SEC-0049 default-deny) — preserving prior behaviour
+  (the transport-level JWT verifier still authenticates every MCP request;
+  the tool adds no role gate, matching the `jwt`-but-roleless REST query
+  endpoint).
+- **The generated React client now converts snake_case⇄camelCase at the
+  wire boundary** (`toWire`/`fromWire`), so the SPA works in camelCase
+  end-to-end. Migrated every consumer of the generated client to the
+  camelCase contract: `profiles.ts` (builders emit camelCase DTOs the
+  client snakes for the wire; parsers read camelCase with a snake fallback
+  for the legacy JSON-string `tls`/`pool_overrides` form), `capabilities.ts`
+  (`geodeVersion`/`adminWritable`/`rlsDenyPolicies`/…), the query path
+  (`rowCount`/`elapsedMs`/`pageSize`/`timeoutMs`), `RestorePage`
+  (`targetTime`/`sizeBytes`), and the `postAPIRoles` method rename. The
+  graph-result pipeline reads `graphSummary`/`startNode`/`endNode`
+  camelCase-first with a snake fallback so the raw streaming path keeps
+  working unconverted.
+- genapi v0.11.1 emits a fuller security/runtime suite under `gen/pkg`
+  (HSM signer behind `//go:build pkcs11`, WebAuthn, OIDC/JWKS), pulling new
+  module deps into `go.mod`; none are linked into `cmd/server` and the
+  cgo-only pkcs11 backend is excluded from default (`CGO_ENABLED=0`) builds.
+
 ### Added (2026-06-03 — OpenTelemetry export)
 
 - **OTLP telemetry export.** `cmd/server` now wires OTLP/HTTP trace + metric

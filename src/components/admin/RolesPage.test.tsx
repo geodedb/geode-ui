@@ -18,7 +18,7 @@ import { ThemeProvider } from 'styled-components'
 jest.mock('../../api/client', () => ({
   client: {
     getRoles: jest.fn(),
-    postApiRoles: jest.fn(),
+    postAPIRoles: jest.fn(),
     deleteRole: jest.fn(),
     getCapabilities: jest.fn(),
   },
@@ -31,7 +31,7 @@ import { testTheme as theme } from '../../test-utils/theme'
 
 const mockClient = client as unknown as {
   getRoles: jest.Mock
-  postApiRoles: jest.Mock
+  postAPIRoles: jest.Mock
   deleteRole: jest.Mock
   getCapabilities: jest.Mock
 }
@@ -45,9 +45,11 @@ const renderPage = (): ReturnType<typeof render> =>
 
 const capsWritable = (
   roles: boolean
-): { geode_version: string; admin_writable: Record<string, boolean> } => ({
-  geode_version: 'v0.5.11-2-gcdf1b54c',
-  admin_writable: { users: roles, roles, policies: roles, grants: roles },
+): { geodeVersion: string; adminWritable: Record<string, boolean> } => ({
+  // genapi 0.11.1: the generated client returns camelCase (converts the
+  // snake_case wire response), so this mock mirrors the client's output.
+  geodeVersion: 'v0.5.11-2-gcdf1b54c',
+  adminWritable: { users: roles, roles, policies: roles, grants: roles },
 })
 
 beforeEach(() => {
@@ -62,7 +64,7 @@ beforeEach(() => {
       { name: 'reader', description: 'Read-only', permissions: ['read'] },
     ],
   })
-  mockClient.postApiRoles.mockResolvedValue({})
+  mockClient.postAPIRoles.mockResolvedValue({})
   mockClient.deleteRole.mockResolvedValue({})
   mockClient.getCapabilities.mockResolvedValue(capsWritable(true))
 })
@@ -155,8 +157,8 @@ test('create-role modal uses a chip input with a suggestions datalist and submit
 
   fireEvent.click(within(dialog).getByRole('button', { name: /create/i }))
 
-  await waitFor(() => expect(mockClient.postApiRoles).toHaveBeenCalled())
-  const arg = mockClient.postApiRoles.mock.calls[0][0]
+  await waitFor(() => expect(mockClient.postAPIRoles).toHaveBeenCalled())
+  const arg = mockClient.postAPIRoles.mock.calls[0][0]
   expect(Array.isArray(arg.permissions)).toBe(true)
   // After removing read:graph, only write:node remains. (If the remove
   // control wasn't found above the test still pins that the submitted

@@ -2,15 +2,15 @@
 package types
 
 import (
-	"errors"
 	"encoding/json/jsontext"
+	"errors"
 
 	"geodedb.com/geode-ui/gen/pkg/gen"
 )
 
 // AssignRoleReq generated from config schema
 type AssignRoleReq struct {
-	Role string `json:"role" genapi:"role"`
+	Role     string `json:"role" genapi:"role"`
 	Username string `json:"username" genapi:"username"`
 }
 
@@ -33,40 +33,54 @@ func (v AuditList) Valid() error {
 type AuditQuery struct {
 	Event string `json:"event" genapi:"event"`
 	Since string `json:"since" genapi:"since"`
-	User string `json:"user" genapi:"user"`
+	User  string `json:"user" genapi:"user"`
 }
 
 // Valid validates AuditQuery fields against schema constraints.
 func (v AuditQuery) Valid() error {
-	if len(v.Event) > 64 { return errors.New("event: too long") }
-	if len(v.Since) > 64 { return errors.New("since: too long") }
-	if len(v.User) > 256 { return errors.New("user: too long") }
+	if len(v.Event) > 64 {
+		return errors.New("event: too long")
+	}
+	if len(v.Since) > 64 {
+		return errors.New("since: too long")
+	}
+	if len(v.User) > 256 {
+		return errors.New("user: too long")
+	}
 	return nil
 }
 
 // BackupCleanupResp generated from config schema
 type BackupCleanupResp struct {
 	FreedBytes int64 `json:"freed_bytes" genapi:"freed_bytes"`
-	Removed int64 `json:"removed" genapi:"removed"`
+	Removed    int64 `json:"removed" genapi:"removed"`
 }
 
 // Valid validates BackupCleanupResp fields against schema constraints.
 func (v BackupCleanupResp) Valid() error {
-	if v.FreedBytes < 0 { return errors.New("freed_bytes: too small") }
-	if v.Removed < 0 { return errors.New("removed: too small") }
+	if v.FreedBytes != 0 && v.FreedBytes < 0 {
+		return errors.New("freed_bytes: too small")
+	}
+	if v.Removed < 0 {
+		return errors.New("removed: too small")
+	}
 	return nil
 }
 
 // BackupCreateReq generated from config schema
 type BackupCreateReq struct {
-	Graph string `json:"graph" genapi:"graph"`
+	Graph  string `json:"graph" genapi:"graph"`
 	Output string `json:"output" genapi:"output"`
 }
 
 // Valid validates BackupCreateReq fields against schema constraints.
 func (v BackupCreateReq) Valid() error {
-	if len(v.Graph) > 256 { return errors.New("graph: too long") }
-	if len(v.Output) > 1024 { return errors.New("output: too long") }
+	if len(v.Graph) > 256 {
+		return errors.New("graph: too long")
+	}
+	if len(v.Output) > 1024 {
+		return errors.New("output: too long")
+	}
 	return nil
 }
 
@@ -77,20 +91,24 @@ type BackupFileParam struct {
 
 // Valid validates BackupFileParam fields against schema constraints.
 func (v BackupFileParam) Valid() error {
-	if len(v.File) < 1 { return errors.New("file: too short") }
-	if len(v.File) > 256 { return errors.New("file: too long") }
+	if len(v.File) < 1 {
+		return errors.New("file: too short")
+	}
+	if len(v.File) > 256 {
+		return errors.New("file: too long")
+	}
 	return nil
 }
 
 // BackupInfo generated from config schema
 type BackupInfo struct {
-	CreatedAt string `json:"created_at" genapi:"created_at"`
-	EdgeCount int64 `json:"edge_count" genapi:"edge_count"`
-	File string `json:"file" genapi:"file"`
-	GraphCount int64 `json:"graph_count" genapi:"graph_count"`
-	NodeCount int64 `json:"node_count" genapi:"node_count"`
-	Path string `json:"path" genapi:"path"`
-	SizeBytes int64 `json:"size_bytes" genapi:"size_bytes"`
+	CreatedAt  string `json:"created_at" genapi:"created_at"`
+	EdgeCount  int64  `json:"edge_count" genapi:"edge_count"`
+	File       string `json:"file" genapi:"file"`
+	GraphCount int64  `json:"graph_count" genapi:"graph_count"`
+	NodeCount  int64  `json:"node_count" genapi:"node_count"`
+	Path       string `json:"path" genapi:"path"`
+	SizeBytes  int64  `json:"size_bytes" genapi:"size_bytes"`
 }
 
 // Valid validates BackupInfo fields against schema constraints.
@@ -111,18 +129,28 @@ func (v BackupList) Valid() error {
 // BackupRef generated from config schema
 type BackupRef struct {
 	CreatedAt string `json:"created_at" genapi:"created_at"`
-	File string `json:"file" genapi:"file"`
-	Path string `json:"path" genapi:"path"`
-	SizeBytes int64 `json:"size_bytes" genapi:"size_bytes"`
+	File      string `json:"file" genapi:"file"`
+	Path      string `json:"path" genapi:"path"`
+	SizeBytes int64  `json:"size_bytes" genapi:"size_bytes"`
 }
 
 // Valid validates BackupRef fields against schema constraints.
 func (v BackupRef) Valid() error {
-	if len(v.CreatedAt) > 64 { return errors.New("created_at: too long") }
-	if len(v.File) < 1 { return errors.New("file: too short") }
-	if len(v.File) > 256 { return errors.New("file: too long") }
-	if len(v.Path) > 1024 { return errors.New("path: too long") }
-	if v.SizeBytes < 0 { return errors.New("size_bytes: too small") }
+	if len(v.CreatedAt) > 64 {
+		return errors.New("created_at: too long")
+	}
+	if len(v.File) < 1 {
+		return errors.New("file: too short")
+	}
+	if len(v.File) > 256 {
+		return errors.New("file: too long")
+	}
+	if len(v.Path) > 1024 {
+		return errors.New("path: too long")
+	}
+	if v.SizeBytes != 0 && v.SizeBytes < 0 {
+		return errors.New("size_bytes: too small")
+	}
 	return nil
 }
 
@@ -138,14 +166,16 @@ func (v BackupUploadReq) Valid() error {
 
 // Capabilities generated from config schema
 type Capabilities struct {
-	AdminWritable jsontext.Value `json:"admin_writable" genapi:"admin_writable"`
-	GeodeVersion string `json:"geode_version" genapi:"geode_version"`
-	MetricsEnabled bool `json:"metrics_enabled" genapi:"metrics_enabled"`
+	AdminWritable  jsontext.Value `json:"admin_writable" genapi:"admin_writable"`
+	GeodeVersion   string         `json:"geode_version" genapi:"geode_version"`
+	MetricsEnabled bool           `json:"metrics_enabled" genapi:"metrics_enabled"`
 }
 
 // Valid validates Capabilities fields against schema constraints.
 func (v Capabilities) Valid() error {
-	if len(v.GeodeVersion) > 256 { return errors.New("geode_version: too long") }
+	if len(v.GeodeVersion) > 256 {
+		return errors.New("geode_version: too long")
+	}
 	return nil
 }
 
@@ -161,24 +191,36 @@ func (v ConstraintList) Valid() error {
 
 // CreateProfileReq generated from config schema
 type CreateProfileReq struct {
-	Description string `json:"description" genapi:"description"`
-	Dsn string `json:"dsn" genapi:"dsn"`
-	IsDefault bool `json:"is_default" genapi:"is_default"`
-	Name string `json:"name" genapi:"name"`
+	Description   string         `json:"description" genapi:"description"`
+	Dsn           string         `json:"dsn" genapi:"dsn"`
+	IsDefault     bool           `json:"is_default" genapi:"is_default"`
+	Name          string         `json:"name" genapi:"name"`
 	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
-	SavedUsername string `json:"saved_username" genapi:"saved_username"`
-	Scope string `json:"scope" genapi:"scope"`
-	TLS jsontext.Value `json:"tls" genapi:"tls"`
+	SavedUsername string         `json:"saved_username" genapi:"saved_username"`
+	Scope         string         `json:"scope" genapi:"scope"`
+	TLS           jsontext.Value `json:"tls" genapi:"tls"`
 }
 
 // Valid validates CreateProfileReq fields against schema constraints.
 func (v CreateProfileReq) Valid() error {
-	if len(v.Description) > 256 { return errors.New("description: too long") }
-	if len(v.Dsn) < 1 { return errors.New("dsn: too short") }
-	if len(v.Dsn) > 1024 { return errors.New("dsn: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 64 { return errors.New("name: too long") }
-	if len(v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
+	if len(v.Description) > 256 {
+		return errors.New("description: too long")
+	}
+	if len(v.Dsn) < 1 {
+		return errors.New("dsn: too short")
+	}
+	if len(v.Dsn) > 1024 {
+		return errors.New("dsn: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 64 {
+		return errors.New("name: too long")
+	}
+	if len(v.SavedUsername) > 128 {
+		return errors.New("saved_username: too long")
+	}
 	return nil
 }
 
@@ -203,26 +245,44 @@ func (v Empty) Valid() error {
 
 // GrantReq generated from config schema
 type GrantReq struct {
-	Grantee string `json:"grantee" genapi:"grantee"`
+	Grantee     string `json:"grantee" genapi:"grantee"`
 	GranteeKind string `json:"grantee_kind" genapi:"grantee_kind"`
-	Permission string `json:"permission" genapi:"permission"`
-	Resource string `json:"resource" genapi:"resource"`
+	Permission  string `json:"permission" genapi:"permission"`
+	Resource    string `json:"resource" genapi:"resource"`
 }
 
 // Valid validates GrantReq fields against schema constraints.
 func (v GrantReq) Valid() error {
-	if len(v.Grantee) < 1 { return errors.New("grantee: too short") }
-	if len(v.Grantee) > 256 { return errors.New("grantee: too long") }
-	{
-		okEnum := false
-		if v.GranteeKind == "" { okEnum = true }
-		if v.GranteeKind == "user" { okEnum = true }
-		if v.GranteeKind == "role" { okEnum = true }
-		if !okEnum { return errors.New("grantee_kind: invalid enum value") }
+	if len(v.Grantee) < 1 {
+		return errors.New("grantee: too short")
 	}
-	if len(v.Permission) < 1 { return errors.New("permission: too short") }
-	if len(v.Permission) > 256 { return errors.New("permission: too long") }
-	if len(v.Resource) > 256 { return errors.New("resource: too long") }
+	if len(v.Grantee) > 256 {
+		return errors.New("grantee: too long")
+	}
+	{
+		okEnum := v.GranteeKind == ""
+		if v.GranteeKind == "" {
+			okEnum = true
+		}
+		if v.GranteeKind == "user" {
+			okEnum = true
+		}
+		if v.GranteeKind == "role" {
+			okEnum = true
+		}
+		if !okEnum {
+			return errors.New("grantee_kind: invalid enum value")
+		}
+	}
+	if len(v.Permission) < 1 {
+		return errors.New("permission: too short")
+	}
+	if len(v.Permission) > 256 {
+		return errors.New("permission: too long")
+	}
+	if len(v.Resource) > 256 {
+		return errors.New("resource: too long")
+	}
 	return nil
 }
 
@@ -243,14 +303,18 @@ type GraphParam struct {
 
 // Valid validates GraphParam fields against schema constraints.
 func (v GraphParam) Valid() error {
-	if len(v.Graph) < 1 { return errors.New("graph: too short") }
-	if len(v.Graph) > 256 { return errors.New("graph: too long") }
+	if len(v.Graph) < 1 {
+		return errors.New("graph: too short")
+	}
+	if len(v.Graph) > 256 {
+		return errors.New("graph: too long")
+	}
 	return nil
 }
 
 // HealthResp generated from config schema
 type HealthResp struct {
-	Status string `json:"status" genapi:"status"`
+	Status  string `json:"status" genapi:"status"`
 	Version string `json:"version" genapi:"version"`
 }
 
@@ -258,11 +322,19 @@ type HealthResp struct {
 func (v HealthResp) Valid() error {
 	{
 		okEnum := false
-		if v.Status == "ok" { okEnum = true }
-		if !okEnum { return errors.New("status: invalid enum value") }
+		if v.Status == "ok" {
+			okEnum = true
+		}
+		if !okEnum {
+			return errors.New("status: invalid enum value")
+		}
 	}
-	if len(v.Version) < 1 { return errors.New("version: too short") }
-	if len(v.Version) > 64 { return errors.New("version: too long") }
+	if len(v.Version) < 1 {
+		return errors.New("version: too short")
+	}
+	if len(v.Version) > 64 {
+		return errors.New("version: too long")
+	}
 	return nil
 }
 
@@ -289,41 +361,66 @@ func (v LabelList) Valid() error {
 // LoginReq generated from config schema
 type LoginReq struct {
 	Password string `json:"password" genapi:"password"`
-	Profile string `json:"profile" genapi:"profile"`
+	Profile  string `json:"profile" genapi:"profile"`
 	Username string `json:"username" genapi:"username"`
 }
 
 // Valid validates LoginReq fields against schema constraints.
 func (v LoginReq) Valid() error {
-	if len(v.Password) < 1 { return errors.New("password: too short") }
-	if len(v.Password) > 4096 { return errors.New("password: too long") }
-	if v.Profile != "" && len(v.Profile) < 1 { return errors.New("profile: too short") }
-	if len(v.Profile) > 64 { return errors.New("profile: too long") }
-	if len(v.Username) < 1 { return errors.New("username: too short") }
-	if len(v.Username) > 256 { return errors.New("username: too long") }
+	if len(v.Password) < 1 {
+		return errors.New("password: too short")
+	}
+	if len(v.Password) > 4096 {
+		return errors.New("password: too long")
+	}
+	if len(v.Profile) > 64 {
+		return errors.New("profile: too long")
+	}
+	if len(v.Username) < 1 {
+		return errors.New("username: too short")
+	}
+	if len(v.Username) > 256 {
+		return errors.New("username: too long")
+	}
 	return nil
 }
 
 // LoginResp generated from config schema
 type LoginResp struct {
-	AccessToken string `json:"access_token" genapi:"access_token"`
+	AccessToken  string `json:"access_token" genapi:"access_token"`
 	ConnectionID string `json:"connection_id" genapi:"connection_id"`
-	ExpiresIn int64 `json:"expires_in" genapi:"expires_in"`
-	TokenType string `json:"token_type" genapi:"token_type"`
+	ExpiresIn    int64  `json:"expires_in" genapi:"expires_in"`
+	TokenType    string `json:"token_type" genapi:"token_type"`
 }
 
 // Valid validates LoginResp fields against schema constraints.
 func (v LoginResp) Valid() error {
-	if len(v.AccessToken) < 1 { return errors.New("access_token: too short") }
-	if len(v.AccessToken) > 8192 { return errors.New("access_token: too long") }
-	if len(v.ConnectionID) < 1 { return errors.New("connection_id: too short") }
-	if len(v.ConnectionID) > 64 { return errors.New("connection_id: too long") }
-	if v.ExpiresIn < 1 { return errors.New("expires_in: too small") }
-	if v.ExpiresIn > 86400 { return errors.New("expires_in: too large") }
+	if len(v.AccessToken) < 1 {
+		return errors.New("access_token: too short")
+	}
+	if len(v.AccessToken) > 8192 {
+		return errors.New("access_token: too long")
+	}
+	if len(v.ConnectionID) < 1 {
+		return errors.New("connection_id: too short")
+	}
+	if len(v.ConnectionID) > 64 {
+		return errors.New("connection_id: too long")
+	}
+	if v.ExpiresIn < 1 {
+		return errors.New("expires_in: too small")
+	}
+	if v.ExpiresIn > 86400 {
+		return errors.New("expires_in: too large")
+	}
 	{
 		okEnum := false
-		if v.TokenType == "Bearer" { okEnum = true }
-		if !okEnum { return errors.New("token_type: invalid enum value") }
+		if v.TokenType == "Bearer" {
+			okEnum = true
+		}
+		if !okEnum {
+			return errors.New("token_type: invalid enum value")
+		}
 	}
 	return nil
 }
@@ -331,14 +428,20 @@ func (v LoginResp) Valid() error {
 // MigrationCreateReq generated from config schema
 type MigrationCreateReq struct {
 	Description string `json:"description" genapi:"description"`
-	Name string `json:"name" genapi:"name"`
+	Name        string `json:"name" genapi:"name"`
 }
 
 // Valid validates MigrationCreateReq fields against schema constraints.
 func (v MigrationCreateReq) Valid() error {
-	if len(v.Description) > 1024 { return errors.New("description: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Description) > 1024 {
+		return errors.New("description: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
 	return nil
 }
 
@@ -349,16 +452,20 @@ type MigrationParam struct {
 
 // Valid validates MigrationParam fields against schema constraints.
 func (v MigrationParam) Valid() error {
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
 	return nil
 }
 
 // MigrationRef generated from config schema
 type MigrationRef struct {
 	CreatedAt string `json:"created_at" genapi:"created_at"`
-	Name string `json:"name" genapi:"name"`
-	Path string `json:"path" genapi:"path"`
+	Name      string `json:"name" genapi:"name"`
+	Path      string `json:"path" genapi:"path"`
 }
 
 // Valid validates MigrationRef fields against schema constraints.
@@ -379,7 +486,7 @@ func (v MigrationRunResp) Valid() error {
 // MigrationStatus generated from config schema
 type MigrationStatus struct {
 	Applied []jsontext.Value `json:"applied" genapi:"applied"`
-	Pending []string `json:"pending" genapi:"pending"`
+	Pending []string         `json:"pending" genapi:"pending"`
 }
 
 // Valid validates MigrationStatus fields against schema constraints.
@@ -401,20 +508,22 @@ func (v MigrationUploadReq) Valid() error {
 type PasswordChangeReq struct {
 	NewPassword string `json:"new_password" genapi:"new_password"`
 	OldPassword string `json:"old_password" genapi:"old_password"`
-	Username string `json:"username" genapi:"username"`
+	Username    string `json:"username" genapi:"username"`
 }
 
 // Valid validates PasswordChangeReq fields against schema constraints.
 func (v PasswordChangeReq) Valid() error {
-	if len(v.NewPassword) < 8 { return errors.New("new_password: too short") }
+	if len(v.NewPassword) < 8 {
+		return errors.New("new_password: too short")
+	}
 	return nil
 }
 
 // Permission generated from config schema
 type Permission struct {
 	Permission string `json:"permission" genapi:"permission"`
-	Resource string `json:"resource" genapi:"resource"`
-	Scope string `json:"scope" genapi:"scope"`
+	Resource   string `json:"resource" genapi:"resource"`
+	Scope      string `json:"scope" genapi:"scope"`
 }
 
 // Valid validates Permission fields against schema constraints.
@@ -439,40 +548,60 @@ type PingMsg struct {
 
 // Valid validates PingMsg fields against schema constraints.
 func (v PingMsg) Valid() error {
-	if v.Seq < 0 { return errors.New("seq: too small") }
+	if v.Seq < 0 {
+		return errors.New("seq: too small")
+	}
 	return nil
 }
 
 // Policy generated from config schema
 type Policy struct {
 	Expression string `json:"expression" genapi:"expression"`
-	Name string `json:"name" genapi:"name"`
-	Resource string `json:"resource" genapi:"resource"`
+	Name       string `json:"name" genapi:"name"`
+	Resource   string `json:"resource" genapi:"resource"`
 }
 
 // Valid validates Policy fields against schema constraints.
 func (v Policy) Valid() error {
-	if len(v.Expression) > 4096 { return errors.New("expression: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
-	if len(v.Resource) > 256 { return errors.New("resource: too long") }
+	if len(v.Expression) > 4096 {
+		return errors.New("expression: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
+	if len(v.Resource) > 256 {
+		return errors.New("resource: too long")
+	}
 	return nil
 }
 
 // PolicyCreateReq generated from config schema
 type PolicyCreateReq struct {
 	Expression string `json:"expression" genapi:"expression"`
-	Name string `json:"name" genapi:"name"`
-	Resource string `json:"resource" genapi:"resource"`
+	Name       string `json:"name" genapi:"name"`
+	Resource   string `json:"resource" genapi:"resource"`
 }
 
 // Valid validates PolicyCreateReq fields against schema constraints.
 func (v PolicyCreateReq) Valid() error {
-	if len(v.Expression) < 1 { return errors.New("expression: too short") }
-	if len(v.Expression) > 4096 { return errors.New("expression: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
-	if len(v.Resource) > 256 { return errors.New("resource: too long") }
+	if len(v.Expression) < 1 {
+		return errors.New("expression: too short")
+	}
+	if len(v.Expression) > 4096 {
+		return errors.New("expression: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
+	if len(v.Resource) > 256 {
+		return errors.New("resource: too long")
+	}
 	return nil
 }
 
@@ -493,52 +622,80 @@ type PolicyParam struct {
 
 // Valid validates PolicyParam fields against schema constraints.
 func (v PolicyParam) Valid() error {
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
 	return nil
 }
 
 // PoolOverrides generated from config schema
 type PoolOverrides struct {
-	ConnMaxIdleMs int64 `json:"conn_max_idle_ms" genapi:"conn_max_idle_ms"`
+	ConnMaxIdleMs     int64 `json:"conn_max_idle_ms" genapi:"conn_max_idle_ms"`
 	ConnMaxLifetimeMs int64 `json:"conn_max_lifetime_ms" genapi:"conn_max_lifetime_ms"`
-	MaxIdleConns int64 `json:"max_idle_conns" genapi:"max_idle_conns"`
-	MaxOpenConns int64 `json:"max_open_conns" genapi:"max_open_conns"`
+	MaxIdleConns      int64 `json:"max_idle_conns" genapi:"max_idle_conns"`
+	MaxOpenConns      int64 `json:"max_open_conns" genapi:"max_open_conns"`
 }
 
 // Valid validates PoolOverrides fields against schema constraints.
 func (v PoolOverrides) Valid() error {
-	if v.ConnMaxIdleMs < 0 { return errors.New("conn_max_idle_ms: too small") }
-	if v.ConnMaxLifetimeMs < 0 { return errors.New("conn_max_lifetime_ms: too small") }
-	if v.MaxIdleConns < 0 { return errors.New("max_idle_conns: too small") }
-	if v.MaxOpenConns < 0 { return errors.New("max_open_conns: too small") }
+	if v.ConnMaxIdleMs != 0 && v.ConnMaxIdleMs < 0 {
+		return errors.New("conn_max_idle_ms: too small")
+	}
+	if v.ConnMaxLifetimeMs != 0 && v.ConnMaxLifetimeMs < 0 {
+		return errors.New("conn_max_lifetime_ms: too small")
+	}
+	if v.MaxIdleConns != 0 && v.MaxIdleConns < 0 {
+		return errors.New("max_idle_conns: too small")
+	}
+	if v.MaxOpenConns != 0 && v.MaxOpenConns < 0 {
+		return errors.New("max_open_conns: too small")
+	}
 	return nil
 }
 
 // Profile generated from config schema
 type Profile struct {
-	Description string `json:"description" genapi:"description"`
-	Dsn string `json:"dsn" genapi:"dsn"`
-	ID string `json:"id" genapi:"id"`
-	IsDefault bool `json:"is_default" genapi:"is_default"`
-	Name string `json:"name" genapi:"name"`
-	OwnerUserID string `json:"owner_user_id" genapi:"owner_user_id"`
+	Description   string         `json:"description" genapi:"description"`
+	Dsn           string         `json:"dsn" genapi:"dsn"`
+	ID            string         `json:"id" genapi:"id"`
+	IsDefault     bool           `json:"is_default" genapi:"is_default"`
+	Name          string         `json:"name" genapi:"name"`
+	OwnerUserID   string         `json:"owner_user_id" genapi:"owner_user_id"`
 	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
-	SavedUsername string `json:"saved_username" genapi:"saved_username"`
-	Scope string `json:"scope" genapi:"scope"`
-	TLS jsontext.Value `json:"tls" genapi:"tls"`
+	SavedUsername string         `json:"saved_username" genapi:"saved_username"`
+	Scope         string         `json:"scope" genapi:"scope"`
+	TLS           jsontext.Value `json:"tls" genapi:"tls"`
 }
 
 // Valid validates Profile fields against schema constraints.
 func (v Profile) Valid() error {
-	if len(v.Description) > 256 { return errors.New("description: too long") }
-	if len(v.Dsn) < 1 { return errors.New("dsn: too short") }
-	if len(v.Dsn) > 1024 { return errors.New("dsn: too long") }
-	if len(v.ID) < 1 { return errors.New("id: too short") }
-	if len(v.ID) > 64 { return errors.New("id: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 64 { return errors.New("name: too long") }
-	if len(v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
+	if len(v.Description) > 256 {
+		return errors.New("description: too long")
+	}
+	if len(v.Dsn) < 1 {
+		return errors.New("dsn: too short")
+	}
+	if len(v.Dsn) > 1024 {
+		return errors.New("dsn: too long")
+	}
+	if len(v.ID) < 1 {
+		return errors.New("id: too short")
+	}
+	if len(v.ID) > 64 {
+		return errors.New("id: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 64 {
+		return errors.New("name: too long")
+	}
+	if len(v.SavedUsername) > 128 {
+		return errors.New("saved_username: too long")
+	}
 	return nil
 }
 
@@ -549,8 +706,12 @@ type ProfileIDPath struct {
 
 // Valid validates ProfileIDPath fields against schema constraints.
 func (v ProfileIDPath) Valid() error {
-	if len(v.ProfileID) < 1 { return errors.New("profile_id: too short") }
-	if len(v.ProfileID) > 64 { return errors.New("profile_id: too long") }
+	if len(v.ProfileID) < 1 {
+		return errors.New("profile_id: too short")
+	}
+	if len(v.ProfileID) > 64 {
+		return errors.New("profile_id: too long")
+	}
 	return nil
 }
 
@@ -567,14 +728,20 @@ func (v ProfileList) Valid() error {
 // PublicProfile generated from config schema
 type PublicProfile struct {
 	Description string `json:"description" genapi:"description"`
-	Name string `json:"name" genapi:"name"`
+	Name        string `json:"name" genapi:"name"`
 }
 
 // Valid validates PublicProfile fields against schema constraints.
 func (v PublicProfile) Valid() error {
-	if len(v.Description) > 256 { return errors.New("description: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 64 { return errors.New("name: too long") }
+	if len(v.Description) > 256 {
+		return errors.New("description: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 64 {
+		return errors.New("name: too long")
+	}
 	return nil
 }
 
@@ -590,118 +757,182 @@ func (v PublicProfileList) Valid() error {
 
 // QueryReq generated from config schema
 type QueryReq struct {
-	Graph string `json:"graph" genapi:"graph"`
-	PageSize int64 `json:"page_size" genapi:"page_size"`
-	Params jsontext.Value `json:"params" genapi:"params"`
-	Statement string `json:"statement" genapi:"statement"`
-	TimeoutMs int64 `json:"timeout_ms" genapi:"timeout_ms"`
+	Graph     string         `json:"graph" genapi:"graph"`
+	PageSize  int64          `json:"page_size" genapi:"page_size"`
+	Params    jsontext.Value `json:"params" genapi:"params"`
+	Statement string         `json:"statement" genapi:"statement"`
+	TimeoutMs int64          `json:"timeout_ms" genapi:"timeout_ms"`
 }
 
 // Valid validates QueryReq fields against schema constraints.
 func (v QueryReq) Valid() error {
-	if len(v.Graph) > 256 { return errors.New("graph: too long") }
-	if v.PageSize < 1 { return errors.New("page_size: too small") }
-	if v.PageSize > 10000 { return errors.New("page_size: too large") }
-	if len(v.Statement) < 1 { return errors.New("statement: too short") }
-	if len(v.Statement) > 524288 { return errors.New("statement: too long") }
-	if v.TimeoutMs < 1 { return errors.New("timeout_ms: too small") }
-	if v.TimeoutMs > 600000 { return errors.New("timeout_ms: too large") }
+	if len(v.Graph) > 256 {
+		return errors.New("graph: too long")
+	}
+	if v.PageSize != 0 && v.PageSize < 1 {
+		return errors.New("page_size: too small")
+	}
+	if v.PageSize > 10000 {
+		return errors.New("page_size: too large")
+	}
+	if len(v.Statement) < 1 {
+		return errors.New("statement: too short")
+	}
+	if len(v.Statement) > 524288 {
+		return errors.New("statement: too long")
+	}
+	if v.TimeoutMs != 0 && v.TimeoutMs < 1 {
+		return errors.New("timeout_ms: too small")
+	}
+	if v.TimeoutMs > 600000 {
+		return errors.New("timeout_ms: too large")
+	}
 	return nil
 }
 
 // QueryResp generated from config schema
 type QueryResp struct {
-	Columns []jsontext.Value `json:"columns" genapi:"columns"`
-	ElapsedMs int64 `json:"elapsed_ms" genapi:"elapsed_ms"`
-	GraphSummary jsontext.Value `json:"graph_summary" genapi:"graph_summary"`
-	RowCount int64 `json:"row_count" genapi:"row_count"`
-	Rows []jsontext.Value `json:"rows" genapi:"rows"`
+	Columns      []jsontext.Value `json:"columns" genapi:"columns"`
+	ElapsedMs    int64            `json:"elapsed_ms" genapi:"elapsed_ms"`
+	GraphSummary jsontext.Value   `json:"graph_summary" genapi:"graph_summary"`
+	RowCount     int64            `json:"row_count" genapi:"row_count"`
+	Rows         []jsontext.Value `json:"rows" genapi:"rows"`
 }
 
 // Valid validates QueryResp fields against schema constraints.
 func (v QueryResp) Valid() error {
-	if v.ElapsedMs < 0 { return errors.New("elapsed_ms: too small") }
-	if v.RowCount < 0 { return errors.New("row_count: too small") }
+	if v.ElapsedMs < 0 {
+		return errors.New("elapsed_ms: too small")
+	}
+	if v.RowCount < 0 {
+		return errors.New("row_count: too small")
+	}
 	return nil
 }
 
 // QueryStreamMsg generated from config schema
 type QueryStreamMsg struct {
-	Code string `json:"code" genapi:"code"`
-	Columns []jsontext.Value `json:"columns" genapi:"columns"`
-	ElapsedMs int64 `json:"elapsed_ms" genapi:"elapsed_ms"`
-	Graph string `json:"graph" genapi:"graph"`
-	Kind string `json:"kind" genapi:"kind"`
-	Message string `json:"message" genapi:"message"`
-	Params jsontext.Value `json:"params" genapi:"params"`
-	Row []jsontext.Value `json:"row" genapi:"row"`
-	RowCount int64 `json:"row_count" genapi:"row_count"`
-	Statement string `json:"statement" genapi:"statement"`
+	Code      string           `json:"code" genapi:"code"`
+	Columns   []jsontext.Value `json:"columns" genapi:"columns"`
+	ElapsedMs int64            `json:"elapsed_ms" genapi:"elapsed_ms"`
+	Graph     string           `json:"graph" genapi:"graph"`
+	Kind      string           `json:"kind" genapi:"kind"`
+	Message   string           `json:"message" genapi:"message"`
+	Params    jsontext.Value   `json:"params" genapi:"params"`
+	Row       []jsontext.Value `json:"row" genapi:"row"`
+	RowCount  int64            `json:"row_count" genapi:"row_count"`
+	Statement string           `json:"statement" genapi:"statement"`
 }
 
 // Valid validates QueryStreamMsg fields against schema constraints.
 func (v QueryStreamMsg) Valid() error {
-	if len(v.Code) > 64 { return errors.New("code: too long") }
-	if v.ElapsedMs < 0 { return errors.New("elapsed_ms: too small") }
-	if len(v.Graph) > 256 { return errors.New("graph: too long") }
+	if len(v.Code) > 64 {
+		return errors.New("code: too long")
+	}
+	if v.ElapsedMs != 0 && v.ElapsedMs < 0 {
+		return errors.New("elapsed_ms: too small")
+	}
+	if len(v.Graph) > 256 {
+		return errors.New("graph: too long")
+	}
 	{
 		okEnum := false
-		if v.Kind == "start" { okEnum = true }
-		if v.Kind == "schema" { okEnum = true }
-		if v.Kind == "row" { okEnum = true }
-		if v.Kind == "summary" { okEnum = true }
-		if v.Kind == "error" { okEnum = true }
-		if v.Kind == "end" { okEnum = true }
-		if v.Kind == "cancel" { okEnum = true }
-		if !okEnum { return errors.New("kind: invalid enum value") }
+		if v.Kind == "start" {
+			okEnum = true
+		}
+		if v.Kind == "schema" {
+			okEnum = true
+		}
+		if v.Kind == "row" {
+			okEnum = true
+		}
+		if v.Kind == "summary" {
+			okEnum = true
+		}
+		if v.Kind == "error" {
+			okEnum = true
+		}
+		if v.Kind == "end" {
+			okEnum = true
+		}
+		if v.Kind == "cancel" {
+			okEnum = true
+		}
+		if !okEnum {
+			return errors.New("kind: invalid enum value")
+		}
 	}
-	if len(v.Message) > 4096 { return errors.New("message: too long") }
-	if v.RowCount < 0 { return errors.New("row_count: too small") }
-	if len(v.Statement) > 524288 { return errors.New("statement: too long") }
+	if len(v.Message) > 4096 {
+		return errors.New("message: too long")
+	}
+	if v.RowCount != 0 && v.RowCount < 0 {
+		return errors.New("row_count: too small")
+	}
+	if len(v.Statement) > 524288 {
+		return errors.New("statement: too long")
+	}
 	return nil
 }
 
 // RestoreReq generated from config schema
 type RestoreReq struct {
-	File string `json:"file" genapi:"file"`
+	File       string `json:"file" genapi:"file"`
 	TargetTime string `json:"target_time" genapi:"target_time"`
 }
 
 // Valid validates RestoreReq fields against schema constraints.
 func (v RestoreReq) Valid() error {
-	if len(v.File) < 1 { return errors.New("file: too short") }
-	if len(v.File) > 256 { return errors.New("file: too long") }
-	if len(v.TargetTime) > 64 { return errors.New("target_time: too long") }
+	if len(v.File) < 1 {
+		return errors.New("file: too short")
+	}
+	if len(v.File) > 256 {
+		return errors.New("file: too long")
+	}
+	if len(v.TargetTime) > 64 {
+		return errors.New("target_time: too long")
+	}
 	return nil
 }
 
 // Role generated from config schema
 type Role struct {
-	Description string `json:"description" genapi:"description"`
-	Name string `json:"name" genapi:"name"`
+	Description string   `json:"description" genapi:"description"`
+	Name        string   `json:"name" genapi:"name"`
 	Permissions []string `json:"permissions" genapi:"permissions"`
 }
 
 // Valid validates Role fields against schema constraints.
 func (v Role) Valid() error {
-	if len(v.Description) > 1024 { return errors.New("description: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Description) > 1024 {
+		return errors.New("description: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
 	return nil
 }
 
 // RoleCreateReq generated from config schema
 type RoleCreateReq struct {
-	Description string `json:"description" genapi:"description"`
-	Name string `json:"name" genapi:"name"`
+	Description string   `json:"description" genapi:"description"`
+	Name        string   `json:"name" genapi:"name"`
 	Permissions []string `json:"permissions" genapi:"permissions"`
 }
 
 // Valid validates RoleCreateReq fields against schema constraints.
 func (v RoleCreateReq) Valid() error {
-	if len(v.Description) > 1024 { return errors.New("description: too long") }
-	if len(v.Name) < 1 { return errors.New("name: too short") }
-	if len(v.Name) > 256 { return errors.New("name: too long") }
+	if len(v.Description) > 1024 {
+		return errors.New("description: too long")
+	}
+	if len(v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if len(v.Name) > 256 {
+		return errors.New("name: too long")
+	}
 	return nil
 }
 
@@ -722,16 +953,20 @@ type RoleParam struct {
 
 // Valid validates RoleParam fields against schema constraints.
 func (v RoleParam) Valid() error {
-	if len(v.Role) < 1 { return errors.New("role: too short") }
-	if len(v.Role) > 256 { return errors.New("role: too long") }
+	if len(v.Role) < 1 {
+		return errors.New("role: too short")
+	}
+	if len(v.Role) > 256 {
+		return errors.New("role: too long")
+	}
 	return nil
 }
 
 // TLSMaterial generated from config schema
 type TLSMaterial struct {
-	CaPem string `json:"ca_pem" genapi:"ca_pem"`
+	CaPem         string `json:"ca_pem" genapi:"ca_pem"`
 	ClientCertPem string `json:"client_cert_pem" genapi:"client_cert_pem"`
-	ClientKeyPem string `json:"client_key_pem" genapi:"client_key_pem"`
+	ClientKeyPem  string `json:"client_key_pem" genapi:"client_key_pem"`
 }
 
 // Valid validates TLSMaterial fields against schema constraints.
@@ -741,13 +976,15 @@ func (v TLSMaterial) Valid() error {
 
 // TxBeginReq generated from config schema
 type TxBeginReq struct {
-	Graph string `json:"graph" genapi:"graph"`
-	ReadOnly bool `json:"read_only" genapi:"read_only"`
+	Graph    string `json:"graph" genapi:"graph"`
+	ReadOnly bool   `json:"read_only" genapi:"read_only"`
 }
 
 // Valid validates TxBeginReq fields against schema constraints.
 func (v TxBeginReq) Valid() error {
-	if len(v.Graph) > 256 { return errors.New("graph: too long") }
+	if len(v.Graph) > 256 {
+		return errors.New("graph: too long")
+	}
 	return nil
 }
 
@@ -758,8 +995,12 @@ type TxBeginResp struct {
 
 // Valid validates TxBeginResp fields against schema constraints.
 func (v TxBeginResp) Valid() error {
-	if len(v.Txid) < 16 { return errors.New("txid: too short") }
-	if len(v.Txid) > 64 { return errors.New("txid: too long") }
+	if len(v.Txid) < 16 {
+		return errors.New("txid: too short")
+	}
+	if len(v.Txid) > 64 {
+		return errors.New("txid: too long")
+	}
 	return nil
 }
 
@@ -770,76 +1011,112 @@ type TxIDParam struct {
 
 // Valid validates TxIDParam fields against schema constraints.
 func (v TxIDParam) Valid() error {
-	if len(v.Txid) < 16 { return errors.New("txid: too short") }
-	if len(v.Txid) > 64 { return errors.New("txid: too long") }
+	if len(v.Txid) < 16 {
+		return errors.New("txid: too short")
+	}
+	if len(v.Txid) > 64 {
+		return errors.New("txid: too long")
+	}
 	return nil
 }
 
 // TxRunReq generated from config schema
 type TxRunReq struct {
-	Params jsontext.Value `json:"params" genapi:"params"`
-	Statement string `json:"statement" genapi:"statement"`
-	Txid string `json:"txid" genapi:"txid"`
+	Params    jsontext.Value `json:"params" genapi:"params"`
+	Statement string         `json:"statement" genapi:"statement"`
+	Txid      string         `json:"txid" genapi:"txid"`
 }
 
 // Valid validates TxRunReq fields against schema constraints.
 func (v TxRunReq) Valid() error {
-	if len(v.Statement) < 1 { return errors.New("statement: too short") }
+	if len(v.Statement) < 1 {
+		return errors.New("statement: too short")
+	}
 	return nil
 }
 
 // UpdateProfileReq generated from config schema
 type UpdateProfileReq struct {
-	Description *string `json:"description,omitempty" genapi:"description"`
-	Dsn *string `json:"dsn,omitempty" genapi:"dsn"`
-	IsDefault *bool `json:"is_default,omitempty" genapi:"is_default"`
-	Name *string `json:"name,omitempty" genapi:"name"`
+	Description   *string        `json:"description,omitempty" genapi:"description"`
+	Dsn           *string        `json:"dsn,omitempty" genapi:"dsn"`
+	IsDefault     *bool          `json:"is_default,omitempty" genapi:"is_default"`
+	Name          *string        `json:"name,omitempty" genapi:"name"`
 	PoolOverrides jsontext.Value `json:"pool_overrides" genapi:"pool_overrides"`
-	ProfileID string `json:"profile_id" genapi:"profile_id"`
-	SavedUsername *string `json:"saved_username,omitempty" genapi:"saved_username"`
-	TLS jsontext.Value `json:"tls" genapi:"tls"`
+	ProfileID     string         `json:"profile_id" genapi:"profile_id"`
+	SavedUsername *string        `json:"saved_username,omitempty" genapi:"saved_username"`
+	TLS           jsontext.Value `json:"tls" genapi:"tls"`
 }
 
 // Valid validates UpdateProfileReq fields against schema constraints.
 func (v UpdateProfileReq) Valid() error {
-	if v.Description != nil && len(*v.Description) > 256 { return errors.New("description: too long") }
-	if v.Dsn != nil && len(*v.Dsn) < 1 { return errors.New("dsn: too short") }
-	if v.Dsn != nil && len(*v.Dsn) > 1024 { return errors.New("dsn: too long") }
-	if v.Name != nil && len(*v.Name) < 1 { return errors.New("name: too short") }
-	if v.Name != nil && len(*v.Name) > 64 { return errors.New("name: too long") }
-	if len(v.ProfileID) < 1 { return errors.New("profile_id: too short") }
-	if len(v.ProfileID) > 64 { return errors.New("profile_id: too long") }
-	if v.SavedUsername != nil && len(*v.SavedUsername) > 128 { return errors.New("saved_username: too long") }
+	if v.Description != nil && len(*v.Description) > 256 {
+		return errors.New("description: too long")
+	}
+	if v.Dsn != nil && len(*v.Dsn) < 1 {
+		return errors.New("dsn: too short")
+	}
+	if v.Dsn != nil && len(*v.Dsn) > 1024 {
+		return errors.New("dsn: too long")
+	}
+	if v.Name != nil && len(*v.Name) < 1 {
+		return errors.New("name: too short")
+	}
+	if v.Name != nil && len(*v.Name) > 64 {
+		return errors.New("name: too long")
+	}
+	if len(v.ProfileID) < 1 {
+		return errors.New("profile_id: too short")
+	}
+	if len(v.ProfileID) > 64 {
+		return errors.New("profile_id: too long")
+	}
+	if v.SavedUsername != nil && len(*v.SavedUsername) > 128 {
+		return errors.New("saved_username: too long")
+	}
 	return nil
 }
 
 // UploadResp generated from config schema
 type UploadResp struct {
-	File string `json:"file" genapi:"file"`
-	Path string `json:"path" genapi:"path"`
-	SizeBytes int64 `json:"size_bytes" genapi:"size_bytes"`
+	File       string `json:"file" genapi:"file"`
+	Path       string `json:"path" genapi:"path"`
+	SizeBytes  int64  `json:"size_bytes" genapi:"size_bytes"`
 	UploadedAt string `json:"uploaded_at" genapi:"uploaded_at"`
 }
 
 // Valid validates UploadResp fields against schema constraints.
 func (v UploadResp) Valid() error {
-	if len(v.File) < 1 { return errors.New("file: too short") }
-	if len(v.File) > 256 { return errors.New("file: too long") }
-	if len(v.Path) < 1 { return errors.New("path: too short") }
-	if len(v.Path) > 4096 { return errors.New("path: too long") }
-	if v.SizeBytes < 0 { return errors.New("size_bytes: too small") }
-	if len(v.UploadedAt) < 1 { return errors.New("uploaded_at: too short") }
-	if len(v.UploadedAt) > 64 { return errors.New("uploaded_at: too long") }
+	if len(v.File) < 1 {
+		return errors.New("file: too short")
+	}
+	if len(v.File) > 256 {
+		return errors.New("file: too long")
+	}
+	if len(v.Path) < 1 {
+		return errors.New("path: too short")
+	}
+	if len(v.Path) > 4096 {
+		return errors.New("path: too long")
+	}
+	if v.SizeBytes < 0 {
+		return errors.New("size_bytes: too small")
+	}
+	if len(v.UploadedAt) < 1 {
+		return errors.New("uploaded_at: too short")
+	}
+	if len(v.UploadedAt) > 64 {
+		return errors.New("uploaded_at: too long")
+	}
 	return nil
 }
 
 // User generated from config schema
 type User struct {
-	Disabled bool `json:"disabled" genapi:"disabled"`
-	Email string `json:"email" genapi:"email"`
-	MfaEnrolled bool `json:"mfa_enrolled" genapi:"mfa_enrolled"`
-	Roles []string `json:"roles" genapi:"roles"`
-	Username string `json:"username" genapi:"username"`
+	Disabled    bool     `json:"disabled" genapi:"disabled"`
+	Email       string   `json:"email" genapi:"email"`
+	MfaEnrolled bool     `json:"mfa_enrolled" genapi:"mfa_enrolled"`
+	Roles       []string `json:"roles" genapi:"roles"`
+	Username    string   `json:"username" genapi:"username"`
 }
 
 // Valid validates User fields against schema constraints.
@@ -849,19 +1126,29 @@ func (v User) Valid() error {
 
 // UserCreateReq generated from config schema
 type UserCreateReq struct {
-	Email string `json:"email" genapi:"email"`
-	Password string `json:"password" genapi:"password"`
-	Roles []string `json:"roles" genapi:"roles"`
-	Username string `json:"username" genapi:"username"`
+	Email    string   `json:"email" genapi:"email"`
+	Password string   `json:"password" genapi:"password"`
+	Roles    []string `json:"roles" genapi:"roles"`
+	Username string   `json:"username" genapi:"username"`
 }
 
 // Valid validates UserCreateReq fields against schema constraints.
 func (v UserCreateReq) Valid() error {
-	if len(v.Email) < 3 { return errors.New("email: too short") }
-	if len(v.Email) > 256 { return errors.New("email: too long") }
-	if len(v.Password) > 4096 { return errors.New("password: too long") }
-	if len(v.Username) < 1 { return errors.New("username: too short") }
-	if len(v.Username) > 256 { return errors.New("username: too long") }
+	if len(v.Email) < 3 {
+		return errors.New("email: too short")
+	}
+	if len(v.Email) > 256 {
+		return errors.New("email: too long")
+	}
+	if len(v.Password) > 4096 {
+		return errors.New("password: too long")
+	}
+	if len(v.Username) < 1 {
+		return errors.New("username: too short")
+	}
+	if len(v.Username) > 256 {
+		return errors.New("username: too long")
+	}
 	return nil
 }
 
@@ -877,10 +1164,10 @@ func (v UserList) Valid() error {
 
 // UserUpdateReq generated from config schema
 type UserUpdateReq struct {
-	Email string `json:"email" genapi:"email"`
-	Password string `json:"password" genapi:"password"`
-	Roles []string `json:"roles" genapi:"roles"`
-	Username string `json:"username" genapi:"username"`
+	Email    string   `json:"email" genapi:"email"`
+	Password string   `json:"password" genapi:"password"`
+	Roles    []string `json:"roles" genapi:"roles"`
+	Username string   `json:"username" genapi:"username"`
 }
 
 // Valid validates UserUpdateReq fields against schema constraints.
@@ -895,7 +1182,11 @@ type UsernameParam struct {
 
 // Valid validates UsernameParam fields against schema constraints.
 func (v UsernameParam) Valid() error {
-	if len(v.Username) < 1 { return errors.New("username: too short") }
-	if len(v.Username) > 256 { return errors.New("username: too long") }
+	if len(v.Username) < 1 {
+		return errors.New("username: too short")
+	}
+	if len(v.Username) > 256 {
+		return errors.New("username: too long")
+	}
 	return nil
 }

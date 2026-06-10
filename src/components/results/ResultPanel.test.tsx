@@ -15,9 +15,9 @@ jest.mock('./GraphView', () => ({
 const resp = {
   columns: [{ name: 'n', type: 'NODE' }],
   rows: [[{ id: 1, labels: ['A'], properties: {} }]],
-  row_count: 1,
-  elapsed_ms: 1,
-  graph_summary: {
+  rowCount: 1,
+  elapsedMs: 1,
+  graphSummary: {
     nodes: [{ id: 1, labels: ['A'], properties: {} }],
     edges: [],
   },
@@ -52,7 +52,7 @@ describe('ResultPanel', () => {
   it('renders the active view per the tab prop', () => {
     renderPanel({ tab: 'json' })
     // JsonView renders a <pre> with the stringified resp
-    expect(screen.getByText(/"row_count": 1/)).toBeInTheDocument()
+    expect(screen.getByText(/"rowCount": 1/)).toBeInTheDocument()
   })
 
   it('renders the maximize toggle only when onToggleMaximize is given', () => {

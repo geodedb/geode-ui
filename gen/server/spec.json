@@ -1,0 +1,1869 @@
+{
+  "api": [
+    {
+      "auth": "public",
+      "method": "GET",
+      "path": "/healthz",
+      "rateLimit": 50,
+      "requestSchema": "Empty",
+      "responseSchema": "HealthResp"
+    },
+    {
+      "auth": "public",
+      "form_encoded": true,
+      "maxBodyBytes": 4096,
+      "method": "POST",
+      "path": "/api/v1/auth/login",
+      "rateLimit": 20,
+      "requestSchema": "LoginReq",
+      "responseSchema": "LoginResp"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 524288,
+      "method": "POST",
+      "path": "/api/v1/query",
+      "rateLimit": 2000,
+      "requestSchema": "QueryReq",
+      "responseSchema": "QueryResp",
+      "streaming": true
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/graphs",
+      "rateLimit": 100,
+      "requestSchema": "Empty",
+      "responseSchema": "GraphList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/labels",
+      "rateLimit": 100,
+      "requestSchema": "GraphParam",
+      "responseSchema": "LabelList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/edge-types",
+      "rateLimit": 100,
+      "requestSchema": "GraphParam",
+      "responseSchema": "EdgeTypeList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/indexes",
+      "rateLimit": 100,
+      "requestSchema": "GraphParam",
+      "responseSchema": "IndexList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/graphs/{graph}/constraints",
+      "rateLimit": 100,
+      "requestSchema": "GraphParam",
+      "responseSchema": "ConstraintList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "name": "GetCapabilities",
+      "path": "/api/v1/capabilities",
+      "rateLimit": 100,
+      "requestSchema": "Empty",
+      "responseSchema": "Capabilities"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 4096,
+      "method": "POST",
+      "path": "/api/v1/tx",
+      "rateLimit": 50,
+      "requestSchema": "TxBeginReq",
+      "responseSchema": "TxBeginResp"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 524288,
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/run",
+      "rateLimit": 200,
+      "requestSchema": "TxRunReq",
+      "responseSchema": "QueryResp"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/commit",
+      "rateLimit": 50,
+      "requestSchema": "TxIDParam",
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/tx/{txid}/rollback",
+      "rateLimit": 50,
+      "requestSchema": "TxIDParam",
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/users",
+      "rateLimit": 100,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "UserList"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/users",
+      "rateLimit": 50,
+      "requestSchema": "UserCreateReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "User"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/users/{username}",
+      "rateLimit": 100,
+      "requestSchema": "UsernameParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "User"
+    },
+    {
+      "auth": "jwt",
+      "method": "PATCH",
+      "path": "/api/v1/users/{username}",
+      "rateLimit": 50,
+      "requestSchema": "UserUpdateReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "User"
+    },
+    {
+      "auth": "jwt",
+      "method": "DELETE",
+      "path": "/api/v1/users/{username}",
+      "rateLimit": 20,
+      "requestSchema": "UsernameParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/users/{username}/disable",
+      "rateLimit": 20,
+      "requestSchema": "UsernameParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/users/{username}/enable",
+      "rateLimit": 20,
+      "requestSchema": "UsernameParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/users/{username}/password",
+      "rateLimit": 20,
+      "requestSchema": "PasswordChangeReq",
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/users/{username}/roles",
+      "rateLimit": 20,
+      "requestSchema": "AssignRoleReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/users/{username}/permissions",
+      "rateLimit": 100,
+      "requestSchema": "UsernameParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "PermissionList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/roles",
+      "rateLimit": 100,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "RoleList"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/roles",
+      "rateLimit": 50,
+      "requestSchema": "RoleCreateReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Role"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/roles/{role}",
+      "rateLimit": 100,
+      "requestSchema": "RoleParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Role"
+    },
+    {
+      "auth": "jwt",
+      "method": "DELETE",
+      "path": "/api/v1/roles/{role}",
+      "rateLimit": 20,
+      "requestSchema": "RoleParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/policies",
+      "rateLimit": 100,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "PolicyList"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/policies",
+      "rateLimit": 50,
+      "requestSchema": "PolicyCreateReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Policy"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/policies/{name}",
+      "rateLimit": 100,
+      "requestSchema": "PolicyParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Policy"
+    },
+    {
+      "auth": "jwt",
+      "method": "DELETE",
+      "path": "/api/v1/policies/{name}",
+      "rateLimit": 20,
+      "requestSchema": "PolicyParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/grants",
+      "rateLimit": 30,
+      "requestSchema": "GrantReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/grants/revoke",
+      "rateLimit": 30,
+      "requestSchema": "GrantReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/backups",
+      "rateLimit": 50,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "BackupList"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 4096,
+      "method": "POST",
+      "path": "/api/v1/backups",
+      "rateLimit": 10,
+      "requestSchema": "BackupCreateReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "BackupRef"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/backups/{file}",
+      "rateLimit": 50,
+      "requestSchema": "BackupFileParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "BackupInfo"
+    },
+    {
+      "auth": "jwt",
+      "method": "DELETE",
+      "path": "/api/v1/backups/{file}",
+      "rateLimit": 20,
+      "requestSchema": "BackupFileParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/backups/cleanup",
+      "rateLimit": 10,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "BackupCleanupResp"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 67108864,
+      "method": "POST",
+      "name": "BackupUpload",
+      "path": "/api/v1/backups/upload",
+      "rateLimit": 10,
+      "requestSchema": "BackupUploadReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "UploadResp"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 4096,
+      "method": "POST",
+      "path": "/api/v1/restore",
+      "rateLimit": 5,
+      "requestSchema": "RestoreReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/migrations",
+      "rateLimit": 50,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "MigrationStatus"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/migrations/run",
+      "rateLimit": 5,
+      "requestSchema": "Empty",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "MigrationRunResp"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 4096,
+      "method": "POST",
+      "path": "/api/v1/migrations",
+      "rateLimit": 20,
+      "requestSchema": "MigrationCreateReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "MigrationRef"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/migrations/{name}/sign",
+      "rateLimit": 20,
+      "requestSchema": "MigrationParam",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "Empty"
+    },
+    {
+      "auth": "jwt",
+      "maxBodyBytes": 67108864,
+      "method": "POST",
+      "name": "MigrationUpload",
+      "path": "/api/v1/migrations/upload",
+      "rateLimit": 10,
+      "requestSchema": "MigrationUploadReq",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "UploadResp"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/audit",
+      "rateLimit": 50,
+      "requestSchema": "AuditQuery",
+      "required_roles": [
+        "admin"
+      ],
+      "responseSchema": "AuditList"
+    },
+    {
+      "auth": "public",
+      "method": "GET",
+      "path": "/api/v1/profiles/public",
+      "rateLimit": 50,
+      "requestSchema": "Empty",
+      "responseSchema": "PublicProfileList"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/profiles",
+      "rateLimit": 50,
+      "requestSchema": "Empty",
+      "responseSchema": "ProfileList"
+    },
+    {
+      "auth": "jwt",
+      "method": "POST",
+      "path": "/api/v1/profiles",
+      "rateLimit": 20,
+      "requestSchema": "CreateProfileReq",
+      "responseSchema": "Profile"
+    },
+    {
+      "auth": "jwt",
+      "method": "GET",
+      "path": "/api/v1/profiles/{profileId}",
+      "rateLimit": 50,
+      "requestSchema": "ProfileIDPath",
+      "responseSchema": "Profile"
+    },
+    {
+      "auth": "jwt",
+      "method": "PATCH",
+      "path": "/api/v1/profiles/{profileId}",
+      "rateLimit": 20,
+      "requestSchema": "UpdateProfileReq",
+      "responseSchema": "Profile"
+    },
+    {
+      "auth": "jwt",
+      "method": "DELETE",
+      "path": "/api/v1/profiles/{profileId}",
+      "rateLimit": 20,
+      "requestSchema": "ProfileIDPath",
+      "responseSchema": "Empty"
+    }
+  ],
+  "mcp": {
+    "tools": [
+      {
+        "authn": "public",
+        "name": "query",
+        "paramsSchema": "QueryReq",
+        "resultSchema": "QueryResp"
+      }
+    ],
+    "transport": [
+      "http"
+    ]
+  },
+  "schemas": {
+    "AssignRoleReq": {
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "role"
+      ],
+      "type": "object"
+    },
+    "AuditList": {
+      "properties": {
+        "entries": {
+          "items": {},
+          "type": "array"
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "AuditQuery": {
+      "properties": {
+        "event": {
+          "maxLength": 64,
+          "type": "string"
+        },
+        "since": {
+          "maxLength": 64,
+          "type": "string"
+        },
+        "user": {
+          "maxLength": 256,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "BackupCleanupResp": {
+      "properties": {
+        "freed_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "removed"
+      ],
+      "type": "object"
+    },
+    "BackupCreateReq": {
+      "properties": {
+        "graph": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "output": {
+          "maxLength": 1024,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "BackupFileParam": {
+      "properties": {
+        "file": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "BackupInfo": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "edge_count": {
+          "type": "integer"
+        },
+        "file": {
+          "type": "string"
+        },
+        "graph_count": {
+          "type": "integer"
+        },
+        "node_count": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "BackupList": {
+      "properties": {
+        "backups": {
+          "items": {},
+          "type": "array"
+        }
+      },
+      "required": [
+        "backups"
+      ],
+      "type": "object"
+    },
+    "BackupRef": {
+      "properties": {
+        "created_at": {
+          "maxLength": 64,
+          "type": "string"
+        },
+        "file": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "BackupUploadReq": {
+      "properties": {
+        "file": {
+          "maxSize": 67108864,
+          "type": "file"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "Capabilities": {
+      "properties": {
+        "admin_writable": {
+          "properties": {
+            "grants": {
+              "type": "boolean"
+            },
+            "policies": {
+              "type": "boolean"
+            },
+            "roles": {
+              "type": "boolean"
+            },
+            "users": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "geode_version": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "metrics_enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "geode_version",
+        "admin_writable"
+      ],
+      "type": "object"
+    },
+    "ConstraintList": {
+      "properties": {
+        "constraints": {
+          "items": {
+            "properties": {
+              "columns": {},
+              "name": {
+                "type": "string"
+              },
+              "table": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "constraints"
+      ],
+      "type": "object"
+    },
+    "CreateProfileReq": {
+      "properties": {
+        "description": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "dsn": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "is_default": {
+          "type": "boolean"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "pool_overrides": {
+          "type": "object"
+        },
+        "saved_username": {
+          "maxLength": 128,
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "tls": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "scope",
+        "name",
+        "dsn"
+      ],
+      "type": "object"
+    },
+    "EdgeTypeList": {
+      "properties": {
+        "types": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "types"
+      ],
+      "type": "object"
+    },
+    "Empty": {
+      "properties": {},
+      "type": "object"
+    },
+    "GrantReq": {
+      "properties": {
+        "grantee": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "grantee_kind": {
+          "enum": [
+            "",
+            "user",
+            "role"
+          ],
+          "type": "string"
+        },
+        "permission": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "resource": {
+          "maxLength": 256,
+          "type": "string"
+        }
+      },
+      "required": [
+        "permission",
+        "grantee"
+      ],
+      "type": "object"
+    },
+    "GraphList": {
+      "properties": {
+        "graphs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "graphs"
+      ],
+      "type": "object"
+    },
+    "GraphParam": {
+      "properties": {
+        "graph": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "graph"
+      ],
+      "type": "object"
+    },
+    "HealthResp": {
+      "properties": {
+        "status": {
+          "enum": [
+            "ok"
+          ],
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "version"
+      ],
+      "type": "object"
+    },
+    "IndexList": {
+      "properties": {
+        "indexes": {
+          "items": {
+            "properties": {
+              "columns": {},
+              "name": {
+                "type": "string"
+              },
+              "table": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "indexes"
+      ],
+      "type": "object"
+    },
+    "LabelList": {
+      "properties": {
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "labels"
+      ],
+      "type": "object"
+    },
+    "LoginReq": {
+      "properties": {
+        "password": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "profile": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "username": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "password"
+      ],
+      "type": "object"
+    },
+    "LoginResp": {
+      "properties": {
+        "access_token": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "type": "string"
+        },
+        "connection_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "expires_in": {
+          "maximum": 86400,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "token_type": {
+          "enum": [
+            "Bearer"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "access_token",
+        "token_type",
+        "expires_in",
+        "connection_id"
+      ],
+      "type": "object"
+    },
+    "MigrationCreateReq": {
+      "properties": {
+        "description": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "MigrationParam": {
+      "properties": {
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "MigrationRef": {
+      "properties": {
+        "created_at": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "MigrationRunResp": {
+      "properties": {
+        "applied": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "applied"
+      ],
+      "type": "object"
+    },
+    "MigrationStatus": {
+      "properties": {
+        "applied": {
+          "items": {},
+          "type": "array"
+        },
+        "pending": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pending",
+        "applied"
+      ],
+      "type": "object"
+    },
+    "MigrationUploadReq": {
+      "properties": {
+        "file": {
+          "maxSize": 67108864,
+          "type": "file"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "PasswordChangeReq": {
+      "properties": {
+        "new_password": {
+          "minLength": 8,
+          "type": "string"
+        },
+        "old_password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "new_password"
+      ],
+      "type": "object"
+    },
+    "Permission": {
+      "properties": {
+        "permission": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "PermissionList": {
+      "properties": {
+        "permissions": {
+          "items": {
+            "$ref": "Permission"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "permissions"
+      ],
+      "type": "object"
+    },
+    "PingMsg": {
+      "properties": {
+        "seq": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq"
+      ],
+      "type": "object"
+    },
+    "Policy": {
+      "properties": {
+        "expression": {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "resource": {
+          "maxLength": 256,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PolicyCreateReq": {
+      "properties": {
+        "expression": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "resource": {
+          "maxLength": 256,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "expression"
+      ],
+      "type": "object"
+    },
+    "PolicyList": {
+      "properties": {
+        "policies": {
+          "items": {},
+          "type": "array"
+        }
+      },
+      "required": [
+        "policies"
+      ],
+      "type": "object"
+    },
+    "PolicyParam": {
+      "properties": {
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PoolOverrides": {
+      "properties": {
+        "conn_max_idle_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "conn_max_lifetime_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_idle_conns": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_open_conns": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Profile": {
+      "properties": {
+        "description": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "dsn": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "is_default": {
+          "type": "boolean"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "owner_user_id": {
+          "type": "string"
+        },
+        "pool_overrides": {
+          "type": "object"
+        },
+        "saved_username": {
+          "maxLength": 128,
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "tls": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "name",
+        "dsn"
+      ],
+      "type": "object"
+    },
+    "ProfileIDPath": {
+      "properties": {
+        "profile_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id"
+      ],
+      "type": "object"
+    },
+    "ProfileList": {
+      "properties": {
+        "profiles": {
+          "items": {
+            "$ref": "Profile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "profiles"
+      ],
+      "type": "object"
+    },
+    "PublicProfile": {
+      "properties": {
+        "description": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PublicProfileList": {
+      "properties": {
+        "profiles": {
+          "items": {
+            "$ref": "PublicProfile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "profiles"
+      ],
+      "type": "object"
+    },
+    "QueryReq": {
+      "properties": {
+        "graph": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "page_size": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "params": {
+          "properties": {},
+          "type": "object"
+        },
+        "statement": {
+          "maxLength": 524288,
+          "minLength": 1,
+          "type": "string"
+        },
+        "timeout_ms": {
+          "maximum": 600000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "statement"
+      ],
+      "type": "object"
+    },
+    "QueryResp": {
+      "properties": {
+        "columns": {
+          "items": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "elapsed_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "graph_summary": {
+          "properties": {
+            "edges": {
+              "items": {},
+              "type": "array"
+            },
+            "nodes": {
+              "items": {},
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "row_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "items": {},
+            "type": "array"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "columns",
+        "rows",
+        "row_count",
+        "elapsed_ms"
+      ],
+      "type": "object"
+    },
+    "QueryStreamMsg": {
+      "properties": {
+        "code": {
+          "maxLength": 64,
+          "type": "string"
+        },
+        "columns": {
+          "items": {},
+          "type": "array"
+        },
+        "elapsed_ms": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "graph": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "start",
+            "schema",
+            "row",
+            "summary",
+            "error",
+            "end",
+            "cancel"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        "params": {
+          "properties": {},
+          "type": "object"
+        },
+        "row": {
+          "items": {},
+          "type": "array"
+        },
+        "row_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "statement": {
+          "maxLength": 524288,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "RestoreReq": {
+      "properties": {
+        "file": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "target_time": {
+          "maxLength": 64,
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "Role": {
+      "properties": {
+        "description": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "RoleCreateReq": {
+      "properties": {
+        "description": {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "RoleList": {
+      "properties": {
+        "roles": {
+          "items": {},
+          "type": "array"
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "type": "object"
+    },
+    "RoleParam": {
+      "properties": {
+        "role": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "type": "object"
+    },
+    "TLSMaterial": {
+      "properties": {
+        "ca_pem": {
+          "type": "string"
+        },
+        "client_cert_pem": {
+          "type": "string"
+        },
+        "client_key_pem": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TxBeginReq": {
+      "properties": {
+        "graph": {
+          "maxLength": 256,
+          "type": "string"
+        },
+        "read_only": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "TxBeginResp": {
+      "properties": {
+        "txid": {
+          "maxLength": 64,
+          "minLength": 16,
+          "type": "string"
+        }
+      },
+      "required": [
+        "txid"
+      ],
+      "type": "object"
+    },
+    "TxIDParam": {
+      "properties": {
+        "txid": {
+          "maxLength": 64,
+          "minLength": 16,
+          "type": "string"
+        }
+      },
+      "required": [
+        "txid"
+      ],
+      "type": "object"
+    },
+    "TxRunReq": {
+      "properties": {
+        "params": {
+          "properties": {},
+          "type": "object"
+        },
+        "statement": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "txid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "txid",
+        "statement"
+      ],
+      "type": "object"
+    },
+    "UpdateProfileReq": {
+      "properties": {
+        "description": {
+          "maxLength": 256,
+          "nullable": true,
+          "type": "string"
+        },
+        "dsn": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "nullable": true,
+          "type": "string"
+        },
+        "is_default": {
+          "nullable": true,
+          "type": "boolean"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "nullable": true,
+          "type": "string"
+        },
+        "pool_overrides": {
+          "type": "object"
+        },
+        "profile_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "saved_username": {
+          "maxLength": 128,
+          "nullable": true,
+          "type": "string"
+        },
+        "tls": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "profile_id"
+      ],
+      "type": "object"
+    },
+    "UploadResp": {
+      "properties": {
+        "file": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uploaded_at": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "size_bytes",
+        "path",
+        "uploaded_at"
+      ],
+      "type": "object"
+    },
+    "User": {
+      "properties": {
+        "disabled": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": "string"
+        },
+        "mfa_enrolled": {
+          "type": "boolean"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "email"
+      ],
+      "type": "object"
+    },
+    "UserCreateReq": {
+      "properties": {
+        "email": {
+          "maxLength": 256,
+          "minLength": 3,
+          "type": "string"
+        },
+        "password": {
+          "maxLength": 4096,
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "username",
+        "email"
+      ],
+      "type": "object"
+    },
+    "UserList": {
+      "properties": {
+        "users": {
+          "items": {
+            "$ref": "User"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "type": "object"
+    },
+    "UserUpdateReq": {
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ],
+      "type": "object"
+    },
+    "UsernameParam": {
+      "properties": {
+        "username": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "username"
+      ],
+      "type": "object"
+    }
+  },
+  "security": {
+    "auth": {
+      "api_key": false,
+      "jwt": true
+    },
+    "cors": {
+      "enabled": true,
+      "origins": [
+        "http://localhost:3000"
+      ]
+    }
+  },
+  "server": {
+    "enable_compression": true,
+    "tls": {}
+  },
+  "websocket": [
+    {
+      "allow_empty_origin": true,
+      "auth": "jwt",
+      "max_frame_bytes": 65536,
+      "max_message_bytes": 1048576,
+      "messageSchema": "PingMsg",
+      "path": "/ws/ping",
+      "ping_interval_ms": 30000,
+      "proto": "json",
+      "same_origin_only": true
+    },
+    {
+      "allow_empty_origin": true,
+      "auth": "jwt",
+      "max_frame_bytes": 1048576,
+      "max_message_bytes": 16777216,
+      "messageSchema": "QueryStreamMsg",
+      "path": "/ws/query",
+      "ping_interval_ms": 15000,
+      "proto": "json",
+      "same_origin_only": true
+    }
+  ]
+}

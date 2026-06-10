@@ -30,8 +30,8 @@ describe('queryPageStore — cross-route memory for QueryPage', () => {
     const resp = {
       columns: [{ name: 'n', type: 'NODE' }] as never,
       rows: [[]] as never,
-      row_count: 1,
-      elapsed_ms: 12,
+      rowCount: 1,
+      elapsedMs: 12,
     }
     useQueryPageStore.getState().setResp(resp)
     useQueryPageStore.getState().setSubmittedStmt('USE GRAPH x; RETURN 1')
@@ -57,8 +57,8 @@ describe('queryPageStore — cross-route memory for QueryPage', () => {
     s.setResp({
       columns: [] as never,
       rows: [] as never,
-      row_count: 0,
-      elapsed_ms: 0,
+      rowCount: 0,
+      elapsedMs: 0,
     })
     s.setSubmittedStmt('something')
     s.setErr('boom')

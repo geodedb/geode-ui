@@ -93,7 +93,7 @@ export const RestorePage: React.FC = () => {
     setErr(null)
     setOkMsg(null)
     try {
-      await client.restore({ file, target_time: targetTime })
+      await client.restore({ file, targetTime })
       setOkMsg(t('restore.started'))
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
@@ -123,9 +123,7 @@ export const RestorePage: React.FC = () => {
         file: { blob: f, filename: f.name, contentType: f.type || undefined },
       })
       setFile(resp.file)
-      setOkMsg(
-        t('restore.uploaded', { name: resp.file, size: resp.size_bytes })
-      )
+      setOkMsg(t('restore.uploaded', { name: resp.file, size: resp.sizeBytes }))
     } catch (e2: unknown) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
     } finally {

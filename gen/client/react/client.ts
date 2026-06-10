@@ -11,14 +11,26 @@ export type RequestState<T> = {
   data: T | null;
   error: Error | null;
   loading: boolean;
+  isPending: boolean;
+  isLoading: boolean;
+  isFetching: boolean;
+  isSuccess: boolean;
+  isError: boolean;
   refetch: () => Promise<T>;
 };
+
+export type QueryHookOptions = { enabled?: boolean };
 
 export type MutationState<TReq, TResp> = {
   data: TResp | null;
   error: Error | null;
   loading: boolean;
+  isPending: boolean;
+  isIdle: boolean;
+  isSuccess: boolean;
+  isError: boolean;
   mutate: (req: TReq) => Promise<TResp>;
+  mutateAsync: (req: TReq) => Promise<TResp>;
 };
 
 export type StreamState<T> = {
@@ -44,12 +56,45 @@ export type APIKeySigningResult = {
 export type ClientConfig = {
   baseUrl: string;
   bearerToken?: string | (() => string | null | undefined | Promise<string | null | undefined>);
+  /**
+   * Signs an api_key request/handshake. The signer owns all hashing/HMAC, so
+   * the client itself needs no WebCrypto: inject a platform hasher here to use
+   * api_key auth on React Native (where crypto.subtle is unavailable).
+   */
   apiKeySigner?: (input: APIKeySigningInput) => Promise<APIKeySigningResult> | APIKeySigningResult;
   headers?: Record<string, string>;
   fetchImpl?: typeof fetch;
   webSocketFactory?: (url: string, protocols?: string | string[]) => WebSocket;
   wsProtocols?: Record<string, string[]>;
   wsOrigin?: string;
+  /**
+   * Called once when a request receives HTTP 401. If it resolves truthy
+   * (e.g. a token was refreshed), the request is retried exactly once.
+   * Mirrors the CSRF 403-retry already built into this client.
+   */
+  onUnauthorized?: () => Promise<boolean | void> | boolean | void;
+  /** Query-fetch retry count (default 0). Mirrors react-query's retry knob (TSC-15). */
+  retry?: number;
+  /** Base backoff (ms) for the exponential retry delay (default 250). TSC-15. */
+  retryBackoffMs?: number;
+  /**
+   * Cache entry time-to-live (ms) for the shared QueryCache: a settled entry
+   * older than this is treated as absent and garbage-collected on next access.
+   * Mirrors react-query's gcTime. Default 30 minutes (TSC-03).
+   */
+  gcTimeMs?: number;
+  /**
+   * Maximum number of settled entries retained in the shared QueryCache;
+   * exceeding it evicts the least-recently-used settled entries. Bounds memory
+   * so the cache cannot grow without limit. Default 500 (TSC-03).
+   */
+  maxCacheEntries?: number;
+};
+
+export type RequestOptions = {
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+  timeoutMs?: number;
 };
 
 async function resolveBearerToken(value: ClientConfig["bearerToken"]): Promise<string> {
@@ -82,12 +127,104 @@ export interface GraphQLSubscription<T> extends MessageStream<T> {
 type MessageHandler<T> = (value: T) => void;
 
 export class HTTPError extends Error {
+  readonly status: number;
+  readonly code?: string | undefined;
+  readonly body: unknown;
+  readonly bodyText: string;
   constructor(
-    readonly status: number,
-    readonly body: string,
+    status: number,
+    bodyText: string,
+    body: unknown,
+    code?: string,
+    options?: { cause?: unknown },
   ) {
-    super(body ? `http status ${status}: ${body}` : `http status ${status}`);
+    super(resolveErrorMessage(status, body), options as ErrorOptions);
+    this.name = "HTTPError";
+    this.status = status;
+    this.bodyText = bodyText;
+    this.body = body;
+    this.code = code;
   }
+}
+
+function resolveErrorMessage(status: number, body: unknown): string {
+  if (body && typeof body === "object") {
+    const rec = body as Record<string, unknown>;
+    const parsed = {
+      error: typeof rec.error === "string" ? rec.error : undefined,
+      message: typeof rec.message === "string" ? rec.message : undefined,
+    };
+    return parsed.error ?? parsed.message ?? `Request failed (${status})`;
+  }
+  return `Request failed (${status})`;
+}
+
+// parseErrorBody reads the error response body once, JSON-parsing it when
+// possible and falling back to the raw text. Returns the parsed value (or the
+// raw string), the raw text (back-compat/debug), and the optional `code`
+// lifted from a JSON envelope.
+async function parseErrorBody(
+  response: Response,
+): Promise<{ body: unknown; bodyText: string; code?: string }> {
+  const bodyText = await response.text().catch(() => "");
+  if (!bodyText) {
+    return { body: null, bodyText };
+  }
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    let code: string | undefined;
+    if (parsed && typeof parsed === "object") {
+      const c = (parsed as Record<string, unknown>).code;
+      if (typeof c === "string") {
+        code = c;
+      }
+    }
+    return code === undefined ? { body: parsed, bodyText } : { body: parsed, bodyText, code };
+  } catch {
+    return { body: bodyText, bodyText };
+  }
+}
+
+async function httpErrorFromResponse(response: Response): Promise<HTTPError> {
+  const { body, bodyText, code } = await parseErrorBody(response);
+  return new HTTPError(response.status, bodyText, body, code);
+}
+
+// networkError wraps a rejected fetch (DNS/offline/CORS/abort) as a typed
+// HTTPError with status 0 and code "network_error", preserving the original
+// throwable as `cause`. TSC-02.
+function networkError(cause: unknown): HTTPError {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return new HTTPError(0, message, null, "network_error", { cause });
+}
+
+// mergeAbortSignal returns a signal that fires when EITHER the caller's signal
+// aborts OR the timeout elapses, plus a cleanup that clears the timer. Manual
+// relay (no AbortSignal.any) keeps the client ES2022/Hermes-safe. TSC-13.
+function mergeAbortSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number | undefined,
+): { signal: AbortSignal | undefined; cleanup: () => void } {
+  if (timeoutMs === undefined || timeoutMs <= 0) {
+    return { signal, cleanup: () => {} };
+  }
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener("abort", onAbort);
+    }
+  }
+  const timer = setTimeout(() => controller.abort(new DOMException("timeout", "AbortError")), timeoutMs);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    },
+  };
 }
 export interface AssignRoleReq {
   role: string;
@@ -102,7 +239,7 @@ export interface AuditQuery {
   user?: string;
 }
 export interface BackupCleanupResp {
-  freed_bytes?: number;
+  freedBytes?: number;
   removed: number;
 }
 export interface BackupCreateReq {
@@ -113,30 +250,30 @@ export interface BackupFileParam {
   file: string;
 }
 export interface BackupInfo {
-  created_at?: string;
-  edge_count?: number;
+  createdAt?: string;
+  edgeCount?: number;
   file: string;
-  graph_count?: number;
-  node_count?: number;
+  graphCount?: number;
+  nodeCount?: number;
   path?: string;
-  size_bytes?: number;
+  sizeBytes?: number;
 }
 export interface BackupList {
   backups: Array<unknown>;
 }
 export interface BackupRef {
-  created_at?: string;
+  createdAt?: string;
   file: string;
   path?: string;
-  size_bytes?: number;
+  sizeBytes?: number;
 }
 export interface BackupUploadReq {
   file: FileUpload;
 }
 export interface Capabilities {
-  admin_writable: Record<string, unknown>;
-  geode_version: string;
-  metrics_enabled?: boolean;
+  adminWritable: Record<string, unknown>;
+  geodeVersion: string;
+  metricsEnabled?: boolean;
 }
 export interface ConstraintList {
   constraints: Array<Record<string, unknown>>;
@@ -144,10 +281,10 @@ export interface ConstraintList {
 export interface CreateProfileReq {
   description?: string;
   dsn: string;
-  is_default?: boolean;
+  isDefault?: boolean;
   name: string;
-  pool_overrides?: Record<string, unknown>;
-  saved_username?: string;
+  poolOverrides?: Record<string, unknown>;
+  savedUsername?: string;
   scope: string;
   tls?: Record<string, unknown>;
 }
@@ -158,7 +295,7 @@ export interface Empty {
 }
 export interface GrantReq {
   grantee: string;
-  grantee_kind?: string;
+  granteeKind?: string;
   permission: string;
   resource?: string;
 }
@@ -184,10 +321,10 @@ export interface LoginReq {
   username: string;
 }
 export interface LoginResp {
-  access_token: string;
-  connection_id: string;
-  expires_in: number;
-  token_type: string;
+  accessToken: string;
+  connectionId: string;
+  expiresIn: number;
+  tokenType: string;
 }
 export interface MigrationCreateReq {
   description?: string;
@@ -197,7 +334,7 @@ export interface MigrationParam {
   name: string;
 }
 export interface MigrationRef {
-  created_at?: string;
+  createdAt?: string;
   name: string;
   path?: string;
 }
@@ -212,8 +349,8 @@ export interface MigrationUploadReq {
   file: FileUpload;
 }
 export interface PasswordChangeReq {
-  new_password: string;
-  old_password?: string;
+  newPassword: string;
+  oldPassword?: string;
   username: string;
 }
 export interface Permission {
@@ -244,25 +381,25 @@ export interface PolicyParam {
   name: string;
 }
 export interface PoolOverrides {
-  conn_max_idle_ms?: number;
-  conn_max_lifetime_ms?: number;
-  max_idle_conns?: number;
-  max_open_conns?: number;
+  connMaxIdleMs?: number;
+  connMaxLifetimeMs?: number;
+  maxIdleConns?: number;
+  maxOpenConns?: number;
 }
 export interface Profile {
   description?: string;
   dsn: string;
   id: string;
-  is_default?: boolean;
+  isDefault?: boolean;
   name: string;
-  owner_user_id?: string;
-  pool_overrides?: Record<string, unknown>;
-  saved_username?: string;
+  ownerUserId?: string;
+  poolOverrides?: Record<string, unknown>;
+  savedUsername?: string;
   scope: string;
   tls?: Record<string, unknown>;
 }
 export interface ProfileIDPath {
-  profile_id: string;
+  profileId: string;
 }
 export interface ProfileList {
   profiles: Array<Profile>;
@@ -276,33 +413,33 @@ export interface PublicProfileList {
 }
 export interface QueryReq {
   graph?: string;
-  page_size?: number;
+  pageSize?: number;
   params?: Record<string, unknown>;
   statement: string;
-  timeout_ms?: number;
+  timeoutMs?: number;
 }
 export interface QueryResp {
   columns: Array<Record<string, unknown>>;
-  elapsed_ms: number;
-  graph_summary?: Record<string, unknown>;
-  row_count: number;
+  elapsedMs: number;
+  graphSummary?: Record<string, unknown>;
+  rowCount: number;
   rows: Array<Array<unknown>>;
 }
 export interface QueryStreamMsg {
   code?: string;
   columns?: Array<unknown>;
-  elapsed_ms?: number;
+  elapsedMs?: number;
   graph?: string;
   kind: string;
   message?: string;
   params?: Record<string, unknown>;
   row?: Array<unknown>;
-  row_count?: number;
+  rowCount?: number;
   statement?: string;
 }
 export interface RestoreReq {
   file: string;
-  target_time?: string;
+  targetTime?: string;
 }
 export interface Role {
   description?: string;
@@ -321,13 +458,13 @@ export interface RoleParam {
   role: string;
 }
 export interface TLSMaterial {
-  ca_pem?: string;
-  client_cert_pem?: string;
-  client_key_pem?: string;
+  caPem?: string;
+  clientCertPem?: string;
+  clientKeyPem?: string;
 }
 export interface TxBeginReq {
   graph?: string;
-  read_only?: boolean;
+  readOnly?: boolean;
 }
 export interface TxBeginResp {
   txid: string;
@@ -343,23 +480,23 @@ export interface TxRunReq {
 export interface UpdateProfileReq {
   description?: string;
   dsn?: string;
-  is_default?: boolean;
+  isDefault?: boolean;
   name?: string;
-  pool_overrides?: Record<string, unknown>;
-  profile_id: string;
-  saved_username?: string;
+  poolOverrides?: Record<string, unknown>;
+  profileId: string;
+  savedUsername?: string;
   tls?: Record<string, unknown>;
 }
 export interface UploadResp {
   file: string;
   path: string;
-  size_bytes: number;
-  uploaded_at: string;
+  sizeBytes: number;
+  uploadedAt: string;
 }
 export interface User {
   disabled?: boolean;
   email: string;
-  mfa_enrolled?: boolean;
+  mfaEnrolled?: boolean;
   roles?: Array<string>;
   username: string;
 }
@@ -412,6 +549,70 @@ function copyRecord(value: unknown): Record<string, unknown> {
     return {};
   }
   return { ...(value as Record<string, unknown>) };
+}
+
+// --- snake_case <-> camelCase boundary mapper (TSC-08) ---
+// DTO interfaces expose camelCase; the wire is snake_case. toWire converts
+// camelCase object keys to snake_case on the way OUT (request body + query
+// keys); fromWire converts snake_case keys to camelCase on the way IN
+// (decoded responses). Only object KEYS are rewritten — values (including
+// Blob/File/Date/ArrayBuffer/typed arrays and free-form string values) are
+// preserved untouched, recursively through nested objects and arrays.
+function snakeToCamel(key: string): string {
+  return key.replace(/_+([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
+}
+
+function camelToSnake(key: string): string {
+  return key.replace(/[A-Z]/g, (m) => "_" + m.toLowerCase());
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return false;
+  }
+  if (value instanceof Date) {
+    return false;
+  }
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return false;
+  }
+  if (typeof ArrayBuffer !== "undefined" && (value instanceof ArrayBuffer || ArrayBuffer.isView(value))) {
+    return false;
+  }
+  return true;
+}
+
+function convertKeys(value: unknown, convert: (key: string) => string): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => convertKeys(item, convert));
+  }
+  // FileUpload values ({blob, contentType?, filename?}) are opaque at the
+  // boundary: their internal keys (contentType, filename) must not be renamed
+  // by the camelCase<->snake_case mapper. The OUTER field KEY that points to a
+  // FileUpload is still converted by the caller's loop (see the isPlainObject
+  // branch below), but recursion does NOT descend into the FileUpload value.
+  if (isFileUpload(value)) {
+    return value;
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[convert(key)] = convertKeys(item, convert);
+    }
+    return out;
+  }
+  return value;
+}
+
+function toWire(value: unknown): unknown {
+  return convertKeys(value, camelToSnake);
+}
+
+function fromWire(value: unknown): unknown {
+  return convertKeys(value, snakeToCamel);
 }
 
 function isFileUpload(value: unknown): value is FileUpload {
@@ -481,8 +682,68 @@ function joinURLPath(basePath: string, path: string): string {
   return `${base}${next}`;
 }
 
+// --- RN-safe portable primitives (TSC-16) ---
+// The generated client must IMPORT and run on web, Electron, AND React Native
+// (Hermes). These replace module-load-time uses of web-only globals; APIs that
+// are genuinely platform-bound (Blob, crypto.subtle, WebSocket) are
+// capability-guarded at their call sites and throw a clear error only if
+// actually exercised without the capability.
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function encodeBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = i + 1 < bytes.length ? (bytes[i + 1] ?? 0) : 0;
+    const b2 = i + 2 < bytes.length ? (bytes[i + 2] ?? 0) : 0;
+    out += BASE64_ALPHABET[b0 >> 2];
+    out += BASE64_ALPHABET[((b0 & 3) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? BASE64_ALPHABET[((b1 & 15) << 2) | (b2 >> 6)] : "=";
+    out += i + 2 < bytes.length ? BASE64_ALPHABET[b2 & 63] : "=";
+  }
+  return out;
+}
+
+function utf8Encode(value: string): Uint8Array {
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(value);
+  }
+  const out: number[] = [];
+  for (let i = 0; i < value.length; i++) {
+    let c = value.charCodeAt(i);
+    if (c < 0x80) {
+      out.push(c);
+    } else if (c < 0x800) {
+      out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+    } else if (c >= 0xd800 && c <= 0xdbff) {
+      const next = value.charCodeAt(++i);
+      c = 0x10000 + ((c & 0x3ff) << 10) + (next & 0x3ff);
+      out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    } else {
+      out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+  }
+  return Uint8Array.from(out);
+}
+
+// randomToken returns a hex token for the multipart boundary. Prefers
+// crypto.getRandomValues when present, else Math.random (the boundary only
+// needs to be collision-improbable within one request body).
+function randomToken(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const buf = new Uint8Array(16);
+    crypto.getRandomValues(buf);
+    return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  let s = "";
+  for (let i = 0; i < 32; i++) {
+    s += Math.floor(Math.random() * 16).toString(16);
+  }
+  return s;
+}
+
 function utf8Bytes(value: string): ArrayBuffer {
-  const encoded = new TextEncoder().encode(value);
+  const encoded = utf8Encode(value);
   const buffer = new ArrayBuffer(encoded.byteLength);
   new Uint8Array(buffer).set(encoded);
   return buffer;
@@ -530,13 +791,6 @@ function sanitizeMultipartHeaderValue(value: string): string {
   return value.trim().replace(/[\r\n]+/g, " ").trim();
 }
 
-async function sha256Hex(bytes: BufferSource): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 function sanitizeAuthValue(name: string, value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -560,12 +814,7 @@ function bearerTokenFromAuthorization(authorization: string): string {
 }
 
 function encodeWSAuthProtocol(kind: string, value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (const item of bytes) {
-    binary += String.fromCharCode(item);
-  }
-  const encoded = btoa(binary)
+  const encoded = encodeBase64(utf8Encode(value))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
@@ -596,7 +845,12 @@ async function signAPIKey(
 }
 
 async function buildMultipartBody(payload: Record<string, unknown>): Promise<PreparedBody> {
-  const boundary = `genapi-${crypto.randomUUID()}`;
+  if (typeof Blob === "undefined") {
+    throw new Error(
+      "multipart upload requires Blob; it is unavailable in this runtime (provide a Blob polyfill to upload files on React Native)",
+    );
+  }
+  const boundary = `genapi-${randomToken()}`;
   const parts: BlobPart[] = [];
 
   const pushLine = (line: string): void => {
@@ -668,11 +922,24 @@ async function buildBody(mode: string, payload: Record<string, unknown>): Promis
     case "query":
       return { bytes: new ArrayBuffer(0) };
     case "form": {
-      const params = new URLSearchParams();
+      const pairs: string[] = [];
+      const append = (key: string, value: unknown): void => {
+        if (value === undefined || value === null) {
+          return;
+        }
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            append(key, item);
+          }
+          return;
+        }
+        const v = typeof value === "object" ? JSON.stringify(value) : String(value);
+        pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
+      };
       for (const [key, value] of Object.entries(payload)) {
-        appendSearchParam(params, key, value);
+        append(key, value);
       }
-      const bodyText = params.toString();
+      const bodyText = pairs.join("&");
       return {
         body: bodyText,
         contentType: "application/x-www-form-urlencoded",
@@ -700,6 +967,29 @@ async function buildBody(mode: string, payload: Record<string, unknown>): Promis
   }
 }
 
+// resolveClientAuthMode reduces a route's auth expression to the single
+// application-layer credential the client can present. Single-token values
+// pass through unchanged. For a composite expression (e.g. "cac || jwt",
+// "mtls && jwt", "(cac && jwt) || api_key") the client can only inject an
+// app-layer credential into the request — mtls/cac/piv are TLS
+// client-certificate gates satisfied by the transport (the browser's mTLS
+// handshake), not by a header — so the client applies the first app-layer
+// token it finds (jwt > cookie > api_key) and injects nothing for a
+// transport-only expression. The server still enforces the full composite.
+function resolveClientAuthMode(authMode: string): string {
+  const raw = authMode.trim().toLowerCase();
+  if (!/[|&()]/.test(raw)) {
+    return raw;
+  }
+  const tokens = raw.split(/[|&()\s]+/).filter(Boolean);
+  for (const pref of ["jwt", "cookie", "api_key"]) {
+    if (tokens.includes(pref)) {
+      return pref;
+    }
+  }
+  return tokens.includes("public") || tokens.includes("none") ? "none" : "";
+}
+
 async function applyHTTPAuth(
   headers: Headers,
   authMode: string,
@@ -708,14 +998,18 @@ async function applyHTTPAuth(
   bodyBytes: BufferSource,
   config: ClientConfig,
 ): Promise<void> {
-  const mode = authMode.trim().toLowerCase();
+  const mode = resolveClientAuthMode(authMode);
   if (mode === "" || mode === "none" || mode === "unauthenticated") {
     return;
   }
   if (mode === "jwt") {
     const token = await resolveBearerToken(config.bearerToken);
     if (!token) {
-      throw new Error("missing bearer token");
+      // No browser-side bearer configured (cookie-only BFF deployment).
+      // Skip header injection; rely on credentials: 'same-origin' cookies
+      // and let the server make the auth decision (and return 401 if the
+      // session is missing or expired).
+      return;
     }
     if (!headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${token}`);
@@ -732,6 +1026,11 @@ async function applyHTTPAuth(
     headers.set("X-Timestamp", signed.timestamp);
     return;
   }
+  if (mode === "cookie") {
+    // Cookie/session auth: the session cookie is sent automatically with
+    // credentials: 'same-origin' (set on the request). Nothing to inject.
+    return;
+  }
   throw new Error(`unsupported auth mode "${authMode}"`);
 }
 
@@ -740,7 +1039,7 @@ async function decodeJSON<T>(response: Response): Promise<T> {
   if (!text) {
     return null as T;
   }
-  return JSON.parse(text) as T;
+  return fromWire(JSON.parse(text)) as T;
 }
 
 function createBufferedStream<T>() {
@@ -778,13 +1077,13 @@ function createBufferedStream<T>() {
 function createJSONSocket<T>(socket: WebSocket): JSONSocket<T> {
   const stream = createBufferedStream<T>();
   const listener = (event: MessageEvent<string>) => {
-    stream.emit(JSON.parse(String(event.data)) as T);
+    stream.emit(fromWire(JSON.parse(String(event.data))) as T);
   };
   socket.addEventListener("message", listener as EventListener);
   return {
     socket,
     send(value: T) {
-      socket.send(JSON.stringify(value));
+      socket.send(JSON.stringify(toWire(value)));
     },
     close() {
       socket.removeEventListener("message", listener as EventListener);
@@ -820,16 +1119,308 @@ function createBinarySocket(socket: WebSocket): BinarySocket {
   };
 }
 
-function usePromise<T>(factory: () => Promise<T>, deps: ReadonlyArray<unknown> = []): RequestState<T> {
-  const [data, setData] = useState<T | null>(null);
+export type CacheKey = string;
+
+export function makeCacheKey(method: string, path: string, req: unknown): CacheKey {
+  return method.toUpperCase() + " " + path + " " + stableStringify(req);
+}
+
+// matchesResource reports whether a cache key belongs to a resource, used to
+// scope post-mutation invalidation. The key is "METHOD PATH STABLE-JSON"; the
+// PATH is the second space-delimited token. The resource (e.g. "/items") matches
+// only at a PATH-SEGMENT boundary — the char immediately after the resource in
+// the path must be a boundary (end-of-path, "/", "#" for GraphQL "/graphql#field"
+// keys, or "?") — rather than a raw substring. So resource "/items" matches
+// "/v1/items" and "/v1/items/{id}" but NOT a sibling like "/v1/items-archive".
+// (Matching "/graphql" still invalidates EVERY GraphQL query: GraphQL is one
+// path with a "#field" suffix, so this is coarse-but-safe; see the GraphQL
+// mutation hooks below.)
+function matchesResource(key: CacheKey, resource: string): boolean {
+  const path = key.split(" ")[1] ?? "";
+  const i = path.indexOf(resource);
+  if (i < 0) {
+    return false;
+  }
+  const after = path[i + resource.length];
+  return after === undefined || after === "/" || after === "#" || after === "?";
+}
+
+// stableStringify produces a key-order-independent JSON string so two requests
+// with the same fields in different orders share a cache key.
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return "[" + value.map(stableStringify).join(",") + "]";
+  }
+  const rec = value as Record<string, unknown>;
+  const keys = Object.keys(rec).sort();
+  return "{" + keys.map((k) => JSON.stringify(k) + ":" + stableStringify(rec[k])).join(",") + "}";
+}
+
+export type CacheEntry<T = unknown> = {
+  data: T | null;
+  error: Error | null;
+  promise: Promise<T> | null; // in-flight de-dup handle
+  updatedAt: number;
+  lastAccess: number; // ms (Date.now()) of last get/set, for gcTime + LRU eviction
+};
+
+type CacheListener = () => void;
+
+// QueryCache is a minimal dependency-free, BOUNDED keyed cache: single-flight
+// dedup, an invalidate-by-key event bus (so a mutation can force dependent
+// query hooks to refetch), and dehydrate/hydrate hook-points so a consumer CAN
+// layer offline persistence (TSC-06). Memory is bounded two ways (TSC-03):
+//   - gcTime: a SETTLED entry not accessed within `gcTimeMs` is treated as
+//     absent on the next get (and deleted), and is swept on every set.
+//   - LRU: when the settled-entry count exceeds `maxCacheEntries`, the
+//     least-recently-used SETTLED entries are evicted until within budget.
+// In-flight entries (a pending dedup promise) are NEVER evicted out from under
+// a waiting caller — only settled entries are subject to gcTime/LRU. It is NOT
+// a full react-query reimplementation. TSC-03/04.
+export class QueryCache {
+  private readonly entries = new Map<CacheKey, CacheEntry>();
+  private readonly listeners = new Map<CacheKey, Set<CacheListener>>();
+  private readonly gcTimeMs: number;
+  private readonly maxCacheEntries: number;
+
+  constructor(options?: { gcTimeMs?: number; maxCacheEntries?: number }) {
+    this.gcTimeMs = options?.gcTimeMs ?? 30 * 60 * 1000;
+    this.maxCacheEntries = options?.maxCacheEntries ?? 500;
+  }
+
+  get<T>(key: CacheKey): CacheEntry<T> | undefined {
+    const entry = this.entries.get(key) as CacheEntry<T> | undefined;
+    if (!entry) {
+      return undefined;
+    }
+    // A settled (not in-flight) entry past its gcTime is treated as absent and
+    // collected. In-flight entries are never expired (a caller is awaiting).
+    if (!entry.promise && this.isExpired(entry)) {
+      this.entries.delete(key);
+      return undefined;
+    }
+    entry.lastAccess = Date.now();
+    return entry;
+  }
+
+  private isExpired(entry: CacheEntry): boolean {
+    return Date.now() - entry.lastAccess > this.gcTimeMs;
+  }
+
+  subscribe(key: CacheKey, listener: CacheListener): () => void {
+    let set = this.listeners.get(key);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(key, set);
+    }
+    set.add(listener);
+    return () => {
+      set?.delete(listener);
+    };
+  }
+
+  private notify(key: CacheKey): void {
+    const set = this.listeners.get(key);
+    if (!set) {
+      return;
+    }
+    for (const l of [...set]) {
+      l();
+    }
+  }
+
+  // fetch de-dups concurrent callers of the same key onto ONE in-flight
+  // promise; the resolved value is cached and broadcast to subscribers.
+  fetch<T>(key: CacheKey, factory: () => Promise<T>): Promise<T> {
+    const existing = this.entries.get(key) as CacheEntry<T> | undefined;
+    if (existing?.promise) {
+      return existing.promise;
+    }
+    const now = Date.now();
+    const promise = factory()
+      .then((data) => {
+        // Settle WITHOUT notifying: the initiating caller receives the value via
+        // the returned promise (the hook then calls setData). Notifying here
+        // would re-fire the very subscriber whose refetch is settling — an
+        // infinite fetch->set->notify->refetch loop. Only invalidate() notifies.
+        this.set(key, { data, error: null, promise: null, updatedAt: Date.now(), lastAccess: Date.now() }, false);
+        return data;
+      })
+      .catch((err: unknown) => {
+        const e = err instanceof Error ? err : new Error(String(err));
+        const prev = this.entries.get(key) as CacheEntry<T> | undefined;
+        this.set(
+          key,
+          {
+            data: prev?.data ?? null,
+            error: e,
+            promise: null,
+            updatedAt: Date.now(),
+            lastAccess: Date.now(),
+          },
+          false,
+        );
+        throw e;
+      });
+    this.set(
+      key,
+      {
+        data: existing?.data ?? null,
+        error: null,
+        promise,
+        updatedAt: existing?.updatedAt ?? 0,
+        lastAccess: now,
+      },
+      false,
+    );
+    return promise;
+  }
+
+  private set<T>(key: CacheKey, entry: CacheEntry<T>, notify = true): void {
+    this.entries.set(key, entry as CacheEntry);
+    this.evict();
+    if (notify) {
+      this.notify(key);
+    }
+  }
+
+  // evict enforces the cache bounds: first drop any settled entry past its
+  // gcTime, then — if still over budget — evict least-recently-used SETTLED
+  // entries (lowest lastAccess) until at/under maxCacheEntries. In-flight
+  // entries are exempt from both passes.
+  private evict(): void {
+    for (const [k, e] of this.entries) {
+      if (!e.promise && this.isExpired(e)) {
+        this.entries.delete(k);
+      }
+    }
+    if (this.entries.size <= this.maxCacheEntries) {
+      return;
+    }
+    const settled: Array<[CacheKey, CacheEntry]> = [];
+    for (const pair of this.entries) {
+      if (!pair[1].promise) {
+        settled.push(pair);
+      }
+    }
+    settled.sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    let overBy = this.entries.size - this.maxCacheEntries;
+    for (const [k] of settled) {
+      if (overBy <= 0) {
+        break;
+      }
+      this.entries.delete(k);
+      overBy -= 1;
+    }
+  }
+
+  // invalidate marks every entry whose key matches the predicate stale
+  // (updatedAt = 0) and notifies its subscribers so dependent query hooks
+  // refetch. A mutation calls this in its success path. TSC-04.
+  invalidate(predicate: (key: CacheKey) => boolean): void {
+    for (const key of [...this.listeners.keys()]) {
+      if (!predicate(key)) {
+        continue;
+      }
+      const e = this.entries.get(key);
+      if (e) {
+        this.set(key, { ...e, updatedAt: 0 });
+      } else {
+        this.notify(key);
+      }
+    }
+  }
+
+  // dehydrate/hydrate are the persistence hook-points (TSC-06): a consumer
+  // can serialize the resolved data entries to offline storage and rehydrate
+  // on cold start. In-flight promises and errors are never serialized.
+  dehydrate(): Array<[CacheKey, { data: unknown; updatedAt: number }]> {
+    const out: Array<[CacheKey, { data: unknown; updatedAt: number }]> = [];
+    for (const [k, e] of this.entries) {
+      if (e.data !== null) {
+        out.push([k, { data: e.data, updatedAt: e.updatedAt }]);
+      }
+    }
+    return out;
+  }
+
+  hydrate(snapshot: ReadonlyArray<readonly [CacheKey, { data: unknown; updatedAt: number }]>): void {
+    for (const [k, v] of snapshot) {
+      this.set(k, { data: v.data, error: null, promise: null, updatedAt: v.updatedAt, lastAccess: Date.now() });
+    }
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// isRetryableError reports whether a failed request should be retried. Only
+// transient failures are retryable: a network/transport error (HTTPError with
+// status 0 / code "network_error", TSC-02), an HTTP 5xx, or the two transient
+// 4xx the server may emit (408 Request Timeout, 429 Too Many Requests). Any
+// other 4xx (400/401/403/404/422/…) is a deterministic client error: retrying
+// re-sends the same bad request and, for a destructive method, risks repeating
+// a side effect — so it is rethrown immediately. A non-HTTPError throwable is
+// treated as non-retryable (it never reached the retry-worthy transport layer).
+function isRetryableError(err: unknown): boolean {
+  if (!(err instanceof HTTPError)) {
+    return false;
+  }
+  if (err.status === 0) {
+    return true; // network/transport failure (offline/DNS/CORS/abort)
+  }
+  if (err.status >= 500) {
+    return true; // server-side transient
+  }
+  return err.status === 408 || err.status === 429;
+}
+
+// fetchWithRetry retries a RETRYABLE failed factory up to `retry` times with
+// exponential backoff (backoffMs * 2^attempt). Non-retryable errors (most 4xx)
+// are rethrown immediately without a retry. TSC-15.
+async function fetchWithRetry<T>(factory: () => Promise<T>, retry: number, backoffMs: number): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await factory();
+    } catch (err) {
+      if (attempt >= retry || !isRetryableError(err)) {
+        throw err;
+      }
+      await delay(backoffMs * 2 ** attempt);
+      attempt += 1;
+    }
+  }
+}
+
+function usePromise<T>(
+  client: GenAPIClient,
+  method: string,
+  path: string,
+  req: unknown,
+  factory: () => Promise<T>,
+  deps: ReadonlyArray<unknown> = [],
+  options?: QueryHookOptions,
+): RequestState<T> {
+  const enabled = options?.enabled ?? true;
+  const cacheKey = makeCacheKey(method, path, req);
+  const cached = client.cache.get<T>(cacheKey);
+  const [data, setData] = useState<T | null>(cached?.data ?? null);
   const [error, setError] = useState<Error | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(enabled && (cached?.data ?? null) === null);
+  const { retry, backoffMs } = client.retryConfig;
 
   const refetch = async (): Promise<T> => {
     setLoading(true);
     setError(null);
     try {
-      const value = await factory();
+      // Route through the shared cache so concurrent identical requests share
+      // one in-flight promise (dedup) and one cache entry. TSC-03.
+      const value = await client.cache.fetch(cacheKey, () => fetchWithRetry(factory, retry, backoffMs));
       setData(value);
       return value;
     } catch (err) {
@@ -842,43 +1433,94 @@ function usePromise<T>(factory: () => Promise<T>, deps: ReadonlyArray<unknown> =
   };
 
   useEffect(() => {
-    void refetch();
-  }, deps);
+    if (!enabled) {
+      return;
+    }
+    // Swallow the effect-path rejection: the error is already captured into hook
+    // state (setError -> `error`/`isError`). Leaving it as `void refetch()` would
+    // surface an auto-fired query's failure as an UNHANDLED promise rejection
+    // (which crashes strict runtimes). The returned `refetch` still rejects for
+    // callers that await it manually.
+    refetch().catch(() => {});
+    // Subscribe so a mutation's invalidate(cacheKey) triggers a refetch. TSC-04.
+    return client.cache.subscribe(cacheKey, () => {
+      refetch().catch(() => {});
+    });
+  }, [enabled, cacheKey, ...deps]);
 
-  return { data, error, loading, refetch };
+  const isFetching = enabled && loading;
+  const isPending = !enabled ? true : loading && data === null;
+  const isSuccess = enabled && !loading && error === null && data !== null;
+  const isError = error !== null;
+
+  return {
+    data,
+    error,
+    loading,
+    isPending,
+    isLoading: isPending,
+    isFetching,
+    isSuccess,
+    isError,
+    refetch,
+  };
 }
 
-function useMutationState<TReq, TResp>(mutator: (req: TReq) => Promise<TResp>): MutationState<TReq, TResp> {
+function useMutationState<TReq, TResp>(
+  client: GenAPIClient,
+  mutator: (req: TReq) => Promise<TResp>,
+  invalidate?: (cache: QueryCache, req: TReq, resp: TResp) => void,
+): MutationState<TReq, TResp> {
   const [data, setData] = useState<TResp | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [settled, setSettled] = useState<boolean>(false);
 
-  const mutate = async (req: TReq): Promise<TResp> => {
+  const mutateAsync = async (req: TReq): Promise<TResp> => {
     setLoading(true);
     setError(null);
     try {
       const value = await mutator(req);
       setData(value);
+      setSettled(true);
+      // TSC-04: signal dependent query hooks to refetch.
+      invalidate?.(client.cache, req, value);
       return value;
     } catch (err) {
       const next = err instanceof Error ? err : new Error(String(err));
       setError(next);
+      setSettled(true);
       throw next;
     } finally {
       setLoading(false);
     }
   };
 
-  return { data, error, loading, mutate };
+  return {
+    data,
+    error,
+    loading,
+    isPending: loading,
+    isIdle: !loading && !settled,
+    isSuccess: settled && error === null,
+    isError: error !== null,
+    // mutate is the alias of mutateAsync; both return the same Promise.
+    mutate: mutateAsync,
+    mutateAsync,
+  };
 }
 
-function useStream<T>(connect: () => Promise<MessageStream<T>>, deps: ReadonlyArray<unknown> = []): StreamState<T> {
+function useStream<T>(connect: () => Promise<MessageStream<T>>, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): StreamState<T> {
+  const enabled = options?.enabled ?? true;
   const [connected, setConnected] = useState<boolean>(false);
   const [error, setError] = useState<Error | null>(null);
   const [lastMessage, setLastMessage] = useState<T | null>(null);
   const streamRef = useRef<MessageStream<T> | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     let cancelled = false;
     let detach: (() => void) | null = null;
     void connect()
@@ -908,7 +1550,7 @@ function useStream<T>(connect: () => Promise<MessageStream<T>>, deps: ReadonlyAr
       streamRef.current?.close();
       streamRef.current = null;
     };
-  }, deps);
+  }, [enabled, ...deps]);
 
   return {
     connected,
@@ -925,9 +1567,23 @@ function useStream<T>(connect: () => Promise<MessageStream<T>>, deps: ReadonlyAr
 export class GenAPIClient {
   private readonly fetchImpl: typeof fetch;
   private readonly config: ClientConfig;
+  private readonly queryCache: QueryCache;
+  /** Shared query cache (bounded dedup + invalidate + persistence). TSC-03/04/06. */
+  get cache(): QueryCache {
+    return this.queryCache;
+  }
+  /** Retry knobs surfaced to hooks (TSC-15). */
+  get retryConfig(): { retry: number; backoffMs: number } {
+    return { retry: this.config.retry ?? 0, backoffMs: this.config.retryBackoffMs ?? 250 };
+  }
 
   constructor(config: ClientConfig) {
     this.config = { ...config, baseUrl: normalizeBaseURL(config.baseUrl) };
+    // Bound the shared cache by gcTime + LRU so it cannot grow unbounded. TSC-03.
+    this.queryCache = new QueryCache({
+      ...(this.config.gcTimeMs === undefined ? {} : { gcTimeMs: this.config.gcTimeMs }),
+      ...(this.config.maxCacheEntries === undefined ? {} : { maxCacheEntries: this.config.maxCacheEntries }),
+    });
     // Native `fetch` must be invoked with `this === window`; calling it
     // as `this.fetchImpl(...)` would bind `this` to the class instance
     // and Chrome throws "Illegal invocation". Bind to globalThis when
@@ -935,15 +1591,23 @@ export class GenAPIClient {
     this.fetchImpl = this.config.fetchImpl ?? fetch.bind(globalThis);
   }
 
-  private async request<T>(
+  // sendRequest runs the full request pipeline (path expansion, body build,
+  // auth, CSRF 403-retry, 401-retry) and returns the resolved Response WITHOUT
+  // the ok-check, so request<T> and requestRaw can share one pipeline. L-32b.
+  private async sendRequest(
     method: string,
     path: string,
     authMode: string,
     bodyMode: string,
     pathParams: readonly (readonly [string, string])[],
     request: Record<string, unknown>,
-  ): Promise<T> {
-    const { url, payload } = expandPath(this.config.baseUrl, path, pathParams, request);
+    options?: RequestOptions,
+  ): Promise<Response> {
+    // Convert caller camelCase keys to wire snake_case BEFORE path expansion
+    // so the path-param lookup (by snake_case schema key) and body/query
+    // serialization both see wire keys. Path params are unaffected.
+    const wireRequest = toWire(request) as Record<string, unknown>;
+    const { url, payload } = expandPath(this.config.baseUrl, path, pathParams, wireRequest);
     if (bodyMode === "query") {
       for (const [key, value] of Object.entries(payload)) {
         appendSearchParam(url.searchParams, key, value);
@@ -954,16 +1618,103 @@ export class GenAPIClient {
     if (prepared.contentType) {
       headers.set("Content-Type", prepared.contentType);
     }
+    // Caller headers override config defaults but are applied BEFORE auth so
+    // auth/CSRF headers (set below) always win — a caller cannot strip or
+    // spoof Authorization/CSRF via options.headers.
+    if (options?.headers) {
+      const extra = new Headers(options.headers);
+      extra.forEach((value, key) => headers.set(key, value));
+    }
+    headers.set("Accept", "application/json");
     await applyHTTPAuth(headers, authMode, url, method, prepared.bytes, this.config);
-    const response = await this.fetchImpl(url, {
-      method,
-      headers,
-      body: bodyMode === "query" ? undefined : prepared.body,
-    });
+    const merged = mergeAbortSignal(options?.signal, options?.timeoutMs);
+    try {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method,
+        headers,
+        body: bodyMode === "query" ? null : (prepared.body ?? null),
+        // N-3: set explicitly (matches the fetch default) so cookie-auth routes
+        // send the session cookie only same-origin rather than leaving it to the
+        // runtime default.
+        credentials: "same-origin",
+        signal: merged.signal ?? null,
+      });
+    } catch (err) {
+      throw networkError(err);
+    }
+    if (response.status === 401 && this.config.onUnauthorized) {
+      let refreshed = false;
+      try {
+        refreshed = (await this.config.onUnauthorized()) === true;
+      } catch {
+        refreshed = false;
+      }
+      if (refreshed) {
+        try {
+          // Re-apply auth so a refreshed bearer token is picked up.
+          const retryHeaders = new Headers(headers);
+          retryHeaders.delete("Authorization");
+          await applyHTTPAuth(retryHeaders, authMode, url, method, prepared.bytes, this.config);
+          response = await this.fetchImpl(url, {
+            method,
+            headers: retryHeaders,
+            body: bodyMode === "query" ? null : (prepared.body ?? null),
+            credentials: "same-origin",
+            signal: merged.signal ?? null,
+          });
+        } catch (err) {
+          throw networkError(err);
+        }
+      }
+    }
+      return response;
+    } finally {
+      merged.cleanup();
+    }
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    authMode: string,
+    bodyMode: string,
+    pathParams: readonly (readonly [string, string])[],
+    request: Record<string, unknown>,
+    responseKind: "json" | "blob" | "arrayBuffer",
+    options?: RequestOptions,
+  ): Promise<T> {
+    const response = await this.sendRequest(method, path, authMode, bodyMode, pathParams, request, options);
     if (!response.ok) {
-      throw new HTTPError(response.status, await response.text());
+      throw await httpErrorFromResponse(response);
+    }
+    if (responseKind === "blob") {
+      return (await response.blob()) as T;
+    }
+    if (responseKind === "arrayBuffer") {
+      return (await response.arrayBuffer()) as T;
     }
     return decodeJSON<T>(response);
+  }
+
+  // requestRaw runs the full request pipeline and returns the raw Response
+  // (after the ok-check) for callers that need streaming/Blob/headers. L-32b.
+  // Public so consumers can access raw Response (headers, streaming) directly.
+  async requestRaw(
+    method: string,
+    path: string,
+    authMode: string,
+    bodyMode: string,
+    pathParams: readonly (readonly [string, string])[],
+    request: Record<string, unknown>,
+    options?: RequestOptions,
+  ): Promise<Response> {
+    const response = await this.sendRequest(method, path, authMode, bodyMode, pathParams, request, options);
+    if (!response.ok) {
+      throw await httpErrorFromResponse(response);
+    }
+    return response;
   }
 
   private async graphQL<T>(
@@ -974,21 +1725,39 @@ export class GenAPIClient {
   ): Promise<T> {
     const url = new URL(this.config.baseUrl);
     url.pathname = joinURLPath(url.pathname, "/graphql");
-    const bodyText = JSON.stringify({ query, variables });
+    const bodyText = JSON.stringify({ query, variables: variables === undefined ? undefined : toWire(variables) });
     const bodyBytes = utf8Bytes(bodyText);
     const headers = new Headers(this.config.headers ?? {});
     headers.set("Content-Type", "application/json");
+    headers.set("Accept", "application/json");
     await applyHTTPAuth(headers, authMode, url, "POST", bodyBytes, this.config);
-    const response = await this.fetchImpl(url, { method: "POST", headers, body: bodyText });
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { method: "POST", headers, body: bodyText, credentials: "same-origin" });
+    } catch (err) {
+      throw networkError(err);
+    }
+    if (response.status === 401 && this.config.onUnauthorized) {
+      let refreshed = false;
+      try { refreshed = (await this.config.onUnauthorized()) === true; } catch { refreshed = false; }
+      if (refreshed) {
+        try {
+          const retryHeaders = new Headers(headers);
+          retryHeaders.delete("Authorization");
+          await applyHTTPAuth(retryHeaders, authMode, url, "POST", bodyBytes, this.config);
+          response = await this.fetchImpl(url, { method: "POST", headers: retryHeaders, body: bodyText, credentials: "same-origin" });
+        } catch (err) { throw networkError(err); }
+      }
+    }
     if (!response.ok) {
-      throw new HTTPError(response.status, await response.text());
+      throw await httpErrorFromResponse(response);
     }
     const envelope = (await response.json()) as GraphQLEnvelope;
     if (envelope.errors && envelope.errors.length > 0) {
       const firstError = envelope.errors[0];
       throw new Error(firstError ? firstError.message : "graphql error");
     }
-    return (envelope.data?.[field] ?? null) as T;
+    return (fromWire(envelope.data?.[field] ?? null)) as T;
   }
 
   private async websocketURL(path: string): Promise<string> {
@@ -1012,13 +1781,26 @@ export class GenAPIClient {
       : protocols
         ? [protocols]
         : [];
-    const mode = authMode.trim().toLowerCase();
+    // L-19: always offer the reserved non-secret sentinel so the server can
+    // echo a Sec-WebSocket-Protocol on the 101 even for endpoints with no
+    // configured protocols. Strict clients (node-24 undici) fail the handshake
+    // when they offer subprotocols but the server selects none. The server
+    // prefers a real configured protocol (e.g. binary-v1) and only falls back
+    // to this sentinel, so existing negotiation is unaffected.
+    if (!nextProtocols.includes("genapi.ws.v1")) {
+      nextProtocols.push("genapi.ws.v1");
+    }
+    const mode = resolveClientAuthMode(authMode);
     if (mode === "jwt") {
       const token = await resolveBearerToken(this.config.bearerToken);
-      if (!token) {
-        throw new Error("missing bearer token");
+      if (token) {
+        nextProtocols.push(encodeWSAuthProtocol("bearer", token));
       }
-      nextProtocols.push(encodeWSAuthProtocol("bearer", token));
+      // No browser-side bearer configured (cookie-only BFF deployment).
+      // Omit the bearer.<token> Sec-WebSocket-Protocol entry; the
+      // session cookie sent on the WebSocket handshake (when origin
+      // matches) carries the auth, and the server returns 401 if it
+      // isn't present.
     } else if (mode === "api_key") {
       const signed = await signAPIKey(this.config, "GET", path, new ArrayBuffer(0), "ws");
       nextProtocols.push(encodeWSAuthProtocol("sig", bearerTokenFromAuthorization(signed.authorization)));
@@ -1037,8 +1819,17 @@ export class GenAPIClient {
   }
 
   private openSocket(url: string, protocols?: string | string[]): Promise<WebSocket> {
+    const factory =
+      this.config.webSocketFactory ??
+      ((nextUrl: string, nextProtocols?: string | string[]) => {
+        if (typeof WebSocket === "undefined") {
+          throw new Error(
+            "WebSocket is unavailable in this runtime; provide config.webSocketFactory to open sockets on React Native",
+          );
+        }
+        return new WebSocket(nextUrl, nextProtocols);
+      });
     return new Promise((resolve, reject) => {
-      const factory = this.config.webSocketFactory ?? ((nextUrl: string, nextProtocols?: string | string[]) => new WebSocket(nextUrl, nextProtocols));
       const socket = factory(url, protocols);
       const onOpen = () => {
         cleanup();
@@ -1056,472 +1847,576 @@ export class GenAPIClient {
       socket.addEventListener("error", onError);
     });
   }
-  async audit(req: AuditQuery): Promise<AuditList> {
+  async audit(req: AuditQuery,options?: RequestOptions): Promise<AuditList> {
     return this.request<AuditList>(
       "GET",
       "/api/v1/audit",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async login(req: LoginReq): Promise<LoginResp> {
+  async login(req: LoginReq,options?: RequestOptions): Promise<LoginResp> {
     return this.request<LoginResp>(
       "POST",
       "/api/v1/auth/login",
       "",
       "form",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getBackups(req: Empty): Promise<BackupList> {
+  async getBackups(req: Empty,options?: RequestOptions): Promise<BackupList> {
     return this.request<BackupList>(
       "GET",
       "/api/v1/backups",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postBackups(req: BackupCreateReq): Promise<BackupRef> {
+  async postBackups(req: BackupCreateReq,options?: RequestOptions): Promise<BackupRef> {
     return this.request<BackupRef>(
       "POST",
       "/api/v1/backups",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async cleanup(req: Empty): Promise<BackupCleanupResp> {
+  async cleanup(req: Empty,options?: RequestOptions): Promise<BackupCleanupResp> {
     return this.request<BackupCleanupResp>(
       "POST",
       "/api/v1/backups/cleanup",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async backupUpload(req: BackupUploadReq): Promise<UploadResp> {
+  async backupUpload(req: BackupUploadReq,options?: RequestOptions): Promise<UploadResp> {
     return this.request<UploadResp>(
       "POST",
       "/api/v1/backups/upload",
       "jwt",
       "multipart",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async deleteFile(req: BackupFileParam): Promise<Empty> {
+  async deleteFile(req: BackupFileParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
       "/api/v1/backups/{file}",
       "jwt",
       "query",
       [["file", "file"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getFile(req: BackupFileParam): Promise<BackupInfo> {
+  async getFile(req: BackupFileParam,options?: RequestOptions): Promise<BackupInfo> {
     return this.request<BackupInfo>(
       "GET",
       "/api/v1/backups/{file}",
       "jwt",
       "query",
       [["file", "file"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getCapabilities(req: Empty): Promise<Capabilities> {
+  async getCapabilities(req: Empty,options?: RequestOptions): Promise<Capabilities> {
     return this.request<Capabilities>(
       "GET",
       "/api/v1/capabilities",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async grants(req: GrantReq): Promise<Empty> {
+  async grants(req: GrantReq,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/grants",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async revoke(req: GrantReq): Promise<Empty> {
+  async revoke(req: GrantReq,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/grants/revoke",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async graphs(req: Empty): Promise<GraphList> {
+  async graphs(req: Empty,options?: RequestOptions): Promise<GraphList> {
     return this.request<GraphList>(
       "GET",
       "/api/v1/graphs",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async constraints(req: GraphParam): Promise<ConstraintList> {
+  async constraints(req: GraphParam,options?: RequestOptions): Promise<ConstraintList> {
     return this.request<ConstraintList>(
       "GET",
       "/api/v1/graphs/{graph}/constraints",
       "jwt",
       "query",
       [["graph", "graph"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async edgeTypes(req: GraphParam): Promise<EdgeTypeList> {
+  async edgeTypes(req: GraphParam,options?: RequestOptions): Promise<EdgeTypeList> {
     return this.request<EdgeTypeList>(
       "GET",
       "/api/v1/graphs/{graph}/edge-types",
       "jwt",
       "query",
       [["graph", "graph"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async indexes(req: GraphParam): Promise<IndexList> {
+  async indexes(req: GraphParam,options?: RequestOptions): Promise<IndexList> {
     return this.request<IndexList>(
       "GET",
       "/api/v1/graphs/{graph}/indexes",
       "jwt",
       "query",
       [["graph", "graph"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async labels(req: GraphParam): Promise<LabelList> {
+  async labels(req: GraphParam,options?: RequestOptions): Promise<LabelList> {
     return this.request<LabelList>(
       "GET",
       "/api/v1/graphs/{graph}/labels",
       "jwt",
       "query",
       [["graph", "graph"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getMigrations(req: Empty): Promise<MigrationStatus> {
+  async getMigrations(req: Empty,options?: RequestOptions): Promise<MigrationStatus> {
     return this.request<MigrationStatus>(
       "GET",
       "/api/v1/migrations",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postMigrations(req: MigrationCreateReq): Promise<MigrationRef> {
+  async postMigrations(req: MigrationCreateReq,options?: RequestOptions): Promise<MigrationRef> {
     return this.request<MigrationRef>(
       "POST",
       "/api/v1/migrations",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postMigrationsRun(req: Empty): Promise<MigrationRunResp> {
+  async postMigrationsRun(req: Empty,options?: RequestOptions): Promise<MigrationRunResp> {
     return this.request<MigrationRunResp>(
       "POST",
       "/api/v1/migrations/run",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async migrationUpload(req: MigrationUploadReq): Promise<UploadResp> {
+  async migrationUpload(req: MigrationUploadReq,options?: RequestOptions): Promise<UploadResp> {
     return this.request<UploadResp>(
       "POST",
       "/api/v1/migrations/upload",
       "jwt",
       "multipart",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async sign(req: MigrationParam): Promise<Empty> {
+  async sign(req: MigrationParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/migrations/{name}/sign",
       "jwt",
       "json",
       [["name", "name"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getPolicies(req: Empty): Promise<PolicyList> {
+  async getPolicies(req: Empty,options?: RequestOptions): Promise<PolicyList> {
     return this.request<PolicyList>(
       "GET",
       "/api/v1/policies",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postPolicies(req: PolicyCreateReq): Promise<Policy> {
+  async postPolicies(req: PolicyCreateReq,options?: RequestOptions): Promise<Policy> {
     return this.request<Policy>(
       "POST",
       "/api/v1/policies",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async deleteName(req: PolicyParam): Promise<Empty> {
+  async deleteName(req: PolicyParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
       "/api/v1/policies/{name}",
       "jwt",
       "query",
       [["name", "name"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getName(req: PolicyParam): Promise<Policy> {
+  async getName(req: PolicyParam,options?: RequestOptions): Promise<Policy> {
     return this.request<Policy>(
       "GET",
       "/api/v1/policies/{name}",
       "jwt",
       "query",
       [["name", "name"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getProfiles(req: Empty): Promise<ProfileList> {
+  async getProfiles(req: Empty,options?: RequestOptions): Promise<ProfileList> {
     return this.request<ProfileList>(
       "GET",
       "/api/v1/profiles",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postProfiles(req: CreateProfileReq): Promise<Profile> {
+  async postProfiles(req: CreateProfileReq,options?: RequestOptions): Promise<Profile> {
     return this.request<Profile>(
       "POST",
       "/api/v1/profiles",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async public(req: Empty): Promise<PublicProfileList> {
+  async public(req: Empty,options?: RequestOptions): Promise<PublicProfileList> {
     return this.request<PublicProfileList>(
       "GET",
       "/api/v1/profiles/public",
       "",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async deleteProfileid(req: ProfileIDPath): Promise<Empty> {
+  async deleteProfileid(req: ProfileIDPath,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
       "/api/v1/profiles/{profileId}",
       "jwt",
       "query",
       [["profileId", "profile_id"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getProfileid(req: ProfileIDPath): Promise<Profile> {
+  async getProfileid(req: ProfileIDPath,options?: RequestOptions): Promise<Profile> {
     return this.request<Profile>(
       "GET",
       "/api/v1/profiles/{profileId}",
       "jwt",
       "query",
       [["profileId", "profile_id"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async patchProfileid(req: UpdateProfileReq): Promise<Profile> {
+  async patchProfileid(req: UpdateProfileReq,options?: RequestOptions): Promise<Profile> {
     return this.request<Profile>(
       "PATCH",
       "/api/v1/profiles/{profileId}",
       "jwt",
       "json",
       [["profileId", "profile_id"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async query(req: QueryReq): Promise<QueryResp> {
+  async query(req: QueryReq,options?: RequestOptions): Promise<QueryResp> {
     return this.request<QueryResp>(
       "POST",
       "/api/v1/query",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async restore(req: RestoreReq): Promise<Empty> {
+  async restore(req: RestoreReq,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/restore",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getRoles(req: Empty): Promise<RoleList> {
+  async getRoles(req: Empty,options?: RequestOptions): Promise<RoleList> {
     return this.request<RoleList>(
       "GET",
       "/api/v1/roles",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postApiRoles(req: RoleCreateReq): Promise<Role> {
+  async postAPIRoles(req: RoleCreateReq,options?: RequestOptions): Promise<Role> {
     return this.request<Role>(
       "POST",
       "/api/v1/roles",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async deleteRole(req: RoleParam): Promise<Empty> {
+  async deleteRole(req: RoleParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
       "/api/v1/roles/{role}",
       "jwt",
       "query",
       [["role", "role"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getRole(req: RoleParam): Promise<Role> {
+  async getRole(req: RoleParam,options?: RequestOptions): Promise<Role> {
     return this.request<Role>(
       "GET",
       "/api/v1/roles/{role}",
       "jwt",
       "query",
       [["role", "role"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async tx(req: TxBeginReq): Promise<TxBeginResp> {
+  async tx(req: TxBeginReq,options?: RequestOptions): Promise<TxBeginResp> {
     return this.request<TxBeginResp>(
       "POST",
       "/api/v1/tx",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async commit(req: TxIDParam): Promise<Empty> {
+  async commit(req: TxIDParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/tx/{txid}/commit",
       "jwt",
       "json",
       [["txid", "txid"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async rollback(req: TxIDParam): Promise<Empty> {
+  async rollback(req: TxIDParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/tx/{txid}/rollback",
       "jwt",
       "json",
       [["txid", "txid"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postTxidRun(req: TxRunReq): Promise<QueryResp> {
+  async postTxidRun(req: TxRunReq,options?: RequestOptions): Promise<QueryResp> {
     return this.request<QueryResp>(
       "POST",
       "/api/v1/tx/{txid}/run",
       "jwt",
       "json",
       [["txid", "txid"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getUsers(req: Empty): Promise<UserList> {
+  async getUsers(req: Empty,options?: RequestOptions): Promise<UserList> {
     return this.request<UserList>(
       "GET",
       "/api/v1/users",
       "jwt",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postUsers(req: UserCreateReq): Promise<User> {
+  async postUsers(req: UserCreateReq,options?: RequestOptions): Promise<User> {
     return this.request<User>(
       "POST",
       "/api/v1/users",
       "jwt",
       "json",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async deleteUsername(req: UsernameParam): Promise<Empty> {
+  async deleteUsername(req: UsernameParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "DELETE",
       "/api/v1/users/{username}",
       "jwt",
       "query",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async getUsername(req: UsernameParam): Promise<User> {
+  async getUsername(req: UsernameParam,options?: RequestOptions): Promise<User> {
     return this.request<User>(
       "GET",
       "/api/v1/users/{username}",
       "jwt",
       "query",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async patchUsername(req: UserUpdateReq): Promise<User> {
+  async patchUsername(req: UserUpdateReq,options?: RequestOptions): Promise<User> {
     return this.request<User>(
       "PATCH",
       "/api/v1/users/{username}",
       "jwt",
       "json",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async disable(req: UsernameParam): Promise<Empty> {
+  async disable(req: UsernameParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/users/{username}/disable",
       "jwt",
       "json",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async enable(req: UsernameParam): Promise<Empty> {
+  async enable(req: UsernameParam,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/users/{username}/enable",
       "jwt",
       "json",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async password(req: PasswordChangeReq): Promise<Empty> {
+  async password(req: PasswordChangeReq,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/users/{username}/password",
       "jwt",
       "json",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async permissions(req: UsernameParam): Promise<PermissionList> {
+  async permissions(req: UsernameParam,options?: RequestOptions): Promise<PermissionList> {
     return this.request<PermissionList>(
       "GET",
       "/api/v1/users/{username}/permissions",
       "jwt",
       "query",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async postUsernameRoles(req: AssignRoleReq): Promise<Empty> {
+  async postUsernameRoles(req: AssignRoleReq,options?: RequestOptions): Promise<Empty> {
     return this.request<Empty>(
       "POST",
       "/api/v1/users/{username}/roles",
       "jwt",
       "json",
       [["username", "username"]], copyRecord(req),
+      "json",
+      options,
     );
   }
-  async healthz(req: Empty): Promise<HealthResp> {
+  async healthz(req: Empty,options?: RequestOptions): Promise<HealthResp> {
     return this.request<HealthResp>(
       "GET",
       "/healthz",
       "",
       "query",
       [], copyRecord(req),
+      "json",
+      options,
     );
   }
   async connectPing(): Promise<JSONSocket<PingMsg>> {
@@ -1553,168 +2448,168 @@ export function useGenAPIClient(config: ClientConfig): GenAPIClient {
   }
   useEffect(() => {
     clientRef.current = new GenAPIClient(config);
-  }, [config.baseUrl, config.bearerToken, config.apiKeySigner, config.fetchImpl, config.headers, config.webSocketFactory, config.wsOrigin, config.wsProtocols]);
+  }, [config.baseUrl, config.bearerToken, config.apiKeySigner, config.fetchImpl, config.headers, config.webSocketFactory, config.wsOrigin, config.wsProtocols, config.onUnauthorized]);
   return clientRef.current;
 }
-export function useAudit(client: GenAPIClient, req: AuditQuery, deps: ReadonlyArray<unknown> = []): RequestState<AuditList> {
-  return usePromise(() => client.audit(req), deps);
+export function useAudit(client: GenAPIClient, req: AuditQuery, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<AuditList> {
+  return usePromise(client, "GET", "/api/v1/audit", req, () => client.audit(req), deps, options);
 }
 export function useLoginMutation(client: GenAPIClient): MutationState<LoginReq, LoginResp> {
-  return useMutationState((req) => client.login(req));
+  return useMutationState(client, (req) => client.login(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetBackups(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<BackupList> {
-  return usePromise(() => client.getBackups(req), deps);
+export function useGetBackups(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<BackupList> {
+  return usePromise(client, "GET", "/api/v1/backups", req, () => client.getBackups(req), deps, options);
 }
 export function usePostBackupsMutation(client: GenAPIClient): MutationState<BackupCreateReq, BackupRef> {
-  return useMutationState((req) => client.postBackups(req));
+  return useMutationState(client, (req) => client.postBackups(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useCleanupMutation(client: GenAPIClient): MutationState<Empty, BackupCleanupResp> {
-  return useMutationState((req) => client.cleanup(req));
+  return useMutationState(client, (req) => client.cleanup(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useBackupUploadMutation(client: GenAPIClient): MutationState<BackupUploadReq, UploadResp> {
-  return useMutationState((req) => client.backupUpload(req));
+  return useMutationState(client, (req) => client.backupUpload(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useDeleteFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
-  return usePromise(() => client.deleteFile(req), deps);
+export function useDeleteFileMutation(client: GenAPIClient): MutationState<BackupFileParam, Empty> {
+  return useMutationState(client, (req) => client.deleteFile(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = []): RequestState<BackupInfo> {
-  return usePromise(() => client.getFile(req), deps);
+export function useGetFile(client: GenAPIClient, req: BackupFileParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<BackupInfo> {
+  return usePromise(client, "GET", "/api/v1/backups/{file}", req, () => client.getFile(req), deps, options);
 }
-export function useGetCapabilities(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<Capabilities> {
-  return usePromise(() => client.getCapabilities(req), deps);
+export function useGetCapabilities(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<Capabilities> {
+  return usePromise(client, "GET", "/api/v1/capabilities", req, () => client.getCapabilities(req), deps, options);
 }
 export function useGrantsMutation(client: GenAPIClient): MutationState<GrantReq, Empty> {
-  return useMutationState((req) => client.grants(req));
+  return useMutationState(client, (req) => client.grants(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useRevokeMutation(client: GenAPIClient): MutationState<GrantReq, Empty> {
-  return useMutationState((req) => client.revoke(req));
+  return useMutationState(client, (req) => client.revoke(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGraphs(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<GraphList> {
-  return usePromise(() => client.graphs(req), deps);
+export function useGraphs(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<GraphList> {
+  return usePromise(client, "GET", "/api/v1/graphs", req, () => client.graphs(req), deps, options);
 }
-export function useConstraints(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<ConstraintList> {
-  return usePromise(() => client.constraints(req), deps);
+export function useConstraints(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<ConstraintList> {
+  return usePromise(client, "GET", "/api/v1/graphs/{graph}/constraints", req, () => client.constraints(req), deps, options);
 }
-export function useEdgeTypes(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<EdgeTypeList> {
-  return usePromise(() => client.edgeTypes(req), deps);
+export function useEdgeTypes(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<EdgeTypeList> {
+  return usePromise(client, "GET", "/api/v1/graphs/{graph}/edge-types", req, () => client.edgeTypes(req), deps, options);
 }
-export function useIndexes(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<IndexList> {
-  return usePromise(() => client.indexes(req), deps);
+export function useIndexes(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<IndexList> {
+  return usePromise(client, "GET", "/api/v1/graphs/{graph}/indexes", req, () => client.indexes(req), deps, options);
 }
-export function useLabels(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = []): RequestState<LabelList> {
-  return usePromise(() => client.labels(req), deps);
+export function useLabels(client: GenAPIClient, req: GraphParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<LabelList> {
+  return usePromise(client, "GET", "/api/v1/graphs/{graph}/labels", req, () => client.labels(req), deps, options);
 }
-export function useGetMigrations(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<MigrationStatus> {
-  return usePromise(() => client.getMigrations(req), deps);
+export function useGetMigrations(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<MigrationStatus> {
+  return usePromise(client, "GET", "/api/v1/migrations", req, () => client.getMigrations(req), deps, options);
 }
 export function usePostMigrationsMutation(client: GenAPIClient): MutationState<MigrationCreateReq, MigrationRef> {
-  return useMutationState((req) => client.postMigrations(req));
+  return useMutationState(client, (req) => client.postMigrations(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function usePostMigrationsRunMutation(client: GenAPIClient): MutationState<Empty, MigrationRunResp> {
-  return useMutationState((req) => client.postMigrationsRun(req));
+  return useMutationState(client, (req) => client.postMigrationsRun(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useMigrationUploadMutation(client: GenAPIClient): MutationState<MigrationUploadReq, UploadResp> {
-  return useMutationState((req) => client.migrationUpload(req));
+  return useMutationState(client, (req) => client.migrationUpload(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useSignMutation(client: GenAPIClient): MutationState<MigrationParam, Empty> {
-  return useMutationState((req) => client.sign(req));
+  return useMutationState(client, (req) => client.sign(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetPolicies(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<PolicyList> {
-  return usePromise(() => client.getPolicies(req), deps);
+export function useGetPolicies(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<PolicyList> {
+  return usePromise(client, "GET", "/api/v1/policies", req, () => client.getPolicies(req), deps, options);
 }
 export function usePostPoliciesMutation(client: GenAPIClient): MutationState<PolicyCreateReq, Policy> {
-  return useMutationState((req) => client.postPolicies(req));
+  return useMutationState(client, (req) => client.postPolicies(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useDeleteName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
-  return usePromise(() => client.deleteName(req), deps);
+export function useDeleteNameMutation(client: GenAPIClient): MutationState<PolicyParam, Empty> {
+  return useMutationState(client, (req) => client.deleteName(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = []): RequestState<Policy> {
-  return usePromise(() => client.getName(req), deps);
+export function useGetName(client: GenAPIClient, req: PolicyParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<Policy> {
+  return usePromise(client, "GET", "/api/v1/policies/{name}", req, () => client.getName(req), deps, options);
 }
-export function useGetProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<ProfileList> {
-  return usePromise(() => client.getProfiles(req), deps);
+export function useGetProfiles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<ProfileList> {
+  return usePromise(client, "GET", "/api/v1/profiles", req, () => client.getProfiles(req), deps, options);
 }
 export function usePostProfilesMutation(client: GenAPIClient): MutationState<CreateProfileReq, Profile> {
-  return useMutationState((req) => client.postProfiles(req));
+  return useMutationState(client, (req) => client.postProfiles(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function usePublic(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<PublicProfileList> {
-  return usePromise(() => client.public(req), deps);
+export function usePublic(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<PublicProfileList> {
+  return usePromise(client, "GET", "/api/v1/profiles/public", req, () => client.public(req), deps, options);
 }
-export function useDeleteProfileid(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
-  return usePromise(() => client.deleteProfileid(req), deps);
+export function useDeleteProfileidMutation(client: GenAPIClient): MutationState<ProfileIDPath, Empty> {
+  return useMutationState(client, (req) => client.deleteProfileid(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetProfileid(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = []): RequestState<Profile> {
-  return usePromise(() => client.getProfileid(req), deps);
+export function useGetProfileid(client: GenAPIClient, req: ProfileIDPath, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<Profile> {
+  return usePromise(client, "GET", "/api/v1/profiles/{profileId}", req, () => client.getProfileid(req), deps, options);
 }
 export function usePatchProfileidMutation(client: GenAPIClient): MutationState<UpdateProfileReq, Profile> {
-  return useMutationState((req) => client.patchProfileid(req));
+  return useMutationState(client, (req) => client.patchProfileid(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useQueryMutation(client: GenAPIClient): MutationState<QueryReq, QueryResp> {
-  return useMutationState((req) => client.query(req));
+  return useMutationState(client, (req) => client.query(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useRestoreMutation(client: GenAPIClient): MutationState<RestoreReq, Empty> {
-  return useMutationState((req) => client.restore(req));
+  return useMutationState(client, (req) => client.restore(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetRoles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<RoleList> {
-  return usePromise(() => client.getRoles(req), deps);
+export function useGetRoles(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<RoleList> {
+  return usePromise(client, "GET", "/api/v1/roles", req, () => client.getRoles(req), deps, options);
 }
-export function usePostApiRolesMutation(client: GenAPIClient): MutationState<RoleCreateReq, Role> {
-  return useMutationState((req) => client.postApiRoles(req));
+export function usePostAPIRolesMutation(client: GenAPIClient): MutationState<RoleCreateReq, Role> {
+  return useMutationState(client, (req) => client.postAPIRoles(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useDeleteRole(client: GenAPIClient, req: RoleParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
-  return usePromise(() => client.deleteRole(req), deps);
+export function useDeleteRoleMutation(client: GenAPIClient): MutationState<RoleParam, Empty> {
+  return useMutationState(client, (req) => client.deleteRole(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetRole(client: GenAPIClient, req: RoleParam, deps: ReadonlyArray<unknown> = []): RequestState<Role> {
-  return usePromise(() => client.getRole(req), deps);
+export function useGetRole(client: GenAPIClient, req: RoleParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<Role> {
+  return usePromise(client, "GET", "/api/v1/roles/{role}", req, () => client.getRole(req), deps, options);
 }
 export function useTxMutation(client: GenAPIClient): MutationState<TxBeginReq, TxBeginResp> {
-  return useMutationState((req) => client.tx(req));
+  return useMutationState(client, (req) => client.tx(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useCommitMutation(client: GenAPIClient): MutationState<TxIDParam, Empty> {
-  return useMutationState((req) => client.commit(req));
+  return useMutationState(client, (req) => client.commit(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useRollbackMutation(client: GenAPIClient): MutationState<TxIDParam, Empty> {
-  return useMutationState((req) => client.rollback(req));
+  return useMutationState(client, (req) => client.rollback(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function usePostTxidRunMutation(client: GenAPIClient): MutationState<TxRunReq, QueryResp> {
-  return useMutationState((req) => client.postTxidRun(req));
+  return useMutationState(client, (req) => client.postTxidRun(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetUsers(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<UserList> {
-  return usePromise(() => client.getUsers(req), deps);
+export function useGetUsers(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<UserList> {
+  return usePromise(client, "GET", "/api/v1/users", req, () => client.getUsers(req), deps, options);
 }
 export function usePostUsersMutation(client: GenAPIClient): MutationState<UserCreateReq, User> {
-  return useMutationState((req) => client.postUsers(req));
+  return useMutationState(client, (req) => client.postUsers(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useDeleteUsername(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<Empty> {
-  return usePromise(() => client.deleteUsername(req), deps);
+export function useDeleteUsernameMutation(client: GenAPIClient): MutationState<UsernameParam, Empty> {
+  return useMutationState(client, (req) => client.deleteUsername(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useGetUsername(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<User> {
-  return usePromise(() => client.getUsername(req), deps);
+export function useGetUsername(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<User> {
+  return usePromise(client, "GET", "/api/v1/users/{username}", req, () => client.getUsername(req), deps, options);
 }
 export function usePatchUsernameMutation(client: GenAPIClient): MutationState<UserUpdateReq, User> {
-  return useMutationState((req) => client.patchUsername(req));
+  return useMutationState(client, (req) => client.patchUsername(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useDisableMutation(client: GenAPIClient): MutationState<UsernameParam, Empty> {
-  return useMutationState((req) => client.disable(req));
+  return useMutationState(client, (req) => client.disable(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function useEnableMutation(client: GenAPIClient): MutationState<UsernameParam, Empty> {
-  return useMutationState((req) => client.enable(req));
+  return useMutationState(client, (req) => client.enable(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
 export function usePasswordMutation(client: GenAPIClient): MutationState<PasswordChangeReq, Empty> {
-  return useMutationState((req) => client.password(req));
+  return useMutationState(client, (req) => client.password(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function usePermissions(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = []): RequestState<PermissionList> {
-  return usePromise(() => client.permissions(req), deps);
+export function usePermissions(client: GenAPIClient, req: UsernameParam, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<PermissionList> {
+  return usePromise(client, "GET", "/api/v1/users/{username}/permissions", req, () => client.permissions(req), deps, options);
 }
 export function usePostUsernameRolesMutation(client: GenAPIClient): MutationState<AssignRoleReq, Empty> {
-  return useMutationState((req) => client.postUsernameRoles(req));
+  return useMutationState(client, (req) => client.postUsernameRoles(req), (cache) => cache.invalidate((key) => matchesResource(key, "/api")));
 }
-export function useHealthz(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = []): RequestState<HealthResp> {
-  return usePromise(() => client.healthz(req), deps);
+export function useHealthz(client: GenAPIClient, req: Empty, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): RequestState<HealthResp> {
+  return usePromise(client, "GET", "/healthz", req, () => client.healthz(req), deps, options);
 }
-export function usePingSocket(client: GenAPIClient, deps: ReadonlyArray<unknown> = []): StreamState<PingMsg> {
-  return useStream(() => client.connectPing(), deps);
+export function usePingSocket(client: GenAPIClient, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): StreamState<PingMsg> {
+  return useStream(() => client.connectPing(), deps, options);
 }
-export function useQuerySocket(client: GenAPIClient, deps: ReadonlyArray<unknown> = []): StreamState<QueryStreamMsg> {
-  return useStream(() => client.connectQuery(), deps);
+export function useQuerySocket(client: GenAPIClient, deps: ReadonlyArray<unknown> = [], options?: QueryHookOptions): StreamState<QueryStreamMsg> {
+  return useStream(() => client.connectQuery(), deps, options);
 }
