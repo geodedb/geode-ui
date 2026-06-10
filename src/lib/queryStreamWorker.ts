@@ -23,6 +23,8 @@
 // error envelope lets future telemetry instrument them without
 // changing the WS contract.
 
+import { camelCaseStreamFrame } from './wireCase'
+
 declare const self: DedicatedWorkerGlobalScope
 
 type WorkerIn = { kind: 'parse'; seq: number; data: string }
@@ -35,7 +37,11 @@ self.onmessage = (ev: MessageEvent<WorkerIn>): void => {
   if (!msg || msg.kind !== 'parse') return
   const target = self as unknown as { postMessage(m: WorkerOut): void }
   try {
-    const parsed = JSON.parse(msg.data) as unknown
+    // genapi 0.11.1: normalise the row-cell payload snake_case -> camelCase
+    // (mirroring the generated client's fromWire on the sync path) here, OFF
+    // the main thread, so stream-mode rows match sync-mode rows. Envelope
+    // keys (kind / row_count / elapsed_ms) are left untouched.
+    const parsed = camelCaseStreamFrame(JSON.parse(msg.data) as unknown)
     target.postMessage({ kind: 'parsed', seq: msg.seq, msg: parsed })
   } catch (e) {
     target.postMessage({

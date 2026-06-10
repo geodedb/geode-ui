@@ -34,8 +34,12 @@ by Keep-a-Changelog subsection. Issue numbers reference
   (`rowCount`/`elapsedMs`/`pageSize`/`timeoutMs`), `RestorePage`
   (`targetTime`/`sizeBytes`), and the `postAPIRoles` method rename. The
   graph-result pipeline reads `graphSummary`/`startNode`/`endNode`
-  camelCase-first with a snake fallback so the raw streaming path keeps
-  working unconverted.
+  camelCase-first with a snake fallback. To keep the two query transports
+  identical, the WebSocket stream path (`/ws/query`, which bypasses the
+  generated client) now normalises row-cell payloads snake_case→camelCase in
+  the parse worker — OFF the main thread, mirroring the sync client's
+  `fromWire` — via the shared `src/lib/wireCase.ts` helper, so node/edge
+  property keys render the same in stream mode and sync mode.
 - genapi v0.11.1 emits a fuller security/runtime suite under `gen/pkg`
   (HSM signer behind `//go:build pkcs11`, WebAuthn, OIDC/JWKS), pulling new
   module deps into `go.mod`; none are linked into `cmd/server` and the

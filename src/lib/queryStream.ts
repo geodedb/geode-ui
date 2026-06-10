@@ -1,5 +1,6 @@
 import { getLatestToken } from '../api/connections'
 import { getQueryStreamWorkerUrl } from './queryStreamWorkerUrl'
+import { camelCaseStreamFrame } from './wireCase'
 
 // base64UrlEncode produces an unpadded base64url encoding of the given UTF-8
 // string. Matches encoding/base64.RawURLEncoding on the server side so the
@@ -192,9 +193,11 @@ export function streamQuery(
       }
     }
     // Fallback: synchronous main-thread parse. Same shape as the
-    // pre-fix code path.
+    // pre-fix code path. camelCaseStreamFrame mirrors the worker-path
+    // snake_case -> camelCase row normalisation so the no-worker fallback
+    // produces identical data (genapi 0.11.1 parity with the sync client).
     try {
-      dispatch(JSON.parse(ev.data) as WireMsg)
+      dispatch(camelCaseStreamFrame(JSON.parse(ev.data)) as WireMsg)
     } catch {
       /* swallow */
     }
