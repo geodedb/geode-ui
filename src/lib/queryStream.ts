@@ -116,15 +116,22 @@ export function streamQuery(
   // header the fetch wrapper attaches in cookie-mode. The bearer never
   // touches JS-readable storage.
   const token = getLatestToken()
-  const protocols: string[] = []
+  // Always offer the reserved, non-secret sentinel subprotocol. The
+  // generated WS clients (gen/pkg/wsx: SubprotocolSentinel = "genapi.ws.v1")
+  // always offer it so the server can echo a Sec-WebSocket-Protocol value
+  // on the 101 handshake. Strict browsers FAIL the handshake when they
+  // offer subprotocols but the server selects none — and the server
+  // deliberately never echoes the genapi.auth.* bearer marker (doing so
+  // would reflect the token; SEC-0011), so without the sentinel this
+  // hand-rolled /ws/query client's handshake fails outright. The bearer
+  // marker (when we hold an in-memory token) is consumed server-side from
+  // the request header regardless of what gets echoed.
+  const protocols: string[] = ['genapi.ws.v1']
   if (token) {
     const encoded = base64UrlEncode(token)
     protocols.push(`genapi.auth.bearer.${encoded}`)
   }
-  const ws =
-    protocols.length > 0
-      ? new WebSocket(url.toString(), protocols)
-      : new WebSocket(url.toString())
+  const ws = new WebSocket(url.toString(), protocols)
 
   let resolveDone: () => void = () => {}
   const done = new Promise<void>((r) => {

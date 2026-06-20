@@ -88,14 +88,16 @@ test('sends start message on open and forwards messages', () => {
   expect(ws.send).toHaveBeenLastCalledWith(JSON.stringify({ kind: 'cancel' }))
 })
 
-test('cookie mode: opens WS without subprotocol auth (cookie carries JWT)', () => {
+test('cookie mode: offers only the sentinel subprotocol (cookie carries JWT)', () => {
   // SEC-F7 (#62 S3c): same-origin WebSocket upgrades automatically
   // include cookies, so the server-side AuthJWT cookie reader picks
-  // up the geode-ui-auth JWT without any subprotocol channel. The
-  // SPA must NOT attach a bearer subprotocol when no legacy token is
-  // present.
+  // up the geode-ui-auth JWT without any bearer subprotocol channel.
+  // The SPA must NOT attach a bearer subprotocol when no legacy token
+  // is present — but it MUST still offer the reserved sentinel so the
+  // server can echo a Sec-WebSocket-Protocol on the 101 (strict
+  // browsers fail the handshake otherwise; see queryStream.ts).
   streamQuery('RETURN 1', undefined, () => {})
-  expect(lastInstance!.protocols).toEqual([])
+  expect(lastInstance!.protocols).toEqual(['genapi.ws.v1'])
   expect(lastInstance!.url).not.toContain('access_token')
 })
 
@@ -110,6 +112,9 @@ test('in-memory bearer: subprotocol attached when active-connection latch is set
   streamQuery('RETURN 1', undefined, () => {})
   // Token 'tok123' base64url-encoded (no padding) is 'dG9rMTIz'.
   expect(lastInstance!.protocols).toContain('genapi.auth.bearer.dG9rMTIz')
+  // The reserved sentinel is always offered alongside the bearer marker
+  // so the server has a non-credential subprotocol to echo on the 101.
+  expect(lastInstance!.protocols).toContain('genapi.ws.v1')
   expect(lastInstance!.url).not.toContain('access_token')
 })
 
