@@ -137,6 +137,77 @@ func TestCSPNotAppliedToJSONResponses(t *testing.T) {
 	}
 }
 
+// TestCSPOverridesInheritedStrictDefault_SPA pins the production regression
+// where genapi v0.11.1's httpx.WrapHandler began emitting a global
+// `Content-Security-Policy: default-src 'none'` on EVERY response. Because
+// the SPA security wrapper previously applied its permissive policy only
+// when the header was empty (set-if-empty), the SPA HTML document shipped
+// `default-src 'none'`, the browser blocked main.*.js / vendors.*.js / CSS,
+// and the SPA never booted (all UI e2e specs failed).
+//
+// The wrapper MUST OVERRIDE the inherited strict default on HTML responses
+// with the permissive SPA directive so the app's own bundle loads.
+func TestCSPOverridesInheritedStrictDefault_SPA(t *testing.T) {
+	t.Parallel()
+	htmlInner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<!DOCTYPE html><html></html>"))
+	})
+	h := WithSPASecurityHeaders(htmlInner)
+
+	rec := httptest.NewRecorder()
+	// Simulate the global httpx.WrapHandler header already on the response
+	// before the SPA handler runs.
+	rec.Header().Set("Content-Security-Policy", "default-src 'none'")
+	rec.Header().Set("Cross-Origin-Opener-Policy", "unsafe-none")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	h.ServeHTTP(rec, req)
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "default-src 'none'") {
+		t.Fatalf("inherited strict CSP not overridden on SPA HTML; got %q", csp)
+	}
+	if csp != CSPDirective {
+		t.Fatalf("SPA CSP = %q, want permissive CSPDirective %q", csp, CSPDirective)
+	}
+	for _, d := range []string{
+		"default-src 'self'",
+		"script-src 'self' 'wasm-unsafe-eval'",
+		"style-src 'self' 'unsafe-inline'",
+	} {
+		if !strings.Contains(csp, d) {
+			t.Errorf("SPA CSP missing directive %q; got %q", d, csp)
+		}
+	}
+	if coop := rec.Header().Get("Cross-Origin-Opener-Policy"); coop != COOPDirective {
+		t.Errorf("COOP=%q want %q (inherited value must be overridden)", coop, COOPDirective)
+	}
+}
+
+// TestCSPPreservesInheritedStrictDefault_NonHTML pins the other half of the
+// SEC-0023 hardening: the strict global `default-src 'none'` default emitted
+// by httpx.WrapHandler MUST be preserved on non-HTML (API JSON / asset)
+// responses. The SPA wrapper must not globally weaken CSP.
+func TestCSPPreservesInheritedStrictDefault_NonHTML(t *testing.T) {
+	t.Parallel()
+	jsonInner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	h := WithSPASecurityHeaders(jsonInner)
+
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Content-Security-Policy", "default-src 'none'")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
+	h.ServeHTTP(rec, req)
+
+	if csp := rec.Header().Get("Content-Security-Policy"); csp != "default-src 'none'" {
+		t.Fatalf("strict CSP not preserved on JSON response; got %q", csp)
+	}
+}
+
 // TestAccessTokenDeprecation asserts the SEC-F5 (#71) wrapper emits
 // Deprecation/Sunset/Link headers when (and only when) ?access_token=
 // is present on the request URL.

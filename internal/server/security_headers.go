@@ -301,12 +301,17 @@ func (s *spaHeaderWriter) injectIfHTML(body []byte) {
 		return
 	}
 	h := s.Header()
-	if h.Get("Content-Security-Policy") == "" {
-		h.Set("Content-Security-Policy", CSPDirective)
-	}
-	if h.Get("Cross-Origin-Opener-Policy") == "" {
-		h.Set("Cross-Origin-Opener-Policy", COOPDirective)
-	}
+	// Unconditionally OVERRIDE any inherited CSP/COOP for HTML responses.
+	// genapi v0.11.1's httpx.WrapHandler (gen/pkg/httpx/server.go) emits a
+	// global `Content-Security-Policy: default-src 'none'` on EVERY response
+	// as part of the SEC-0023 strict default. That strict default is correct
+	// for API JSON and non-HTML assets (preserved by the early
+	// non-HTML return above), but it blocks the SPA's own
+	// main.*.js / vendors.*.js / CSS bundle loads, so the SPA never boots.
+	// A set-if-empty here would never fire because the header is no longer
+	// empty — the permissive SPA policy MUST replace the inherited value.
+	h.Set("Content-Security-Policy", CSPDirective)
+	h.Set("Cross-Origin-Opener-Policy", COOPDirective)
 }
 
 // isHTMLContentType reports whether the supplied Content-Type header
