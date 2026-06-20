@@ -2,10 +2,8 @@ module geodedb.com/geode-ui
 
 go 1.26.3
 
-replace geodedb.com/geode => ../geode-client-go
-
 require (
-	geodedb.com/geode v0.0.0-00010101000000-000000000000
+	geodedb.com/geode v0.1.26
 	github.com/go-webauthn/webauthn v0.17.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/lestrrat-go/httprc v1.0.6
