@@ -79,9 +79,17 @@ export function useGraphActions(
 
   const onHideNode = useCallback(
     (id: string): void => {
+      if (!id) return
+      // State-first, mirroring onRestoreHidden: the `hidden` set is the
+      // source of truth for the Hidden list, so record the intent even
+      // when the cytoscape core is momentarily absent. The core is torn
+      // down and rebuilt on a debounced result change (cyRef.current is
+      // null during that window); the old guard `if (!cy || !id) return`
+      // dropped a Hide click that landed mid-rebuild, leaving the node
+      // both visible AND missing from the Hidden list. Apply the visual
+      // hide when the core is present; the state update always lands.
       const cy = cyRef.current
-      if (!cy || !id) return
-      hideNode(cy, id)
+      if (cy) hideNode(cy, id)
       setHidden((prev) => {
         const next = new Set(prev)
         next.add(id)

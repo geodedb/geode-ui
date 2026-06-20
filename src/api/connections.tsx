@@ -40,6 +40,7 @@ interface State {
 type Action =
   | { type: 'add'; conn: ConnectionState }
   | { type: 'remove'; id: string }
+  | { type: 'disconnect'; id: string }
   | { type: 'setActive'; id: string | null }
   | { type: 'clear' }
   // PSR-F16 (#113): hydrate replaces the entire byId map + activeId in
@@ -122,6 +123,25 @@ function reducer(s: State, a: Action): State {
       const activeId = s.activeId === a.id ? null : s.activeId
       return { byId: next, activeId, version: s.version + 1 }
     }
+    case 'disconnect': {
+      // Atomic remove + active re-point in a SINGLE state transition.
+      // AuthProvider.disconnect did remove() then a separate
+      // setActive(): when the disconnected connection was the active
+      // one, the intermediate render saw activeId=null, which
+      // ProtectedRoute reads as "logged out" and redirects to /login —
+      // intermittently kicking the user out mid-disconnect. Choosing
+      // the next active here closes that window regardless of whether
+      // React happens to batch the two dispatches.
+      if (!s.byId.has(a.id)) return s
+      const next = new Map(s.byId)
+      next.delete(a.id)
+      let activeId = s.activeId
+      if (activeId === a.id) {
+        const firstRemaining = next.keys().next()
+        activeId = firstRemaining.done ? null : firstRemaining.value
+      }
+      return { byId: next, activeId, version: s.version + 1 }
+    }
     case 'setActive': {
       // No-op transition to the same active id stays at the same
       // version. The persist effect doesn't actually depend on which
@@ -170,6 +190,11 @@ interface ContextValue {
   loading: boolean
   add: (conn: ConnectionState) => void
   remove: (id: string) => void
+  // disconnect removes a connection AND atomically re-points activeId to
+  // another remaining connection (or null) in one dispatch, so callers
+  // never expose a transient activeId=null state. Prefer this over
+  // remove()+setActive() when tearing down a connection.
+  disconnect: (id: string) => void
   setActive: (id: string | null) => void
   clear: () => void
 }
@@ -321,6 +346,7 @@ export const ConnectionsProvider: React.FC<{
       loading,
       add: (conn) => dispatch({ type: 'add', conn }),
       remove: (id) => dispatch({ type: 'remove', id }),
+      disconnect: (id) => dispatch({ type: 'disconnect', id }),
       setActive: (id) => dispatch({ type: 'setActive', id }),
       clear: () => dispatch({ type: 'clear' }),
     }),

@@ -417,15 +417,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const disconnect = useCallback(
     (connectionId: string): void => {
       const wasActive = conns.activeId === connectionId
-      // Snapshot remaining BEFORE the remove call (Map mutation).
+      // Snapshot remaining BEFORE the disconnect call (Map mutation).
       const remaining = [...conns.connections.values()].filter(
         (c) => c.connectionId !== connectionId
       )
-      conns.remove(connectionId)
+      // Atomic remove + active re-point (see connections.tsx reducer
+      // 'disconnect'). This replaces the old remove()+setActive() pair,
+      // which left a render window with activeId=null that ProtectedRoute
+      // treated as logged-out and redirected to /login — intermittently
+      // kicking the user out when they disconnected the active row.
+      conns.disconnect(connectionId)
       if (wasActive) {
         const next = remaining[0]
         if (next) {
-          conns.setActive(next.connectionId)
+          // The reducer already re-pointed activeId to the first
+          // remaining connection; keep the non-React token latch in sync.
           setLatestToken(next.token)
         } else {
           // Last connection just disconnected — clear latch + legacy
