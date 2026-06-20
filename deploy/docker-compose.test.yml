@@ -67,6 +67,11 @@ services:
       # default and front geode-ui's /api/v1/metrics with the JWT
       # auth chain instead.
       GEODE_METRICS_BIND: 0.0.0.0
+      # TEST-STACK ONLY: the release geode binary refuses
+      # `--insecure-tls-skip-verify` (used by the healthcheck below and the
+      # seed entrypoints) unless this gate is set. The e2e stack runs over a
+      # self-signed QUIC cert, so we opt in here. NEVER set this in production.
+      GEODE_ALLOW_INSECURE_TLS: '1'
     volumes:
     - geode-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
@@ -120,6 +125,11 @@ services:
       E2E_USER: ${E2E_USER:-e2e_admin}
       E2E_PASSWORD: ${E2E_PASSWORD:-E2E Admin User Password 2024}
       GEODE_INIT_GQL: /seed/init.gql
+      # TEST-STACK ONLY: seed-bootstrap.sh runs
+      # `geode query --insecure-tls-skip-verify` against the self-signed
+      # QUIC cert; the release binary requires this gate to allow it.
+      # NEVER set this in production.
+      GEODE_ALLOW_INSECURE_TLS: '1'
     volumes:
       # Read the bootstrap password the geode container wrote to /data.
     - geode-data:/shared-data:ro
@@ -152,6 +162,10 @@ services:
       # network namespaces.
       GEODE_METRICS_PORT: '9090'
       GEODE_METRICS_BIND: 0.0.0.0
+      # TEST-STACK ONLY: same self-signed QUIC cert gate as the primary
+      # geode service; the healthcheck below runs
+      # `geode query --insecure-tls-skip-verify`. NEVER set in production.
+      GEODE_ALLOW_INSECURE_TLS: '1'
     volumes:
     - geode-b-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
@@ -195,6 +209,11 @@ services:
       # first successful seed exit in seconds via the count check.
       GEODE_SEEDS: social:/seed/social.gql:10000:Person
       GEODE_WAIT_SECS: '120'
+      # TEST-STACK ONLY: seed-bootstrap.sh runs
+      # `geode query --insecure-tls-skip-verify` against the self-signed
+      # QUIC cert; the release binary requires this gate to allow it.
+      # NEVER set this in production.
+      GEODE_ALLOW_INSECURE_TLS: '1'
     volumes:
     - geode-b-data:/shared-data:ro
     - ./geode/seed-bootstrap.sh:/seed/seed-bootstrap.sh:ro
