@@ -79,6 +79,13 @@ include:
       sign_needs: prepare-apt-packages
       allow_failure: false
 
+  # Security findings -> auto-triaged Jira SEC issues (.post; reads gl-*-report
+  # artifacts from the scans above). component_id 12496 = SEC > Vuln Mgmt.
+  - component: gitlab.com/devnw/ci-catalog/jira-event-intake@v1.31.0
+    inputs:
+      project_key: SEC
+      component_id: "12496"
+
 variables:
   NODE_VERSION: '22.14.0'
   GO_VERSION: '1.26-alpine'
