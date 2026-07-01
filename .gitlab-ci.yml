@@ -378,7 +378,15 @@ docker:build:
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
+    # The group-level DOCKER_AUTH_CONFIG CI/CD variable holds a *read_registry*
+    # deploy token (so runners can pull registry.gitlab.com/security-products/*
+    # analyzer images). The docker CLI reads it from the environment and it
+    # TAKES PRECEDENCE over `docker login`, so `docker push` to
+    # registry.gitlab.com fails with `insufficient_scope: authorization
+    # failed`. Unset it and log in with the push-capable CI job token.
+    - unset DOCKER_AUTH_CONFIG
     - apk add --no-cache git
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - mkdir -p /tmp/ctx/geode-ui
     - cp -r . /tmp/ctx/geode-ui/
     - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
@@ -502,6 +510,15 @@ e2e:playwright:
       done
       docker info
     # GitLab Container Registry login (always available).
+    #
+    # The group-level DOCKER_AUTH_CONFIG CI/CD variable holds a *read_registry*
+    # deploy token (so runners can pull registry.gitlab.com/security-products/*
+    # analyzer images). The docker CLI reads it from the environment and it
+    # TAKES PRECEDENCE over `docker login` — so every push to
+    # registry.gitlab.com (goreleaser `dockers:`/`docker_manifests:`) fails with
+    # `insufficient_scope: authorization failed`. Unset it here so the push
+    # below uses the push-capable CI job token from `docker login`.
+    - unset DOCKER_AUTH_CONFIG
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     # Optional Docker Hub login. SKIP_DOCKERHUB="true" silences the
     # dockerhub image variants when credentials aren't present.
@@ -564,7 +581,7 @@ goreleaser:release:
   timeout: 2h
   script:
     - . /tmp/dockerhub.env
-    - echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"
+    - 'echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
     - goreleaser release --clean --timeout 120m
     - ls -la dist/
   artifacts:
