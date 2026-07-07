@@ -6,8 +6,17 @@
 FROM mcr.microsoft.com/playwright:v1.59.1-jammy
 
 WORKDIR /work
-COPY package.json package-lock.json ./
-RUN npm ci --omit=optional
+# .npmrc maps the @devnw scope to the private GitLab npm registry (see
+# ../../.npmrc) — it must land before `npm ci` so @devnw/* packages (e.g.
+# @devnw/playwright-scanner-kit) resolve. The auth token is supplied at
+# build time via BuildKit's --secret mechanism (`docker build --secret
+# id=npm_auth_token,env=DEVNW_NPM_REGISTRY_TOKEN`) and only exported for
+# the lifetime of the `npm ci` RUN step, so it never lands in an image
+# layer or `docker history`.
+COPY package.json package-lock.json .npmrc ./
+RUN --mount=type=secret,id=npm_auth_token \
+    export DEVNW_NPM_REGISTRY_TOKEN="$(cat /run/secrets/npm_auth_token)" && \
+    npm ci --omit=optional
 
 COPY e2e/ ./e2e/
 ENV CI=1

@@ -605,7 +605,10 @@ docker:build:
     - cp -r . /tmp/ctx/geode-ui/
     - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
     - cd /tmp/ctx
-    - docker build -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    # --secret passes DEVNW_NPM_REGISTRY_TOKEN (devnw-group CI/CD variable,
+    # already present in this job's environment) to the `npm ci` RUN step
+    # in the `web` stage without it persisting in any image layer.
+    - docker build --secret id=npm_auth_token,env=DEVNW_NPM_REGISTRY_TOKEN -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
     - if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA; fi
   rules:
     # Main-branch only. On tag pipelines goreleaser-release produces
@@ -661,7 +664,10 @@ e2e:playwright:
         sleep 2
       done
     # Build the playwright runner and run the suite. Mount the report dir.
-    - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
+    # --secret passes DEVNW_NPM_REGISTRY_TOKEN (devnw-group CI/CD variable,
+    # already present in this job's environment) to the `npm ci` RUN step
+    # without it persisting in any image layer.
+    - docker build --secret id=npm_auth_token,env=DEVNW_NPM_REGISTRY_TOKEN -f deploy/playwright/Dockerfile.playwright -t pw:local .
     - mkdir -p e2e/playwright-report
     - >
       docker run --rm --network=host

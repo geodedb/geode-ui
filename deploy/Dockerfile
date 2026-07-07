@@ -26,8 +26,17 @@
 # digest on the next 60d cycle via scripts/check-image-pins.sh.
 FROM node:22-alpine AS web
 WORKDIR /work
-COPY geode-ui/package.json geode-ui/package-lock.json ./
-RUN npm ci
+# .npmrc maps the @devnw scope to the private GitLab npm registry (see
+# geode-ui/.npmrc) — it must land before `npm ci` so @devnw/* packages
+# (e.g. @devnw/playwright-scanner-kit) resolve. The auth token itself is
+# NOT baked in: it's supplied at build time via BuildKit's --secret
+# mechanism (`docker build --secret id=npm_auth_token,env=DEVNW_NPM_REGISTRY_TOKEN`)
+# and only exported for the lifetime of the `npm ci` RUN step, so it never
+# lands in an image layer or `docker history`.
+COPY geode-ui/package.json geode-ui/package-lock.json geode-ui/.npmrc ./
+RUN --mount=type=secret,id=npm_auth_token \
+    export DEVNW_NPM_REGISTRY_TOKEN="$(cat /run/secrets/npm_auth_token)" && \
+    npm ci
 COPY geode-ui/ ./
 # Webpack outputs to internal/ui/dist/ (per webpack.common.js); the Go
 # embed.go uses //go:embed all:dist relative to internal/ui/.

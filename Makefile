@@ -216,7 +216,12 @@ e2e-build: e2e-deps
 	@echo "==> building $(GEODE_IMAGE)"
 	cd -P .. && docker build -f geode-ui/deploy/geode/Dockerfile.geode -t $(GEODE_IMAGE) .
 	@echo "==> building $(GEODE_UI_IMAGE)"
-	cd -P .. && docker build -f geode-ui/deploy/Dockerfile -t $(GEODE_UI_IMAGE) .
+	# --secret passes DEVNW_NPM_REGISTRY_TOKEN through to the `web` stage's
+	# `npm ci` (needed to resolve @devnw/* packages via geode-ui/.npmrc)
+	# without it persisting in any image layer. In CI this is the
+	# devnw-group CI/CD variable, already present in the job environment;
+	# locally, export DEVNW_NPM_REGISTRY_TOKEN yourself before `make e2e-up`.
+	cd -P .. && docker build --secret id=npm_auth_token,env=DEVNW_NPM_REGISTRY_TOKEN -f geode-ui/deploy/Dockerfile -t $(GEODE_UI_IMAGE) .
 
 # Bring up the test stack (images already built by e2e-build; compose
 # only starts containers + runs the seed init). Sources the per-checkout
