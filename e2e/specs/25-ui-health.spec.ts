@@ -165,6 +165,29 @@ test.describe('UI health — horizontal overflow sweep', () => {
 
       for (const r of ROUTES_PUBLIC) {
         await visit(page, base, r)
+        // KNOWN KIT LIMITATION (tracked gap, not fixed here — kit change is
+        // out of scope for this task): the kit's scanContainerOverflow walks
+        // UP from each matched container (form/[role=dialog]/dialog) toward
+        // the document root and skips scanning it entirely if ANY ancestor
+        // — not just one sitting between the container and the overflowing
+        // text — has `overflow-x: auto|scroll`. The pre-migration
+        // containerOverflowReport() this replaced only exempted the
+        // narrower case (a scroll wrapper between the offending text and
+        // its own container), so this is a coverage-narrowing regression
+        // in the general case.
+        //
+        // Verified NOT applicable to this project's CONTAINER_SELECTOR
+        // today: the two overflow-x:auto ancestors in this codebase
+        // (TableView.tsx's ScrollArea, GraphToolbar.tsx's Toolbar) never
+        // have a form/[role=dialog]/dialog descendant — the app's only
+        // `<wa-dialog>` (ExpandQueryPopover) renders as a DOM sibling of
+        // GraphToolbar's containing CanvasArea, not nested under it, and
+        // TableView's cells contain no forms/dialogs. All other <form>
+        // elements live on unrelated admin/login/profile pages with no
+        // overflow-x:auto ancestor. Note this determination is specific to
+        // the current DOM structure and route list (which doesn't even
+        // include /query, the one route where GraphToolbar/TableView
+        // render) — re-verify if either changes.
         const findings = await scanContainerOverflow(
           page,
           CONTAINER_SELECTOR,
@@ -182,6 +205,8 @@ test.describe('UI health — horizontal overflow sweep', () => {
       await seedAuth(page)
       for (const r of ROUTES_PROTECTED) {
         await visit(page, base, r)
+        // See the known kit limitation noted above the first
+        // scanContainerOverflow call in this test.
         const findings = await scanContainerOverflow(
           page,
           CONTAINER_SELECTOR,
