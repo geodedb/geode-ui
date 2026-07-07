@@ -27,6 +27,10 @@
 /* eslint-disable no-await-in-loop, no-restricted-syntax */
 
 import { test, expect, Page } from '@playwright/test'
+import {
+  scanHorizontalOverflow,
+  scanContainerOverflow,
+} from '@devnw/playwright-scanner-kit'
 import { login } from '../helpers/auth'
 
 // Public + protected routes. /login is unauthenticated; everything
@@ -57,6 +61,10 @@ const VIEWPORTS = [
 
 const TOLERANCE_PX = 2
 
+// Containers whose text descendants must not overflow the right edge.
+// Passed straight through to the kit's scanContainerOverflow.
+const CONTAINER_SELECTOR = 'form, [role=dialog], dialog'
+
 // Mutable per-page console-error buffer is attached to the playwright
 // Page object so the route-walk and the console-error assertion share
 // a single sink. WeakMap keeps the binding out of the Page's public
@@ -81,83 +89,6 @@ async function seedAuth(page: Page): Promise<void> {
     const w = window as unknown as Record<string, unknown>
     w[e2eKey] = seed
   }, token)
-}
-
-async function pageOverflowPx(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const vw = window.innerWidth
-    const dw = document.documentElement.scrollWidth
-    return Math.max(0, dw - vw)
-  })
-}
-
-// Returns text-bearing elements inside any form / dialog whose right
-// edge exceeds the container's right edge by more than TOLERANCE_PX.
-// Skips elements that sit inside a horizontally-scrollable ancestor —
-// those surfaces intentionally exceed the container width.
-async function containerOverflowReport(page: Page): Promise<
-  Array<{
-    container: string
-    element: string
-    rightOverflow: number
-    text: string
-  }>
-> {
-  return page.evaluate(() => {
-    const CONTAINERS = 'form, [role=dialog], dialog'
-    const TEXT_SELECTORS =
-      'p, h1, h2, h3, h4, span, div, strong, em, code, label'
-    type Hit = {
-      container: string
-      element: string
-      rightOverflow: number
-      text: string
-    }
-    const out: Hit[] = []
-    const containers = Array.from(document.querySelectorAll(CONTAINERS))
-    containers.forEach((c) => {
-      const cRect = c.getBoundingClientRect()
-      if (cRect.width < 1) return
-      const desc = Array.from(c.querySelectorAll(TEXT_SELECTORS))
-      desc.forEach((el) => {
-        const cs = window.getComputedStyle(el as HTMLElement)
-        if (
-          cs.display === 'none' ||
-          cs.visibility === 'hidden' ||
-          cs.opacity === '0'
-        ) {
-          return
-        }
-        // Skip elements with a scrollable ancestor between them and the
-        // container — those surfaces opt in to overflow via scroll.
-        let anc: Element | null = el.parentElement
-        let scrollable = false
-        while (anc && anc !== c && anc !== document.body) {
-          const acs = window.getComputedStyle(anc as HTMLElement)
-          if (acs.overflowX === 'auto' || acs.overflowX === 'scroll') {
-            scrollable = true
-            break
-          }
-          anc = anc.parentElement
-        }
-        if (scrollable) return
-        const r = el.getBoundingClientRect()
-        if (r.width < 1 || r.height < 1) return
-        const rightOverflow = Math.max(0, r.right - cRect.right)
-        if (rightOverflow <= 2) return
-        const text = ((el as HTMLElement).innerText || '')
-          .slice(0, 80)
-          .replace(/\s+/g, ' ')
-        out.push({
-          container: `${c.tagName.toLowerCase()}.${(c as HTMLElement).className.toString().slice(0, 40)}`,
-          element: `${el.tagName.toLowerCase()}.${(el as HTMLElement).className.toString().slice(0, 40)}`,
-          rightOverflow,
-          text,
-        })
-      })
-    })
-    return out
-  })
 }
 
 async function visit(page: Page, base: string, route: string): Promise<void> {
@@ -190,19 +121,25 @@ test.describe('UI health — horizontal overflow sweep', () => {
 
       for (const r of ROUTES_PUBLIC) {
         await visit(page, base, r)
-        const overflow = await pageOverflowPx(page)
-        if (overflow > TOLERANCE_PX) {
-          failures.push({ route: r, overflowPx: overflow })
-        }
+        const findings = await scanHorizontalOverflow(page, [vp], TOLERANCE_PX)
+        findings.forEach((f) => {
+          failures.push({
+            route: r,
+            overflowPx: Number(f.meta?.overflowPx ?? 0),
+          })
+        })
       }
 
       await seedAuth(page)
       for (const r of ROUTES_PROTECTED) {
         await visit(page, base, r)
-        const overflow = await pageOverflowPx(page)
-        if (overflow > TOLERANCE_PX) {
-          failures.push({ route: r, overflowPx: overflow })
-        }
+        const findings = await scanHorizontalOverflow(page, [vp], TOLERANCE_PX)
+        findings.forEach((f) => {
+          failures.push({
+            route: r,
+            overflowPx: Number(f.meta?.overflowPx ?? 0),
+          })
+        })
       }
 
       expect(
@@ -221,22 +158,43 @@ test.describe('UI health — horizontal overflow sweep', () => {
 
       const failures: Array<{
         route: string
-        container: string
-        element: string
-        rightOverflow: number
-        text: string
+        selector: string
+        message: string
+        overflowPx: number
       }> = []
 
       for (const r of ROUTES_PUBLIC) {
         await visit(page, base, r)
-        const report = await containerOverflowReport(page)
-        report.forEach((f) => failures.push({ route: r, ...f }))
+        const findings = await scanContainerOverflow(
+          page,
+          CONTAINER_SELECTOR,
+          TOLERANCE_PX
+        )
+        findings.forEach((f) =>
+          failures.push({
+            route: r,
+            selector: f.selector,
+            message: f.message,
+            overflowPx: Number(f.meta?.overflowPx ?? 0),
+          })
+        )
       }
       await seedAuth(page)
       for (const r of ROUTES_PROTECTED) {
         await visit(page, base, r)
-        const report = await containerOverflowReport(page)
-        report.forEach((f) => failures.push({ route: r, ...f }))
+        const findings = await scanContainerOverflow(
+          page,
+          CONTAINER_SELECTOR,
+          TOLERANCE_PX
+        )
+        findings.forEach((f) =>
+          failures.push({
+            route: r,
+            selector: f.selector,
+            message: f.message,
+            overflowPx: Number(f.meta?.overflowPx ?? 0),
+          })
+        )
       }
 
       expect(

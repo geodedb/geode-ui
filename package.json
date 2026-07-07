@@ -101,6 +101,7 @@
     "@babel/preset-env": "^7.24.0",
     "@babel/preset-react": "^7.24.0",
     "@babel/preset-typescript": "^7.24.0",
+    "@devnw/playwright-scanner-kit": "file:../../../react/playwright-scanner-kit",
     "@playwright/test": "^1.59.1",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^14.2.0",
