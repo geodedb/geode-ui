@@ -104,5 +104,9 @@ USER geode
 # Playwright runs reproducibly; deploy/docker-compose.example.yml
 # documents the production-recommended `openssl rand -base64 32` flow.
 EXPOSE 8080
+# Healthcheck against the API's own liveness endpoint (matches the probe
+# already used in deploy/docker-compose.test.yml's geode-ui healthcheck).
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://127.0.0.1:8080/healthz | grep -q '"status":"ok"' || exit 1
 ENTRYPOINT ["/usr/local/bin/geode-ui"]
 CMD ["-listen", ":8080"]
