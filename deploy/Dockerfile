@@ -52,7 +52,11 @@ RUN npm run build
 # alongside go.mod toolchain bumps.
 FROM golang:1.26-alpine AS gobuild
 ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3
-RUN apk add --no-cache git
+# apk version pin verified live against the golang:1.26-alpine base
+# (Alpine 3.24.1) repo on 2026-07-11 via `docker run golang:1.26-alpine
+# apk info git`. Re-verify and bump alongside the next base-image pin
+# refresh (see scripts/check-image-pins.sh).
+RUN apk add --no-cache git=2.54.0-r0
 WORKDIR /work
 # Sibling driver source needed because of the local replace directive.
 # Layout inside the build image:
@@ -71,7 +75,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/geode-ui ./cmd/ser
 # ----- Stage 3: minimal runtime -----
 # image-pin: 2026-05-16 @ alpine 3.20 stable; refresh per cadence.
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates && \
+# apk version pin verified live against the alpine:3.20 repo on
+# 2026-07-11 via `docker run alpine:3.20 apk info ca-certificates`.
+# Re-verify and bump alongside the next base-image pin refresh (see
+# scripts/check-image-pins.sh).
+RUN apk add --no-cache ca-certificates=20260413-r0 && \
     addgroup -S geode && adduser -S -G geode geode
 COPY --from=gobuild /out/geode-ui /usr/local/bin/geode-ui
 # Pre-create /var/lib/geode-ui/uploads owned by the runtime user so that

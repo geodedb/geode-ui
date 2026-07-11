@@ -43,6 +43,12 @@ services:
     build:
       context: ../..
       dockerfile: geode-ui/deploy/geode/Dockerfile.geode
+    # SAST hardening: drop all Linux capabilities (geode serve/auth init
+    # need none of them) and block setuid/setgid privilege escalation.
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
     # Override the image entrypoint with our wrapper. We keep tini as
     # PID 1 so SIGTERM/SIGINT propagate cleanly to `geode serve`.
     entrypoint: [/usr/bin/tini, --, /geode-entrypoint.sh]
@@ -75,8 +81,12 @@ services:
     volumes:
     - geode-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
+    # SAST hardening: neither host port below is consumed by CI or the
+    # Playwright suite (grep confirms no e2e/ spec or .gitlab-ci.yml step
+    # dials them) — they exist purely for ad-hoc host-side debugging, so
+    # binding to loopback only is safe.
     ports:
-    - 3141:3141/udp
+    - 127.0.0.1:3141:3141/udp
     # Expose the prometheus listener so a host-side curl can grab
     # /metrics for ad-hoc debugging; the Playwright spec drives it
     # through the geode-ui proxy at /api/v1/metrics instead. The
@@ -84,7 +94,7 @@ services:
     # never has to know about the host-side remap; we pick a host
     # port well clear of the Prometheus / Pushgateway / Alertmanager
     # default cluster (9090 / 9091 / 9092).
-    - 9093:9090/tcp
+    - 127.0.0.1:9093:9090/tcp
     # The wire is up well before any password rotation has happened, so
     # we cannot use a normal `geode query 'RETURN 1'` probe — pre-
     # rotation, every authenticated query rejects with status_class=08P01
@@ -113,6 +123,12 @@ services:
 
   geode-init:
     image: geode:v0.5.19
+    # SAST hardening: one-shot seed/rotate script needs no Linux
+    # capabilities and no privilege escalation.
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
     depends_on:
       geode:
         condition: service_healthy
@@ -225,6 +241,12 @@ services:
     build:
       context: ../..
       dockerfile: geode-ui/deploy/Dockerfile
+    # SAST hardening: geode-ui listens on an unprivileged port and does
+    # no privileged filesystem/network operations.
+    security_opt:
+    - no-new-privileges:true
+    cap_drop:
+    - ALL
     depends_on:
       geode-init:
         condition: service_completed_successfully
@@ -302,6 +324,15 @@ services:
     volumes:
     - ./profiles.json:/etc/geode-ui/profiles.json:ro
     - geode-ui-uploads:/var/lib/geode-ui/uploads
+    # SAST "Container Traffic Not Bound To Host Interface" NOT applied
+    # here: the e2e:playwright CI job runs Playwright in a sibling
+    # docker:25-dind container and reaches this port at
+    # http://docker:8080 (see .gitlab-ci.yml + e2e/playwright.config.ts
+    # baseURL / e2e/helpers/globalSetup.ts) — not via 127.0.0.1 relative
+    # to the dind engine. Binding to 127.0.0.1 here would only be
+    # reachable from inside the dind container and would break the e2e
+    # pipeline. Left as-is pending a network-topology change (e.g. join
+    # the Playwright runner container to the compose network directly).
     ports:
     - 8080:8080
     healthcheck:
@@ -340,6 +371,11 @@ services:
     volumes:
     - ./geode/mcp-bridge.sh:/mcp/mcp-bridge.sh:ro
     - ./geode/mcp-stdio-launch.sh:/mcp/mcp-stdio-launch.sh:ro
+    # SAST "Container Traffic Not Bound To Host Interface" NOT applied
+    # here: e2e/specs/10-mcp-endpoint.spec.ts opens a raw TCP socket to
+    # MCP_HOST:MCP_PORT, which CI sets to docker:8090 (the docker:25-dind
+    # sibling service alias, not localhost/127.0.0.1 relative to this
+    # container). Binding to loopback would break that spec in CI.
     ports:
     - 8090:8090
     # No wget/curl/nc in the geode runtime image; bash 5+ is present, so
