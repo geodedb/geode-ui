@@ -74,7 +74,14 @@ export function createCytoscapeStyle(
   // contrast — see theme/types.ts).
   const edgeColor = isDark ? '#7d6f96' : '#9c8db5'
   const edgeLabelColor = isDark ? '#cca8fb' : '#5a4a78'
-  const nodeBorderColor = isDark ? '#1c0f2e' : '#ffffff'
+  // Border must match bg.graphCanvas (the actual canvas the node
+  // renders on), not bg.canvas — see the node selector's "Thin border
+  // in canvas color" comment below. Light mode's bg.canvas and
+  // bg.graphCanvas happen to coincide (#ffffff), which masked that
+  // dark mode was wired to bg.canvas (#1c0f2e) instead of
+  // bg.graphCanvas (#13091e), so the border rendered visibly against
+  // the darker graph canvas rather than blending into it.
+  const nodeBorderColor = theme.bg.graphCanvas
   const selectedBorder = theme.colors.primary
   const fadedOpacity = 0.18
 
