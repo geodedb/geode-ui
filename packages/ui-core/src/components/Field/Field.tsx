@@ -34,8 +34,13 @@ export const Field: React.FC<FieldProps> = ({
   required,
   children,
 }) => {
+  // The hint <div> below only renders when hint && !error (error takes
+  // visual precedence) — hintId must track that same condition, or
+  // aria-describedby can reference an id with no corresponding DOM
+  // node whenever both hint and error are supplied simultaneously.
+  const showHint = Boolean(hint) && !error
   const errorId = error && htmlFor ? `${htmlFor}-error` : undefined
-  const hintId = hint && htmlFor ? `${htmlFor}-hint` : undefined
+  const hintId = showHint && htmlFor ? `${htmlFor}-hint` : undefined
 
   // Inject aria-describedby into the single child control if it's a
   // valid React element. Multi-control fields should pass it manually.
@@ -87,7 +92,7 @@ export const Field: React.FC<FieldProps> = ({
       ) : (
         control
       )}
-      {hint && !error && (
+      {showHint && (
         <div id={hintId} className="small text-body-tertiary">
           {hint}
         </div>
