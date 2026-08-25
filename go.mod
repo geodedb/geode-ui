@@ -1,20 +1,20 @@
 module geodedb.com/geode-ui
 
-go 1.26.2
+go 1.27.0
 
 replace geodedb.com/geode => ../geode-client-go
 
 require (
 	geodedb.com/geode v0.0.0-00010101000000-000000000000
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/lestrrat-go/jwx v1.2.31
-	github.com/stretchr/testify v1.11.1
+	github.com/lestrrat-go/jwx/v4 v4.4.0
+	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/otel v1.43.0
-	go.opentelemetry.io/otel/metric v1.43.0
-	go.opentelemetry.io/otel/trace v1.43.0
-	golang.org/x/sync v0.20.0
+	go.opentelemetry.io/otel/metric v1.46.0
+	go.opentelemetry.io/otel/trace v1.46.0
+	golang.org/x/sync v0.22.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.50.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (

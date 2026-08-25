@@ -4,17 +4,17 @@
 
 include:
   # Security scanning
-  - component: gitlab.com/devnw/ci-catalog/security-sast@v1.7.1
-  - component: gitlab.com/devnw/ci-catalog/security-dependency-scanning@v1.7.1
-  - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.7.1
-  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/security-sast@v1.48.0
+  - component: gitlab.com/devnw/ci-catalog/security-dependency-scanning@v1.48.0
+  - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.48.0
+  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.48.0
 
   # SBOM
-  - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.7.1
-  - component: gitlab.com/devnw/ci-catalog/sbom-scan@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.48.0
+  - component: gitlab.com/devnw/ci-catalog/sbom-scan@v1.48.0
 
   # Release
-  - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.7.1
+  - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.48.0
 
   # Code signing — Windows Authenticode via ssl.com eSigner.
   # Pulls credentials from group-level CI variables ESIGNER_*; see
@@ -280,7 +280,7 @@ pages:
 # install/lint/test/build stages declared above.
 
 .go_defaults: &go_defaults
-  image: golang:1.26-alpine
+  image: golang:1.27-alpine
   variables:
     GOEXPERIMENT: jsonv2
     GOTOOLCHAIN: go1.26.3
@@ -371,9 +371,9 @@ bench-gate:
 # parent dir so docker build sees the expected layout.
 docker:build:
   stage: build
-  image: docker:25
+  image: docker:29
   services:
-    - docker:25-dind
+    - docker:29-dind
   before_script: []
   variables:
     DOCKER_TLS_CERTDIR: ""
@@ -411,9 +411,9 @@ docker:build:
 # release artifact.
 e2e:playwright:
   stage: test
-  image: docker:25
+  image: docker:29
   services:
-    - docker:25-dind
+    - docker:29-dind
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
@@ -484,9 +484,9 @@ e2e:playwright:
 # pipe-to-shell), authenticate to registries, then invoke goreleaser.
 
 .goreleaser-base:
-  image: docker:25
+  image: docker:29
   services:
-    - docker:25-dind
+    - docker:29-dind
   tags:
     - company
   variables:
