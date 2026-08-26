@@ -17,7 +17,9 @@
   ],
   "overrides": [
     {
-      "files": ["*.js"],
+      "files": [
+        "*.js"
+      ],
       "rules": {
         "import/extensions": 0,
         "react/destructuring-assignment": 1,
@@ -26,7 +28,10 @@
       }
     },
     {
-      "files": ["*.ts", "*.tsx"],
+      "files": [
+        "*.ts",
+        "*.tsx"
+      ],
       "rules": {
         "@typescript-eslint/no-explicit-any": 0,
         "@typescript-eslint/no-var-requires": 0,
@@ -45,11 +50,24 @@
       }
     },
     {
-      "files": ["*.test.tsx", "*.test.ts"],
+      "files": [
+        "*.test.tsx",
+        "*.test.ts"
+      ],
       "rules": {
         "@typescript-eslint/no-empty-function": 0,
         "import/first": 0,
         "import/order": 0
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "__test_utils__/**/*"
+      ],
+      "rules": {
+        "@typescript-eslint/no-require-imports": "off"
       }
     }
   ],
@@ -61,11 +79,17 @@
     "ecmaVersion": "latest",
     "sourceType": "module"
   },
-  "plugins": ["react", "@typescript-eslint"],
+  "plugins": [
+    "react",
+    "@typescript-eslint"
+  ],
   "root": true,
   "rules": {
     "comma-dangle": 0,
-    "eol-last": ["error", "always"],
+    "eol-last": [
+      "error",
+      "always"
+    ],
     "import-extensions": 0,
     "max-len": 0,
     "object-curly-newline": 0,
@@ -87,7 +111,11 @@
     "prefer-template": 0,
     "no-use-before-define": [
       "error",
-      { "functions": false, "classes": false, "variables": false }
+      {
+        "functions": false,
+        "classes": false,
+        "variables": false
+      }
     ],
     "max-classes-per-file": 0,
     "arrow-body-style": 0,
@@ -101,7 +129,12 @@
   "settings": {
     "import/resolver": {
       "node": {
-        "extensions": [".ts", ".tsx", ".js", ".jsx"]
+        "extensions": [
+          ".ts",
+          ".tsx",
+          ".js",
+          ".jsx"
+        ]
       }
     }
   }

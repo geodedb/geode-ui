@@ -26,6 +26,8 @@
 //      to set serverUrl), fall back to `http://localhost`. This matches
 //      the generated client's requirement that base URLs use http(s)
 //      and avoids tripping its URL whitelist.
+import { locationOrigin } from './locationOrigin'
+
 export function resolveBaseUrl(): string {
   if (
     typeof window !== 'undefined' &&
@@ -35,14 +37,9 @@ export function resolveBaseUrl(): string {
   ) {
     return window.geode.serverUrl
   }
-  if (
-    typeof window !== 'undefined' &&
-    window.location &&
-    window.location.origin &&
-    (window.location.origin.startsWith('http:') ||
-      window.location.origin.startsWith('https:'))
-  ) {
-    return window.location.origin
+  const origin = locationOrigin()
+  if (origin && (origin.startsWith('http:') || origin.startsWith('https:'))) {
+    return origin
   }
   return 'http://localhost'
 }

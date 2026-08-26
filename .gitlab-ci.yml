@@ -463,7 +463,7 @@ pages:
   image: golang:1.26-alpine
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.26.3
+    GOTOOLCHAIN: go1.27.0
     CGO_ENABLED: "0"
     # QUALITY #175: stash the module download cache so the test/lint
     # jobs don't pull every dep from proxy.golang.org on every pipeline.
@@ -725,10 +725,10 @@ e2e:playwright:
   variables:
     GIT_DEPTH: '0'
     # The alpine `go` package ships with GOTOOLCHAIN=local (no
-    # auto-download), but our go.mod requires Go 1.26.3 while alpine
+    # auto-download), but our go.mod requires Go 1.27.0 while alpine
     # currently ships Go 1.22.x. `auto` tells Go to download the
     # specific toolchain go.mod asks for. .goreleaser.yaml's
-    # builds[].env still pins GOTOOLCHAIN=go1.26.3 for the build
+    # builds[].env still pins GOTOOLCHAIN=go1.27.0 for the build
     # process itself; this variable governs the pre-build "loading
     # go mod information" step that runs with the shell env.
     GOTOOLCHAIN: auto

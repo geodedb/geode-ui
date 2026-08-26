@@ -55,7 +55,7 @@ builds:
   env:
   - CGO_ENABLED=0
   - GOEXPERIMENT=jsonv2
-  - GOTOOLCHAIN=go1.26.3
+  - GOTOOLCHAIN=go1.27.0
   goos:
   - linux
   - darwin

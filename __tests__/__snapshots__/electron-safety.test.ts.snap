@@ -1,3 +1,3 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`buildCspValue (APP-02: Electron CSP) snapshot — locks the CSP string against silent drift 1`] = `"default-src 'self' geode://app; script-src 'self' geode://app; style-src 'self' geode://app 'unsafe-inline'; font-src 'self' geode://app data:; img-src 'self' geode://app data: blob:; connect-src 'self' geode://app http://localhost:8080 ws://localhost:8080; worker-src 'self' geode://app blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'none'"`;

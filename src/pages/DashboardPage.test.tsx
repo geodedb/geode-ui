@@ -100,7 +100,7 @@ jest.mock('../lib/useClusterStatus', () => ({
 // static stub for these DashboardPage layout assertions; the card's
 // own behavior is exercised in its dedicated test below.
 jest.mock('../components/dashboard/AuditEventMixCard', () => ({
-  AuditEventMixCard: (): JSX.Element | null => null,
+  AuditEventMixCard: (): React.JSX.Element | null => null,
 }))
 
 import { DashboardPage } from './DashboardPage'

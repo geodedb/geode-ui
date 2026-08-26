@@ -15,7 +15,7 @@ type ReagraphProps = {
   layoutType: string
 }
 const mockGraphCanvas = jest.fn(
-  (props: ReagraphProps): JSX.Element => (
+  (props: ReagraphProps): React.JSX.Element => (
     // Touch `props` (rendering a data attribute with the layout type
     // we received) so eslint's no-unused-vars rule is satisfied without
     // an underscore-prefixed arg name or rule-disable comment. The

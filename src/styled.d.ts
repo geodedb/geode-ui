@@ -8,5 +8,8 @@ declare module 'styled-components' {
   // every styled component, every helper, and every test wrapper agree on
   // token shape — including the legacy flat aliases (colors.primary,
   // spacing.{xs..xl}) kept for backwards compatibility.
+  // The "empty" interface is the point: declaration merging into the
+  // module's DefaultTheme requires an interface, not a type alias.
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   export interface DefaultTheme extends Theme {}
 }

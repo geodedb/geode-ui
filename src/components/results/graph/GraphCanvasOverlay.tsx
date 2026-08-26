@@ -25,7 +25,7 @@ import type { TooltipTargetData } from './useNodeTooltip'
 // e2e/specs/20 -- pre-fix the bench canvas was 990x0 because the
 // wrapper was auto-height).
 export type GraphCanvasOverlayProps = {
-  canvasRef: RefObject<HTMLDivElement>
+  canvasRef: RefObject<HTMLDivElement | null>
   cyRef: MutableRefObject<Core | null>
   sig: string
   t: TFunction

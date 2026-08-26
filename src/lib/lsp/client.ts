@@ -1,11 +1,12 @@
 import { MonacoLanguageClient } from 'monaco-languageclient'
-// `vscode-languageclient`'s package `main` is the node-only entry; the
-// CloseAction / ErrorAction enums live in the common subpath, which is
-// browser-safe.
-import {
-  CloseAction,
-  ErrorAction,
-} from 'vscode-languageclient/lib/common/client.js'
+// vscode-languageclient v10's root export is the browser-safe common
+// api (lib/common/api), which re-exports the CloseAction / ErrorAction
+// enums; the old ./lib/common/client.js deep path is no longer allowed
+// by its exports map. TS (moduleResolution "node") resolves the bare
+// specifier via the tsconfig paths mapping. (eslint's import resolver,
+// like TS's node10 resolution, cannot see the exports-map-only entry.)
+// eslint-disable-next-line import/no-unresolved
+import { CloseAction, ErrorAction } from 'vscode-languageclient'
 import { createWebSocketTransport, LspTransport } from './websocketTransport'
 
 // monaco-languageclient v8 requires the @codingame/monaco-vscode-api
@@ -47,15 +48,25 @@ function ensureVscodeServicesInitialized(): Promise<void> {
     // client — monaco-languageclient adds its required languages +
     // model overrides internally.
     // ESLint's `import/no-unresolved` doesn't follow monaco-languageclient's
-    // `exports` map for `./vscode/services`. The subpath resolves at
+    // `exports` map for `./vscodeApiWrapper`. The subpath resolves at
     // runtime (webpack honors `exports`) and unit tests virtual-mock
     // the same string. Disable the rule via the next-line directive
     // immediately above the import (the rule is line-scoped).
-    const { initServices } = await import(
+    //
+    // monaco-languageclient v10 replaced the `vscode/services`
+    // initServices() one-liner with MonacoVscodeApiWrapper.start();
+    // `$type: 'classic'` + EditorService views is the equivalent of
+    // the old minimal bootstrap (the wrapper merges the always-on
+    // languages/log/model/configuration services itself).
+    const { MonacoVscodeApiWrapper } = await import(
       // eslint-disable-next-line import/no-unresolved
-      /* webpackChunkName: "vscode-services" */ 'monaco-languageclient/vscode/services'
+      /* webpackChunkName: "vscode-services" */ 'monaco-languageclient/vscodeApiWrapper'
     )
-    await initServices({ caller: 'geode-ui:GqlEditor' })
+    const wrapper = new MonacoVscodeApiWrapper({
+      $type: 'classic',
+      viewsConfig: { $type: 'EditorService' },
+    })
+    await wrapper.start({ caller: 'geode-ui:GqlEditor' })
   })()
   // If init fails, reset the cache so the next attempt retries instead
   // of inheriting a poisoned rejected promise.
@@ -262,12 +273,11 @@ export async function startLspClient(
           ...(opts.format ? { format: opts.format } : {}),
         },
       },
-      connectionProvider: {
-        get: () =>
-          Promise.resolve({
-            reader: transport.reader,
-            writer: transport.writer,
-          }),
+      // monaco-languageclient v10 replaced the lazy connectionProvider
+      // with directly supplied messageTransports.
+      messageTransports: {
+        reader: transport.reader,
+        writer: transport.writer,
       },
     })
 

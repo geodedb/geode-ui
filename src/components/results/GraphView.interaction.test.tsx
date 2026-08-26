@@ -526,8 +526,16 @@ describe('Phase 2: Explore neighbours', () => {
     })
     pickNode(view, 'p:Alice')
     const exploreBtn = view.getByTestId('graph-action-explore')
-    expect(exploreBtn).toBeDisabled()
-    expect(exploreBtn).toHaveAttribute('title')
+    // React 19 assigns `disabled`/`title` as element PROPERTIES on
+    // upgraded custom elements (WA's wa-button), so jest-dom's
+    // attribute-based toBeDisabled()/toHaveAttribute() no longer see
+    // them in jsdom. Assert the property contract instead.
+    const exploreState = exploreBtn as unknown as {
+      disabled?: boolean
+      title?: string
+    }
+    expect(exploreState.disabled).toBe(true)
+    expect(exploreState.title).toBeTruthy()
   })
 
   it('surfaces a fetch failure via the graph error banner', async () => {

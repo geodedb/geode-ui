@@ -141,7 +141,10 @@ type WaDropdownItemProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode
 }
 
-declare global {
+// React 19 removed the global JSX namespace: the JSX runtime now reads
+// tag types from React.JSX.IntrinsicElements, so augment the 'react'
+// module instead of the (no longer consulted) global JSX namespace.
+declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
       'wa-button': WaButtonProps

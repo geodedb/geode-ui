@@ -21,7 +21,7 @@
 set -euo pipefail
 
 # Single source of truth — bump this when bumping Go.
-GOTOOLCHAIN_PIN="1.26.3"
+GOTOOLCHAIN_PIN="1.27.0"
 
 ROOT="${1:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$ROOT"

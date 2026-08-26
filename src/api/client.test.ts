@@ -12,11 +12,18 @@ import type { GeodeBridge } from '../types/electron'
 // falls back to http://localhost only when neither a bridge serverUrl
 // nor an http(s) origin is available.
 
+// jsdom 26 (jest 30) makes window.location non-configurable, so the old
+// Object.defineProperty(window, 'location', ...) swap throws. The
+// resolver now reads the origin through the ./locationOrigin leaf
+// module precisely so tests can stub it per-case.
+let stubbedOrigin: string | undefined
+jest.mock('./locationOrigin', () => ({
+  __esModule: true,
+  locationOrigin: (): string | undefined => stubbedOrigin,
+}))
+
 function setLocationOrigin(origin: string): void {
-  Object.defineProperty(window, 'location', {
-    configurable: true,
-    value: { ...window.location, origin, href: origin + '/' },
-  })
+  stubbedOrigin = origin
 }
 
 function setBridge(serverUrl: string | undefined): void {

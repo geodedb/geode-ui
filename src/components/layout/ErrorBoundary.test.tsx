@@ -6,7 +6,7 @@ import { testTheme as theme } from '../../test-utils/theme'
 
 afterEach(cleanup)
 
-function Boom({ message }: { message: string }): JSX.Element {
+function Boom({ message }: { message: string }): React.JSX.Element {
   throw new Error(message)
 }
 

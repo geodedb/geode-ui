@@ -37,16 +37,19 @@ jest.mock('monaco-languageclient', () => ({
 // "Default api is not ready yet"). Stub so the dynamic-import in
 // ensureVscodeServicesInitialized() resolves to a no-op under jest.
 jest.mock(
-  'monaco-languageclient/vscode/services',
+  'monaco-languageclient/vscodeApiWrapper',
   () => ({
     __esModule: true,
-    initServices: jest.fn().mockResolvedValue(undefined),
+    MonacoVscodeApiWrapper: jest.fn().mockImplementation(() => ({
+      start: jest.fn().mockResolvedValue(undefined),
+      dispose: jest.fn(),
+    })),
   }),
   { virtual: true }
 )
 
 jest.mock(
-  'vscode-languageclient/lib/common/client.js',
+  'vscode-languageclient',
   () => ({
     __esModule: true,
     ErrorAction: { Continue: 1, Shutdown: 2 },

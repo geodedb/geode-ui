@@ -15,7 +15,11 @@
     "paths": {
       "@/*": ["src/*"],
       "@api": ["gen/client/react/index.ts"],
-      "@api/*": ["gen/client/react/*"]
+      "@api/*": ["gen/client/react/*"],
+      "monaco-editor": ["node_modules/monaco-editor/esm/vs/index.d.ts"],
+      "vscode-languageclient": [
+        "node_modules/vscode-languageclient/lib/common/api.d.ts"
+      ]
     }
   },
   "exclude": [

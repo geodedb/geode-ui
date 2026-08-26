@@ -105,6 +105,68 @@ if (
   }
 }
 
+// jsdom 26 (jest-environment-jsdom v30) DOES ship attachInternals, so
+// the stub above no longer installs — but its ElementInternals is still
+// partial: setValidity/setFormValue/checkValidity/reportValidity are
+// missing, and WA's form-associated elements crash with
+// "this.internals.setValidity is not a function". Backfill just the
+// missing members on the real prototype.
+if (typeof globalThis.ElementInternals !== 'undefined') {
+  const proto = globalThis.ElementInternals.prototype
+  if (!Object.getOwnPropertyDescriptor(proto, 'validity')) {
+    Object.defineProperty(proto, 'validity', {
+      configurable: true,
+      get() {
+        return {
+          valid: true,
+          badInput: false,
+          customError: false,
+          patternMismatch: false,
+          rangeOverflow: false,
+          rangeUnderflow: false,
+          stepMismatch: false,
+          tooLong: false,
+          tooShort: false,
+          typeMismatch: false,
+          valueMissing: false,
+        }
+      },
+    })
+  }
+  if (!Object.getOwnPropertyDescriptor(proto, 'validationMessage')) {
+    Object.defineProperty(proto, 'validationMessage', {
+      configurable: true,
+      get() {
+        return ''
+      },
+    })
+  }
+  if (!Object.getOwnPropertyDescriptor(proto, 'willValidate')) {
+    Object.defineProperty(proto, 'willValidate', {
+      configurable: true,
+      get() {
+        return false
+      },
+    })
+  }
+  if (typeof proto.setValidity !== 'function') {
+    proto.setValidity = function setValidity() {}
+  }
+  if (typeof proto.setFormValue !== 'function') {
+    proto.setFormValue = function setFormValue() {}
+  }
+  if (typeof proto.checkValidity !== 'function') {
+    proto.checkValidity = function checkValidity() {
+      return true
+    }
+  }
+  if (typeof proto.reportValidity !== 'function') {
+    proto.reportValidity = function reportValidity() {
+      return true
+    }
+  }
+}
+
 // jsdom's Performance implementation (as of jest-environment-jsdom v29 /
 // jsdom v20) ships `performance.now()` and the navigation-timing fields,
 // but omits the W3C UserTiming entries (`mark`, `measure`, `clearMarks`,
