@@ -15,17 +15,18 @@ require (
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.44.0
-	go.opentelemetry.io/otel/metric v1.44.0
+	go.opentelemetry.io/otel/metric v1.46.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
-	go.opentelemetry.io/otel/trace v1.44.0
+	go.opentelemetry.io/otel/trace v1.46.0
 	golang.org/x/crypto v0.52.0
 	github.com/lestrrat-go/jwx v1.2.31
-	github.com/stretchr/testify v1.11.1
-	golang.org/x/sync v0.20.0
+	github.com/stretchr/testify v1.12.1
+	golang.org/x/sync v0.22.0
 	golang.org/x/text v0.37.0
+	github.com/lestrrat-go/jwx/v4 v4.4.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	modernc.org/sqlite v1.50.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
