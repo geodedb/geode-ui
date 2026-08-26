@@ -47,6 +47,8 @@ check_pin "Makefile"         "^GOTOOLCHAIN \\?= go${GOTOOLCHAIN_PIN}\$"         
 check_pin ".gitlab-ci.yml"   "GOTOOLCHAIN: go${GOTOOLCHAIN_PIN}"                     ".gitlab-ci.yml GOTOOLCHAIN var"
 check_pin "README.md"        "Go-${GOTOOLCHAIN_PIN}-00ADD8"                          "README.md Go badge"
 check_pin "README.md"        "Build \\(Go ${GOTOOLCHAIN_PIN} \\+ Node"               "README.md quick-start hint"
+check_pin "scripts/run-go.sh"           "GOTOOLCHAIN=go${GOTOOLCHAIN_PIN}\$"         "scripts/run-go.sh GOTOOLCHAIN export"
+check_pin "scripts/check-go-mod-tidy.sh" "GOTOOLCHAIN=go${GOTOOLCHAIN_PIN}\$"        "scripts/check-go-mod-tidy.sh GOTOOLCHAIN export"
 
 # Check 2: stale-pin grep — any 1.26.x !== $GOTOOLCHAIN_PIN is a leftover.
 # We grep across the audited files only (NOT the full tree — generated
