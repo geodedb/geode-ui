@@ -70,6 +70,7 @@ default:
     policy: pull
   tags:
     - company
+    - linux
 
 stages:
   - install
@@ -489,6 +490,7 @@ e2e:playwright:
     - docker:25-dind
   tags:
     - company
+    - linux
   variables:
     DOCKER_TLS_CERTDIR: ''
     DOCKER_BUILDKIT: '1'
