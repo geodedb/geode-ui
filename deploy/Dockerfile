@@ -41,8 +41,8 @@ ENV GEODE_E2E_BUILD=true
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
-FROM golang:1.26-alpine AS gobuild
-ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3
+FROM golang:1.27.1-alpine AS gobuild
+ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.27.1
 RUN apk add --no-cache git
 WORKDIR /work
 # Sibling driver source needed because of the local replace directive.
