@@ -89,7 +89,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadDisabled,
 			description: "server started without -upload-dir; uploads disabled",
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	if file == nil || file.Reader == nil {
 		writeEndpointError(w, &endpointError{
@@ -97,7 +97,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeMissingFile,
 			description: `multipart field "file" is required`,
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	name, err := sanitiseUploadName(file.Filename)
@@ -107,7 +107,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeInvalidFilename,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	dir := filepath.Join(s.cfg.UploadDir, subdir)
@@ -117,7 +117,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadDirFailed,
 			description: "could not create upload dir: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	finalPath := filepath.Join(dir, name)
@@ -130,7 +130,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadOpenFailed,
 			description: "could not open destination: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	n, copyErr := io.Copy(out, file.Reader)
 	closeErr := out.Close()
@@ -141,7 +141,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadWriteFailed,
 			description: "could not write file: " + copyErr.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmpPath)
@@ -150,7 +150,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadCloseFailed,
 			description: "could not close file: " + closeErr.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
@@ -159,7 +159,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadRenameFailed,
 			description: "could not finalise upload: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	emitAudit(auditEvent,

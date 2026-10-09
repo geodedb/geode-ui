@@ -35,7 +35,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 			code:        ErrCodeServerMisconfigured,
 			description: "jwt issuer not configured",
 		})
-		return nil, nil
+		return responseWritten[gentypes.LoginResp]()
 	}
 	if s.cfg.Profiles == nil {
 		writeEndpointError(w, &endpointError{
@@ -43,7 +43,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 			code:        ErrCodeServerMisconfigured,
 			description: "profile lookup not configured",
 		})
-		return nil, nil
+		return responseWritten[gentypes.LoginResp]()
 	}
 	// SEC-N10 (#76): start the auth-failure timer BEFORE any upstream
 	// call so every failure path — unknown user, wrong password, and
@@ -80,7 +80,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 			reason = "upstream_error"
 		}
 		denyLogin(w, authStart, reason, req.Username, req.Password, profile)
-		return nil, nil
+		return responseWritten[gentypes.LoginResp]()
 	}
 	// Grant the "admin" role to configured bootstrap admins (see
 	// adminRolesFor / authenticateUpstream).

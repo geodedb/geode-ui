@@ -24,14 +24,14 @@ import (
 func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *gentypes.CreateProfileReq) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
 		writeStoreUnavailable(w)
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	actr := actorFromContext(r.Context())
 	isAdmin := hasRole(actr.Roles, "admin")
 	scope := conn.ProfileScope(req.Scope)
 	if !scope.Valid() {
 		writeBadRequest(w, ErrCodeInvalidScope, "scope must be 'system' or 'personal'")
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 
 	owner := ""
@@ -40,7 +40,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 		if !isAdmin {
 			writeEndpointErr(w, http.StatusForbidden,
 				ErrCodeForbidden, "system profiles require the admin role")
-			return nil, nil
+			return responseWritten[gentypes.Profile]()
 		}
 	case conn.ProfileScopePersonal:
 		owner = actr.Subject
@@ -49,12 +49,12 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 	tlsMat, err := tlsFromGenJSON(req.TLS)
 	if err != nil {
 		writeBadRequest(w, ErrCodeInvalidTLS, err.Error())
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	poolOv, err := poolOverridesFromGenJSON(req.PoolOverrides)
 	if err != nil {
 		writeBadRequest(w, ErrCodeInvalidPoolOverrides, err.Error())
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 
 	saved, err := s.cfg.Store.Put(r.Context(), conn.Profile{
@@ -70,7 +70,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 	})
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	emitAudit(auditEventProfileCreated,
 		"actor", actr.Subject,
@@ -92,18 +92,18 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
 		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	actr := actorFromContext(r.Context())
 	isAdmin := hasRole(actr.Roles, "admin")
 	p, err := s.cfg.Store.Get(r.Context(), req.ProfileID)
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	if p.Scope == conn.ProfileScopePersonal && p.OwnerUserID != actr.Subject && !isAdmin {
 		writeNotFound(w, "profile not found")
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	reveal := isAdmin || p.OwnerUserID == actr.Subject
 	g := toGenProfile(p, reveal)
@@ -119,12 +119,12 @@ func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *
 func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.UpdateProfileReq) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
 		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	id := r.PathValue("profileId")
 	if id == "" {
 		writeBadRequest(w, ErrCodeMissingID, "path parameter profileId is required")
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	actr := actorFromContext(r.Context())
 	isAdmin := hasRole(actr.Roles, "admin")
@@ -132,21 +132,21 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 	cur, err := s.cfg.Store.Get(r.Context(), id)
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	if !canMutate(cur, actr, isAdmin) {
 		writeNotFound(w, "profile not found")
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	patch, perr := buildProfilePatch(req)
 	if perr != nil {
 		writeEndpointError(w, perr)
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	updated, err := s.cfg.Store.Patch(r.Context(), id, patch)
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
-		return nil, nil
+		return responseWritten[gentypes.Profile]()
 	}
 	emitAudit(auditEventProfileUpdated,
 		"actor", actr.Subject,
@@ -167,22 +167,22 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath) (*gentypes.Empty, error) {
 	if s.cfg.Store == nil {
 		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	actr := actorFromContext(r.Context())
 	isAdmin := hasRole(actr.Roles, "admin")
 	cur, err := s.cfg.Store.Get(r.Context(), req.ProfileID)
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	if !canMutate(cur, actr, isAdmin) {
 		writeNotFound(w, "profile not found")
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	if err := s.cfg.Store.Delete(r.Context(), req.ProfileID); err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	emitAudit(auditEventProfileDeleted,
 		"actor", actr.Subject,
@@ -281,7 +281,7 @@ func poolOverridesFromGenJSON(raw jsontext.Value) (conn.PoolOverrides, error) {
 // "clear all" signal mergeProfile is looking for.
 func tlsPatchFromGenJSON(raw jsontext.Value) (*conn.TLSMaterial, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil pointer is the "key absent from PATCH body" result (leave persisted value alone), not an error.
 	}
 	mat, err := tlsFromGenJSON(raw)
 	if err != nil {
@@ -294,7 +294,7 @@ func tlsPatchFromGenJSON(raw jsontext.Value) (*conn.TLSMaterial, error) {
 // pool_overrides field.
 func poolPatchFromGenJSON(raw jsontext.Value) (*conn.PoolOverrides, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil pointer is the "key absent from PATCH body" result (leave persisted value alone), not an error.
 	}
 	po, err := poolOverridesFromGenJSON(raw)
 	if err != nil {
@@ -396,32 +396,40 @@ func (s *GraphServer) maybeReload(ctx context.Context) {
 // result and never actually be applied to the pool.
 func (s *GraphServer) reloadAsync(actorSubject string, _ int64) {
 	_, _, _ = s.reloadGroup.Do(reloadSingleFlightKey, func() (any, error) {
-		// Fresh background context; the originating HTTP request may
-		// have been cancelled by the time we run.
-		ctx := context.Background()
-		all, err := s.cfg.Store.List(ctx, profilestore.Filter{})
-		if err != nil {
-			slog.Warn("profile reload: list failed", "err", err)
-			emitAudit(auditEventProfileReloadFail,
-				"actor", actorSubject,
-				"phase", "list",
-				"error", err.Error(),
-			)
-			return nil, err
-		}
-		if len(all) == 0 {
-			return nil, nil
-		}
-		if err := s.cfg.PoolReloader.Reload(all); err != nil {
-			slog.Warn("profile reload: pool refused new set", "err", err)
-			emitAudit(auditEventProfileReloadFail,
-				"actor", actorSubject,
-				"phase", "reload",
-				"error", err.Error(),
-			)
-			return nil, err
-		}
-		return nil, nil
+		// The singleflight result value is unused; only the error matters.
+		return nil, s.reloadPoolFromStore(actorSubject)
 	})
 	s.reloadGroup.Forget(reloadSingleFlightKey)
+}
+
+// reloadPoolFromStore lists every stored profile and hands the set to the
+// pool reloader. An empty store is a no-op (the pool keeps its current
+// set). Failures are logged and audited before being returned.
+func (s *GraphServer) reloadPoolFromStore(actorSubject string) error {
+	// Fresh background context; the originating HTTP request may
+	// have been cancelled by the time we run.
+	ctx := context.Background()
+	all, err := s.cfg.Store.List(ctx, profilestore.Filter{})
+	if err != nil {
+		slog.Warn("profile reload: list failed", "err", err)
+		emitAudit(auditEventProfileReloadFail,
+			"actor", actorSubject,
+			"phase", "list",
+			"error", err.Error(),
+		)
+		return err
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	if err := s.cfg.PoolReloader.Reload(all); err != nil {
+		slog.Warn("profile reload: pool refused new set", "err", err)
+		emitAudit(auditEventProfileReloadFail,
+			"actor", actorSubject,
+			"phase", "reload",
+			"error", err.Error(),
+		)
+		return err
+	}
+	return nil
 }

@@ -203,11 +203,6 @@ func mustScan(b *testing.B, fr *fakeRowScanner) GraphSummary {
 	return summary.finish()
 }
 
-// referenceTime is a fixed clock used by tests that need a non-zero
-// elapsed_ms; not currently used but kept here so future stop-the-world
-// regression tests can pin a deterministic time.Since.
-var referenceTime = time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC) //nolint:unused
-
 // discardFlushWriter is an http.ResponseWriter that discards the body
 // (so the benchmark measures the codec, not buffer growth) and implements
 // http.Flusher as a no-op. The header map is real so WriteHeader is happy.

@@ -138,7 +138,7 @@ func findLargeJSAsset(t *testing.T) (string, []byte) {
 		}
 		info, err := d.Info()
 		if err != nil || info.Size() < minCompressSize {
-			return nil //nolint:nilerr
+			return nil //nolint:nilerr // best-effort walk: skip unreadable or small files
 		}
 		found = p
 		return nil

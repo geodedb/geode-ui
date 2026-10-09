@@ -7,8 +7,6 @@ import (
 )
 
 // timeNow is a test seam for any handler that wants a deterministic clock.
-//
-//nolint:unused // kept for B-series handlers that will need a clock seam.
 var timeNow = time.Now
 
 // ctxKey is a private type for context keys to avoid collisions with other

@@ -20,6 +20,17 @@ type endpointError struct {
 
 func (e *endpointError) Error() string { return e.code + ": " + e.description }
 
+// responseWritten is the result a genapi handler returns after it has
+// already written the full HTTP response itself (typically an error
+// envelope via writeEndpointError). The generated dispatcher in
+// gen/api treats a (nil, nil) result as "response handled": it writes
+// nothing further and records the span as OK. Returning a non-nil
+// error instead would make the dispatcher append a generic 500 body,
+// so these call sites must not be converted to sentinel errors.
+func responseWritten[T any]() (*T, error) {
+	return nil, nil //nolint:nilnil // genapi handler contract: (nil, nil) means the handler already wrote the response.
+}
+
 // errorBody is the on-wire JSON shape every endpoint error serialises
 // into. Defining it as a struct (rather than a map[string]any) keeps
 // the key order deterministic — required by GAP-N10 so that the

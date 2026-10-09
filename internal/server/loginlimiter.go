@@ -432,7 +432,9 @@ func peekLoginCreds(r *http.Request) (profile, username string, err error) {
 	vals, perr := url.ParseQuery(string(buf))
 	if perr != nil {
 		// Treat as empty — the inner handler's r.ParseForm will reject.
-		return "", "", nil
+		// A nil url.Values yields "" from Get, so the bucket key falls
+		// back to the IP-only dimensions.
+		vals = nil
 	}
 	return vals.Get("profile"), vals.Get("username"), nil
 }

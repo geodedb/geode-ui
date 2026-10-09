@@ -111,7 +111,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.TxBeginResp]()
 	}
 	tx, err := db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: req.ReadOnly})
 	if err != nil {
@@ -120,7 +120,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 			code:        ErrCodeTxBeginFailed,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.TxBeginResp]()
 	}
 	if req.Graph != "" {
 		if _, err := tx.ExecContext(r.Context(), "USE GRAPH "+sanitizeGraphName(req.Graph)); err != nil {
@@ -130,7 +130,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 				code:        ErrCodeTxUseGraphFailed,
 				description: err.Error(),
 			})
-			return nil, nil
+			return responseWritten[gentypes.TxBeginResp]()
 		}
 	}
 	id := s.cfg.TxStore.put(tx, userFromContext(r.Context()))
@@ -163,7 +163,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.QueryResp]()
 	}
 	args, err := namedArgs(req.Params)
 	if err != nil {
@@ -172,7 +172,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 			code:        ErrCodeInvalidParams,
 			description: "params field is not a valid JSON object: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.QueryResp]()
 	}
 	start := time.Now()
 	rows, err := tx.QueryContext(r.Context(), req.Statement, args...)
@@ -182,7 +182,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 			code:        ErrCodeQueryError,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.QueryResp]()
 	}
 	defer func() { _ = rows.Close() }()
 	resp, err := scanQueryResult(rows, start)
@@ -193,7 +193,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 				code:        ErrCodeQueryError,
 				description: err.Error(),
 			})
-			return nil, nil
+			return responseWritten[gentypes.QueryResp]()
 		}
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentyp
 			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	if err := tx.Commit(); err != nil {
 		writeEndpointError(w, &endpointError{
@@ -221,7 +221,7 @@ func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentyp
 			code:        ErrCodeTxCommitFailed,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	emitAudit(auditEventTxCommitted,
 		"user", userFromContext(r.Context()),
@@ -243,7 +243,7 @@ func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gent
 			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	if err := tx.Rollback(); err != nil {
 		writeEndpointError(w, &endpointError{
@@ -251,7 +251,7 @@ func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gent
 			code:        ErrCodeTxRollbackFailed,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
 	emitAudit(auditEventTxRollback,
 		"user", userFromContext(r.Context()),
