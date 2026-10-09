@@ -1,0 +1,78 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "Keep Go directives on the latest stable release, including minor upgrades.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "matchDepTypes": [
+        "golang"
+      ],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Update Go and golangci-lint together; merge only after required checks pass.",
+      "matchPackageNames": [
+        "go",
+        "golang",
+        "golangci/golangci-lint",
+        "github.com/golangci/golangci-lint/v2",
+        "github.com/golangci/golangci-lint",
+        "devnw/utility-projects/org-pre-commit-hooks",
+        "devnw/ci-catalog",
+        "/^(?:registry\\.gitlab\\.com/devnw/ci-catalog/)?go(?:lang|-ci)?$/"
+      ],
+      "groupName": "Go toolchain and golangci-lint",
+      "enabled": true,
+      "ignoreUnstable": true,
+      "automerge": true,
+      "dependencyDashboardApproval": false,
+      "schedule": [
+        "at any time"
+      ],
+      "commitMessageSuffix": "(SONNY-2928)",
+      "semanticCommitType": "chore",
+      "semanticCommitScope": null
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)(Makefile|Dockerfile[^/]*|[^/]+\\.(mk|sh|py|ya?ml))$/"
+      ],
+      "matchStrings": [
+        "(?:GOLANGCI_LINT_VERSION|golangci_version)[^\\n]*?[=:][ \\t?=\"\\x27]*(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "# Updated for golangci-lint (?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "golangci_version:\\s+default: [\"\\x27]?(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "github\\.com/golangci/golangci-lint(?:/v2)?/cmd/golangci-lint@(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "repo: https://github\\.com/golangci/golangci-lint\\s+rev: (?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)(Makefile|Dockerfile[^/]*|[^/]+\\.(mk|sh|py|ya?ml))$/"
+      ],
+      "matchStrings": [
+        "(?:GO_VERSION|GO_VERSIONS|go_version|GOTOOLCHAIN|DESKTOP_GO_VERSION|GOVERSION)[ \\t?]*[=:][ \\t\"\\x27\\[]*(?:go)?(?<currentValue>1\\.\\d+\\.\\d+)",
+        "go_version:\\s+default: [\"\\x27]?(?<currentValue>1\\.\\d+\\.\\d+)",
+        "golang:[ \\t\"\\x27]*(?<currentValue>1\\.\\d+\\.\\d+)",
+        "GOTOOLCHAIN[^\\n]*?[=:][^\\n]*?go(?<currentValue>1\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "go",
+      "datasourceTemplate": "golang-version",
+      "versioningTemplate": "go-mod-directive"
+    }
+  ],
+  "pre-commit": {
+    "enabled": true
+  }
+}

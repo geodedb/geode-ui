@@ -1,3 +1,5 @@
+default_language_version:
+  golang: 1.27.2
 # yaml-language-server: $schema=https://json.schemastore.org/pre-commit-config.json
 # https://pre-commit.com
 #

@@ -1,6 +1,6 @@
 SHELL := /usr/bin/env bash
 GOEXPERIMENT ?= jsonv2
-GOTOOLCHAIN ?= go1.26.3
+GOTOOLCHAIN ?= go1.27.2
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
@@ -24,7 +24,7 @@ go-test:
 	$(GOENV) go test -race -cover -failfast ./...
 
 go-lint:
-	$(GOENV) golangci-lint run
+	$(GOENV) python3 scripts/golangci-lint.py run
 
 go-fmt:
 	$(GOENV) gofmt -s -w .
