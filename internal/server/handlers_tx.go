@@ -203,40 +203,30 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 // Commit implements POST /api/v1/tx/{txid}/commit — finalises the
 // transaction and removes it from the store.
 func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
-	if s.cfg.TxStore == nil {
-		return nil, errors.New("server: tx store not configured")
-	}
-	tx, err := s.cfg.TxStore.take(req.Txid, userFromContext(r.Context()))
-	if err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusNotFound,
-			code:        ErrCodeTxNotFound,
-			description: err.Error(),
-		})
-		return responseWritten[gentypes.Empty]()
-	}
-	if err := tx.Commit(); err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusUnprocessableEntity,
-			code:        ErrCodeTxCommitFailed,
-			description: err.Error(),
-		})
-		return responseWritten[gentypes.Empty]()
-	}
-	emitAudit(auditEventTxCommitted,
-		"user", userFromContext(r.Context()),
-		"txid", req.Txid,
-	)
-	return &gentypes.Empty{}, nil
+	return s.finishTx(w, r, req.Txid, (*sql.Tx).Commit, ErrCodeTxCommitFailed, auditEventTxCommitted)
 }
 
 // Rollback implements POST /api/v1/tx/{txid}/rollback — discards the
 // transaction and removes it from the store.
 func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
+	return s.finishTx(w, r, req.Txid, (*sql.Tx).Rollback, ErrCodeTxRollbackFailed, auditEventTxRollback)
+}
+
+// finishTx is the shared body of Commit and Rollback: it takes the
+// caller-owned transaction out of the store, applies finish (Commit or
+// Rollback), and emits auditEvent on success. A missing/foreign txid is
+// a 404 tx_not_found; a finish error is a 422 carrying failCode.
+func (s *GraphServer) finishTx(
+	w http.ResponseWriter,
+	r *http.Request,
+	txid string,
+	finish func(*sql.Tx) error,
+	failCode, auditEvent string,
+) (*gentypes.Empty, error) {
 	if s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx store not configured")
 	}
-	tx, err := s.cfg.TxStore.take(req.Txid, userFromContext(r.Context()))
+	tx, err := s.cfg.TxStore.take(txid, userFromContext(r.Context()))
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusNotFound,
@@ -245,17 +235,17 @@ func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gent
 		})
 		return responseWritten[gentypes.Empty]()
 	}
-	if err := tx.Rollback(); err != nil {
+	if err := finish(tx); err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        ErrCodeTxRollbackFailed,
+			code:        failCode,
 			description: err.Error(),
 		})
 		return responseWritten[gentypes.Empty]()
 	}
-	emitAudit(auditEventTxRollback,
+	emitAudit(auditEvent,
 		"user", userFromContext(r.Context()),
-		"txid", req.Txid,
+		"txid", txid,
 	)
 	return &gentypes.Empty{}, nil
 }

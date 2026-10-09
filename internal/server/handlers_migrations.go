@@ -157,23 +157,11 @@ func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req
 
 // Sign implements POST /api/v1/migrations/{name}/sign.
 func (s *GraphServer) Sign(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationParam) (*gentypes.Empty, error) {
-	db, err := s.connDB(r.Context())
-	if err != nil {
-		return nil, respondErr(w, err)
-	}
-	if err := sanitizeBackupFile(req.Name); err != nil {
-		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
-	}
-	mname, err := quoteIdent(req.Name)
-	if err != nil {
-		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
-	}
-	if _, err := runStatement(r.Context(), db, "MIGRATE SIGN "+mname); err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	emitAudit(auditEventMigrationSigned,
-		"user", userFromContext(r.Context()),
-		"name", req.Name,
-	)
-	return &gentypes.Empty{}, nil
+	return s.execNamedAdmin(w, r, req.Name, namedAdminStmt{
+		prefix:      "MIGRATE SIGN ",
+		quote:       quoteIdent,
+		invalidCode: ErrCodeInvalidName,
+		auditEvent:  auditEventMigrationSigned,
+		auditKey:    "name",
+	})
 }

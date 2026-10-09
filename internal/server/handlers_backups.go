@@ -61,27 +61,43 @@ import (
 
 // GetBackups implements GET /api/v1/backups (list backups).
 func (s *GraphServer) GetBackups(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.BackupList, error) {
+	out, done, err := s.showRowsAsJSON(w, r, "SHOW BACKUPS", "backup")
+	if done {
+		return nil, err
+	}
+	return &gentypes.BackupList{Backups: out}, nil
+}
+
+// showRowsAsJSON runs a SHOW-style catalog statement on the caller's
+// connection and returns one JSON object per row. A Geode build that
+// does not implement the statement (wire_feature_missing) yields an
+// empty, non-nil list so list endpoints degrade to 200 + []. When done
+// is true the handler must return (nil, err) immediately: the error
+// response has already been written (err == nil) or err is a 500.
+func (s *GraphServer) showRowsAsJSON(
+	w http.ResponseWriter, r *http.Request, stmt, what string,
+) ([]jsontext.Value, bool, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
-		return nil, respondErr(w, err)
+		return nil, true, respondErr(w, err)
 	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW BACKUPS")
+	rows, cols, err := runQuery(r.Context(), db, stmt)
 	if err != nil {
 		if isWireFeatureMissing(err) {
-			return &gentypes.BackupList{Backups: []jsontext.Value{}}, nil
+			return []jsontext.Value{}, false, nil
 		}
-		return nil, respondErr(w, wireErr(err))
+		return nil, true, respondErr(w, wireErr(err))
 	}
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
 		obj := rowToMap(cols, row)
 		raw, mErr := json.Marshal(obj)
 		if mErr != nil {
-			return nil, fmt.Errorf("marshal backup row: %w", mErr)
+			return nil, true, fmt.Errorf("marshal %s row: %w", what, mErr)
 		}
 		out = append(out, jsontext.Value(raw))
 	}
-	return &gentypes.BackupList{Backups: out}, nil
+	return out, false, nil
 }
 
 // PostBackups implements POST /api/v1/backups (create a backup).
@@ -165,27 +181,52 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 
 // DeleteFile implements DELETE /api/v1/backups/{file} (drop backup).
 func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam) (*gentypes.Empty, error) {
+	return s.execNamedAdmin(w, r, req.File, namedAdminStmt{
+		prefix: "DROP BACKUP ",
+		// v0.5.15: BACKUP / RESTORE paths are string literals (single-quoted)
+		// per parseBackupStatement / parseRestoreStatement in
+		// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
+		// identifier-shape rule rejects valid filenames containing `.`.
+		quote:       quoteString,
+		invalidCode: ErrCodeInvalidFile,
+		auditEvent:  auditEventBackupDeleted,
+		auditKey:    "file",
+	})
+}
+
+// namedAdminStmt describes a single-argument admin statement whose
+// argument is a caller-supplied backup/migration name.
+type namedAdminStmt struct {
+	prefix      string                       // statement text before the quoted name
+	quote       func(string) (string, error) // quoteString or quoteIdent
+	invalidCode string                       // 400 code for a rejected name
+	auditEvent  string                       // emitted on success
+	auditKey    string                       // audit field carrying the raw name
+}
+
+// execNamedAdmin is the shared body of DeleteFile and Sign: it validates
+// name with sanitizeBackupFile, quotes it, runs prefix+quoted on the
+// caller's connection, and audits on success.
+func (s *GraphServer) execNamedAdmin(
+	w http.ResponseWriter, r *http.Request, name string, st namedAdminStmt,
+) (*gentypes.Empty, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
 	}
-	if err := sanitizeBackupFile(req.File); err != nil {
-		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
+	if err := sanitizeBackupFile(name); err != nil {
+		return nil, respondErr(w, badRequest(st.invalidCode, err.Error()))
 	}
-	// v0.5.15: BACKUP / RESTORE paths are string literals (single-quoted)
-	// per parseBackupStatement / parseRestoreStatement in
-	// src/gql/parser.zig. They are NOT identifiers, so quoteIdent's
-	// identifier-shape rule rejects valid filenames containing `.`.
-	fname, err := quoteString(req.File)
+	quoted, err := st.quote(name)
 	if err != nil {
-		return nil, respondErr(w, badRequest(ErrCodeInvalidFile, err.Error()))
+		return nil, respondErr(w, badRequest(st.invalidCode, err.Error()))
 	}
-	if _, err := runStatement(r.Context(), db, "DROP BACKUP "+fname); err != nil {
+	if _, err := runStatement(r.Context(), db, st.prefix+quoted); err != nil {
 		return nil, respondErr(w, wireErr(err))
 	}
-	emitAudit(auditEventBackupDeleted,
+	emitAudit(st.auditEvent,
 		"user", userFromContext(r.Context()),
-		"file", req.File,
+		st.auditKey, name,
 	)
 	return &gentypes.Empty{}, nil
 }
