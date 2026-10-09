@@ -130,14 +130,14 @@ type txCapableDriver struct {
 	rows [][]driver.Value
 }
 
+func (d *txCapableDriver) Open(_ string) (driver.Conn, error) {
+	return &txCapableConn{d: d}, nil
+}
+
 func (d *txCapableDriver) record(s string) {
 	d.mu.Lock()
 	d.events = append(d.events, s)
 	d.mu.Unlock()
-}
-
-func (d *txCapableDriver) Open(_ string) (driver.Conn, error) {
-	return &txCapableConn{d: d}, nil
 }
 
 // registerTxDriver registers d under name once per process so multiple

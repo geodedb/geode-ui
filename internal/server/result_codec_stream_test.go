@@ -19,6 +19,7 @@ import (
 // head before fetching rows (the TTFB property PERF-F3 buys).
 type flushRecorder struct {
 	*httptest.ResponseRecorder
+
 	flushes int
 }
 
@@ -33,6 +34,7 @@ func (f *flushRecorder) Flush() { f.flushes++ }
 // streamQueryResult (head already on the wire, body truncated).
 type errRowScanner struct {
 	*fakeRowScanner
+
 	failOn int // 1-based row index whose Scan returns an error; 0 = never
 }
 

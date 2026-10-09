@@ -26,6 +26,7 @@ import (
 // per-goroutine sync.Map stash mitigation is gone.
 type MCPServer struct {
 	genmcp.UnimplementedMCPServer
+
 	server *GraphServer
 }
 

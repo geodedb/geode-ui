@@ -70,6 +70,22 @@ func (f *fakeLspTcp) Close() {
 	}
 }
 
+// WaitForFrame blocks until the fake LSP has decoded one frame from
+// the bridge, then returns the JSON body bytes. Fails the test on
+// timeout — a deadlocked bridge would otherwise hang the suite.
+func (f *fakeLspTcp) WaitForFrame(t *testing.T) []byte {
+	t.Helper()
+	select {
+	case <-f.got:
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.frame
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for upstream LSP frame")
+		return nil
+	}
+}
+
 func (f *fakeLspTcp) serve() {
 	c, err := f.ln.Accept()
 	if err != nil {
@@ -115,22 +131,6 @@ func (f *fakeLspTcp) serve() {
 	// Stay alive so the bridge does not see an immediate EOF; the
 	// test will close us when it returns.
 	<-f.done
-}
-
-// WaitForFrame blocks until the fake LSP has decoded one frame from
-// the bridge, then returns the JSON body bytes. Fails the test on
-// timeout — a deadlocked bridge would otherwise hang the suite.
-func (f *fakeLspTcp) WaitForFrame(t *testing.T) []byte {
-	t.Helper()
-	select {
-	case <-f.got:
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		return f.frame
-	case <-time.After(3 * time.Second):
-		t.Fatalf("timed out waiting for upstream LSP frame")
-		return nil
-	}
 }
 
 // newTestLspServer wires a fresh *http.ServeMux to the bridge and

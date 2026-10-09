@@ -28,6 +28,8 @@ type userDriver struct {
 	execErr  error
 }
 
+func (d *userDriver) Open(_ string) (driver.Conn, error) { return &userConn{d: d}, nil }
+
 func (d *userDriver) record(s string) {
 	d.mu.Lock()
 	d.stmts = append(d.stmts, s)
@@ -39,8 +41,6 @@ func (d *userDriver) seen() []string {
 	defer d.mu.Unlock()
 	return append([]string(nil), d.stmts...)
 }
-
-func (d *userDriver) Open(_ string) (driver.Conn, error) { return &userConn{d: d}, nil }
 
 type userConn struct{ d *userDriver }
 

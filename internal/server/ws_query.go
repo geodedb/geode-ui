@@ -143,6 +143,7 @@ func (b *rowBatcher) flush() error {
 // methods into it accidentally.
 type WSServer struct {
 	genws.UnimplementedWSServer
+
 	cfg Config
 
 	// onCancelReaderExit, when non-nil, is invoked by the cancel-reader

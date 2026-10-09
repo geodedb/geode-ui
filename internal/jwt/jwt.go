@@ -62,7 +62,10 @@ type Claims struct {
 	Profile      string   `json:"profile"`
 	Roles        []string `json:"roles"`
 	ConnectionID string   `json:"cid,omitempty"`
-	jjwt.RegisteredClaims
+	// Declared last on purpose: struct field order fixes the JSON key
+	// order of every issued token payload, so moving the embed to the
+	// top would change minted token bytes.
+	jjwt.RegisteredClaims //nolint:embeddedstructfieldcheck // field order defines the JWT payload key order; keep wire bytes stable.
 }
 
 // Issuer signs and verifies HS256 tokens. It is safe for concurrent use:

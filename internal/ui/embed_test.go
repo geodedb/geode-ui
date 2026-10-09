@@ -23,13 +23,6 @@ type countingFS struct {
 	stats sync.Map // key: string path, value: *atomic.Int64
 }
 
-func (c *countingFS) statCount(name string) int64 {
-	if v, ok := c.stats.Load(name); ok {
-		return v.(*atomic.Int64).Load()
-	}
-	return 0
-}
-
 func (c *countingFS) Open(name string) (fs.File, error) {
 	return c.inner.Open(name)
 }
@@ -49,6 +42,13 @@ func (c *countingFS) Stat(name string) (fs.FileInfo, error) {
 	}
 	n.Add(1)
 	return fs.Stat(c.inner, name)
+}
+
+func (c *countingFS) statCount(name string) int64 {
+	if v, ok := c.stats.Load(name); ok {
+		return v.(*atomic.Int64).Load()
+	}
+	return 0
 }
 
 func TestHandlerServesIndexForUnknownPaths(t *testing.T) {

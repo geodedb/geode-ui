@@ -246,6 +246,7 @@ func acceptsGzip(r *http.Request) bool {
 // pooled gzip.Writer when done.
 type gzipResponseWriter struct {
 	http.ResponseWriter
+
 	gz *gzip.Writer
 
 	status      int  // status sent (or to send); 0 until known

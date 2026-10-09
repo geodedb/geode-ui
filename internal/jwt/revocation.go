@@ -126,13 +126,6 @@ func (rs *RevocationSet) AttachSQLiteRW(rw, ro *sql.DB) error {
 	return nil
 }
 
-func (rs *RevocationSet) now() time.Time {
-	if rs.nowFn != nil {
-		return rs.nowFn()
-	}
-	return time.Now()
-}
-
 // Revoke marks the token identified by jti as revoked until exp. A blank
 // jti is ignored (legacy tokens minted before SEC-N2 carry no jti and
 // therefore cannot be individually revoked — they remain subject to the
@@ -187,21 +180,6 @@ func (rs *RevocationSet) RevokeUser(username string) {
 	}
 }
 
-// persistUser write-throughs a password_changed_at row. now is always
-// strictly newer than any previously-persisted instant for username
-// (the caller only reaches here after winning the monotonic-advance
-// check), so an INSERT OR REPLACE can never move the durable marker
-// backward. A SQLite failure is logged, not fatal — the in-memory
-// marker is already updated and takes effect for this process.
-func (rs *RevocationSet) persistUser(username string, now time.Time) {
-	if rs.backend == nil {
-		return
-	}
-	if err := rs.backend.putUser(username, now); err != nil {
-		slog.Error("jwt: persist user revocation", "user", username, "err", err)
-	}
-}
-
 // IsRevoked reports whether the supplied claims correspond to a token
 // that has been revoked, by either mechanism. A nil RevocationSet or nil
 // claims is treated as "not revoked".
@@ -221,49 +199,6 @@ func (rs *RevocationSet) IsRevoked(c *Claims) bool {
 		return true
 	}
 	return false
-}
-
-// jtiRevoked reports whether the per-token revocation map names jti.
-// Lazy GC: an entry whose time.Time expiry has already passed (relative
-// to now) is deleted and reported as not-revoked — the token's own TTL
-// guard already rejects it. Defensive: an entry whose value is somehow
-// not a time.Time is treated as revoked rather than silently passing the
-// token through.
-func (rs *RevocationSet) jtiRevoked(jti string, now time.Time) bool {
-	v, ok := rs.revoked.Load(jti)
-	if !ok {
-		return false
-	}
-	exp, ok := v.(time.Time)
-	if !ok {
-		// A non-time value should never be stored, but if it somehow
-		// is, treat the token as revoked.
-		return true
-	}
-	if now.Before(exp) {
-		return true
-	}
-	// Expired revocation entry — drop the stale entry and treat as
-	// not revoked.
-	rs.revoked.Delete(jti)
-	return false
-}
-
-// subjectRevokeAll reports whether the per-user revoke-all marker for sub
-// invalidates a token issued at iat — i.e. iat is at or before the
-// recorded password-change instant. A non-time stored value is ignored
-// (treated as no marker), matching the original inline behavior.
-func (rs *RevocationSet) subjectRevokeAll(sub string, iat time.Time) bool {
-	v, ok := rs.passwordChangedAt.Load(sub)
-	if !ok {
-		return false
-	}
-	changedAt, ok := v.(time.Time)
-	if !ok {
-		return false
-	}
-	// iat at or before the change instant ⇒ stale token.
-	return !iat.After(changedAt)
 }
 
 // Sweep drops jti entries whose expiry has passed and passwordChangedAt
@@ -323,4 +258,69 @@ func (rs *RevocationSet) StartSweeper(ctx context.Context, interval, maxTokenAge
 			}
 		}
 	}()
+}
+
+func (rs *RevocationSet) now() time.Time {
+	if rs.nowFn != nil {
+		return rs.nowFn()
+	}
+	return time.Now()
+}
+
+// persistUser write-throughs a password_changed_at row. now is always
+// strictly newer than any previously-persisted instant for username
+// (the caller only reaches here after winning the monotonic-advance
+// check), so an INSERT OR REPLACE can never move the durable marker
+// backward. A SQLite failure is logged, not fatal — the in-memory
+// marker is already updated and takes effect for this process.
+func (rs *RevocationSet) persistUser(username string, now time.Time) {
+	if rs.backend == nil {
+		return
+	}
+	if err := rs.backend.putUser(username, now); err != nil {
+		slog.Error("jwt: persist user revocation", "user", username, "err", err)
+	}
+}
+
+// jtiRevoked reports whether the per-token revocation map names jti.
+// Lazy GC: an entry whose time.Time expiry has already passed (relative
+// to now) is deleted and reported as not-revoked — the token's own TTL
+// guard already rejects it. Defensive: an entry whose value is somehow
+// not a time.Time is treated as revoked rather than silently passing the
+// token through.
+func (rs *RevocationSet) jtiRevoked(jti string, now time.Time) bool {
+	v, ok := rs.revoked.Load(jti)
+	if !ok {
+		return false
+	}
+	exp, ok := v.(time.Time)
+	if !ok {
+		// A non-time value should never be stored, but if it somehow
+		// is, treat the token as revoked.
+		return true
+	}
+	if now.Before(exp) {
+		return true
+	}
+	// Expired revocation entry — drop the stale entry and treat as
+	// not revoked.
+	rs.revoked.Delete(jti)
+	return false
+}
+
+// subjectRevokeAll reports whether the per-user revoke-all marker for sub
+// invalidates a token issued at iat — i.e. iat is at or before the
+// recorded password-change instant. A non-time stored value is ignored
+// (treated as no marker), matching the original inline behavior.
+func (rs *RevocationSet) subjectRevokeAll(sub string, iat time.Time) bool {
+	v, ok := rs.passwordChangedAt.Load(sub)
+	if !ok {
+		return false
+	}
+	changedAt, ok := v.(time.Time)
+	if !ok {
+		return false
+	}
+	// iat at or before the change instant ⇒ stale token.
+	return !iat.After(changedAt)
 }
