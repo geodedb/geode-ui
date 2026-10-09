@@ -222,6 +222,7 @@ var allErrorCodes = []string{
 	ErrCodeInternalError,
 	ErrCodeServerMisconfigured,
 	ErrCodeInvalidCredentials,
+	ErrCodeRateLimited,
 	ErrCodePasswordTooShort,
 	ErrCodePasswordTooWeak,
 	ErrCodePasswordContainsUsername,

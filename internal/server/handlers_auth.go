@@ -166,6 +166,7 @@ func (s *GraphServer) mintAndSetAuthCookie(w http.ResponseWriter, token string, 
 	// vanishingly unlikely race where the wall clock advanced
 	// past the expiry between Issue() and the Sub() call.
 	expiresIn := max(int64(exp.Sub(timeNow()).Seconds()), 1)
+	//nolint:gosec // G124: HttpOnly and SameSite=Strict are set; Secure follows the operator's -secure-cookies flag (plain-HTTP dev).
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
@@ -195,6 +196,7 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	//nolint:gosec // G124: HttpOnly and SameSite=Strict are set; Secure follows the operator's -secure-cookies flag (plain-HTTP dev).
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    "",

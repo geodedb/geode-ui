@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"io"
 	"maps"
 	"net"
@@ -411,15 +412,28 @@ func rejectLogin(w http.ResponseWriter, retry time.Duration, reason string) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(retry/time.Second)))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
-	body := `{"code":"rate_limited","description":"too many attempts; try again later","reason":"` + reason + `"}`
-	_, _ = w.Write([]byte(body))
+	// Encoded (not string-concatenated) so reason can never break out of
+	// the JSON string. Field order matches the historical wire bytes.
+	_ = json.MarshalWrite(w, rateLimitedBody{
+		Code:        ErrCodeRateLimited,
+		Description: "too many attempts; try again later",
+		Reason:      reason,
+	})
+}
+
+// rateLimitedBody is the 429 body written by rejectLogin.
+type rateLimitedBody struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Reason      string `json:"reason"`
 }
 
 // peekLoginCreds reads the form body, parses profile + username, and
 // restores the body on the request so the inner handler can re-parse
 // it. Limits the read to 4096 bytes to match the genapi-emitted body
-// cap on this route. Returns "" + nil error if the body is empty.
-func peekLoginCreds(r *http.Request) (profile, username string, err error) {
+// cap on this route. Returns the profile and username (both "" with a
+// nil error if the body is empty).
+func peekLoginCreds(r *http.Request) (string, string, error) {
 	if r.Body == nil {
 		return "", "", nil
 	}

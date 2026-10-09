@@ -105,6 +105,7 @@ func (s *GraphServer) HandleCSRF(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "csrf: token mint failed", http.StatusInternalServerError)
 		return
 	}
+	//nolint:gosec // G124: HttpOnly=false is required (double-submit: the SPA reads it); Secure follows the operator's -secure-cookies flag.
 	http.SetCookie(w, &http.Cookie{
 		Name:     CSRFCookieName,
 		Value:    tok,

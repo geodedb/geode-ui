@@ -124,7 +124,8 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	tcp, err := net.DialTimeout("tcp", h.upstreamAddr, lspDialTimeout)
+	dialer := net.Dialer{Timeout: lspDialTimeout}
+	tcp, err := dialer.DialContext(r.Context(), "tcp", h.upstreamAddr)
 	if err != nil {
 		// A close frame surfaces the failure mode cleanly to the
 		// browser; the WebSocket library can't send an HTTP error at

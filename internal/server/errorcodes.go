@@ -49,6 +49,9 @@ const (
 	// (401). Constant value is byte-identical across every login-failure
 	// mode (see errorBody doc / GAP-N10).
 	ErrCodeInvalidCredentials = "invalid_credentials"
+	// ErrCodeRateLimited: the login limiter rejected the attempt (per-IP
+	// rate or per-user lockout); the body's "reason" says which (429).
+	ErrCodeRateLimited = "rate_limited"
 
 	// Section: password policy.
 

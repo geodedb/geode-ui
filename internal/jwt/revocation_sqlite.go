@@ -104,48 +104,14 @@ func (b *sqliteRevocationBackend) load(now time.Time) (map[string]time.Time, map
 	ctx := context.Background()
 	nowNs := now.UnixNano()
 
-	jtis := map[string]time.Time{}
-	rows, err := b.ro.QueryContext(ctx, `SELECT jti, exp FROM revoked_jti`)
+	jtis, err := b.loadRevokedJTIs(ctx, nowNs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("jwt: revocation load jti: %w", err)
+		return nil, nil, err
 	}
-	for rows.Next() {
-		var jti string
-		var expNs int64
-		if err := rows.Scan(&jti, &expNs); err != nil {
-			_ = rows.Close()
-			return nil, nil, fmt.Errorf("jwt: revocation scan jti: %w", err)
-		}
-		if expNs <= nowNs {
-			continue // expired — skip; GC'd below.
-		}
-		jtis[jti] = time.Unix(0, expNs)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, nil, fmt.Errorf("jwt: revocation rows jti: %w", err)
-	}
-	_ = rows.Close()
-
-	users := map[string]time.Time{}
-	urows, err := b.ro.QueryContext(ctx, `SELECT username, changed_at FROM password_changed_at`)
+	users, err := b.loadPasswordChanges(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("jwt: revocation load users: %w", err)
+		return nil, nil, err
 	}
-	for urows.Next() {
-		var username string
-		var changedNs int64
-		if err := urows.Scan(&username, &changedNs); err != nil {
-			_ = urows.Close()
-			return nil, nil, fmt.Errorf("jwt: revocation scan user: %w", err)
-		}
-		users[username] = time.Unix(0, changedNs)
-	}
-	if err := urows.Err(); err != nil {
-		_ = urows.Close()
-		return nil, nil, fmt.Errorf("jwt: revocation rows users: %w", err)
-	}
-	_ = urows.Close()
 
 	// GC stale revoked_jti rows. Not counted in queries — this is part
 	// of one-time startup hydration, not the steady-state hot path.
@@ -153,6 +119,55 @@ func (b *sqliteRevocationBackend) load(now time.Time) (map[string]time.Time, map
 		return nil, nil, fmt.Errorf("jwt: revocation gc: %w", err)
 	}
 	return jtis, users, nil
+}
+
+// loadRevokedJTIs reads every unexpired revoked_jti row (relative to
+// nowNs) from the read-only handle.
+func (b *sqliteRevocationBackend) loadRevokedJTIs(ctx context.Context, nowNs int64) (map[string]time.Time, error) {
+	rows, err := b.ro.QueryContext(ctx, `SELECT jti, exp FROM revoked_jti`)
+	if err != nil {
+		return nil, fmt.Errorf("jwt: revocation load jti: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	jtis := map[string]time.Time{}
+	for rows.Next() {
+		var jti string
+		var expNs int64
+		if err := rows.Scan(&jti, &expNs); err != nil {
+			return nil, fmt.Errorf("jwt: revocation scan jti: %w", err)
+		}
+		if expNs <= nowNs {
+			continue // expired — skip; GC'd by load.
+		}
+		jtis[jti] = time.Unix(0, expNs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("jwt: revocation rows jti: %w", err)
+	}
+	return jtis, nil
+}
+
+// loadPasswordChanges reads every password_changed_at row from the
+// read-only handle.
+func (b *sqliteRevocationBackend) loadPasswordChanges(ctx context.Context) (map[string]time.Time, error) {
+	rows, err := b.ro.QueryContext(ctx, `SELECT username, changed_at FROM password_changed_at`)
+	if err != nil {
+		return nil, fmt.Errorf("jwt: revocation load users: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	users := map[string]time.Time{}
+	for rows.Next() {
+		var username string
+		var changedNs int64
+		if err := rows.Scan(&username, &changedNs); err != nil {
+			return nil, fmt.Errorf("jwt: revocation scan user: %w", err)
+		}
+		users[username] = time.Unix(0, changedNs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("jwt: revocation rows users: %w", err)
+	}
+	return users, nil
 }
 
 // putJTI write-through-upserts a revoked-jti row. INSERT OR REPLACE so a

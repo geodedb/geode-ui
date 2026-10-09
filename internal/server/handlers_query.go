@@ -67,7 +67,7 @@ func (s *GraphServer) Query(w http.ResponseWriter, r *http.Request, req *gentype
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	rows, start, err := s.runQuery(ctx, req)
+	rows, start, err := s.runQuery(ctx, req) //nolint:rowserrcheck // rows.Err() is checked inside streamQueryResult (result_codec.go).
 	if err != nil {
 		// Nothing has been written yet — surface the structured envelope
 		// (for *endpointError) or a generic 500 (for anything else, via
