@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/internal/conn"
@@ -171,8 +172,8 @@ func marshalPoolOverrides(o conn.PoolOverrides) (jsontext.Value, error) {
 	raw, err := json.Marshal(poolOverridesWire{
 		MaxOpenConns:      o.MaxOpenConns,
 		MaxIdleConns:      o.MaxIdleConns,
-		ConnMaxLifetimeMs: int64(o.ConnMaxLifetime / 1_000_000),
-		ConnMaxIdleMs:     int64(o.ConnMaxIdleTime / 1_000_000),
+		ConnMaxLifetimeMs: int64(o.ConnMaxLifetime / time.Millisecond),
+		ConnMaxIdleMs:     int64(o.ConnMaxIdleTime / time.Millisecond),
 	})
 	if err != nil {
 		return nil, err

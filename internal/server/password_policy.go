@@ -150,6 +150,12 @@ func isAllDigits(s string) bool {
 	return true
 }
 
+// HIBP range-API client limits.
+const (
+	hibpTimeout = 5 * time.Second
+	hibpMaxBody = 1 << 20 // 1 MiB cap on the range response
+)
+
 // hibpHasSeen implements the HIBP "range" k-anonymity API: SHA-1 the
 // password, send the first 5 hex chars to /range/{prefix}, and
 // search the returned `SUFFIX:count` lines for our suffix.
@@ -168,7 +174,7 @@ func hibpHasSeen(ctx context.Context, pw string, policy PasswordPolicy) (bool, e
 	}
 	client := policy.HIBPClient
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
+		client = &http.Client{Timeout: hibpTimeout}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+prefix, nil)
 	if err != nil {
@@ -185,7 +191,7 @@ func hibpHasSeen(ctx context.Context, pw string, policy PasswordPolicy) (bool, e
 	if resp.StatusCode != http.StatusOK {
 		return false, fmt.Errorf("hibp: status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // cap at 1 MiB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, hibpMaxBody))
 	if err != nil {
 		return false, err
 	}
@@ -196,12 +202,12 @@ func hibpHasSeen(ctx context.Context, pw string, policy PasswordPolicy) (bool, e
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
+		rawSuffix, rawCount, ok := strings.Cut(line, ":")
+		if !ok {
 			continue
 		}
-		rowSuffix := strings.ToUpper(strings.TrimSpace(parts[0]))
-		count := strings.TrimSpace(parts[1])
+		rowSuffix := strings.ToUpper(strings.TrimSpace(rawSuffix))
+		count := strings.TrimSpace(rawCount)
 		if rowSuffix == suffix && count != "0" {
 			return true, nil
 		}

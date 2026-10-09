@@ -243,9 +243,11 @@ func emitAudit(event string, kv ...any) {
 				"AUDIT EMISSION FAILED event=%s panic=%v\n", event, rec)
 		}
 	}()
-	args := make([]any, 0, len(kv)+2)
+	// kv is a flat key/value list; "event" adds one more pair.
+	const pairLen = 2
+	args := make([]any, 0, len(kv)+pairLen)
 	args = append(args, "event", event)
-	fields := make(map[string]any, len(kv)/2)
+	fields := make(map[string]any, len(kv)/pairLen)
 	for i := 0; i+1 < len(kv); i += 2 {
 		key, _ := kv[i].(string)
 		val := kv[i+1]

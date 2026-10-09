@@ -10,6 +10,10 @@ import (
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
+// defaultQueryTimeout bounds a query when the request does not set
+// timeout_ms.
+const defaultQueryTimeout = 30 * time.Second
+
 // Query implements ServerInterface.Query — POST /api/v1/query.
 //
 // Method name is generated as "Query" (not "PostApiV1Query") by genapi;
@@ -56,7 +60,7 @@ func (s *GraphServer) Query(w http.ResponseWriter, r *http.Request, req *gentype
 	if s.cfg.Pool == nil {
 		return respondErr(w, errors.New("server: pool not configured"))
 	}
-	timeout := 30 * time.Second
+	timeout := defaultQueryTimeout
 	if req.TimeoutMs > 0 {
 		timeout = time.Duration(req.TimeoutMs) * time.Millisecond
 	}
@@ -148,7 +152,7 @@ func (s *GraphServer) handleQuery(ctx context.Context, req *gentypes.QueryReq) (
 	if s.cfg.Pool == nil {
 		return nil, errors.New("server: pool not configured")
 	}
-	timeout := 30 * time.Second
+	timeout := defaultQueryTimeout
 	if req.TimeoutMs > 0 {
 		timeout = time.Duration(req.TimeoutMs) * time.Millisecond
 	}

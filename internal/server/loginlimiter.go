@@ -71,15 +71,23 @@ type LoginLimiterConfig struct {
 	TrustProxyXFF bool
 }
 
+// Production login-limiter defaults; see LoginLimiterDefaults.
+const (
+	defaultLoginPerIPRate     = 5
+	defaultLoginPerIPBurst    = 10
+	defaultLoginFailThreshold = 5
+	defaultLoginLockoutWindow = 15 * time.Minute
+)
+
 // LoginLimiterDefaults applies production defaults (5 rps per IP,
 // burst 10, 5 fails -> 15-min lockout). Production callers can pass an
 // empty LoginLimiterConfig{} and let NewLoginLimiter fill these in.
 func LoginLimiterDefaults() LoginLimiterConfig {
 	return LoginLimiterConfig{
-		PerIPRate:     5,
-		PerIPBurst:    10,
-		FailThreshold: 5,
-		LockoutWindow: 15 * time.Minute,
+		PerIPRate:     defaultLoginPerIPRate,
+		PerIPBurst:    defaultLoginPerIPBurst,
+		FailThreshold: defaultLoginFailThreshold,
+		LockoutWindow: defaultLoginLockoutWindow,
 		Now:           time.Now,
 	}
 }

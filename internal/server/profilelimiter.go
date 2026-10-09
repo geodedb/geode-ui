@@ -70,14 +70,20 @@ type ProfileLimiterConfig struct {
 	TrustProxyXFF bool
 }
 
+// Production profile-limiter defaults; see ProfileLimiterDefaults.
+const (
+	defaultProfilePerActorRate  = 0.5 // tokens/second = 30 req/min
+	defaultProfilePerActorBurst = 10
+)
+
 // ProfileLimiterDefaults applies production defaults: 30 req/min per
 // actor with burst 10. Production callers can pass an empty
 // ProfileLimiterConfig{} (with JWT set) and let NewProfileLimiter fill
 // these in.
 func ProfileLimiterDefaults() ProfileLimiterConfig {
 	return ProfileLimiterConfig{
-		PerActorRate:  0.5, // 30 req/min
-		PerActorBurst: 10,
+		PerActorRate:  defaultProfilePerActorRate,
+		PerActorBurst: defaultProfilePerActorBurst,
 		Now:           time.Now,
 	}
 }

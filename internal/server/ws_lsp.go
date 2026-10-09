@@ -55,6 +55,16 @@ import (
 // legitimate LSP payload that exceeds it.
 const maxLspMessage = 16 * 1024 * 1024
 
+// LSP bridge timeouts and limits.
+const (
+	lspWriteTimeout = 30 * time.Second
+	lspPingInterval = 30 * time.Second
+	lspDialTimeout  = 5 * time.Second
+	// maxLspHeader caps the LSP base-protocol header block
+	// ("Content-Length: N\r\n\r\n" plus optional fields).
+	maxLspHeader = 4096
+)
+
 // wsLspHandler is the http.Handler for /ws/lsp. It is constructed with
 // the upstream TCP address (typically 127.0.0.1:3142 for a colocated
 // geode serve --lsp-port=3142) and an AuthJWT-shaped callback that
@@ -102,8 +112,8 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MaxFrame:       maxLspMessage,
 		MaxMessage:     maxLspMessage,
 		ReadTimeout:    0,
-		WriteTimeout:   30 * time.Second,
-		PingInterval:   30 * time.Second,
+		WriteTimeout:   lspWriteTimeout,
+		PingInterval:   lspPingInterval,
 		AllowAnyOrigin: true,
 	})
 	if err != nil {
@@ -113,7 +123,7 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	tcp, err := net.DialTimeout("tcp", h.upstreamAddr, 5*time.Second)
+	tcp, err := net.DialTimeout("tcp", h.upstreamAddr, lspDialTimeout)
 	if err != nil {
 		// A close frame surfaces the failure mode cleanly to the
 		// browser; the WebSocket library can't send an HTTP error at
@@ -123,7 +133,9 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tcp.Close() }()
 
-	errCh := make(chan error, 2)
+	// One slot per proxy direction so neither goroutine blocks on send.
+	const proxyDirections = 2
+	errCh := make(chan error, proxyDirections)
 	go func() { errCh <- proxyWsToTcp(conn, tcp, token) }()
 	go func() { errCh <- proxyTcpToWs(tcp, conn) }()
 	// The first goroutine to error (or hit EOF) unblocks the receive;
@@ -272,7 +284,7 @@ func (f *lspFrameReader) ReadFrame() ([]byte, error) {
 		if len(header) >= 4 && string(header[len(header)-4:]) == "\r\n\r\n" {
 			break
 		}
-		if len(header) > 4096 {
+		if len(header) > maxLspHeader {
 			return nil, errors.New("LSP header too large")
 		}
 	}

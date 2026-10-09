@@ -40,6 +40,32 @@ const defaultJWTTTL = 8 * time.Hour
 // runs for minutes.
 const restWriteTimeout = 60 * time.Second
 
+// HTTP server limits. See the hcfg literal in newApp for the rationale
+// behind each value.
+const (
+	readHeaderTimeout = 5 * time.Second
+	restReadTimeout   = 30 * time.Second
+	idleConnTimeout   = 120 * time.Second
+	maxHeaderBytes    = 16 << 10 // 16 KiB
+	maxBodyBytes      = 1 << 20  // 1 MiB
+
+	// Global (all-routes) genapi token bucket.
+	apiGlobalRate  = 2000
+	apiGlobalBurst = 400
+
+	// Coarse per-IP abuse ceiling (SEC-N7 / #66).
+	perIPRPS   = 50
+	perIPBurst = 100
+
+	// revocationSweepInterval is how often the JWT revocation set is
+	// pruned (SEC-N2 / #64).
+	revocationSweepInterval = 10 * time.Minute
+
+	// exitUsage is the process exit code for a flag-parsing failure,
+	// matching the flag package's own convention.
+	exitUsage = 2
+)
+
 // appConfig is the fully-parsed startup configuration: everything the
 // dependency graph needs that came off a flag or has a fixed default.
 // Environment-derived secrets (GEODE_PROFILESTORE_KEY) are NOT held here
@@ -267,8 +293,8 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
-		GlobalRate:  2000,
-		GlobalBurst: 400,
+		GlobalRate:  apiGlobalRate,
+		GlobalBurst: apiGlobalBurst,
 	})
 
 	// GAP-Q5 (#34): the multipart upload endpoints
@@ -381,12 +407,12 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// the timeouts are applied explicitly below where the WS exemption
 	// can be expressed.
 	hcfg := httpx.Config{
-		ReadHeader:     5 * time.Second,
-		ReadTimeout:    30 * time.Second,
+		ReadHeader:     readHeaderTimeout,
+		ReadTimeout:    restReadTimeout,
 		WriteTimeout:   restWriteTimeout,
-		IdleTimeout:    120 * time.Second,
-		MaxHeaderBytes: 16384,
-		MaxBodyBytes:   1 << 20,
+		IdleTimeout:    idleConnTimeout,
+		MaxHeaderBytes: maxHeaderBytes,
+		MaxBodyBytes:   maxBodyBytes,
 		// PERF-F13 (#57): transparent gzip of text-ish JSON responses
 		// >=1 KiB when the client sends Accept-Encoding: gzip. Skips
 		// already-encoded responses, images/video/audio, and tiny
@@ -404,8 +430,8 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		// RemoteAddr — this server is not behind a trusted proxy that
 		// rewrites X-Forwarded-For, so the proxy-header sources would
 		// be forgeable.
-		PerIPRPS:    50,
-		PerIPBurst:  100,
+		PerIPRPS:    perIPRPS,
+		PerIPBurst:  perIPBurst,
 		PerIPSource: httpx.IPSourceRemoteAddr,
 	}
 	// Per-IP / per-(profile, username) login limiter (SEC-F2 #58, SEC-N7
@@ -466,7 +492,7 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		Addr:    cfg.listen,
 		Handler: rootHandler,
 		// ReadHeaderTimeout guards against slowloris on the header read.
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 		// IdleTimeout reaps idle keep-alive connections — including a WS
 		// connection whose peer has gone silent without sending a close
 		// frame (the per-frame deadlines in wsx handle the in-flight
@@ -504,7 +530,7 @@ func (a *app) serve(ctx context.Context) error {
 	// 10-minute cadence is plenty given the 1m..24h TTL window; the
 	// maxTokenAge is the issuer's TTL so the sweep never drops a marker
 	// a live token could still reference.
-	a.issuer.Revocation().StartSweeper(ctx, 10*time.Minute, a.issuer.TTL())
+	a.issuer.Revocation().StartSweeper(ctx, revocationSweepInterval, a.issuer.TTL())
 
 	listenErr := make(chan error, 1)
 	go func() {
@@ -542,7 +568,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 			return 0
 		}
 		// flag already printed the error + usage to stderr.
-		return 2
+		return exitUsage
 	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(stdout, nil)))

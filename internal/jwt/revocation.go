@@ -299,13 +299,17 @@ func (rs *RevocationSet) Sweep(maxTokenAge time.Duration) {
 	}
 }
 
+// defaultSweepInterval is the StartSweeper cadence used when the caller
+// passes a non-positive interval.
+const defaultSweepInterval = 10 * time.Minute
+
 // StartSweeper runs Sweep on a ticker until ctx is cancelled. interval
 // is the sweep cadence; maxTokenAge is forwarded to Sweep (pass the
 // issuer's TTL ceiling — 24h is a safe over-estimate). It returns
 // immediately; the loop runs in a goroutine.
 func (rs *RevocationSet) StartSweeper(ctx context.Context, interval, maxTokenAge time.Duration) {
 	if interval <= 0 {
-		interval = 10 * time.Minute
+		interval = defaultSweepInterval
 	}
 	go func() {
 		t := time.NewTicker(interval)

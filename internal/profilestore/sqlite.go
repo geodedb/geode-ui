@@ -105,6 +105,10 @@ func OpenSQLiteEncrypted(dsn string, cipher *Cipher) (Store, error) {
 	return openSQLiteWithCipher(dsn, cipher)
 }
 
+// minReadConns is the floor on the read-only pool size so one slow read
+// can never starve a second.
+const minReadConns = 2
+
 func openSQLiteWithCipher(dsn string, cipher *Cipher) (Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -133,7 +137,7 @@ func openSQLiteWithCipher(dsn string, cipher *Cipher) (Store, error) {
 		}
 		// Scale concurrent reads with the CPU count; never below 2 so a
 		// single read can never starve a second.
-		n := max(runtime.GOMAXPROCS(0), 2)
+		n := max(runtime.GOMAXPROCS(0), minReadConns)
 		ro.SetMaxOpenConns(n)
 		ro.SetMaxIdleConns(n)
 		// Validate the RO DSN eagerly so a busted mode=ro (e.g. the file
