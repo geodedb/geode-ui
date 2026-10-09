@@ -105,6 +105,15 @@ install:
     paths:
       - node_modules/
     expire_in: 1 hour
+  # Jobs without rules default to branch/tag pipelines only, so install
+  # was absent from merge-request pipelines while typecheck, eslint,
+  # prettier, audit-ratchets, unit-tests and build all `needs` it there,
+  # which made every MR pipeline fail at creation. Keep the old
+  # branch/tag behaviour and add MR pipelines.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 # ============================================================================
 # LINT STAGE
