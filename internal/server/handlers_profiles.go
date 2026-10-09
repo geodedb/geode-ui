@@ -127,6 +127,8 @@ type poolOverridesWire struct {
 // per zero-valued profile. The bytes are treated as read-only by every
 // caller (they flow straight into the response codec, which only reads
 // jsontext.Value), so sharing a single backing array is safe.
+//
+//nolint:gochecknoglobals // precomputed read-only encodings (PSR-F15 / #112); computing per call defeats the optimisation.
 var (
 	zeroTLSWire = mustMarshalWire(tlsWire{})
 	zeroPOWire  = mustMarshalWire(poolOverridesWire{})

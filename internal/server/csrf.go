@@ -139,19 +139,23 @@ func csrfCheck(r *http.Request) error {
 	return nil
 }
 
-// csrfExemptPaths is the set of paths the middleware never enforces
-// against. Login is exempt because the user is not yet authenticated;
+// isCSRFExemptPath reports whether path is one the middleware never
+// enforces against. Login is exempt because the user is not yet authenticated;
 // logout is idempotent and clears the cookie either way; /api/v1/csrf
 // is the source of the token. /healthz is unauthenticated read-only.
 //
-// The map is keyed by exact path; any sub-path under these names is
-// NOT exempt unless added explicitly.
-var csrfExemptPaths = map[string]struct{}{
-	"/api/v1/auth/login":  {},
-	"/api/v1/auth/logout": {},
-	CSRFEndpointPath:      {},
-	"/api/v1/healthz":     {},
-	"/healthz":            {},
+// Matching is by exact path; any sub-path under these names is NOT
+// exempt unless added explicitly.
+func isCSRFExemptPath(path string) bool {
+	switch path {
+	case "/api/v1/auth/login",
+		"/api/v1/auth/logout",
+		CSRFEndpointPath,
+		"/api/v1/healthz",
+		"/healthz":
+		return true
+	}
+	return false
 }
 
 // isSafeMethod reports whether the HTTP method is read-only by RFC 9110
@@ -195,7 +199,7 @@ func csrfMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, exempt := csrfExemptPaths[r.URL.Path]; exempt {
+		if isCSRFExemptPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

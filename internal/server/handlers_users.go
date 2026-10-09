@@ -665,6 +665,8 @@ func permissionFromRow(cols []string, row []any) gentypes.Permission {
 
 // driftSeen deduplicates the per-(statement,column) drift warning so a
 // large result set does not spam the log with one line per row.
+//
+//nolint:gochecknoglobals // once-per-process dedupe latch; must outlive any single request or server instance.
 var driftSeen = struct {
 	mu  sync.Mutex
 	set map[string]struct{}

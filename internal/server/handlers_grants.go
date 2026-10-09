@@ -59,14 +59,15 @@ import (
 //     introspection is indirect via `SHOW PERMISSIONS [ FOR <user> ]`
 //     (handler in handlers_users.go).
 
-// permissionAllowlist pins the four privilege tokens that v0.5.15
-// accepts (parseGrantPrivilege in src/gql/parser.zig). Compared
-// case-insensitively; the canonical emit form is uppercase.
-var permissionAllowlist = map[string]struct{}{
-	"READ":   {},
-	"WRITE":  {},
-	"SCHEMA": {},
-	"ALL":    {},
+// isAllowedPrivilege pins the four privilege tokens that v0.5.15
+// accepts (parseGrantPrivilege in src/gql/parser.zig). The caller
+// upper-cases first; the canonical emit form is uppercase.
+func isAllowedPrivilege(up string) bool {
+	switch up {
+	case "READ", "WRITE", "SCHEMA", "ALL":
+		return true
+	}
+	return false
 }
 
 // normalisePrivilege returns the canonical upper-case privilege token
@@ -74,7 +75,7 @@ var permissionAllowlist = map[string]struct{}{
 // accepted values.
 func normalisePrivilege(p string) string {
 	up := strings.ToUpper(strings.TrimSpace(p))
-	if _, ok := permissionAllowlist[up]; !ok {
+	if !isAllowedPrivilege(up) {
 		return ""
 	}
 	return up

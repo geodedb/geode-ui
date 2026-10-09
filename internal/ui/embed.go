@@ -15,7 +15,7 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
-// assetExts is the set of path extensions that look like static assets
+// isAssetExt reports whether ext is a path extension that looks like a static asset
 // (bundles, images, fonts). When a request path has one of these but
 // the file doesn't actually exist in dist/, the handler 404s instead
 // of falling through to the SPA index.
@@ -25,25 +25,16 @@ var distFS embed.FS
 // bundle, the server would serve index.html with Content-Type
 // text/html, and the browser would try to parse HTML as JavaScript —
 // the page silently breaks and the user has to hard-refresh.
-var assetExts = map[string]struct{}{
-	".js":          {},
-	".css":         {},
-	".map":         {},
-	".svg":         {},
-	".png":         {},
-	".jpg":         {},
-	".jpeg":        {},
-	".gif":         {},
-	".ico":         {},
-	".woff":        {},
-	".woff2":       {},
-	".ttf":         {},
-	".otf":         {},
-	".webp":        {},
-	".webmanifest": {},
+func isAssetExt(ext string) bool {
+	switch ext {
+	case ".js", ".css", ".map", ".svg", ".png", ".jpg", ".jpeg", ".gif",
+		".ico", ".woff", ".woff2", ".ttf", ".otf", ".webp", ".webmanifest":
+		return true
+	}
+	return false
 }
 
-// compressibleExts is the set of path extensions worth gzip pre-
+// isCompressibleExt reports whether ext is a path extension worth gzip pre-
 // compression: text-shaped bundles whose payload shrinks substantially
 // under DEFLATE. Already-compressed binary types (images, fonts) are
 // intentionally absent — re-compressing them just burns CPU and usually
@@ -54,15 +45,12 @@ var assetExts = map[string]struct{}{
 // uncompressed over the wire. Browsers always send
 // `Accept-Encoding: gzip`; serving gzip cuts the dominant bundle to
 // roughly a quarter of its size with no build-step change.
-var compressibleExts = map[string]struct{}{
-	".js":          {},
-	".css":         {},
-	".map":         {},
-	".svg":         {},
-	".html":        {},
-	".json":        {},
-	".webmanifest": {},
-	".txt":         {},
+func isCompressibleExt(ext string) bool {
+	switch ext {
+	case ".js", ".css", ".map", ".svg", ".html", ".json", ".webmanifest", ".txt":
+		return true
+	}
+	return false
 }
 
 // minCompressSize is the smallest response body worth compressing. Below
@@ -72,6 +60,8 @@ const minCompressSize = 1024
 
 // gzipWriterPool recycles *gzip.Writer instances so a busy server does
 // not allocate (and GC) one writer + its DEFLATE state per request.
+//
+//nolint:gochecknoglobals // a sync.Pool only amortises allocations when shared process-wide.
 var gzipWriterPool = sync.Pool{
 	New: func() any {
 		// BestSpeed keeps per-request CPU low; the embedded bundles are
@@ -150,7 +140,7 @@ func handlerFS(sub fs.FS) (http.Handler, error) {
 		info, statErr := statCached(clean)
 		if statErr != nil {
 			ext := strings.ToLower(path.Ext(clean))
-			if _, isAsset := assetExts[ext]; isAsset {
+			if isAssetExt(ext) {
 				http.NotFound(w, r)
 				return
 			}
@@ -196,7 +186,7 @@ func servedExt(p string) string {
 // non-gzip branch — e.g. a tiny compressible file, or a client that did
 // not advertise gzip).
 func newGzipWriter(w http.ResponseWriter, r *http.Request, ext string, info fs.FileInfo) *gzipResponseWriter {
-	if _, ok := compressibleExts[ext]; !ok {
+	if !isCompressibleExt(ext) {
 		return nil
 	}
 	// Any response on a compressible path is encoding-dependent.

@@ -336,6 +336,8 @@ func newConnectionID() string {
 // immediately when the upstream answers faster). Lowercase / var so
 // tests in this package can lower it to a few microseconds and avoid
 // pegging the suite on real wall-clock waits.
+//
+//nolint:gochecknoglobals // test seam: tests lower the floor to avoid real wall-clock waits.
 var loginMinFailureLatency = 250 * time.Millisecond
 
 // dummyCompareTarget is a constant-time-compare sink: a fixed SHA-256
@@ -345,6 +347,8 @@ var loginMinFailureLatency = 250 * time.Millisecond
 // subtle.ConstantTimeCompare so the function's runtime is dominated
 // by the hash, not by an unequal-byte short-circuit. The output is
 // thrown away — we don't care whether they match.
+//
+//nolint:gochecknoglobals // fixed digest computed once; Go has no constant arrays.
 var dummyCompareTarget = sha256.Sum256([]byte("SEC-N10 anti-timing sink"))
 
 // performDummyCompare burns roughly the same CPU as a real password

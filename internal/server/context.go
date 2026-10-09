@@ -7,6 +7,8 @@ import (
 )
 
 // timeNow is a test seam for any handler that wants a deterministic clock.
+//
+//nolint:gochecknoglobals // test seam: tests swap the clock for deterministic expiry maths.
 var timeNow = time.Now
 
 // ctxKey is a private type for context keys to avoid collisions with other

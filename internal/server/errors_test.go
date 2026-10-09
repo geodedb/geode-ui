@@ -72,11 +72,12 @@ func TestIsWireFeatureMissing_PinnedSubstrings(t *testing.T) {
 		"expected token":      true,
 		"expected identifier": true,
 	}
-	if len(wireFeatureMissingSubstrings) != len(wantSubstrings) {
+	got := wireFeatureMissingSubstrings()
+	if len(got) != len(wantSubstrings) {
 		t.Fatalf("wireFeatureMissingSubstrings drift: have %v, expected size %d",
-			wireFeatureMissingSubstrings, len(wantSubstrings))
+			got, len(wantSubstrings))
 	}
-	for _, s := range wireFeatureMissingSubstrings {
+	for _, s := range got {
 		if !wantSubstrings[s] {
 			t.Fatalf("unexpected substring in fallback list: %q (update test if intentional)", s)
 		}

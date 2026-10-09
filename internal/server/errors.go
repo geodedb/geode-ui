@@ -123,10 +123,12 @@ var errWireFeatureMissing = errors.New("server: wire feature not implemented on 
 // the wire-degradation behaviour cannot drift silently when a
 // driver upstream changes its error wording. Adding a new entry
 // requires both a code change here AND an explicit test row.
-var wireFeatureMissingSubstrings = []string{
-	"parse error",
-	"expected token",
-	"expected identifier",
+func wireFeatureMissingSubstrings() []string {
+	return []string{
+		"parse error",
+		"expected token",
+		"expected identifier",
+	}
 }
 
 // isWireFeatureMissing reports whether err looks like a parse error from
@@ -170,7 +172,7 @@ func isWireFeatureMissing(err error) bool {
 	if !strings.Contains(msg, "42000") {
 		return false
 	}
-	for _, sub := range wireFeatureMissingSubstrings {
+	for _, sub := range wireFeatureMissingSubstrings() {
 		if strings.Contains(msg, sub) {
 			return true
 		}

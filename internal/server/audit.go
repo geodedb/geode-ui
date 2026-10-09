@@ -68,6 +68,8 @@ const (
 // list and these locals together so a single isSensitive() call covers
 // the full surface. False positives (over-redaction) are far cheaper
 // than false negatives (leaking a secret to the audit channel).
+//
+//nolint:gochecknoglobals // read-only lookup table built once; rebuilding it per audit emit would allocate on every event.
 var sensitiveKeys = append(append([]string{}, obsx.DefaultSensitiveKeyFragments...),
 	// geode-ui-specific additions on top of obsx defaults.
 	"saved_password",    // profilestore on-disk password field
@@ -201,6 +203,8 @@ func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 // emit call sites honest — every handler can fire and forget, and the
 // HTTP handler reads from the same buffer regardless of which goroutine
 // recorded the event.
+//
+//nolint:gochecknoglobals // process-wide ring shared by emitAudit and the /api/v1/audit handler by design.
 var defaultAuditRing = newAuditRing()
 
 // emitAudit writes one record to slog at INFO level (prefixed with

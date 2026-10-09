@@ -41,6 +41,8 @@ const wsRowBatchSize = 64
 // batches so the per-batch JSON encoding does not allocate a fresh
 // backing slice for every flush. Buffers are reset (not nil-cleared)
 // on Get so callers can append directly.
+//
+//nolint:gochecknoglobals // a sync.Pool only amortises allocations when shared process-wide.
 var wsRowBufPool = sync.Pool{
 	New: func() any { return &bytes.Buffer{} },
 }
