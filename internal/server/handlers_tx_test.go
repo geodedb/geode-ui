@@ -90,7 +90,7 @@ func TestTxStore_GetMissing(t *testing.T) {
 // truncated.
 func TestNewTxID_Uniqueness(t *testing.T) {
 	seen := make(map[string]struct{}, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		id := newTxID()
 		if len(id) != 32 {
 			t.Fatalf("len=%d want 32", len(id))

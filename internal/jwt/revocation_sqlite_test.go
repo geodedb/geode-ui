@@ -252,7 +252,7 @@ func TestSQLiteRevocation_HotPath_ZeroQueries(t *testing.T) {
 	}
 
 	// Now hammer IsRevoked across every code path.
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		// hit: revoked jti
 		_ = rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "revoked-jti"}})
 		// hit: expired jti (drops the cache entry, must not query SQLite)
@@ -465,11 +465,11 @@ func TestSQLiteRevocation_ROLoadConcurrentWithWrites(t *testing.T) {
 	)
 	var readerWG sync.WaitGroup
 	var loads atomic.Int64
-	for r := 0; r < numReaders; r++ {
+	for range numReaders {
 		readerWG.Add(1)
 		go func() {
 			defer readerWG.Done()
-			for k := 0; k < perReader; k++ {
+			for range perReader {
 				jtis, users, err := rs.backend.load(now)
 				if err != nil {
 					t.Errorf("revocation load: %v", err)
@@ -542,7 +542,7 @@ func BenchmarkRevocationReloadUnderWrite(b *testing.B) {
 	if err := rs.AttachSQLiteRW(rw, ro); err != nil {
 		b.Fatalf("AttachSQLiteRW: %v", err)
 	}
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		rs.Revoke(fmt.Sprintf("seed-%d", i), now.Add(time.Hour))
 	}
 

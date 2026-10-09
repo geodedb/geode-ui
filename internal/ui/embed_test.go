@@ -361,7 +361,7 @@ func TestEmbedHandler_DoesNotCache404(t *testing.T) {
 		t.Fatalf("handlerFS: %v", err)
 	}
 	const missing = "/totally-not-a-real-asset-abc123.js"
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req := httptest.NewRequest(http.MethodGet, missing, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)

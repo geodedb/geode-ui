@@ -36,7 +36,7 @@ func TestRowBatcher_BatchingFramesLessThanRows(t *testing.T) {
 	const rowCount = 200
 	w := &fakeFrameWriter{}
 	b := newRowBatcher(w, wsRowBatchSize)
-	for i := 0; i < rowCount; i++ {
+	for i := range rowCount {
 		if err := b.add([]any{int64(i), "x"}); err != nil {
 			t.Fatalf("add row %d: %v", i, err)
 		}
@@ -62,7 +62,7 @@ func TestRowBatcher_BatchingFramesLessThanRows(t *testing.T) {
 func TestRowBatcher_FrameSchema(t *testing.T) {
 	w := &fakeFrameWriter{}
 	b := newRowBatcher(w, 4)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		if err := b.add([]any{int64(i)}); err != nil {
 			t.Fatalf("add: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestRowBatcher_FrameSchema(t *testing.T) {
 func TestRowBatcher_FlushIsIdempotent(t *testing.T) {
 	w := &fakeFrameWriter{}
 	b := newRowBatcher(w, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_ = b.add([]any{int64(i)})
 	}
 	// First flush: should NOT emit an extra frame because the batch

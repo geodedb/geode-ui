@@ -36,7 +36,7 @@ func BenchmarkPostProfile_SyncReloadBaseline(b *testing.B) {
 	srv.cfg.PoolReloader = stub
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		r := reqWithActor("POST", "/api/v1/profiles", "alice")
 		_, err := srv.PostProfiles(httptest.NewRecorder(), r, &gentypes.CreateProfileReq{
 			Scope: string(conn.ProfileScopePersonal),
@@ -62,7 +62,7 @@ func BenchmarkPatchProfile_SyncReloadBaseline(b *testing.B) {
 	srv.cfg.PoolReloader = stub
 	const seed = 64
 	ids := make([]string, seed)
-	for i := 0; i < seed; i++ {
+	for i := range seed {
 		saved, _ := st.Put(context.Background(), conn.Profile{
 			Scope: conn.ProfileScopePersonal, OwnerUserID: "alice",
 			Name: "p" + atoiBenchKey(i), DSN: "quic://x:1",
@@ -71,7 +71,7 @@ func BenchmarkPatchProfile_SyncReloadBaseline(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		id := ids[i%seed]
 		r := reqWithActor("PATCH", "/api/v1/profiles/"+id, "alice")
 		r.SetPathValue("profileId", id)

@@ -21,7 +21,7 @@ func BenchmarkProfileLimiter_Allow_Parallel(b *testing.B) {
 		Now:           time.Now,
 	})
 	keys := make([]string, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		keys[i] = "u\x00user" + strconv.Itoa(i)
 		l.Allow(keys[i])
 	}

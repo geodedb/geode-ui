@@ -90,7 +90,7 @@ func TestGlobalRate_DisabledWhenZero(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		path := "/api/v1/capabilities"
 		if i%2 == 1 {
 			path = "/api/v1/graphs"

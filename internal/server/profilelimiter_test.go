@@ -31,7 +31,7 @@ func TestProfileLimiter_AllowsBurstThenDenies(t *testing.T) {
 	})
 
 	const key = "u\x00alice"
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		ok, _ := l.Allow(key)
 		if !ok {
 			t.Fatalf("burst[%d] should be allowed (bucket starts full)", i)
@@ -65,7 +65,7 @@ func TestProfileLimiter_PerActorIsolation(t *testing.T) {
 		Now:           clk.Now,
 	})
 	// Drain alice's bucket.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if ok, _ := l.Allow("u\x00alice"); !ok {
 			t.Fatalf("alice burst[%d] should be allowed", i)
 		}
@@ -142,7 +142,7 @@ func TestProfileLimiter_Wrapper_LimitsPostThirtyOne(t *testing.T) {
 
 	// 30 POSTs from the same IP (no JWT issuer wired -> per-IP
 	// fallback keying). All must be allowed.
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/profiles", strings.NewReader(`{}`))
 		req.RemoteAddr = "1.2.3.4:54321"
 		rec := httptest.NewRecorder()

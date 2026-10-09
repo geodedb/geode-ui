@@ -175,7 +175,7 @@ func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 	matches := r.count
 	if !since.IsZero() {
 		matches = 0
-		for i := 0; i < r.count; i++ {
+		for i := range r.count {
 			idx := (r.start + i) % len(r.buf)
 			if !r.buf[idx].Timestamp.Before(since) {
 				matches++
@@ -186,7 +186,7 @@ func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 	// Pass two: allocate exactly `matches` slots and copy the matching
 	// entries in ring (chronological) order.
 	out := make([]AuditEntry, 0, matches)
-	for i := 0; i < r.count; i++ {
+	for i := range r.count {
 		idx := (r.start + i) % len(r.buf)
 		e := r.buf[idx]
 		if since.IsZero() || !e.Timestamp.Before(since) {

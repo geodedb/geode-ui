@@ -107,7 +107,7 @@ func TestSchemaCache_ConcurrentMissesCollapse(t *testing.T) {
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	wg.Add(n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			defer wg.Done()
 			<-start
@@ -215,7 +215,7 @@ func BenchmarkLabels(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rec := httptest.NewRecorder()
 		if _, err := s.Labels(rec, req, param); err != nil {
 			b.Fatalf("Labels: %v", err)
@@ -235,7 +235,7 @@ func BenchmarkEdgeTypes(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rec := httptest.NewRecorder()
 		if _, err := s.EdgeTypes(rec, req, param); err != nil {
 			b.Fatalf("EdgeTypes: %v", err)

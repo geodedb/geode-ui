@@ -179,7 +179,7 @@ func BenchmarkScanQueryResult_FoldedSummary(b *testing.B) {
 			"plain",
 		},
 	}
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fr := &fakeRowScanner{cols: []string{"n", "r"}, rows: rowFixture}
 		_ = mustScan(b, fr)
 	}
@@ -250,7 +250,7 @@ func BenchmarkStreamQueryResult_PerRowAlloc(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fr := &fakeRowScanner{cols: colNames, rows: rows}
 		w := newDiscardFlushWriter()
 		if _, err := streamQueryResult(w, fr, fr.cols, colDescs, time.Now()); err != nil {

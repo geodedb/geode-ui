@@ -75,7 +75,7 @@ func benchResetCounters() {
 // so the parse:execute ratio is stable regardless of host load.
 func busyCompute(seed uint64, n int) uint64 {
 	x := seed
-	for i := 0; i < n; i++ {
+	for range n {
 		x ^= x << 13
 		x ^= x >> 7
 		x ^= x << 17
@@ -193,7 +193,7 @@ func BenchmarkParseVsExecute(b *testing.B) {
 		db := benchOpenDB(b)
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			rows, err := db.QueryContext(ctx, benchQuery, "acme", true)
 			drainRows(b, rows, err)
 		}
@@ -208,7 +208,7 @@ func BenchmarkParseVsExecute(b *testing.B) {
 		defer func() { _ = stmt.Close() }()
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			rows, err := stmt.QueryContext(ctx, "acme", true)
 			drainRows(b, rows, err)
 		}
@@ -228,7 +228,7 @@ func BenchmarkParseFraction(b *testing.B) {
 	benchResetCounters()
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rows, err := db.QueryContext(ctx, benchQuery, "acme", true)
 		drainRows(b, rows, err)
 	}

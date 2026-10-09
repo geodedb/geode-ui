@@ -347,7 +347,7 @@ func TestSQLitePatchAtomic_NoLostUpdate(t *testing.T) {
 
 	// Run many trials to give the race a chance to manifest.
 	const trials = 50
-	for trial := 0; trial < trials; trial++ {
+	for trial := range trials {
 		saved, err := st.Put(context.Background(), conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("trial-%03d", trial),
@@ -717,7 +717,7 @@ func TestSQLiteEncrypted_ListReturnsPlaintext(t *testing.T) {
 	st := openEncryptedSQLite(t, tmp)
 	defer func() { _ = st.Close() }()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := st.Put(context.Background(), conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%d", i),
@@ -777,7 +777,7 @@ func TestSQLiteList_LimitCapsResultSet(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -802,7 +802,7 @@ func TestSQLiteList_LimitLargerThanTableReturnsAll(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -830,7 +830,7 @@ func TestSQLiteList_ZeroLimitReturnsAll(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	const N = 12
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -856,7 +856,7 @@ func TestSQLiteList_CursorAdvancesCorrectly(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	const N = 5
-	for i := 0; i < N; i++ {
+	for i := range N {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -907,7 +907,7 @@ func TestSQLiteList_PaginationOrdersById(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -1299,11 +1299,11 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 	)
 	var readerWG sync.WaitGroup
 	var reads atomic.Int64
-	for r := 0; r < numReaders; r++ {
+	for range numReaders {
 		readerWG.Add(1)
 		go func() {
 			defer readerWG.Done()
-			for k := 0; k < perReader; k++ {
+			for range perReader {
 				var name string
 				err := ro.QueryRowContext(ctx,
 					`SELECT name FROM profiles WHERE id = ?`, seeded.ID).Scan(&name)

@@ -24,7 +24,7 @@ func TestSchemaCache_ConcurrentReadersAndWriters(t *testing.T) {
 	// Pre-populate.
 	const keyCount = 64
 	keys := make([]schemaCacheKey, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		k := schemaCacheKey{
 			profile: "p" + strconv.Itoa(i%4),
 			graph:   "g" + strconv.Itoa(i%8),
@@ -43,26 +43,26 @@ func TestSchemaCache_ConcurrentReadersAndWriters(t *testing.T) {
 	const iterations = 500
 	var wg sync.WaitGroup
 	wg.Add(readers + writers + invalidators)
-	for r := 0; r < readers; r++ {
+	for range readers {
 		go func() {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+			for i := range iterations {
 				_, _ = c.get(keys[i%keyCount])
 			}
 		}()
 	}
-	for w := 0; w < writers; w++ {
+	for w := range writers {
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+			for i := range iterations {
 				c.set(keys[(w*7+i)%keyCount], []string{"x", "y", strconv.Itoa(i)})
 			}
 		}(w)
 	}
-	for i := 0; i < invalidators; i++ {
+	for range invalidators {
 		go func() {
 			defer wg.Done()
-			for i := 0; i < iterations/10; i++ {
+			for range iterations / 10 {
 				c.invalidateAll()
 			}
 		}()
@@ -80,7 +80,7 @@ func BenchmarkSchemaCache_Get_Parallel(b *testing.B) {
 	const keyCount = 64
 	// Pre-populate with realistic per-(profile, graph, kind) shapes.
 	keys := make([]schemaCacheKey, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		k := schemaCacheKey{
 			profile: "p" + strconv.Itoa(i%4),
 			graph:   "g" + strconv.Itoa(i%8),
