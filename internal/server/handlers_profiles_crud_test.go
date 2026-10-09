@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,7 @@ import (
 func silenceSlog(tb testing.TB) {
 	tb.Helper()
 	prior := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	slog.SetDefault(slog.New(slog.DiscardHandler))
 	tb.Cleanup(func() { slog.SetDefault(prior) })
 }
 
@@ -599,9 +598,9 @@ func TestMaybeReload_CoalescesConcurrentTriggers(t *testing.T) {
 	// would spawn 10 in-flight Reload goroutines, all blocked on
 	// release. With singleflight, only 1 is in-flight; the rest are
 	// coalesced behind the same key.
-	const N = 10
+	const n = 10
 	var wg sync.WaitGroup
-	for range N {
+	for range n {
 		wg.Go(func() {
 			ctx := context.WithValue(context.Background(), userCtxKey, "alice")
 			srv.maybeReload(ctx)
@@ -618,11 +617,11 @@ func TestMaybeReload_CoalescesConcurrentTriggers(t *testing.T) {
 
 	// We expect 1 (perfect coalescing) or 2 (one in-flight + one
 	// follow-up that observed a newer version mid-flight). Anything
-	// >= N indicates singleflight is not engaged.
+	// >= n indicates singleflight is not engaged.
 	got := stub.calls.Load()
 	if got < 1 || got > 2 {
 		t.Errorf("Reload calls = %d after %d triggers; want 1 or 2 (singleflight coalescing)",
-			got, N)
+			got, n)
 	}
 	// Sanity: ensure the row we created is still the only one persisted.
 	all, _ := st.List(context.Background(), profilestore.Filter{})

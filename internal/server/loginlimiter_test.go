@@ -331,6 +331,7 @@ func TestClientIPFromXForwardedFor(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.Header = tc.h
 			req.RemoteAddr = tc.ra

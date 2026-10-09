@@ -1,4 +1,4 @@
-// Package server: tests for the /ws/lsp WebSocket-to-TCP bridge.
+// Tests for the /ws/lsp WebSocket-to-TCP bridge.
 //
 // The bridge proxies a browser WebSocket connection through to an
 // upstream LSP TCP listener (geode serve --lsp-port=N). The tests here
@@ -14,6 +14,7 @@
 //     WS frame is a JSON-RPC "initialize" request, so the LSP session
 //     can authenticate without the browser having to know the upstream
 //     auth scheme.
+
 package server
 
 import (

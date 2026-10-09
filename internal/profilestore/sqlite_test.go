@@ -404,11 +404,11 @@ func TestSQLitePatchAtomic_NoTornStateUnderHighContention(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	const N = 20
+	const n = 20
 	var wg sync.WaitGroup
-	wg.Add(N)
-	errCh := make(chan error, N)
-	for i := range N {
+	wg.Add(n)
+	errCh := make(chan error, n)
+	for i := range n {
 		go func() {
 			defer wg.Done()
 			name := fmt.Sprintf("name-%02d", i)
@@ -824,8 +824,8 @@ func TestSQLiteList_ZeroLimitReturnsAll(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	const N = 12
-	for i := range N {
+	const n = 12
+	for i := range n {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -838,8 +838,8 @@ func TestSQLiteList_ZeroLimitReturnsAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(zero filter): %v", err)
 	}
-	if len(got) != N {
-		t.Errorf("List(zero filter) returned %d rows, want %d (default must be unbounded)", len(got), N)
+	if len(got) != n {
+		t.Errorf("List(zero filter) returned %d rows, want %d (default must be unbounded)", len(got), n)
 	}
 }
 
@@ -850,8 +850,8 @@ func TestSQLiteList_CursorAdvancesCorrectly(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	const N = 5
-	for i := range N {
+	const n = 5
+	for i := range n {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -884,8 +884,8 @@ func TestSQLiteList_CursorAdvancesCorrectly(t *testing.T) {
 			t.Fatalf("cursor failed to terminate after 10 pages")
 		}
 	}
-	if len(seen) != N {
-		t.Errorf("cursor visited %d distinct ids, want %d", len(seen), N)
+	if len(seen) != n {
+		t.Errorf("cursor visited %d distinct ids, want %d", len(seen), n)
 	}
 	// 5 rows, 2 per page → 3 pages (2,2,1). The terminating empty
 	// page is not counted.

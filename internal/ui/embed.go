@@ -118,7 +118,9 @@ func handlerFS(sub fs.FS) (http.Handler, error) {
 	var statCache sync.Map // key: string (cleaned path) → value: fs.FileInfo
 	statCached := func(name string) (fs.FileInfo, error) {
 		if v, ok := statCache.Load(name); ok {
-			return v.(fs.FileInfo), nil
+			if info, isInfo := v.(fs.FileInfo); isInfo {
+				return info, nil
+			}
 		}
 		info, err := fs.Stat(sub, name)
 		if err != nil {
@@ -129,7 +131,10 @@ func handlerFS(sub fs.FS) (http.Handler, error) {
 		// keeps the first's *fs.FileInfo. The FileInfo is read-only
 		// for all callers (we only inspect Size()), so this is safe.
 		actual, _ := statCache.LoadOrStore(name, info)
-		return actual.(fs.FileInfo), nil
+		if cached, isInfo := actual.(fs.FileInfo); isInfo {
+			return cached, nil
+		}
+		return info, nil
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := strings.TrimPrefix(r.URL.Path, "/")
@@ -202,7 +207,10 @@ func newGzipWriter(w http.ResponseWriter, r *http.Request, ext string, info fs.F
 		// we must not claim a Content-Encoding we won't honour.
 		return nil
 	}
-	gz := gzipWriterPool.Get().(*gzip.Writer)
+	gz, ok := gzipWriterPool.Get().(*gzip.Writer)
+	if !ok {
+		gz, _ = gzip.NewWriterLevel(w, gzip.BestSpeed)
+	}
 	gz.Reset(w)
 	w.Header().Set("Content-Encoding", "gzip")
 	// The compressed length is unknown ahead of time; drop FileServer's

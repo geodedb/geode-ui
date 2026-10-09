@@ -148,7 +148,9 @@ func (c *schemaCache) getOrLoad(key schemaCacheKey, loader func() ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	return v.([]string), nil
+	// The singleflight closure above only ever returns []string.
+	out, _ := v.([]string)
+	return out, nil
 }
 
 // invalidateAll drops every cached entry. Called when a profile mutation

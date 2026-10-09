@@ -25,7 +25,7 @@ func TestGeodeJSONQueryRateLimit(t *testing.T) {
 		API []struct {
 			Method    string `json:"method"`
 			Path      string `json:"path"`
-			RateLimit *int   `json:"rateLimit"`
+			RateLimit *int   `json:"rateLimit"` //nolint:tagliatelle // mirrors the genapi spec key spelling in geode.json.
 		} `json:"api"`
 	}
 	if err := json.Unmarshal(raw, &spec); err != nil {

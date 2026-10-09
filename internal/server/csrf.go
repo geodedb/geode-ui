@@ -47,6 +47,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -118,7 +119,10 @@ func (s *GraphServer) HandleCSRF(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"token": tok})
+	if err := json.NewEncoder(w).Encode(map[string]string{"token": tok}); err != nil {
+		// Headers are already sent; the client most likely went away.
+		slog.Debug("csrf: write token response", "err", err)
+	}
 }
 
 // csrfCheck verifies that a request's X-CSRF-Token header matches its
@@ -226,6 +230,8 @@ func csrfMiddleware(next http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 			return
+		case authSourceNone:
+			fallthrough
 		default:
 			// No auth credentials on the request — let the downstream
 			// AuthJWT emit its 401. CSRF is irrelevant for an

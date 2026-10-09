@@ -1,4 +1,4 @@
-// Package server: /ws/lsp WebSocket-to-TCP bridge.
+// /ws/lsp WebSocket-to-TCP bridge.
 //
 // /ws/lsp proxies a browser WebSocket connection through to an upstream
 // Language Server Protocol TCP listener — concretely, `geode serve
@@ -34,6 +34,7 @@
 // the generated /ws/query handler (func(*http.Request) error) keeps
 // wiring uniform. An anonymous request receives 401 and the upstream
 // TCP listener is never dialed.
+
 package server
 
 import (

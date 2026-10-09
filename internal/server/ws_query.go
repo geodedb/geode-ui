@@ -1,4 +1,4 @@
-// Package server: WebSocket streaming query handler.
+// WebSocket streaming query handler.
 //
 // /ws/query is the streaming counterpart to POST /api/v1/query. The
 // client sends one {kind:"start", statement, ...} message; the server
@@ -13,6 +13,7 @@
 // satisfying the synchronous API ServerInterface. Splitting the
 // surfaces also matches the conceptual difference: REST returns a
 // completed result; WS streams an in-progress one.
+
 package server
 
 import (
@@ -111,7 +112,10 @@ func (b *rowBatcher) flush() error {
 	if len(b.buf) == 0 {
 		return nil
 	}
-	buf := wsRowBufPool.Get().(*bytes.Buffer)
+	buf, ok := wsRowBufPool.Get().(*bytes.Buffer)
+	if !ok {
+		buf = &bytes.Buffer{}
+	}
 	buf.Reset()
 	defer wsRowBufPool.Put(buf)
 

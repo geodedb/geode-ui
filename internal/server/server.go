@@ -1,3 +1,6 @@
+// Package server implements the geode-ui backend: the genapi REST
+// handlers, the /ws/query and /ws/lsp WebSocket surfaces, the MCP tools,
+// and the auth, CSRF, rate-limit and audit middleware around them.
 package server
 
 import (
