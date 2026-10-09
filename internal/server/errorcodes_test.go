@@ -39,20 +39,31 @@ import (
 // being trusted (see commit message for GAP-Q23).
 func TestErrorCodeTaxonomy(t *testing.T) {
 	fset := token.NewFileSet()
+	files := parseNonTestFiles(t, fset)
+	constValue := collectErrCodeConsts(t, files)
+	checkGoldenSetMirrorsConsts(t, constValue)
+	usageCount := scanErrorCodeUsages(t, fset, files, errorCodeSet)
+	for name := range constValue {
+		if usageCount[name] == 0 {
+			t.Errorf("ErrCode* constant %s is never referenced — dead code", name)
+		}
+	}
+}
+
+// parseNonTestFiles parses every non-test .go file in the package dir.
+// Test files are skipped: steady-state tests shouldn't constrain
+// test-only literals, and a planted-straggler verification lives in a
+// throwaway branch during development.
+func parseNonTestFiles(t *testing.T, fset *token.FileSet) []*ast.File {
+	t.Helper()
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read package dir: %v", err)
 	}
 	var files []*ast.File
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			// Skip test files: steady-state tests shouldn't constrain
-			// test-only literals, and a planted-straggler verification
-			// lives in a throwaway branch during development.
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		f, perr := parser.ParseFile(fset, name, nil, 0)
@@ -64,8 +75,13 @@ func TestErrorCodeTaxonomy(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no non-test .go files found in package dir")
 	}
+	return files
+}
 
-	// Build the set of ErrCode* constant names + their string values.
+// collectErrCodeConsts returns every ErrCode* constant name mapped to its
+// string value.
+func collectErrCodeConsts(t *testing.T, files []*ast.File) map[string]string {
+	t.Helper()
 	constValue := map[string]string{}
 	for _, file := range files {
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -74,28 +90,8 @@ func TestErrorCodeTaxonomy(t *testing.T) {
 				return true
 			}
 			for _, spec := range gd.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for i, name := range vs.Names {
-					if !strings.HasPrefix(name.Name, "ErrCode") {
-						continue
-					}
-					if i >= len(vs.Values) {
-						continue
-					}
-					bl, ok := vs.Values[i].(*ast.BasicLit)
-					if !ok || bl.Kind != token.STRING {
-						t.Errorf("const %s is not a plain string literal", name.Name)
-						continue
-					}
-					v, uerr := strconv.Unquote(bl.Value)
-					if uerr != nil {
-						t.Errorf("const %s value unparsable: %v", name.Name, uerr)
-						continue
-					}
-					constValue[name.Name] = v
+				if vs, ok := spec.(*ast.ValueSpec); ok {
+					collectErrCodeSpec(t, vs, constValue)
 				}
 			}
 			return true
@@ -104,9 +100,34 @@ func TestErrorCodeTaxonomy(t *testing.T) {
 	if len(constValue) == 0 {
 		t.Fatal("no ErrCode* constants found — errorcodes.go missing?")
 	}
+	return constValue
+}
 
-	// Sanity: allErrorCodes mirrors the const block exactly (values, and
-	// count) so it stays a faithful golden set.
+// collectErrCodeSpec records the ErrCode* names declared by one const spec.
+func collectErrCodeSpec(t *testing.T, vs *ast.ValueSpec, constValue map[string]string) {
+	t.Helper()
+	for i, name := range vs.Names {
+		if !strings.HasPrefix(name.Name, "ErrCode") || i >= len(vs.Values) {
+			continue
+		}
+		bl, ok := vs.Values[i].(*ast.BasicLit)
+		if !ok || bl.Kind != token.STRING {
+			t.Errorf("const %s is not a plain string literal", name.Name)
+			continue
+		}
+		v, uerr := strconv.Unquote(bl.Value)
+		if uerr != nil {
+			t.Errorf("const %s value unparsable: %v", name.Name, uerr)
+			continue
+		}
+		constValue[name.Name] = v
+	}
+}
+
+// checkGoldenSetMirrorsConsts asserts allErrorCodes mirrors the const
+// block exactly (values, and count) so it stays a faithful golden set.
+func checkGoldenSetMirrorsConsts(t *testing.T, constValue map[string]string) {
+	t.Helper()
 	byValue := map[string]string{}
 	for name, v := range constValue {
 		if other, dup := byValue[v]; dup {
@@ -123,9 +144,15 @@ func TestErrorCodeTaxonomy(t *testing.T) {
 		t.Errorf("allErrorCodes has %d entries but %d ErrCode* constants exist — keep them in sync",
 			len(allErrorCodes), len(constValue))
 	}
+}
 
-	validValues := errorCodeSet
-
+// scanErrorCodeUsages walks the package source, reports every string
+// literal in an error-envelope code position, and returns how often each
+// ErrCode* identifier is referenced outside its own declaration.
+func scanErrorCodeUsages(
+	t *testing.T, fset *token.FileSet, files []*ast.File, validValues map[string]struct{},
+) map[string]int {
+	t.Helper()
 	// helperCodeArg maps an envelope-helper func name to the argument
 	// index that carries the error code.
 	helperCodeArg := map[string]int{
@@ -134,7 +161,6 @@ func TestErrorCodeTaxonomy(t *testing.T) {
 		"writeEndpointErr": 2,
 		"writeErr":         1,
 	}
-
 	usageCount := map[string]int{}
 	for _, file := range files {
 		fname := filepath.Base(fset.File(file.Pos()).Name())
@@ -152,48 +178,51 @@ func TestErrorCodeTaxonomy(t *testing.T) {
 				}
 			case *ast.CompositeLit:
 				for _, elt := range x.Elts {
-					kv, ok := elt.(*ast.KeyValueExpr)
-					if !ok {
-						continue
-					}
-					key, ok := kv.Key.(*ast.Ident)
-					if !ok || (key.Name != "code" && key.Name != "Code") {
-						continue
-					}
-					if bl, ok := kv.Value.(*ast.BasicLit); ok && bl.Kind == token.STRING {
-						v, _ := strconv.Unquote(bl.Value)
-						pos := fset.Position(bl.Pos())
-						if _, ok := validValues[v]; !ok {
-							t.Errorf("%s:%d: error code literal %q not declared as an ErrCode* constant in errorcodes.go", fname, pos.Line, v)
-						} else {
-							t.Errorf("%s:%d: error code literal %q should use the ErrCode* constant, not a string literal", fname, pos.Line, v)
-						}
+					if kv, ok := elt.(*ast.KeyValueExpr); ok && isCodeKey(kv.Key) {
+						checkCodeLiteral(t, fset, fname, "", kv.Value, validValues)
 					}
 				}
 			case *ast.CallExpr:
 				name := calleeName(x.Fun)
-				argIdx, isHelper := helperCodeArg[name]
-				if !isHelper || argIdx >= len(x.Args) {
-					return true
-				}
-				if bl, ok := x.Args[argIdx].(*ast.BasicLit); ok && bl.Kind == token.STRING {
-					v, _ := strconv.Unquote(bl.Value)
-					pos := fset.Position(bl.Pos())
-					if _, ok := validValues[v]; !ok {
-						t.Errorf("%s:%d: %s(...) error code literal %q not declared as an ErrCode* constant in errorcodes.go", fname, pos.Line, name, v)
-					} else {
-						t.Errorf("%s:%d: %s(...) error code literal %q should use the ErrCode* constant, not a string literal", fname, pos.Line, name, v)
-					}
+				if argIdx, isHelper := helperCodeArg[name]; isHelper && argIdx < len(x.Args) {
+					checkCodeLiteral(t, fset, fname, name, x.Args[argIdx], validValues)
 				}
 			}
 			return true
 		})
 	}
+	return usageCount
+}
 
-	for name := range constValue {
-		if usageCount[name] == 0 {
-			t.Errorf("ErrCode* constant %s is never referenced — dead code", name)
-		}
+// isCodeKey reports whether a composite-literal key is a `code`/`Code` field.
+func isCodeKey(key ast.Expr) bool {
+	id, ok := key.(*ast.Ident)
+	return ok && (id.Name == "code" || id.Name == "Code")
+}
+
+// checkCodeLiteral reports expr when it is a string literal in an error
+// code position. helper is the envelope helper's name, or "" for a
+// composite-literal field.
+func checkCodeLiteral(
+	t *testing.T, fset *token.FileSet, fname, helper string, expr ast.Expr, validValues map[string]struct{},
+) {
+	t.Helper()
+	bl, ok := expr.(*ast.BasicLit)
+	if !ok || bl.Kind != token.STRING {
+		return
+	}
+	v, _ := strconv.Unquote(bl.Value)
+	line := fset.Position(bl.Pos()).Line
+	where := ""
+	if helper != "" {
+		where = helper + "(...) "
+	}
+	if _, ok := validValues[v]; !ok {
+		t.Errorf("%s:%d: %serror code literal %q not declared as an ErrCode* constant in errorcodes.go",
+			fname, line, where, v)
+	} else {
+		t.Errorf("%s:%d: %serror code literal %q should use the ErrCode* constant, not a string literal",
+			fname, line, where, v)
 	}
 }
 

@@ -259,25 +259,9 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		// Pre-validate every quoted literal before opening the tx so a 400
 		// from a bad input does not leave a dangling open transaction.
-		var email string
-		if req.Email != "" {
-			var qErr error
-			email, qErr = quoteString(req.Email)
-			if qErr != nil {
-				return badRequest(ErrCodeInvalidEmail, qErr.Error())
-			}
-		}
-		var pw string
-		if req.Password != "" {
-			// GAP-N4 (#72): same server-side policy gate as PostUsers.
-			if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
-				return passwordPolicyEndpointError(vErr)
-			}
-			var qErr error
-			pw, qErr = quoteString(req.Password)
-			if qErr != nil {
-				return badRequest(ErrCodeInvalidPassword, qErr.Error())
-			}
+		email, pw, err := s.quoteUserPatch(r.Context(), req)
+		if err != nil {
+			return err
 		}
 
 		// Empty patch -- nothing to commit.
@@ -286,46 +270,9 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			return nil
 		}
 
-		tx, txErr := db.BeginTx(r.Context(), nil)
-		if txErr != nil {
-			return wireErr(txErr)
+		if err := applyUserPatchTx(r.Context(), db, uname, email, pw, req.Roles); err != nil {
+			return err
 		}
-		// rollbackErr lets us surface the original failure even when the
-		// driver's Rollback returns a non-nil error of its own. The handler
-		// always prefers the original sub-statement error in the response.
-		commit := false
-		defer func() {
-			if !commit {
-				_ = tx.Rollback()
-			}
-		}()
-
-		if email != "" {
-			if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
-				return wireErr(execErr)
-			}
-		}
-		if pw != "" {
-			if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
-				return wireErr(execErr)
-			}
-		}
-		for _, role := range req.Roles {
-			roleIdent, qErr := quoteIdent(role)
-			if qErr != nil {
-				return badRequest(ErrCodeInvalidRole, qErr.Error())
-			}
-			// v0.5.15: `GRANT ROLE <role> TO <user>` -- no USER
-			// keyword (see file-level grammar note).
-			if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO "+uname); execErr != nil {
-				return wireErr(execErr)
-			}
-		}
-
-		if cErr := tx.Commit(); cErr != nil {
-			return wireErr(cErr)
-		}
-		commit = true
 
 		// SEC-N2 (#64): a password change invalidates every existing
 		// session for that user — revoke all of the target's currently-
@@ -342,6 +289,78 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 		return nil, respondErr(w, err)
 	}
 	return resp, nil
+}
+
+// quoteUserPatch validates and quotes the optional email and password of
+// a user PATCH, returning "" for each field the request leaves unset. The
+// password runs through the same server-side policy gate as PostUsers
+// (GAP-N4 / #72) before it is quoted.
+func (s *GraphServer) quoteUserPatch(ctx context.Context, req *gentypes.UserUpdateReq) (string, string, error) {
+	var email string
+	if req.Email != "" {
+		var qErr error
+		email, qErr = quoteString(req.Email)
+		if qErr != nil {
+			return "", "", badRequest(ErrCodeInvalidEmail, qErr.Error())
+		}
+	}
+	var pw string
+	if req.Password != "" {
+		if vErr := validatePassword(ctx, req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
+			return "", "", passwordPolicyEndpointError(vErr)
+		}
+		var qErr error
+		pw, qErr = quoteString(req.Password)
+		if qErr != nil {
+			return "", "", badRequest(ErrCodeInvalidPassword, qErr.Error())
+		}
+	}
+	return email, pw, nil
+}
+
+// applyUserPatchTx applies the pre-quoted email / password and the role
+// grants for uname inside one transaction. Any sub-statement failure
+// rolls the transaction back and is returned as the response error (the
+// original failure wins over any Rollback error).
+func applyUserPatchTx(ctx context.Context, db *sql.DB, uname, email, pw string, roles []string) error {
+	tx, txErr := db.BeginTx(ctx, nil)
+	if txErr != nil {
+		return wireErr(txErr)
+	}
+	commit := false
+	defer func() {
+		if !commit {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if email != "" {
+		if _, execErr := tx.ExecContext(ctx, "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
+			return wireErr(execErr)
+		}
+	}
+	if pw != "" {
+		if _, execErr := tx.ExecContext(ctx, "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
+			return wireErr(execErr)
+		}
+	}
+	for _, role := range roles {
+		roleIdent, qErr := quoteIdent(role)
+		if qErr != nil {
+			return badRequest(ErrCodeInvalidRole, qErr.Error())
+		}
+		// v0.5.15: `GRANT ROLE <role> TO <user>` -- no USER
+		// keyword (see file-level grammar note).
+		if _, execErr := tx.ExecContext(ctx, "GRANT ROLE "+roleIdent+" TO "+uname); execErr != nil {
+			return wireErr(execErr)
+		}
+	}
+
+	if cErr := tx.Commit(); cErr != nil {
+		return wireErr(cErr)
+	}
+	commit = true
+	return nil
 }
 
 // DeleteUsername implements DELETE /api/v1/users/{username}.
