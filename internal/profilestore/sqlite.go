@@ -133,10 +133,7 @@ func openSQLiteWithCipher(dsn string, cipher *Cipher) (Store, error) {
 		}
 		// Scale concurrent reads with the CPU count; never below 2 so a
 		// single read can never starve a second.
-		n := runtime.GOMAXPROCS(0)
-		if n < 2 {
-			n = 2
-		}
+		n := max(runtime.GOMAXPROCS(0), 2)
 		ro.SetMaxOpenConns(n)
 		ro.SetMaxIdleConns(n)
 		// Validate the RO DSN eagerly so a busted mode=ro (e.g. the file

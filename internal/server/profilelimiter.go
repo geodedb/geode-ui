@@ -1,6 +1,7 @@
 package server
 
 import (
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -142,10 +143,7 @@ func (l *ProfileLimiter) Allow(key string) (bool, time.Duration) {
 	if bkt.tokens < 1 {
 		shortfall := 1.0 - bkt.tokens
 		bkt.mu.Unlock()
-		retry := time.Duration(shortfall / l.cfg.PerActorRate * float64(time.Second))
-		if retry < time.Second {
-			retry = time.Second
-		}
+		retry := max(time.Duration(shortfall/l.cfg.PerActorRate*float64(time.Second)), time.Second)
 		return false, retry
 	}
 	bkt.tokens -= 1
@@ -164,9 +162,7 @@ func (l *ProfileLimiter) insertBucket(key string, now time.Time) *ipBucket {
 	}
 	bkt := &ipBucket{tokens: l.cfg.PerActorBurst, last: now}
 	next := make(map[string]*ipBucket, len(current)+1)
-	for k, v := range current {
-		next[k] = v
-	}
+	maps.Copy(next, current)
 	next[key] = bkt
 	l.perActor.Store(&next)
 	return bkt

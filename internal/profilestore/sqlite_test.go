@@ -110,11 +110,6 @@ func TestSQLitePutValidation(t *testing.T) {
 	}
 }
 
-// stringPtr / boolPtr are tiny helpers that keep the literal-pointer
-// boilerplate in tests readable.
-func stringPtr(s string) *string { return &s }
-func boolPtr(b bool) *bool       { return &b }
-
 func TestSQLitePatchUpdatesFields(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
@@ -123,8 +118,8 @@ func TestSQLitePatchUpdatesFields(t *testing.T) {
 		Name: "p1", DSN: "quic://x:1",
 	})
 	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description:   stringPtr("updated"),
-		SavedUsername: stringPtr("alice@host"),
+		Description:   new("updated"),
+		SavedUsername: new("alice@host"),
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
@@ -151,7 +146,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 
 	// 1. Set Description to "hello" via a non-nil pointer.
 	got, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr("hello"),
+		Description: new("hello"),
 	})
 	if err != nil {
 		t.Fatalf("Patch (set): %v", err)
@@ -162,7 +157,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 
 	// 2. Clear Description by passing a non-nil pointer to "".
 	got, err = st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr(""),
+		Description: new(""),
 	})
 	if err != nil {
 		t.Fatalf("Patch (clear): %v", err)
@@ -178,7 +173,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 
 	// 3. PATCH with a nil Description pointer preserves the cleared value.
 	got, err = st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Name: stringPtr("p1-renamed"),
+		Name: new("p1-renamed"),
 	})
 	if err != nil {
 		t.Fatalf("Patch (preserve): %v", err)
@@ -194,7 +189,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 func TestSQLitePatchNotFound(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
-	_, err := st.Patch(context.Background(), "missing", ProfilePatch{Description: stringPtr("x")})
+	_, err := st.Patch(context.Background(), "missing", ProfilePatch{Description: new("x")})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Patch missing: want ErrNotFound, got %v", err)
 	}
@@ -227,7 +222,7 @@ func TestSQLitePatchClearsDefault(t *testing.T) {
 		t.Fatalf("Put: Default not stored as true: %+v", saved)
 	}
 	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Default: boolPtr(false),
+		Default: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Patch clearing default: %v", err)
@@ -283,7 +278,7 @@ func TestSQLitePatchPreservesTLSWhenAbsent(t *testing.T) {
 		TLS: conn.TLSMaterial{CAPEM: "keep-me"},
 	})
 	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr("just a tweak"),
+		Description: new("just a tweak"),
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
@@ -362,13 +357,13 @@ func TestSQLitePatchAtomic_NoLostUpdate(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, _ = st.Patch(context.Background(), saved.ID, ProfilePatch{
-				Description: stringPtr("D"),
+				Description: new("D"),
 			})
 		}()
 		go func() {
 			defer wg.Done()
 			_, _ = st.Patch(context.Background(), saved.ID, ProfilePatch{
-				SavedUsername: stringPtr("U"),
+				SavedUsername: new("U"),
 			})
 		}()
 		wg.Wait()
@@ -412,15 +407,14 @@ func TestSQLitePatchAtomic_NoTornStateUnderHighContention(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(N)
 	errCh := make(chan error, N)
-	for i := 0; i < N; i++ {
-		i := i
+	for i := range N {
 		go func() {
 			defer wg.Done()
 			name := fmt.Sprintf("name-%02d", i)
 			desc := fmt.Sprintf("desc-%02d", i)
 			if _, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-				Name:        stringPtr(name),
-				Description: stringPtr(desc),
+				Name:        new(name),
+				Description: new(desc),
 			}); err != nil {
 				errCh <- fmt.Errorf("goroutine %d: %w", i, err)
 			}
@@ -466,7 +460,7 @@ func TestSQLitePatchAtomic_DetectsConcurrentDelete(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	_, err := st.Patch(context.Background(), "deadbeef", ProfilePatch{
-		Description: stringPtr("ghost"),
+		Description: new("ghost"),
 	})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Patch on missing id: want ErrNotFound, got %v", err)
@@ -677,7 +671,7 @@ func TestSQLiteEncrypted_LegacyRowReencryptedOnPatch(t *testing.T) {
 
 	enc := openEncryptedSQLite(t, tmp)
 	if _, err := enc.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr("touched"),
+		Description: new("touched"),
 	}); err != nil {
 		t.Fatalf("encrypted Patch: %v", err)
 	}
@@ -1099,15 +1093,15 @@ func TestMergeProfile_OnlyAppliesNonNilFields(t *testing.T) {
 	}
 
 	// Each non-nil pointer overwrites.
-	got = mergeProfile(cur, ProfilePatch{Name: stringPtr("new")})
+	got = mergeProfile(cur, ProfilePatch{Name: new("new")})
 	if got.Name != "new" || got.DSN != "cur-dsn" {
 		t.Errorf("Name=new only: got %+v", got)
 	}
-	got = mergeProfile(cur, ProfilePatch{Description: stringPtr("")})
+	got = mergeProfile(cur, ProfilePatch{Description: new("")})
 	if got.Description != "" {
 		t.Errorf("Description=\"\" should clear: got %q", got.Description)
 	}
-	got = mergeProfile(cur, ProfilePatch{Default: boolPtr(false)})
+	got = mergeProfile(cur, ProfilePatch{Default: new(false)})
 	if got.Default {
 		t.Errorf("Default=false should clear: got %v", got.Default)
 	}
@@ -1258,9 +1252,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 
 	// Writer goroutine: Put/Patch/Delete churn on the single-writer
 	// handle, running until the readers are done.
-	writerWG.Add(1)
-	go func() {
-		defer writerWG.Done()
+	writerWG.Go(func() {
 		i := 0
 		for {
 			select {
@@ -1287,7 +1279,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Reader goroutines: tight-loop SELECTs through the RO handle. Each
 	// does a fixed number of iterations then exits; the test asserts
@@ -1300,9 +1292,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 	var readerWG sync.WaitGroup
 	var reads atomic.Int64
 	for range numReaders {
-		readerWG.Add(1)
-		go func() {
-			defer readerWG.Done()
+		readerWG.Go(func() {
 			for range perReader {
 				var name string
 				err := ro.QueryRowContext(ctx,
@@ -1317,7 +1307,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 				}
 				reads.Add(1)
 			}
-		}()
+		})
 	}
 
 	readersDone := make(chan struct{})

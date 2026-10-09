@@ -98,9 +98,9 @@ func BenchmarkSchemaCache_Get_Parallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		var idx uint64
+		var idx atomic.Uint64
 		for pb.Next() {
-			k := keys[atomic.AddUint64(&idx, 1)%keyCount]
+			k := keys[idx.Add(1)%keyCount]
 			_, _ = c.get(k)
 		}
 	})

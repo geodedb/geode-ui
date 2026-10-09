@@ -171,10 +171,10 @@ func TestLoginLimiter_Wrapper_Lockout(t *testing.T) {
 	})
 
 	// Stub login that always 401s.
-	var calls int32
+	var calls atomic.Int32
 	inner := http.NewServeMux()
 	inner.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"code":"invalid_credentials"}`))
 	})
@@ -192,7 +192,7 @@ func TestLoginLimiter_Wrapper_Lockout(t *testing.T) {
 			t.Fatalf("call[%d] code=%d want 401", i, rec.Code)
 		}
 	}
-	if got := atomic.LoadInt32(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Fatalf("inner called %d times after 2 fails want 2", got)
 	}
 
@@ -206,7 +206,7 @@ func TestLoginLimiter_Wrapper_Lockout(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("after lockout code=%d want 429", rec.Code)
 	}
-	if got := atomic.LoadInt32(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("inner called %d times after lockout want 2 (no further calls)", got)
 	}
 	if rec.Header().Get("Retry-After") == "" {

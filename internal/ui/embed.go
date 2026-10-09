@@ -226,7 +226,7 @@ func newGzipWriter(w http.ResponseWriter, r *http.Request, ext string, info fs.F
 // acceptsGzip reports whether the client's Accept-Encoding header lists
 // gzip (or "*") with a non-zero quality value. "gzip;q=0" opts out.
 func acceptsGzip(r *http.Request) bool {
-	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+	for part := range strings.SplitSeq(r.Header.Get("Accept-Encoding"), ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue

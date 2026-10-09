@@ -162,13 +162,10 @@ func (s *GraphServer) adminRolesFor(username string, upstreamRoles []string) []s
 // callers (CLIs, MCP) keep working unchanged. The expires_in clamp
 // arithmetic is preserved exactly.
 func (s *GraphServer) mintAndSetAuthCookie(w http.ResponseWriter, token string, exp time.Time) int64 {
-	expiresIn := int64(exp.Sub(timeNow()).Seconds())
-	if expiresIn < 1 {
-		// Schema requires expires_in >= 1 — clamp to 1 second on the
-		// vanishingly unlikely race where the wall clock advanced
-		// past the expiry between Issue() and the Sub() call.
-		expiresIn = 1
-	}
+	// Schema requires expires_in >= 1 — clamp to 1 second on the
+	// vanishingly unlikely race where the wall clock advanced
+	// past the expiry between Issue() and the Sub() call.
+	expiresIn := max(int64(exp.Sub(timeNow()).Seconds()), 1)
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,

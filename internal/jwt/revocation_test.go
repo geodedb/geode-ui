@@ -110,11 +110,9 @@ func TestParse_RevokedByJTI_FailsAfterRevoke(t *testing.T) {
 func TestParse_RevokedByJTI_ExpiredEntryIsHarmless(t *testing.T) {
 	rs := NewRevocationSet()
 	c := &Claims{
-		Subject: "dave",
-		RegisteredClaims: jjwt.RegisteredClaims{
-			ID:       "deadbeef",
-			IssuedAt: jjwt.NewNumericDate(time.Now().Add(-time.Hour)),
-		},
+		Subject:  "dave",
+		ID:       "deadbeef",
+		IssuedAt: jjwt.NewNumericDate(time.Now().Add(-time.Hour)),
 	}
 	// Revoke with an expiry in the past.
 	rs.Revoke("deadbeef", time.Now().Add(-time.Minute))
@@ -194,10 +192,10 @@ func TestIsRevoked_DefensiveNonTimeEntries(t *testing.T) {
 
 	// Corrupt jti entry → revoked.
 	rs.revoked.Store("badjti", "not-a-time")
-	cJTI := &Claims{RegisteredClaims: jjwt.RegisteredClaims{
+	cJTI := &Claims{
 		ID:       "badjti",
 		IssuedAt: jjwt.NewNumericDate(time.Now()),
-	}}
+	}
 	if !rs.IsRevoked(cJTI) {
 		t.Fatal("a non-time jti revocation entry must flag the token as revoked")
 	}

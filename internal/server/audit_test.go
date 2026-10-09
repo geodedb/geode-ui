@@ -253,9 +253,7 @@ func BenchmarkAuditRing_ConcurrentAppendSnapshot(b *testing.B) {
 
 	stop := make(chan struct{})
 	var snapWG sync.WaitGroup
-	snapWG.Add(1)
-	go func() {
-		defer snapWG.Done()
+	snapWG.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -264,7 +262,7 @@ func BenchmarkAuditRing_ConcurrentAppendSnapshot(b *testing.B) {
 				_ = r.snapshot(since)
 			}
 		}
-	}()
+	})
 
 	b.ReportAllocs()
 	b.ResetTimer()

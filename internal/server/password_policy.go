@@ -191,7 +191,7 @@ func hibpHasSeen(ctx context.Context, pw string, policy PasswordPolicy) (bool, e
 	}
 	// Body shape: each line is "SUFFIX:COUNT". A count of 0 is the
 	// padding rows; skip those.
-	for _, line := range strings.Split(string(body), "\n") {
+	for line := range strings.SplitSeq(string(body), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

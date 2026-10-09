@@ -88,8 +88,7 @@ func writeNotFound(w http.ResponseWriter, msg string) {
 // asEndpointError extracts an *endpointError from err if it is one (or wraps
 // one), otherwise returns nil.
 func asEndpointError(err error) *endpointError {
-	var ep *endpointError
-	if errors.As(err, &ep) {
+	if ep, ok := errors.AsType[*endpointError](err); ok {
 		return ep
 	}
 	return nil

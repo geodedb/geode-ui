@@ -379,11 +379,9 @@ func (s *GraphServer) maybeReload(ctx context.Context) {
 	}
 	actorSubject := actorFromContext(ctx).Subject
 	triggeredAt := s.reloadVersion.Add(1)
-	s.reloadInflight.Add(1)
-	go func() {
-		defer s.reloadInflight.Done()
+	s.reloadInflight.Go(func() {
 		s.reloadAsync(actorSubject, triggeredAt)
-	}()
+	})
 }
 
 // reloadAsync is the singleflight-coalesced background worker that

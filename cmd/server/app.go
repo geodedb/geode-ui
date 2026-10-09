@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -136,8 +137,8 @@ const defaultShutdownBudget = 5 * time.Second
 // close runs the registered cleanup funcs in reverse registration order
 // (LIFO, like deferred closes in the original main).
 func (a *app) close() {
-	for i := len(a.cleanups) - 1; i >= 0; i-- {
-		a.cleanups[i]()
+	for _, v := range slices.Backward(a.cleanups) {
+		v()
 	}
 }
 
@@ -245,7 +246,7 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	mux := http.NewServeMux()
 
 	adminSet := map[string]bool{}
-	for _, u := range strings.Split(cfg.adminUsers, ",") {
+	for u := range strings.SplitSeq(cfg.adminUsers, ",") {
 		if name := strings.TrimSpace(u); name != "" {
 			adminSet[name] = true
 		}

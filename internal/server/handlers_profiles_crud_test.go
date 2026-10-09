@@ -21,13 +21,6 @@ import (
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
 
-// sp returns &v. Test helper for building gentypes.UpdateProfileReq
-// literals now that nullable scalars come through as *string.
-func sp(v string) *string { return &v }
-
-// bp returns &v. Mirror of sp for *bool fields like is_default.
-func bp(v bool) *bool { return &v }
-
 // silenceSlog redirects slog.Default() to io.Discard for the lifetime
 // of the test/benchmark and restores the prior logger via b.Cleanup.
 // Used by the F1 benchmarks to keep the audit-event INFO lines from
@@ -172,7 +165,7 @@ func TestPatchProfileid_NonOwnerReturns404(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "bob")
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
-	_, _ = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("by bob")})
+	_, _ = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: new("by bob")})
 	if w.Code != http.StatusNotFound {
 		t.Errorf("non-owner PATCH personal: status %d, want 404", w.Code)
 	}
@@ -284,7 +277,7 @@ func TestPatchProfileid_EmitsAuditEvent(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/"+saved.ID, "alice")
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
-	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("updated")})
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: new("updated")})
 	if err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
 	}
@@ -412,7 +405,7 @@ func TestPatchProfileid_TLSPreservedWhenAbsent(t *testing.T) {
 	r.SetPathValue("profileId", saved.ID)
 	w := httptest.NewRecorder()
 	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		Description: sp("tweak only"),
+		Description: new("tweak only"),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
@@ -571,7 +564,7 @@ func TestPatchProfileid_ReturnsBeforeReloadCompletes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		_, _ = srv.PatchProfileid(httptest.NewRecorder(), r, &gentypes.UpdateProfileReq{
-			Description: sp("updated"),
+			Description: new("updated"),
 		})
 		close(done)
 	}()
@@ -609,12 +602,10 @@ func TestMaybeReload_CoalescesConcurrentTriggers(t *testing.T) {
 	const N = 10
 	var wg sync.WaitGroup
 	for range N {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ctx := context.WithValue(context.Background(), userCtxKey, "alice")
 			srv.maybeReload(ctx)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -882,7 +873,7 @@ func TestPatchProfileid_IsDefaultPointerSemantics(t *testing.T) {
 	w := httptest.NewRecorder()
 	got, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
 		// IsDefault deliberately omitted (nil pointer => preserve).
-		Description: sp("tweak"),
+		Description: new("tweak"),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
@@ -903,7 +894,7 @@ func TestPatchProfileid_IsDefaultPointerSemantics(t *testing.T) {
 	r.SetPathValue("profileId", saved.ID)
 	w = httptest.NewRecorder()
 	got, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		IsDefault: bp(false),
+		IsDefault: new(false),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid (set false): %v", err)
@@ -921,7 +912,7 @@ func TestPatchProfileid_IsDefaultPointerSemantics(t *testing.T) {
 	r.SetPathValue("profileId", saved.ID)
 	w = httptest.NewRecorder()
 	got, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		IsDefault: bp(true),
+		IsDefault: new(true),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid (set true): %v", err)
@@ -969,7 +960,7 @@ func TestPatchProfileid_DescriptionClearViaEmptyString(t *testing.T) {
 	r.SetPathValue("profileId", saved.ID)
 	w = httptest.NewRecorder()
 	_, err = srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{
-		Description: sp(""),
+		Description: new(""),
 	})
 	if err != nil {
 		t.Fatalf("PatchProfileid (clear): %v", err)
@@ -988,7 +979,7 @@ func TestPatchProfileid_StoreDisabled(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/abc", "alice")
 	r.SetPathValue("profileId", "abc")
 	w := httptest.NewRecorder()
-	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("x")})
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: new("x")})
 	if err != nil {
 		t.Fatalf("PatchProfileid (no store): %v", err)
 	}
@@ -1007,7 +998,7 @@ func TestPatchProfileid_MissingPathID(t *testing.T) {
 	// so r.PathValue("profileId") returns "".
 	r := reqWithActor("PATCH", "/api/v1/profiles/", "alice")
 	w := httptest.NewRecorder()
-	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("x")})
+	_, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: new("x")})
 	if err != nil {
 		t.Fatalf("PatchProfileid (no path id): %v", err)
 	}
@@ -1036,7 +1027,7 @@ func TestPatchProfileid_StorePatchSurfaces500ToHTTP(t *testing.T) {
 	r := reqWithActor("PATCH", "/api/v1/profiles/abc", "alice")
 	r.SetPathValue("profileId", "abc")
 	w := httptest.NewRecorder()
-	if _, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: sp("x")}); err != nil {
+	if _, err := srv.PatchProfileid(w, r, &gentypes.UpdateProfileReq{Description: new("x")}); err != nil {
 		t.Fatalf("PatchProfileid: %v", err)
 	}
 	if w.Code != http.StatusInternalServerError {

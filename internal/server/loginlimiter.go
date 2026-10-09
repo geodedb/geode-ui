@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -243,10 +244,7 @@ func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration,
 		// One token's worth of seconds = 1/rate.
 		shortfall := 1.0 - bkt.tokens
 		bkt.mu.Unlock()
-		retry := time.Duration(shortfall / l.cfg.PerIPRate * float64(time.Second))
-		if retry < time.Second {
-			retry = time.Second
-		}
+		retry := max(time.Duration(shortfall/l.cfg.PerIPRate*float64(time.Second)), time.Second)
 		return false, retry, "ip_rate_limited"
 	}
 	bkt.tokens -= 1
@@ -267,9 +265,7 @@ func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
 	}
 	bkt := &ipBucket{tokens: l.cfg.PerIPBurst, last: now}
 	next := make(map[string]*ipBucket, len(current)+1)
-	for k, v := range current {
-		next[k] = v
-	}
+	maps.Copy(next, current)
 	next[ip] = bkt
 	l.perIP.Store(&next)
 	return bkt
@@ -285,9 +281,7 @@ func (l *LoginLimiter) insertUserLockout(key string) *userLockout {
 	}
 	u := &userLockout{}
 	next := make(map[string]*userLockout, len(current)+1)
-	for k, v := range current {
-		next[k] = v
-	}
+	maps.Copy(next, current)
 	next[key] = u
 	l.perUserFails.Store(&next)
 	return u
