@@ -368,10 +368,9 @@ bench-gate:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Builds the multi-stage Dockerfile in deploy/. The Dockerfile expects a
-# sibling geode-client-go/ checkout next to the geode-ui/ context root (see
-# deploy/Dockerfile header). For CI, fetch the sibling repo into a temporary
-# parent dir so docker build sees the expected layout.
+# Builds the multi-stage Dockerfile in deploy/. The Dockerfile's build
+# context is the parent of geode-ui/ (see deploy/Dockerfile header), so CI
+# copies the checkout into a temporary parent dir.
 docker:build:
   stage: build
   image: docker:25
@@ -392,7 +391,6 @@ docker:build:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - mkdir -p /tmp/ctx/geode-ui
     - cp -r . /tmp/ctx/geode-ui/
-    - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
     - cd /tmp/ctx
     - docker build -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
     - if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA; fi

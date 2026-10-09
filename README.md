@@ -78,9 +78,10 @@ For local development, a multi-stage build (Node web build → Go static binary
 An example compose file is in
 [deploy/docker-compose.example.yml](deploy/docker-compose.example.yml).
 
-> **Note:** until `geodedb.com/geode` ships to a public Go module proxy, the
-> dev Docker build context must include a sibling `geode-client-go/` checkout
-> next to `geode-ui/`. See the Dockerfile header comments for details.
+> **Note:** the Docker build context is the parent directory of `geode-ui/`
+> (see the Dockerfile header). The geode driver (`geodedb.com/geode`) comes
+> from the public Go module proxy; to develop against a local driver
+> checkout, use an uncommitted `go work` workspace instead of a `replace`.
 
 For released images, GoReleaser produces eight container variants
 (debian + alpine × amd64 + arm64) on every git tag and pushes them to
