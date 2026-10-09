@@ -185,32 +185,89 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		}
 	}()
 
-	if cfg.secretHex == "" {
-		return nil, errors.New("missing -jwt-secret-hex (generate with `openssl rand -hex 32`)")
+	if err := a.initIssuer(); err != nil {
+		return nil, err
 	}
-	secret, err := hex.DecodeString(cfg.secretHex)
+	pool, store, err := a.initPoolAndStore(getenv)
 	if err != nil {
-		return nil, fmt.Errorf("decode -jwt-secret-hex: %w", err)
+		return nil, err
 	}
-	issuer, err := jwt.NewIssuer(secret, cfg.jwtTTL)
+	mux, err := a.buildMux(pool, store)
 	if err != nil {
-		return nil, fmt.Errorf("jwt issuer: %w", err)
+		return nil, err
+	}
+	handler, hcfg := a.buildHandler(mux)
+
+	// PERF-F12 (#56): cap REST + SPA responses at restWriteTimeout, but
+	// route WebSocket upgrades around the timeout handler. http.TimeoutHandler
+	// buffers the whole response and does not implement http.Hijacker —
+	// either of which would break a streaming WS connection (the upgrade
+	// hijacks the conn and then streams indefinitely). The /ws/ prefix
+	// therefore reaches `handler` directly; everything else goes through
+	// the timeout-wrapped copy. Both branches dispatch into the same
+	// middleware chain + mux, so routing is unchanged — only the timeout
+	// envelope differs.
+	rootHandler := wsExemptTimeoutHandler(handler, restWriteTimeout)
+	a.handler = rootHandler
+
+	a.httpSrv = &http.Server{
+		Addr:    cfg.listen,
+		Handler: rootHandler,
+		// ReadHeaderTimeout guards against slowloris on the header read.
+		ReadHeaderTimeout: readHeaderTimeout,
+		// IdleTimeout reaps idle keep-alive connections — including a WS
+		// connection whose peer has gone silent without sending a close
+		// frame (the per-frame deadlines in wsx handle the in-flight
+		// case; this handles the "open but doing nothing" case).
+		IdleTimeout: hcfg.IdleTimeout,
+		// WriteTimeout is deliberately left at its zero value (no cap):
+		// the /ws/ surface streams for as long as the query runs. The
+		// REST surface's per-request cap is restWriteTimeout, applied
+		// via the http.TimeoutHandler above (which the /ws/ prefix is
+		// routed around). See the PERF-F12 comment block above.
+	}
+
+	ok = true
+	return a, nil
+}
+
+// initIssuer decodes the JWT secret and builds the token issuer.
+func (a *app) initIssuer() error {
+	if a.cfg.secretHex == "" {
+		return errors.New("missing -jwt-secret-hex (generate with `openssl rand -hex 32`)")
+	}
+	secret, err := hex.DecodeString(a.cfg.secretHex)
+	if err != nil {
+		return fmt.Errorf("decode -jwt-secret-hex: %w", err)
+	}
+	issuer, err := jwt.NewIssuer(secret, a.cfg.jwtTTL)
+	if err != nil {
+		return fmt.Errorf("jwt issuer: %w", err)
 	}
 	a.issuer = issuer
+	return nil
+}
 
+// initPoolAndStore builds the connection pool and the encrypted profile
+// store, seeds/reloads the pool from the store, and makes the JWT
+// revocation set durable. Every opened resource is registered in
+// a.cleanups.
+func (a *app) initPoolAndStore(getenv func(string) string) (*conn.Pool, profilestore.Store, error) {
+	cfg := a.cfg
+	issuer := a.issuer
 	profiles := []conn.Profile{{Name: "default", DSN: "quic://127.0.0.1:3141"}}
 	if cfg.profilesFile != "" {
 		raw, err := os.ReadFile(cfg.profilesFile)
 		if err != nil {
-			return nil, fmt.Errorf("read profiles: %w", err)
+			return nil, nil, fmt.Errorf("read profiles: %w", err)
 		}
 		if err := json.Unmarshal(raw, &profiles); err != nil {
-			return nil, fmt.Errorf("parse profiles: %w", err)
+			return nil, nil, fmt.Errorf("parse profiles: %w", err)
 		}
 	}
 	pool, err := conn.NewPool(profiles)
 	if err != nil {
-		return nil, fmt.Errorf("conn pool: %w", err)
+		return nil, nil, fmt.Errorf("conn pool: %w", err)
 	}
 	a.cleanups = append(a.cleanups, func() { _ = pool.Close() })
 
@@ -223,11 +280,11 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// wire format and the legacy-row migration path.
 	cipher, err := profilestore.NewCipherFromEnvFunc(getenv, "GEODE_PROFILESTORE_KEY")
 	if err != nil {
-		return nil, fmt.Errorf("profile store encryption key: %w", err)
+		return nil, nil, fmt.Errorf("profile store encryption key: %w", err)
 	}
 	store, err := profilestore.OpenSQLiteEncrypted(cfg.profileStore, cipher)
 	if err != nil {
-		return nil, fmt.Errorf("profile store open: %w", err)
+		return nil, nil, fmt.Errorf("profile store open: %w", err)
 	}
 	a.cleanups = append(a.cleanups, func() { _ = store.Close() })
 
@@ -236,12 +293,12 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// scope=system. Subsequent launches respect whatever's in the store —
 	// the JSON file becomes one-shot.
 	if err := seedFromJSON(context.Background(), store, profiles); err != nil {
-		return nil, fmt.Errorf("profile store seed: %w", err)
+		return nil, nil, fmt.Errorf("profile store seed: %w", err)
 	}
 
 	// Make the persisted set the source of truth for the in-memory pool.
 	if err := reloadPoolFromStore(context.Background(), store, pool); err != nil {
-		return nil, fmt.Errorf("profile pool reload: %w", err)
+		return nil, nil, fmt.Errorf("profile pool reload: %w", err)
 	}
 
 	// SEC-N2 follow-up: make the JWT revocation set durable by backing it
@@ -263,12 +320,19 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// is for the production constructor), fall back to in-memory-only.
 	if dbp, ok := store.(profilestore.DBHandleProvider); ok {
 		if err := issuer.Revocation().AttachSQLiteRW(dbp.DBHandle(), dbp.DBHandleRO()); err != nil {
-			return nil, fmt.Errorf("jwt revocation store: %w", err)
+			return nil, nil, fmt.Errorf("jwt revocation store: %w", err)
 		}
 	} else {
 		slog.Warn("profile store backend does not expose a SQLite handle; JWT revocation state is in-memory only and will not survive a restart")
 	}
+	return pool, store, nil
+}
 
+// buildMux registers the generated REST/WS/MCP surfaces, the hand-rolled
+// auth/CSRF routes, the optional LSP bridge and the SPA on a new mux.
+func (a *app) buildMux(pool *conn.Pool, store profilestore.Store) (*http.ServeMux, error) {
+	cfg := a.cfg
+	issuer := a.issuer
 	mux := http.NewServeMux()
 
 	adminSet := map[string]bool{}
@@ -385,7 +449,15 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// httpx.WrapHandler alongside HSTS and X-Frame-Options; until that
 	// lands the SPA wrapper is the safe, minimal mitigation for SEC-F4.
 	mux.Handle("/", server.WithSPASecurityHeaders(uiHandler))
+	return mux, nil
+}
 
+// buildHandler wraps mux in the middleware chain (login/profile rate
+// limits, CSRF, Permissions-Policy, access-token deprecation, httpx
+// limits) and returns it with the httpx config it was built from.
+func (a *app) buildHandler(mux *http.ServeMux) (http.Handler, httpx.Config) {
+	cfg := a.cfg
+	issuer := a.issuer
 	// PERF-F12 (#56): the WS streaming surface (/ws/query) must NOT be
 	// killed by a server-wide write timeout — a `MATCH (n) RETURN n` over
 	// a large graph legitimately streams for minutes. So WriteTimeout is
@@ -475,38 +547,7 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	handler := server.WithPermissionsPolicy(
 		server.WithAccessTokenDeprecation(httpx.WrapHandler(hcfg, csrfWrapped)),
 	)
-
-	// PERF-F12 (#56): cap REST + SPA responses at restWriteTimeout, but
-	// route WebSocket upgrades around the timeout handler. http.TimeoutHandler
-	// buffers the whole response and does not implement http.Hijacker —
-	// either of which would break a streaming WS connection (the upgrade
-	// hijacks the conn and then streams indefinitely). The /ws/ prefix
-	// therefore reaches `handler` directly; everything else goes through
-	// the timeout-wrapped copy. Both branches dispatch into the same
-	// middleware chain + mux, so routing is unchanged — only the timeout
-	// envelope differs.
-	rootHandler := wsExemptTimeoutHandler(handler, restWriteTimeout)
-	a.handler = rootHandler
-
-	a.httpSrv = &http.Server{
-		Addr:    cfg.listen,
-		Handler: rootHandler,
-		// ReadHeaderTimeout guards against slowloris on the header read.
-		ReadHeaderTimeout: readHeaderTimeout,
-		// IdleTimeout reaps idle keep-alive connections — including a WS
-		// connection whose peer has gone silent without sending a close
-		// frame (the per-frame deadlines in wsx handle the in-flight
-		// case; this handles the "open but doing nothing" case).
-		IdleTimeout: hcfg.IdleTimeout,
-		// WriteTimeout is deliberately left at its zero value (no cap):
-		// the /ws/ surface streams for as long as the query runs. The
-		// REST surface's per-request cap is restWriteTimeout, applied
-		// via the http.TimeoutHandler above (which the /ws/ prefix is
-		// routed around). See the PERF-F12 comment block above.
-	}
-
-	ok = true
-	return a, nil
+	return handler, hcfg
 }
 
 // errGracefulShutdown wraps the (rare) error returned by
