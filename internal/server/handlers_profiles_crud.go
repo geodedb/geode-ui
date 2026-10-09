@@ -27,7 +27,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 		return responseWritten[gentypes.Profile]()
 	}
 	actr := actorFromContext(r.Context())
-	isAdmin := hasRole(actr.Roles, "admin")
+	isAdmin := hasAdminRole(actr.Roles)
 	scope := conn.ProfileScope(req.Scope)
 	if !scope.Valid() {
 		writeBadRequest(w, ErrCodeInvalidScope, "scope must be 'system' or 'personal'")
@@ -95,7 +95,7 @@ func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *
 		return responseWritten[gentypes.Profile]()
 	}
 	actr := actorFromContext(r.Context())
-	isAdmin := hasRole(actr.Roles, "admin")
+	isAdmin := hasAdminRole(actr.Roles)
 	p, err := s.cfg.Store.Get(r.Context(), req.ProfileID)
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))
@@ -127,7 +127,7 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 		return responseWritten[gentypes.Profile]()
 	}
 	actr := actorFromContext(r.Context())
-	isAdmin := hasRole(actr.Roles, "admin")
+	isAdmin := hasAdminRole(actr.Roles)
 
 	cur, err := s.cfg.Store.Get(r.Context(), id)
 	if err != nil {
@@ -170,7 +170,7 @@ func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, re
 		return responseWritten[gentypes.Empty]()
 	}
 	actr := actorFromContext(r.Context())
-	isAdmin := hasRole(actr.Roles, "admin")
+	isAdmin := hasAdminRole(actr.Roles)
 	cur, err := s.cfg.Store.Get(r.Context(), req.ProfileID)
 	if err != nil {
 		writeEndpointError(w, storeErrorToHTTP(err))

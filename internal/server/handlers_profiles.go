@@ -32,7 +32,7 @@ func (s *GraphServer) GetProfiles(_ http.ResponseWriter, r *http.Request, _ *gen
 	if s.cfg.Store != nil {
 		ctx := r.Context()
 		actr := actorFromContext(ctx)
-		isAdmin := hasRole(actr.Roles, "admin")
+		isAdmin := hasAdminRole(actr.Roles)
 
 		// Single visibility-scoped query: the store walks the
 		// `scope='system' OR (scope='personal' AND owner_user_id=?)`

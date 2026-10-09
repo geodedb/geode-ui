@@ -224,8 +224,5 @@ func validateTLSMaterialPEM(caPEM, certPEM, keyPEM string) error {
 	if err := validatePEM(certPEM, pemRoleCert); err != nil {
 		return err
 	}
-	if err := validatePEM(keyPEM, pemRoleKey); err != nil {
-		return err
-	}
-	return nil
+	return validatePEM(keyPEM, pemRoleKey)
 }

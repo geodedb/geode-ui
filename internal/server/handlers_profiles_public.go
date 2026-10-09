@@ -18,7 +18,7 @@ import (
 // Authenticated callers should use GET /api/v1/profiles (Plan A)
 // which returns the union of system + personal profiles with the
 // owner/admin redaction matrix.
-func (s *GraphServer) Public(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.PublicProfileList, error) {
+func (s *GraphServer) Public(_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.PublicProfileList, error) {
 	if s.cfg.Store == nil {
 		// Legacy fallback: enumerate names from the pool.
 		if s.cfg.Profiles == nil {

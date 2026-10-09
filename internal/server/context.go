@@ -100,11 +100,11 @@ func connectionIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-// hasRole reports whether the role list contains the named role,
-// case-insensitively. Empty role list returns false for any name.
-func hasRole(roles []string, name string) bool {
+// hasAdminRole reports whether the role list contains the "admin" role,
+// case-insensitively. An empty role list returns false.
+func hasAdminRole(roles []string) bool {
 	for _, r := range roles {
-		if strings.EqualFold(r, name) {
+		if strings.EqualFold(r, "admin") {
 			return true
 		}
 	}

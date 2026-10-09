@@ -170,20 +170,14 @@ func TestStringsToAny(t *testing.T) {
 	}
 }
 
-// TestMapToNamedArgs_Empty: nil/empty params must yield (nil, nil) so
-// the handler can pass the result straight to db.QueryContext.
+// TestMapToNamedArgs_Empty: nil/empty params must yield nil so the
+// handler can pass the result straight to db.QueryContext.
 func TestMapToNamedArgs_Empty(t *testing.T) {
-	args, err := mapToNamedArgs(nil)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
+	args := mapToNamedArgs(nil)
 	if args != nil {
 		t.Fatalf("args=%v want nil", args)
 	}
-	args, err = mapToNamedArgs(map[string]any{})
-	if err != nil {
-		t.Fatalf("err empty map: %v", err)
-	}
+	args = mapToNamedArgs(map[string]any{})
 	if args != nil {
 		t.Fatalf("args empty map=%v want nil", args)
 	}
@@ -193,10 +187,7 @@ func TestMapToNamedArgs_Empty(t *testing.T) {
 // per key. We don't assert ordering — Go map iteration is intentionally
 // randomized — but we do assert length.
 func TestMapToNamedArgs_Values(t *testing.T) {
-	args, err := mapToNamedArgs(map[string]any{"x": 1, "name": "alice"})
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
+	args := mapToNamedArgs(map[string]any{"x": 1, "name": "alice"})
 	if len(args) != 2 {
 		t.Fatalf("args len=%d want 2", len(args))
 	}

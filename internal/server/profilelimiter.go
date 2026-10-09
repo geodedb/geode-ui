@@ -152,7 +152,7 @@ func (l *ProfileLimiter) Allow(key string) (bool, time.Duration) {
 		retry := max(time.Duration(shortfall/l.cfg.PerActorRate*float64(time.Second)), time.Second)
 		return false, retry
 	}
-	bkt.tokens -= 1
+	bkt.tokens--
 	bkt.mu.Unlock()
 	return true, 0
 }

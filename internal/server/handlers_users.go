@@ -371,7 +371,7 @@ func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req
 
 // Disable implements POST /api/v1/users/{username}/disable.
 func (s *GraphServer) Disable(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	resp, err := s.toggleUser(w, r.Context(), req.Username, "DISABLE")
+	resp, err := s.toggleUser(r.Context(), w, req.Username, "DISABLE")
 	if err == nil && resp != nil {
 		emitAudit(auditEventUserDisabled,
 			"user", userFromContext(r.Context()),
@@ -383,7 +383,7 @@ func (s *GraphServer) Disable(w http.ResponseWriter, r *http.Request, req *genty
 
 // Enable implements POST /api/v1/users/{username}/enable.
 func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	resp, err := s.toggleUser(w, r.Context(), req.Username, "ENABLE")
+	resp, err := s.toggleUser(r.Context(), w, req.Username, "ENABLE")
 	if err == nil && resp != nil {
 		emitAudit(auditEventUserEnabled,
 			"user", userFromContext(r.Context()),
@@ -493,7 +493,7 @@ func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *g
 
 // toggleUser is the shared body of Disable/Enable. action is "DISABLE"
 // or "ENABLE" — the literal verb embedded into the GQL statement.
-func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, username, action string) (*gentypes.Empty, error) {
+func (s *GraphServer) toggleUser(ctx context.Context, w http.ResponseWriter, username, action string) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(ctx, username, func(db *sql.DB, uname string) error {
 		if _, err := runStatement(ctx, db, "ALTER USER "+uname+" "+action); err != nil {
 			return wireErr(err)

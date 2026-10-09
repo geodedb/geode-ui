@@ -255,7 +255,7 @@ func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration,
 		retry := max(time.Duration(shortfall/l.cfg.PerIPRate*float64(time.Second)), time.Second)
 		return false, retry, "ip_rate_limited"
 	}
-	bkt.tokens -= 1
+	bkt.tokens--
 	bkt.mu.Unlock()
 	return true, 0, ""
 }

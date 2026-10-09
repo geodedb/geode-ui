@@ -137,20 +137,20 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// One slot per proxy direction so neither goroutine blocks on send.
 	const proxyDirections = 2
 	errCh := make(chan error, proxyDirections)
-	go func() { errCh <- proxyWsToTcp(conn, tcp, token) }()
-	go func() { errCh <- proxyTcpToWs(tcp, conn) }()
+	go func() { errCh <- proxyWsToTCP(conn, tcp, token) }()
+	go func() { errCh <- proxyTCPToWs(tcp, conn) }()
 	// The first goroutine to error (or hit EOF) unblocks the receive;
 	// the deferred Close calls on both sockets cascade the shutdown to
 	// the second goroutine.
 	<-errCh
 }
 
-// proxyWsToTcp reads WebSocket text frames in a loop, optionally
+// proxyWsToTCP reads WebSocket text frames in a loop, optionally
 // rewrites JSON-RPC initialize requests to carry the caller's bearer
 // token, and writes each frame to the upstream TCP socket with an LSP
 // Content-Length envelope. Returns on the first read or write error
 // (including normal close).
-func proxyWsToTcp(ws *wsx.Conn, tcp net.Conn, token string) error {
+func proxyWsToTCP(ws *wsx.Conn, tcp net.Conn, token string) error {
 	for {
 		op, body, err := ws.ReadMessage()
 		if err != nil {
@@ -183,10 +183,10 @@ func proxyWsToTcp(ws *wsx.Conn, tcp net.Conn, token string) error {
 	}
 }
 
-// proxyTcpToWs reads framed LSP messages from the upstream TCP socket
+// proxyTCPToWs reads framed LSP messages from the upstream TCP socket
 // and emits each body as a single WebSocket text frame. Returns nil on
 // clean EOF, error on any other failure.
-func proxyTcpToWs(tcp net.Conn, ws *wsx.Conn) error {
+func proxyTCPToWs(tcp net.Conn, ws *wsx.Conn) error {
 	rd := newLspFrameReader(tcp)
 	for {
 		frame, err := rd.ReadFrame()

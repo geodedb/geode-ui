@@ -115,6 +115,8 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 // invalid_permission rather than emitting an upstream-broken statement
 // that would trip a 422 wire_feature_missing. Permission membership
 // is modelled per-graph via GRANT (see handlers_grants.go).
+//
+//nolint:revive // var-naming: the method name is fixed by the genapi-generated ServerInterface.
 func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *gentypes.RoleCreateReq) (*gentypes.Role, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {

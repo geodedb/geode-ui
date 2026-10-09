@@ -8,7 +8,7 @@ import (
 	"encoding/json/v2"
 )
 
-// runQuery executes stmt against db with optional named arguments and
+// runQuery executes stmt against db and
 // materialises the full result set into ([][]any, []string, nil) where the
 // first return is the rows (one []any per row, one element per column) and
 // the second is the column names in driver order.
@@ -17,8 +17,8 @@ import (
 // CALL db.labels(), SHOW INDEXES, …) — multiple B-series handlers use it.
 // Long-running streaming queries should iterate rows directly to avoid
 // buffering the whole result set in memory.
-func runQuery(ctx context.Context, db *sql.DB, stmt string, args ...any) ([][]any, []string, error) {
-	rows, err := db.QueryContext(ctx, stmt, args...)
+func runQuery(ctx context.Context, db *sql.DB, stmt string) ([][]any, []string, error) {
+	rows, err := db.QueryContext(ctx, stmt)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -47,15 +47,15 @@ func runQuery(ctx context.Context, db *sql.DB, stmt string, args ...any) ([][]an
 	return out, cols, nil
 }
 
-// runStatement executes stmt against db with optional named arguments and
+// runStatement executes stmt against db and
 // returns the driver's sql.Result. It is the DDL/DML counterpart to
 // runQuery — administrative commands like CREATE USER, DROP USER, ALTER
 // USER, GRANT, and REVOKE typically have no result set, so the user-
 // management handlers funnel them through here. Errors are returned
 // untouched so the caller can wrap them with handler-specific endpoint
 // codes.
-func runStatement(ctx context.Context, db *sql.DB, stmt string, args ...any) (sql.Result, error) {
-	return db.ExecContext(ctx, stmt, args...)
+func runStatement(ctx context.Context, db *sql.DB, stmt string) (sql.Result, error) {
+	return db.ExecContext(ctx, stmt)
 }
 
 // namedArgs converts a JSON-encoded params object into a slice of
