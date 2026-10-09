@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -297,7 +298,7 @@ func TestInjectAuthIntoInitialize_MalformedBypass(t *testing.T) {
 // Content-Length is rejected.
 func TestLspFrameReader(t *testing.T) {
 	body := `{"jsonrpc":"2.0","method":"window/logMessage","params":{}}`
-	stream := "Content-Length: " + fmt.Sprintf("%d", len(body)) + "\r\n\r\n" + body
+	stream := "Content-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body
 	r := newLspFrameReader(strings.NewReader(stream))
 	got, err := r.ReadFrame()
 	if err != nil {

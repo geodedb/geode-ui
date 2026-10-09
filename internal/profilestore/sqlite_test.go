@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -729,10 +730,10 @@ func TestSQLiteEncrypted_ListReturnsPlaintext(t *testing.T) {
 		t.Fatalf("want 3 rows, got %d", len(all))
 	}
 	for _, p := range all {
-		if !bytes.Contains([]byte(p.DSN), []byte("quic://host")) {
+		if !strings.Contains(p.DSN, "quic://host") {
 			t.Errorf("List row %q DSN not unsealed: %q", p.Name, p.DSN)
 		}
-		if !bytes.HasPrefix([]byte(p.TLS.CAPEM), []byte("ca-")) {
+		if !strings.HasPrefix(p.TLS.CAPEM, "ca-") {
 			t.Errorf("List row %q CA not unsealed: %q", p.Name, p.TLS.CAPEM)
 		}
 	}

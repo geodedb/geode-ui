@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -264,10 +265,10 @@ func sanitizeBackupFile(name string) error {
 		return errInvalidIdent
 	}
 	if name[0] == '.' {
-		return fmt.Errorf("backup file must not start with '.'")
+		return errors.New("backup file must not start with '.'")
 	}
 	if strings.Contains(name, "..") {
-		return fmt.Errorf("backup file must not contain '..'")
+		return errors.New("backup file must not contain '..'")
 	}
 	for _, r := range name {
 		switch {

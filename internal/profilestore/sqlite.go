@@ -100,7 +100,7 @@ func OpenSQLite(dsn string) (Store, error) {
 // argument so long as new writes are encrypted).
 func OpenSQLiteEncrypted(dsn string, cipher *Cipher) (Store, error) {
 	if cipher == nil {
-		return nil, fmt.Errorf("profilestore: OpenSQLiteEncrypted: cipher is required")
+		return nil, errors.New("profilestore: OpenSQLiteEncrypted: cipher is required")
 	}
 	return openSQLiteWithCipher(dsn, cipher)
 }
@@ -231,7 +231,7 @@ func (s *sqliteStore) sealString(plain string) (any, error) {
 func (s *sqliteStore) unsealBytes(raw []byte) (string, error) {
 	if s.cipher == nil {
 		if IsCiphertext(raw) {
-			return "", fmt.Errorf("profilestore: ciphertext present but no cipher configured")
+			return "", errors.New("profilestore: ciphertext present but no cipher configured")
 		}
 		return string(raw), nil
 	}

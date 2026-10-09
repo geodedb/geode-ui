@@ -60,7 +60,10 @@ const CSRFCookieName = "geode-ui-csrf"
 // for double-submit verification. The "X-" prefix is conventional and
 // signals the value is application-controlled (not a browser-managed
 // header).
-const CSRFHeaderName = "X-CSRF-Token"
+//
+// The value is written in Go's canonical MIME header form; HTTP header
+// names are case-insensitive, so clients sending "X-CSRF-Token" match.
+const CSRFHeaderName = "X-Csrf-Token"
 
 // CSRFEndpointPath is the route that mints a fresh token. Public —
 // no auth required, since the SPA fetches it before login completes.

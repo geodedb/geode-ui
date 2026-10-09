@@ -304,7 +304,7 @@ func TestLogin_ReturnsConnectionID(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 	resp, err := srv.Login(w, r, &gentypes.LoginReq{
 		Username: "alice", Password: "p", Profile: "default",
 	})
@@ -316,7 +316,7 @@ func TestLogin_ReturnsConnectionID(t *testing.T) {
 	}
 
 	w2 := httptest.NewRecorder()
-	r2 := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 	resp2, _ := srv.Login(w2, r2, &gentypes.LoginReq{
 		Username: "alice", Password: "p", Profile: "default",
 	})

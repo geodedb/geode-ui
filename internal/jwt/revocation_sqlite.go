@@ -3,6 +3,7 @@ package jwt
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -77,7 +78,7 @@ type sqliteRevocationBackend struct {
 // nil ro is treated as "use rw for reads too".
 func newSQLiteRevocationBackend(rw, ro *sql.DB) (*sqliteRevocationBackend, error) {
 	if rw == nil {
-		return nil, fmt.Errorf("jwt: revocation backend: nil db")
+		return nil, errors.New("jwt: revocation backend: nil db")
 	}
 	if ro == nil {
 		ro = rw

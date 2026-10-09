@@ -310,7 +310,7 @@ func TestAuthJWT_PopulatesConnectionID(t *testing.T) {
 
 	tok, _, _ := iss.Issue("alice", "default", []string{"admin"}, "conn-xyz-789")
 
-	r := httptest.NewRequest("GET", "/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Authorization", "Bearer "+tok)
 	if err := srv.AuthJWT(r); err != nil {
 		t.Fatalf("AuthJWT: %v", err)

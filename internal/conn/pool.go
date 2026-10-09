@@ -3,6 +3,7 @@ package conn
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -106,7 +107,7 @@ type Pool struct {
 //   - profile names must be unique
 func NewPool(profiles []Profile, opts ...PoolOption) (*Pool, error) {
 	if len(profiles) == 0 {
-		return nil, fmt.Errorf("conn: NewPool requires at least one profile")
+		return nil, errors.New("conn: NewPool requires at least one profile")
 	}
 
 	cfg := DefaultPoolConfig()
@@ -172,7 +173,7 @@ func (p *Pool) DB(name string) (*sql.DB, error) {
 	defer p.mu.Unlock()
 
 	if p.dbs == nil {
-		return nil, fmt.Errorf("conn: pool is closed")
+		return nil, errors.New("conn: pool is closed")
 	}
 	if db, ok := p.dbs[name]; ok {
 		return db, nil
@@ -212,7 +213,7 @@ func (p *Pool) Ping(ctx context.Context, name string) error {
 // On any validation error the pool is left untouched.
 func (p *Pool) Reload(profiles []Profile) error {
 	if len(profiles) == 0 {
-		return fmt.Errorf("conn: Reload requires at least one profile")
+		return errors.New("conn: Reload requires at least one profile")
 	}
 	next := make(map[string]Profile, len(profiles))
 	for i, prof := range profiles {
@@ -231,7 +232,7 @@ func (p *Pool) Reload(profiles []Profile) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.dbs == nil {
-		return fmt.Errorf("conn: pool is closed")
+		return errors.New("conn: pool is closed")
 	}
 
 	for name, db := range p.dbs {

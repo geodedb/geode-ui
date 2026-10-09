@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json/v2"
+	"net/http"
 	"os"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestGeodeJSONQueryRateLimit(t *testing.T) {
 
 	var found bool
 	for _, r := range spec.API {
-		if r.Method == "POST" && r.Path == "/api/v1/query" {
+		if r.Method == http.MethodPost && r.Path == "/api/v1/query" {
 			found = true
 			if r.RateLimit == nil {
 				t.Fatalf("POST /api/v1/query has no rateLimit in geode.json; want %d", want)

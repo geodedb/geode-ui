@@ -273,7 +273,7 @@ func (f *lspFrameReader) ReadFrame() ([]byte, error) {
 			break
 		}
 		if len(header) > 4096 {
-			return nil, fmt.Errorf("LSP header too large")
+			return nil, errors.New("LSP header too large")
 		}
 	}
 	headerStr := string(header)
@@ -282,7 +282,7 @@ func (f *lspFrameReader) ReadFrame() ([]byte, error) {
 	// specific case.
 	lowerIdx := strings.Index(strings.ToLower(headerStr), "content-length:")
 	if lowerIdx < 0 {
-		return nil, fmt.Errorf("LSP: missing Content-Length header")
+		return nil, errors.New("LSP: missing Content-Length header")
 	}
 	// Slice off everything before "Content-Length:" so the integer
 	// parse starts at the prefix.

@@ -45,11 +45,11 @@ import (
 // host swamps any configured ratio). It is committed as the evidence for
 // the F18 won't-do decision.
 
-// --- cost knobs. parse is sized to ~10% of a round-trip — mirroring the
+// Cost knobs: parse is sized to ~10% of a round-trip — mirroring the
 // documented p50 ~10 ms upstream where GQL parse is a thin slice of plan +
 // transport + execute. Units are "compute iterations"; the absolute time
 // is irrelevant, only the parse:execute ratio and the QueryContext-vs-
-// Stmt equivalence matter for the F18 decision. ---
+// Stmt equivalence matter for the F18 decision.
 const (
 	benchParseIters   = 4_000
 	benchExecuteIters = 36_000
