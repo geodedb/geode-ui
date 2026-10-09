@@ -28,7 +28,9 @@ import (
 // genapi calls this method "Login" — derived from the path's terminal
 // segment, /api/v1/auth/login, with the path containing no other
 // disambiguating tokens.
-func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentypes.LoginReq) (*gentypes.LoginResp, error) {
+func (s *GraphServer) Login(
+	w http.ResponseWriter, r *http.Request, req *gentypes.LoginReq,
+) (*gentypes.LoginResp, error) {
 	if s.cfg.JWT == nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
@@ -166,7 +168,9 @@ func (s *GraphServer) mintAndSetAuthCookie(w http.ResponseWriter, token string, 
 	// vanishingly unlikely race where the wall clock advanced
 	// past the expiry between Issue() and the Sub() call.
 	expiresIn := max(int64(exp.Sub(timeNow()).Seconds()), 1)
-	//nolint:gosec // G124: HttpOnly and SameSite=Strict are set; Secure follows the operator's -secure-cookies flag (plain-HTTP dev).
+	// G124: HttpOnly and SameSite=Strict are set; Secure follows the
+	// operator's -secure-cookies flag so plain-HTTP local dev works.
+	//nolint:gosec // G124: see above.
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
@@ -196,7 +200,9 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	//nolint:gosec // G124: HttpOnly and SameSite=Strict are set; Secure follows the operator's -secure-cookies flag (plain-HTTP dev).
+	// G124: HttpOnly and SameSite=Strict are set; Secure follows the
+	// operator's -secure-cookies flag so plain-HTTP local dev works.
+	//nolint:gosec // G124: see above.
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    "",
@@ -234,7 +240,9 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 // `error`s from this function are reserved for *infrastructure*
 // problems (unknown profile, driver init failure) — callers translate
 // those to 502.
-func (s *GraphServer) authenticateUpstream(ctx context.Context, profile, username, password string) (bool, []string, error) {
+func (s *GraphServer) authenticateUpstream(
+	ctx context.Context, profile, username, password string,
+) (bool, []string, error) {
 	prof, err := s.cfg.Profiles.Lookup(profile)
 	if err != nil {
 		return false, nil, err

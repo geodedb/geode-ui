@@ -254,5 +254,6 @@ func rejectProfileCRUD(w http.ResponseWriter, retry time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(retry/time.Second)))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
-	_, _ = w.Write([]byte(`{"code":"rate_limited","description":"too many profile CRUD attempts; try again later","reason":"actor_rate_limited"}`))
+	_, _ = w.Write([]byte(`{"code":"rate_limited",` +
+		`"description":"too many profile CRUD attempts; try again later","reason":"actor_rate_limited"}`))
 }

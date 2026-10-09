@@ -119,7 +119,9 @@ const streamFlushEvery = 64
 // a mid-stream abort is additionally surfaced server-side via slog.Warn
 // (Q39 / #134) because the truncated body is the only client-visible
 // signal otherwise. On success returns the row count and a nil error.
-func streamQueryResult(w http.ResponseWriter, rows queryRowScanner, cols []string, colDescs []jsontext.Value, start time.Time) (int64, error) {
+func streamQueryResult(
+	w http.ResponseWriter, rows queryRowScanner, cols []string, colDescs []jsontext.Value, start time.Time,
+) (int64, error) {
 	bw := bufio.NewWriter(w)
 	flusher, _ := w.(http.Flusher)
 	flush := func() {

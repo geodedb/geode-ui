@@ -60,7 +60,9 @@ import (
 // 400 before reaching the driver.
 
 // GetBackups implements GET /api/v1/backups (list backups).
-func (s *GraphServer) GetBackups(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.BackupList, error) {
+func (s *GraphServer) GetBackups(
+	w http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.BackupList, error) {
 	out, done, err := s.showRowsAsJSON(w, r, "SHOW BACKUPS", "backup")
 	if done {
 		return nil, err
@@ -106,7 +108,9 @@ func (s *GraphServer) showRowsAsJSON(
 // identifier; output is a string literal (single-quoted). The server
 // returns the first row of the BACKUP CREATE result set as a typed
 // BackupRef.
-func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *gentypes.BackupCreateReq) (*gentypes.BackupRef, error) {
+func (s *GraphServer) PostBackups(
+	w http.ResponseWriter, r *http.Request, req *gentypes.BackupCreateReq,
+) (*gentypes.BackupRef, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -149,7 +153,9 @@ func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *g
 }
 
 // GetFile implements GET /api/v1/backups/{file} (backup info).
-func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam) (*gentypes.BackupInfo, error) {
+func (s *GraphServer) GetFile(
+	w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam,
+) (*gentypes.BackupInfo, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -180,7 +186,9 @@ func (s *GraphServer) GetFile(w http.ResponseWriter, r *http.Request, req *genty
 }
 
 // DeleteFile implements DELETE /api/v1/backups/{file} (drop backup).
-func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam) (*gentypes.Empty, error) {
+func (s *GraphServer) DeleteFile(
+	w http.ResponseWriter, r *http.Request, req *gentypes.BackupFileParam,
+) (*gentypes.Empty, error) {
 	return s.execNamedAdmin(w, r, req.File, namedAdminStmt{
 		prefix: "DROP BACKUP ",
 		// v0.5.15: BACKUP / RESTORE paths are string literals (single-quoted)
@@ -236,7 +244,9 @@ func (s *GraphServer) execNamedAdmin(
 // Returns a typed BackupCleanupResp pulled from the first row of the
 // BACKUP CLEANUP result set. Driver-emitted columns expected:
 // `removed`, `freed_bytes`.
-func (s *GraphServer) Cleanup(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.BackupCleanupResp, error) {
+func (s *GraphServer) Cleanup(
+	w http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.BackupCleanupResp, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -259,7 +269,9 @@ func (s *GraphServer) Cleanup(w http.ResponseWriter, r *http.Request, _ *gentype
 }
 
 // Restore implements POST /api/v1/restore (restore from a backup).
-func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *gentypes.RestoreReq) (*gentypes.Empty, error) {
+func (s *GraphServer) Restore(
+	w http.ResponseWriter, r *http.Request, req *gentypes.RestoreReq,
+) (*gentypes.Empty, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)

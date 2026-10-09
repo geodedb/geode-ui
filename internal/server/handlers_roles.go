@@ -117,7 +117,9 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 // is modelled per-graph via GRANT (see handlers_grants.go).
 //
 //nolint:revive // var-naming: the method name is fixed by the genapi-generated ServerInterface.
-func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *gentypes.RoleCreateReq) (*gentypes.Role, error) {
+func (s *GraphServer) PostApiRoles(
+	w http.ResponseWriter, r *http.Request, req *gentypes.RoleCreateReq,
+) (*gentypes.Role, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -130,7 +132,8 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	// emitting an upstream-broken `WITH PERMISSIONS` clause.
 	if len(req.Permissions) > 0 {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidPermission,
-			"role permissions are not modelled in Geode v0.5.15 grammar; use GRANT per-graph (see docs/GQL_AUTH_DDL.md Limitations #2)"))
+			"role permissions are not modelled in Geode v0.5.15 grammar; use GRANT per-graph (see "+
+				"docs/GQL_AUTH_DDL.md Limitations #2)"))
 	}
 	stmt := "CREATE ROLE " + rname
 	if req.Description != "" {
@@ -212,7 +215,9 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 // uses fetchRemove which is a no-op on missing keys), so `IF EXISTS`
 // is a safeguard against a future upstream tightening rather than a
 // semantic change.
-func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *gentypes.RoleParam) (*gentypes.Empty, error) {
+func (s *GraphServer) DeleteRole(
+	w http.ResponseWriter, r *http.Request, req *gentypes.RoleParam,
+) (*gentypes.Empty, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)

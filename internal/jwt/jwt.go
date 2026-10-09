@@ -65,7 +65,7 @@ type Claims struct {
 	// Declared last on purpose: struct field order fixes the JSON key
 	// order of every issued token payload, so moving the embed to the
 	// top would change minted token bytes.
-	jjwt.RegisteredClaims //nolint:embeddedstructfieldcheck // field order defines the JWT payload key order; keep wire bytes stable.
+	jjwt.RegisteredClaims //nolint:embeddedstructfieldcheck // field order = JWT payload key order.
 }
 
 // Issuer signs and verifies HS256 tokens. It is safe for concurrent use:

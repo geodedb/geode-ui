@@ -77,7 +77,7 @@ const (
 // the full surface. False positives (over-redaction) are far cheaper
 // than false negatives (leaking a secret to the audit channel).
 //
-//nolint:gochecknoglobals // read-only lookup table built once; rebuilding it per audit emit would allocate on every event.
+//nolint:gochecknoglobals // read-only table built once; rebuilding it per emit would allocate.
 var sensitiveKeys = append(append([]string{}, obsx.DefaultSensitiveKeyFragments...),
 	// geode-ui-specific additions on top of obsx defaults.
 	"saved_password",    // profilestore on-disk password field

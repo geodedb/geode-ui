@@ -28,7 +28,9 @@ import (
 //   - When Config.Store is nil, falls back to enumerating profile
 //     names from the *conn.Pool registered as Config.Profiles.
 //     Returned Profile entries carry only Name (legacy contract).
-func (s *GraphServer) GetProfiles(_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.ProfileList, error) {
+func (s *GraphServer) GetProfiles(
+	_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.ProfileList, error) {
 	if s.cfg.Store != nil {
 		ctx := r.Context()
 		actr := actorFromContext(ctx)
@@ -128,7 +130,7 @@ type poolOverridesWire struct {
 // caller (they flow straight into the response codec, which only reads
 // jsontext.Value), so sharing a single backing array is safe.
 //
-//nolint:gochecknoglobals // precomputed read-only encodings (PSR-F15 / #112); computing per call defeats the optimisation.
+//nolint:gochecknoglobals // precomputed read-only encodings (PSR-F15 / #112).
 var (
 	zeroTLSWire = mustMarshalWire(tlsWire{})
 	zeroPOWire  = mustMarshalWire(poolOverridesWire{})

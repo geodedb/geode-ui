@@ -102,14 +102,23 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	fs.SetOutput(output)
 	var cfg appConfig
 	fs.StringVar(&cfg.listen, "listen", ":8080", "address to listen on")
-	fs.StringVar(&cfg.profilesFile, "profiles", "", "path to JSON profiles config; on first launch with -profile-store empty, seeds the store as scope=system profiles, then is unused")
-	fs.StringVar(&cfg.profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
-	fs.StringVar(&cfg.secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
+	fs.StringVar(&cfg.profilesFile, "profiles", "", "path to JSON profiles config; on first launch with "+
+		"-profile-store empty, seeds the store as scope=system profiles, then is unused")
+	fs.StringVar(&cfg.profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile "+
+		"store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
+	fs.StringVar(&cfg.secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl "+
+		"rand -hex 32`")
 	fs.DurationVar(&cfg.jwtTTL, "jwt-ttl", defaultJWTTTL, "JWT TTL (1m..24h)")
-	fs.StringVar(&cfg.adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
-	fs.StringVar(&cfg.uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
-	fs.BoolVar(&cfg.secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
-	fs.BoolVar(&cfg.passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and air-gap-friendly")
+	fs.StringVar(&cfg.adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' "+
+		"role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
+	fs.StringVar(&cfg.uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart "+
+		"uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are "+
+		"auto-created")
+	fs.BoolVar(&cfg.secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / "+
+		"#62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
+	fs.BoolVar(&cfg.passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on "+
+		"PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and "+
+		"air-gap-friendly")
 	// Per-actor profile-CRUD rate limit (GAP-S7 #120). Production default
 	// is a deliberately tight 30 req/min (rps 0.5) / burst 10 — see
 	// server.ProfileLimiterDefaults(). Tunable here so heavy automated
@@ -117,8 +126,10 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// several parallel browser workers sharing one JWT subject) can
 	// loosen it without weakening the shipped default. <= 0 means "use
 	// the built-in default".
-	fs.Float64Var(&cfg.profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the built-in default (0.5 = 30/min)")
-	fs.Float64Var(&cfg.profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the built-in default (10)")
+	fs.Float64Var(&cfg.profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the "+
+		"built-in default (0.5 = 30/min)")
+	fs.Float64Var(&cfg.profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the "+
+		"built-in default (10)")
 	// S-NEW-5 (#201): X-Forwarded-For is no longer trusted by default.
 	// When this flag is false (the secure-by-default), the per-IP login
 	// limiter (5 rps) and the per-(profile,username) lockout counter
@@ -127,13 +138,16 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// arbitrary innocent IPs (DoS-by-lockout). Enable only when the
 	// binary sits behind a TLS-terminating reverse proxy you control
 	// and that proxy strips/normalises any inbound XFF header.
-	fs.BoolVar(&cfg.trustProxyXFF, "trust-proxy-xff", false, "trust X-Forwarded-For header for per-IP rate limiting (enable only when behind a TLS-terminating reverse proxy you control)")
+	fs.BoolVar(&cfg.trustProxyXFF, "trust-proxy-xff", false, "trust X-Forwarded-For header for per-IP rate limiting "+
+		"(enable only when behind a TLS-terminating reverse proxy you control)")
 	// /ws/lsp bridge wiring. The upstream defaults to 127.0.0.1:3142 to
 	// match `geode serve --lsp-port=3142` colocation. Enabled by default
 	// so a clean local boot of both binaries gives the browser editor
 	// schema-aware completion out of the box.
-	fs.StringVar(&cfg.lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener (geode serve --lsp-port)")
-	fs.BoolVar(&cfg.lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP listener")
+	fs.StringVar(&cfg.lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener "+
+		"(geode serve --lsp-port)")
+	fs.BoolVar(&cfg.lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP "+
+		"listener")
 	if err := fs.Parse(args[1:]); err != nil {
 		return appConfig{}, err
 	}
@@ -323,7 +337,8 @@ func (a *app) initPoolAndStore(getenv func(string) string) (*conn.Pool, profiles
 			return nil, nil, fmt.Errorf("jwt revocation store: %w", err)
 		}
 	} else {
-		slog.Warn("profile store backend does not expose a SQLite handle; JWT revocation state is in-memory only and will not survive a restart")
+		slog.Warn("profile store backend does not expose a SQLite handle; JWT revocation state is in-memory only and " +
+			"will not survive a restart")
 	}
 	return pool, store, nil
 }

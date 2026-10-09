@@ -51,7 +51,9 @@ import (
 // to admin_writable.{users,roles,policies,grants}=false and
 // geode_version=s.cfg.Version — the same all-false posture the hard-
 // coded predecessor returned.
-func (s *GraphServer) GetCapabilities(_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.Capabilities, error) {
+func (s *GraphServer) GetCapabilities(
+	_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.Capabilities, error) {
 	ctx := r.Context()
 
 	// Resolve the active connection DB. A missing pool (test wiring

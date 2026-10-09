@@ -100,7 +100,9 @@ func userFromContext(ctx context.Context) string {
 
 // Tx implements POST /api/v1/tx — opens a new transaction on the
 // caller's connection profile and returns an opaque txid.
-func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.TxBeginReq) (*gentypes.TxBeginResp, error) {
+func (s *GraphServer) Tx(
+	w http.ResponseWriter, r *http.Request, req *gentypes.TxBeginReq,
+) (*gentypes.TxBeginResp, error) {
 	if s.cfg.Pool == nil || s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx subsystem not configured")
 	}
@@ -152,7 +154,9 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 // endpoint (POST /api/v1/migrations/run, method PostMigrationsRun) by
 // folding the path-parameter token into the method name. The B7+B8
 // regen rotated this from the simpler `Run` we had before that.
-func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq) (*gentypes.QueryResp, error) {
+func (s *GraphServer) PostTxidRun(
+	w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq,
+) (*gentypes.QueryResp, error) {
 	if s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx store not configured")
 	}
@@ -208,7 +212,9 @@ func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentyp
 
 // Rollback implements POST /api/v1/tx/{txid}/rollback — discards the
 // transaction and removes it from the store.
-func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
+func (s *GraphServer) Rollback(
+	w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam,
+) (*gentypes.Empty, error) {
 	return s.finishTx(w, r, req.Txid, (*sql.Tx).Rollback, ErrCodeTxRollbackFailed, auditEventTxRollback)
 }
 

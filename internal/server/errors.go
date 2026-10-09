@@ -224,9 +224,10 @@ func wireErr(err error) error {
 	}
 	if isWireFeatureMissing(err) {
 		return &endpointError{
-			status:      http.StatusNotImplemented,
-			code:        ErrCodeWireFeatureMissing,
-			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA may have surfaced this CTA prematurely",
+			status: http.StatusNotImplemented,
+			code:   ErrCodeWireFeatureMissing,
+			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA " +
+				"may have surfaced this CTA prematurely",
 		}
 	}
 	return &endpointError{

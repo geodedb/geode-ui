@@ -21,7 +21,9 @@ import (
 //   - scope=personal: any authenticated user; OwnerUserID is forced to
 //     actor.Subject so a user cannot create personal profiles for
 //     someone else.
-func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *gentypes.CreateProfileReq) (*gentypes.Profile, error) {
+func (s *GraphServer) PostProfiles(
+	w http.ResponseWriter, r *http.Request, req *gentypes.CreateProfileReq,
+) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
 		writeStoreUnavailable(w)
 		return responseWritten[gentypes.Profile]()
@@ -89,7 +91,9 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 }
 
 // GetProfileid implements GET /api/v1/profiles/{profileId}.
-func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath) (*gentypes.Profile, error) {
+func (s *GraphServer) GetProfileid(
+	w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath,
+) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
 		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
 		return responseWritten[gentypes.Profile]()
@@ -116,7 +120,9 @@ func (s *GraphServer) GetProfileid(w http.ResponseWriter, r *http.Request, req *
 // parameter (only the request-body type is in the signature). The
 // path id is read off r.PathValue("profileId"), which Go 1.22+
 // http.ServeMux populates from the route pattern.
-func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.UpdateProfileReq) (*gentypes.Profile, error) {
+func (s *GraphServer) PatchProfileid(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UpdateProfileReq,
+) (*gentypes.Profile, error) {
 	if s.cfg.Store == nil {
 		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
 		return responseWritten[gentypes.Profile]()
@@ -164,7 +170,9 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 }
 
 // DeleteProfileid implements DELETE /api/v1/profiles/{profileId}.
-func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath) (*gentypes.Empty, error) {
+func (s *GraphServer) DeleteProfileid(
+	w http.ResponseWriter, r *http.Request, req *gentypes.ProfileIDPath,
+) (*gentypes.Empty, error) {
 	if s.cfg.Store == nil {
 		writeEndpointErr(w, http.StatusServiceUnavailable, ErrCodeStoreDisabled, "")
 		return responseWritten[gentypes.Empty]()
@@ -281,7 +289,9 @@ func poolOverridesFromGenJSON(raw jsontext.Value) (conn.PoolOverrides, error) {
 // "clear all" signal mergeProfile is looking for.
 func tlsPatchFromGenJSON(raw jsontext.Value) (*conn.TLSMaterial, error) {
 	if len(raw) == 0 {
-		return nil, nil //nolint:nilnil // nil pointer is the "key absent from PATCH body" result (leave persisted value alone), not an error.
+		// A nil pointer is the "key absent from PATCH body" result (leave the
+		// persisted value alone), not an error.
+		return nil, nil //nolint:nilnil // see above.
 	}
 	mat, err := tlsFromGenJSON(raw)
 	if err != nil {
@@ -294,7 +304,9 @@ func tlsPatchFromGenJSON(raw jsontext.Value) (*conn.TLSMaterial, error) {
 // pool_overrides field.
 func poolPatchFromGenJSON(raw jsontext.Value) (*conn.PoolOverrides, error) {
 	if len(raw) == 0 {
-		return nil, nil //nolint:nilnil // nil pointer is the "key absent from PATCH body" result (leave persisted value alone), not an error.
+		// A nil pointer is the "key absent from PATCH body" result (leave the
+		// persisted value alone), not an error.
+		return nil, nil //nolint:nilnil // see above.
 	}
 	po, err := poolOverridesFromGenJSON(raw)
 	if err != nil {

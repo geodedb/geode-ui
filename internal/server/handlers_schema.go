@@ -87,7 +87,9 @@ func filterSystemGraphs(names []string) []string {
 // scan is memoised per (profile, graph) for schemaCacheTTL behind a
 // singleflight so a busy dashboard re-querying on every graph switch /
 // tab focus doesn't re-pay it. Profile mutations invalidate the cache.
-func (s *GraphServer) Labels(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.LabelList, error) {
+func (s *GraphServer) Labels(
+	w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam,
+) (*gentypes.LabelList, error) {
 	ctx := r.Context()
 	key := schemaCacheKey{profile: profileFromContextOrDefault(ctx), graph: req.Graph, kind: schemaCacheKindLabels}
 	out, err := s.schemaCacheRef().getOrLoad(key, func() ([]string, error) {
@@ -128,7 +130,9 @@ func (s *GraphServer) Labels(w http.ResponseWriter, r *http.Request, req *gentyp
 //
 // Server-side cache (PERF-2026-05-11-01 / F1 / #128): same TTL +
 // singleflight memoisation as Labels (see that doc comment).
-func (s *GraphServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.EdgeTypeList, error) {
+func (s *GraphServer) EdgeTypes(
+	w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam,
+) (*gentypes.EdgeTypeList, error) {
 	ctx := r.Context()
 	key := schemaCacheKey{profile: profileFromContextOrDefault(ctx), graph: req.Graph, kind: schemaCacheKindEdgeTypes}
 	rows, err := s.schemaCacheRef().getOrLoad(key, func() ([]string, error) {
@@ -142,7 +146,9 @@ func (s *GraphServer) EdgeTypes(w http.ResponseWriter, r *http.Request, req *gen
 }
 
 // Indexes implements GET /api/v1/graphs/{graph}/indexes.
-func (s *GraphServer) Indexes(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.IndexList, error) {
+func (s *GraphServer) Indexes(
+	w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam,
+) (*gentypes.IndexList, error) {
 	items, err := s.queryRowMaps(r.Context(), req.Graph, "SHOW INDEXES")
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
@@ -151,7 +157,9 @@ func (s *GraphServer) Indexes(w http.ResponseWriter, r *http.Request, req *genty
 }
 
 // Constraints implements GET /api/v1/graphs/{graph}/constraints.
-func (s *GraphServer) Constraints(w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam) (*gentypes.ConstraintList, error) {
+func (s *GraphServer) Constraints(
+	w http.ResponseWriter, r *http.Request, req *gentypes.GraphParam,
+) (*gentypes.ConstraintList, error) {
 	items, err := s.queryRowMaps(r.Context(), req.Graph, "SHOW CONSTRAINTS")
 	if err != nil {
 		return nil, schemaResponseErr(w, err)
