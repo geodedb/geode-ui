@@ -77,7 +77,7 @@ func (s *GraphServer) PostProfiles(w http.ResponseWriter, r *http.Request, req *
 		"profile_id", saved.ID,
 		"scope", string(saved.Scope),
 		"owner", saved.OwnerUserID,
-		"name", saved.Name,
+		auditKeyName, saved.Name,
 	)
 	// PERF-2026-05-11-01 / F1 / #128: a profile mutation can change the
 	// connection target, so any cached schema-discovery results may now
@@ -153,7 +153,7 @@ func (s *GraphServer) PatchProfileid(w http.ResponseWriter, r *http.Request, req
 		"profile_id", updated.ID,
 		"scope", string(updated.Scope),
 		"owner", updated.OwnerUserID,
-		"name", updated.Name,
+		auditKeyName, updated.Name,
 	)
 	// PERF-2026-05-11-01 / F1 / #128: invalidate cached schema discovery
 	// — see PostProfiles.
@@ -189,7 +189,7 @@ func (s *GraphServer) DeleteProfileid(w http.ResponseWriter, r *http.Request, re
 		"profile_id", cur.ID,
 		"scope", string(cur.Scope),
 		"owner", cur.OwnerUserID,
-		"name", cur.Name,
+		auditKeyName, cur.Name,
 	)
 	// PERF-2026-05-11-01 / F1 / #128: invalidate cached schema discovery
 	// — see PostProfiles.

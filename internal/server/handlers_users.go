@@ -176,7 +176,7 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 		emitAudit(auditEventUserCreated,
 			"user", userFromContext(r.Context()),
 			"target", req.Username,
-			"roles", req.Roles,
+			auditKeyRoles, req.Roles,
 		)
 		resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}
 		return nil
@@ -207,7 +207,7 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 		// `username`; legacy drivers may emit `name`.
 		nameCol := -1
 		for i, c := range cols {
-			if c == "username" || c == "name" {
+			if c == "username" || c == colName {
 				nameCol = i
 				break
 			}
@@ -465,7 +465,7 @@ func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, 
 		emitAudit(auditEventRoleAssigned,
 			"user", userFromContext(r.Context()),
 			"target", req.Username,
-			"role", req.Role,
+			auditKeyRole, req.Role,
 		)
 		return nil
 	})
@@ -629,11 +629,11 @@ func userFromRow(cols []string, row []any) *gentypes.User {
 			break
 		}
 		switch c {
-		case "username", "name":
+		case "username", colName:
 			u.Username = asStr(row[i])
 		case "email":
 			u.Email = asStr(row[i])
-		case "role":
+		case colRole:
 			// v0.5.15: SHOW USERS emits a single `role` column with the
 			// built-in role name (admin / user / readwrite / readonly).
 			// Lift into the typed []Roles slice so the SPA continues to
@@ -641,7 +641,7 @@ func userFromRow(cols []string, row []any) *gentypes.User {
 			if v := asStr(row[i]); v != "" {
 				u.Roles = []string{v}
 			}
-		case "roles":
+		case colRoles:
 			u.Roles = asStrs(row[i])
 		case "active":
 			// v0.5.15 inverts the polarity: the catalog tracks "is_active",

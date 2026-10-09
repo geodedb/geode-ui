@@ -143,7 +143,7 @@ func (s *GraphServer) PostBackups(w http.ResponseWriter, r *http.Request, req *g
 	emitAudit(auditEventBackupCreated,
 		"user", userFromContext(r.Context()),
 		"graph", req.Graph,
-		"file", ref.File,
+		auditKeyFile, ref.File,
 	)
 	return ref, nil
 }
@@ -190,7 +190,7 @@ func (s *GraphServer) DeleteFile(w http.ResponseWriter, r *http.Request, req *ge
 		quote:       quoteString,
 		invalidCode: ErrCodeInvalidFile,
 		auditEvent:  auditEventBackupDeleted,
-		auditKey:    "file",
+		auditKey:    auditKeyFile,
 	})
 }
 
@@ -288,7 +288,7 @@ func (s *GraphServer) Restore(w http.ResponseWriter, r *http.Request, req *genty
 	}
 	emitAudit(auditEventBackupRestored,
 		"user", userFromContext(r.Context()),
-		"file", req.File,
+		auditKeyFile, req.File,
 		"target_time", req.TargetTime,
 	)
 	return &gentypes.Empty{}, nil
@@ -336,7 +336,7 @@ func backupRefFromRow(cols []string, row []any) *gentypes.BackupRef {
 			break
 		}
 		switch c {
-		case "file":
+		case colFile:
 			b.File = asStr(row[i])
 		case "path":
 			b.Path = asStr(row[i])
@@ -358,7 +358,7 @@ func backupInfoFromRow(cols []string, row []any) *gentypes.BackupInfo {
 			break
 		}
 		switch c {
-		case "file":
+		case colFile:
 			b.File = asStr(row[i])
 		case "path":
 			b.Path = asStr(row[i])

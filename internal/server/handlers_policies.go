@@ -166,7 +166,7 @@ func policyFromRow(cols []string, row []any) *gentypes.Policy {
 			break
 		}
 		switch c {
-		case "name", "policy":
+		case colName, "policy":
 			p.Name = asStr(row[i])
 		case "expression":
 			p.Expression = asStr(row[i])

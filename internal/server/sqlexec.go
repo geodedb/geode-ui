@@ -8,6 +8,14 @@ import (
 	"encoding/json/v2"
 )
 
+// Upstream catalog column names matched by the row-projection helpers.
+const (
+	colName  = "name"
+	colFile  = "file"
+	colRole  = "role"
+	colRoles = "roles"
+)
+
 // runQuery executes stmt against db and
 // materialises the full result set into ([][]any, []string, nil) where the
 // first return is the rows (one []any per row, one element per column) and

@@ -164,7 +164,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 
 	emitAudit(auditEvent,
 		"user", userFromContext(r.Context()),
-		"file", name,
+		auditKeyFile, name,
 		"size_bytes", n,
 		"kind", subdir,
 		"source", "upload",

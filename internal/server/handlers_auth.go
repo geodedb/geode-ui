@@ -94,7 +94,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	emitAudit(auditEventLoginSuccess,
 		"user", req.Username,
 		"profile", profile,
-		"roles", roles,
+		auditKeyRoles, roles,
 		"cid", connID,
 	)
 	expiresIn := s.mintAndSetAuthCookie(w, token, exp)

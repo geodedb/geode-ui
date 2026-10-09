@@ -78,9 +78,9 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
 		obj := rowToMap(cols, row)
-		if _, hasName := obj["name"]; !hasName {
+		if _, hasName := obj[colName]; !hasName {
 			if rn, ok := obj["role_name"]; ok {
-				obj["name"] = rn
+				obj[colName] = rn
 			}
 		}
 		raw, mErr := json.Marshal(obj)
@@ -145,7 +145,7 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	}
 	emitAudit(auditEventRoleCreated,
 		"user", userFromContext(r.Context()),
-		"role", req.Name,
+		auditKeyRole, req.Name,
 		"permissions", req.Permissions,
 	)
 	return &gentypes.Role{
@@ -178,7 +178,7 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 	}
 	nameCol := -1
 	for i, c := range cols {
-		if c == "role_name" || c == "name" || c == "role" {
+		if c == "role_name" || c == colName || c == colRole {
 			nameCol = i
 			break
 		}
@@ -226,7 +226,7 @@ func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *ge
 	}
 	emitAudit(auditEventRoleDeleted,
 		"user", userFromContext(r.Context()),
-		"role", req.Role,
+		auditKeyRole, req.Role,
 	)
 	return &gentypes.Empty{}, nil
 }
@@ -250,7 +250,7 @@ func roleFromRow(cols []string, row []any) *gentypes.Role {
 			break
 		}
 		switch c {
-		case "role_name", "name", "role":
+		case "role_name", colName, colRole:
 			rl.Name = asStr(row[i])
 		case "description":
 			rl.Description = asStr(row[i])

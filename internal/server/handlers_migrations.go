@@ -79,7 +79,7 @@ func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *g
 			}
 		}
 		if isPending {
-			pending = append(pending, asStr(obj["name"]))
+			pending = append(pending, asStr(obj[colName]))
 			continue
 		}
 		raw, mErr := json.Marshal(obj)
@@ -108,7 +108,7 @@ func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, 
 	applied := make([]string, 0, len(rows))
 	for _, row := range rows {
 		obj := rowToMap(cols, row)
-		if v, ok := obj["name"]; ok {
+		if v, ok := obj[colName]; ok {
 			applied = append(applied, asStr(v))
 			continue
 		}
@@ -150,7 +150,7 @@ func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req
 	}
 	emitAudit(auditEventMigrationCreated,
 		"user", userFromContext(r.Context()),
-		"name", req.Name,
+		auditKeyName, req.Name,
 	)
 	return &gentypes.MigrationRef{Name: req.Name}, nil
 }
@@ -162,6 +162,6 @@ func (s *GraphServer) Sign(w http.ResponseWriter, r *http.Request, req *gentypes
 		quote:       quoteIdent,
 		invalidCode: ErrCodeInvalidName,
 		auditEvent:  auditEventMigrationSigned,
-		auditKey:    "name",
+		auditKey:    auditKeyName,
 	})
 }

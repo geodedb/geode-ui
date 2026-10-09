@@ -57,6 +57,14 @@ const (
 	auditEventProfileRateLimited = "profile_rate_limited"
 )
 
+// Audit field keys shared by several emitAudit call sites.
+const (
+	auditKeyName  = "name"
+	auditKeyFile  = "file"
+	auditKeyRole  = "role"
+	auditKeyRoles = "roles"
+)
+
 // sensitiveKeys are case-insensitive substrings that, when found in an
 // audit field's key name, force the value to be redacted. We extend the
 // centralised obsx.DefaultSensitiveKeyFragments list (which already covers

@@ -147,6 +147,12 @@ func (s *GraphServer) Revoke(w http.ResponseWriter, r *http.Request, req *gentyp
 	return &gentypes.Empty{}, nil
 }
 
+// GrantReq.grantee_kind values.
+const (
+	granteeKindUser = "user"
+	granteeKindRole = "role"
+)
+
 // buildGrant assembles either a GRANT or REVOKE statement from req
 // per the v0.5.15 grammar. verb is "GRANT" or "REVOKE"; preposition is
 // "TO" or "FROM" -- kept as caller-supplied tokens (rather than a
@@ -176,12 +182,12 @@ func buildGrant(req *gentypes.GrantReq, verb, preposition string) (string, error
 		// v0.5.15 only supports per-user grants. Default to "user"
 		// when the field is missing rather than the legacy "role" so
 		// the canonical path lights up.
-		kind = "user"
+		kind = granteeKindUser
 	}
 	switch kind {
-	case "user":
+	case granteeKindUser:
 		// canonical path
-	case "role":
+	case granteeKindRole:
 		// Per-role per-privilege grants are not in v0.5.15 grammar.
 		// Surface as wire_feature_missing so the SPA can branch the
 		// same way it does for other upstream-deferred admin features.
