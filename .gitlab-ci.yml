@@ -461,12 +461,15 @@ e2e:playwright:
         sleep 2
       done
     # Build the playwright runner and run the suite. Mount the report dir.
+    # The runner uses the dind daemon's host network, where the stack's
+    # published ports are on localhost; the "docker" service alias only
+    # resolves inside this job container.
     - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
     - mkdir -p e2e/playwright-report
     - >
       docker run --rm --network=host
-      -e UI_URL=http://docker:8080
-      -e MCP_HOST=docker
+      -e UI_URL=http://localhost:8080
+      -e MCP_HOST=localhost
       -e MCP_PORT=8090
       -e ADMIN_USER=geode
       -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
