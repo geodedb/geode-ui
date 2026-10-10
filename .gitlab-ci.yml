@@ -440,15 +440,15 @@ e2e:playwright:
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
     ZIG_VERSION: "0.16.0"
   script:
-    - apk add --no-cache make git bash curl xz tar
-    # Install Zig so the geode binary can be built on the host.
-    - curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
-    - mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
-    - export PATH="/opt/zig:$PATH"
-    - zig version
-    # Fetch the geode runtime sources at the pinned tag and build the binary.
-    - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git ../geode || git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/geode/geode.git ../geode
-    - (cd ../geode && zig build -Doptimize=ReleaseSafe)
+    - apk add --no-cache make git bash curl
+    # Fetch the geode runtime sources at the tag the e2e stack is built
+    # for (deploy/docker-compose.test.yml / Dockerfile.geode: v0.5.15).
+    - git clone --depth=1 --branch v0.5.15 https://gitlab.com/devnw/codepros/geode/geode.git ../geode
+    # Build geode in a Debian builder so the binary links glibc + libssl3
+    # like the Debian runtime image expects (see Dockerfile.geode-build).
+    - docker build --build-arg ZIG_VERSION="${ZIG_VERSION}" -f deploy/geode/Dockerfile.geode-build -t geode-build:ci ../geode
+    - mkdir -p ../geode/zig-out/bin
+    - cid=$(docker create geode-build:ci) && docker cp "$cid:/src/zig-out/bin/geode" ../geode/zig-out/bin/geode && docker rm "$cid"
     # Build the e2e stack and bring services up.
     - make e2e-up
     # Wait for geode-ui to be ready.

@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.7
+#
+# CI builder for the geode binary used by the e2e stack.
+#
+# deploy/geode/Dockerfile.geode copies a prebuilt geode/zig-out/bin/geode
+# into a debian:bookworm-slim runtime, so the binary must be linked
+# against glibc + libssl3. The e2e:playwright CI job runs in docker:25
+# (Alpine/musl, no OpenSSL headers), where a native `zig build` either
+# fails to link libssl/libcrypto or yields a musl binary the Debian
+# runtime cannot execute. Build it here instead, then `docker cp` the
+# binary out (see .gitlab-ci.yml e2e:playwright).
+#
+# Build context: a geode source checkout.
+#   docker build -f geode-ui/deploy/geode/Dockerfile.geode-build -t geode-build geode
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
+ARG ZIG_VERSION=0.16.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils libssl-dev git \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/zig \
+    && curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+    | tar -xJ -C /opt/zig --strip-components=1
+COPY . /src
+WORKDIR /src
+RUN /opt/zig/zig build -Doptimize=ReleaseSafe
