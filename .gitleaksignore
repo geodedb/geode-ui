@@ -1,0 +1,53 @@
+# Gitleaks fingerprint allowlist (gitleaks reads this file automatically).
+# Each entry is one exact historic finding: <commit>:<file>:<rule>:<line>.
+# Reviewed 2026-10-10 (CI job 17083044193 plus local full-history scans with
+# gitleaks v8.30.1): all are test fixtures or doc placeholders, none are real
+# secrets. The same line can be attributed to more than one commit depending
+# on which refs the scanner sees, so every observed attribution is listed.
+# Do not add entries without a reason comment.
+
+# RFC 6455 section 1.3 sample nonce ("the sample nonce", base64) used as the
+# Sec-WebSocket-Key header in WebSocket handshake tests. Public example value.
+0a32b3ab41d666387356109bdcd9a9767540614f:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:120
+0a32b3ab41d666387356109bdcd9a9767540614f:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:194
+0a32b3ab41d666387356109bdcd9a9767540614f:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:282
+0a32b3ab41d666387356109bdcd9a9767540614f:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:304
+0a32b3ab41d666387356109bdcd9a9767540614f:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:334
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:120
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:194
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:282
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:304
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:334
+8880d124e451e8ec70bece6fd44659d106e59a3f:internal/server/ws_lsp_test.go:generic-api-key:326
+8880d124e451e8ec70bece6fd44659d106e59a3f:internal/server/ws_lsp_test.go:generic-api-key:372
+8ff68f4da064a93ca5cccc73f58088866b33807a:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:120
+8ff68f4da064a93ca5cccc73f58088866b33807a:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:194
+8ff68f4da064a93ca5cccc73f58088866b33807a:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:282
+8ff68f4da064a93ca5cccc73f58088866b33807a:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:304
+8ff68f4da064a93ca5cccc73f58088866b33807a:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:334
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:120
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:194
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:282
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:304
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:334
+a758ac49eefa1f30d71d86f06befc3a2ac29bf7d:cmd/server/main_test.go:generic-api-key:273
+b901636b3a5f3968c60e31215de9b90a875c3b02:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:282
+b901636b3a5f3968c60e31215de9b90a875c3b02:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:304
+b901636b3a5f3968c60e31215de9b90a875c3b02:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:334
+f3915254264c2f4ce8b03e85aba89a71d3d65471:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:119
+f3915254264c2f4ce8b03e85aba89a71d3d65471:gen/pkg/mcpx/ws_e2e_test.go:generic-api-key:187
+
+# Placeholder JWT_SECRET_HEX ("0123456789abcdef" repeated) in planning and audit
+# docs; an illustrative sequential hex string, never a deployed key.
+0a32b3ab41d666387356109bdcd9a9767540614f:docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:generic-api-key:1697
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:generic-api-key:1697
+898e68d593c8b130c91399a66e200a012509da13:docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:generic-api-key:1697
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:docs/superpowers/plans/2026-05-06-e2e-testing-stack.md:generic-api-key:1697
+ca34382312d0484e98eecfb1fee52324f9b81189:docs/audits/2026-05-21/security-review.md:generic-api-key:92
+
+# Fake password fixture ("anything-12-chars-pw") in handlers_auth_test.go that only
+# satisfies the 12-character minimum in a unit test. Not a credential.
+0a32b3ab41d666387356109bdcd9a9767540614f:internal/server/handlers_auth_test.go:generic-api-key:549
+21676492e5d38feeb7547b61cedb4f25f3ac1e21:internal/server/handlers_auth_test.go:generic-api-key:549
+502a86506a195a6e810adcb420679b31da437c0b:internal/server/handlers_auth_test.go:generic-api-key:478
+9fffbd8c75fe09f2d4273448112f27574b0b3ad0:internal/server/handlers_auth_test.go:generic-api-key:549
