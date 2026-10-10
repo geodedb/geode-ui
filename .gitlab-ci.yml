@@ -321,7 +321,7 @@ go:generate-verify:
   <<: *go_defaults
   stage: lint
   script:
-    - apk add --no-cache make git nodejs npm
+    - apk add --no-cache make git nodejs npm bash
     - npm ci
     # Pinned to an immutable tag (Q32 / #127). Bump in lockstep with the
     # genapi version the gen/ tree was generated against. NOTE: this pin
