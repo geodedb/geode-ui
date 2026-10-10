@@ -45,6 +45,22 @@ describe('perfMarks', () => {
   })
 })
 
+// waitForBuffered polls until the observer has delivered at least `min`
+// measures into the buffer, or gives up after `timeoutMs`.
+function waitForBuffered(min: number, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  return new Promise((resolve) => {
+    const check = (): void => {
+      if (perfMarks.__bufferSizeForTest() >= min || Date.now() >= deadline) {
+        resolve()
+        return
+      }
+      setTimeout(check, 5)
+    }
+    check()
+  })
+}
+
 describe('perfMarks buffered upload', () => {
   let fetchSpy: jest.SpyInstance
 
@@ -67,9 +83,9 @@ describe('perfMarks buffered upload', () => {
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
     // PerformanceObserver delivery is asynchronous (microtask / setImmediate
-    // in Node's perf_hooks). Yield to the event loop so the buffer is
-    // populated before we assert.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    // in Node's perf_hooks) and can take more than one event-loop turn on a
+    // loaded CI runner, so wait for delivery instead of a single yield.
+    await waitForBuffered(1)
     expect(perfMarks.__bufferSizeForTest()).toBeGreaterThanOrEqual(1)
   })
 
@@ -77,7 +93,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForBuffered(1)
     await perfMarks.flush()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(perfMarks.__bufferSizeForTest()).toBe(0)
