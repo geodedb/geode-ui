@@ -5,12 +5,7 @@ import type { Theme } from '../../theme'
 type SpacingKey = keyof Theme['spacing']
 type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline'
 type Justify =
-  | 'start'
-  | 'center'
-  | 'end'
-  | 'space-between'
-  | 'space-around'
-  | 'space-evenly'
+  'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly'
 
 interface FlexProps {
   $gap?: SpacingKey

@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26.2-00ADD8.svg)](https://go.dev/)
-[![Node.js](https://img.shields.io/badge/Node.js-22.14.0+-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24.21.0+-green.svg)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18.2.0-blue.svg)](https://reactjs.org/)
 
 A self-contained Go binary that embeds a React + TypeScript SPA and exposes the
@@ -14,7 +14,7 @@ restores, migrations, and the audit log.
 ## Quick start
 
 ```bash
-# Build (Go 1.26.2 + Node 22.14+)
+# Build (Go 1.26.2 + Node 24.21+)
 make build
 
 # Generate a JWT secret

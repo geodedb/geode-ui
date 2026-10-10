@@ -105,6 +105,47 @@ if (
   }
 }
 
+// jsdom >= 22 (jest-environment-jsdom 30 ships jsdom 26) does implement
+// attachInternals, but its ElementInternals lacks the form-association
+// methods (setValidity, setFormValue, checkValidity, reportValidity) that
+// Web Awesome calls during Lit's update cycle. Fill in no-op versions on
+// the real object so WA components can render.
+if (
+  typeof HTMLElement !== 'undefined' &&
+  typeof HTMLElement.prototype.attachInternals === 'function' &&
+  typeof ElementInternals !== 'undefined' &&
+  typeof ElementInternals.prototype.setValidity !== 'function'
+) {
+  const validState = {
+    valid: true,
+    badInput: false,
+    customError: false,
+    patternMismatch: false,
+    rangeOverflow: false,
+    rangeUnderflow: false,
+    stepMismatch: false,
+    tooLong: false,
+    tooShort: false,
+    typeMismatch: false,
+    valueMissing: false,
+  }
+  const proto = ElementInternals.prototype
+  const define = (name, value) => {
+    if (!(name in proto)) {
+      Object.defineProperty(proto, name, { configurable: true, ...value })
+    }
+  }
+  define('setValidity', { value() {} })
+  define('setFormValue', { value() {} })
+  define('checkValidity', { value: () => true })
+  define('reportValidity', { value: () => true })
+  define('validity', { get: () => validState })
+  define('validationMessage', { get: () => '' })
+  define('willValidate', { get: () => false })
+  define('labels', { get: () => [] })
+  define('form', { get: () => null })
+}
+
 // jsdom's Performance implementation (as of jest-environment-jsdom v29 /
 // jsdom v20) ships `performance.now()` and the navigation-timing fields,
 // but omits the W3C UserTiming entries (`mark`, `measure`, `clearMarks`,

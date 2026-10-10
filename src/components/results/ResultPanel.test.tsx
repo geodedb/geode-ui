@@ -42,9 +42,10 @@ function renderPanel(
 }
 
 describe('ResultPanel', () => {
-  it('renders the four result tabs and reports tab changes', () => {
+  it('renders the four result tabs and reports tab changes', async () => {
     const { onTabChange } = renderPanel()
-    expect(screen.getAllByRole('tab')).toHaveLength(4)
+    // Web Awesome assigns role="tab" in its (async) Lit update.
+    expect(await screen.findAllByRole('tab')).toHaveLength(4)
     fireEvent.click(screen.getByRole('tab', { name: /json/i }))
     expect(onTabChange).toHaveBeenCalledWith('json')
   })

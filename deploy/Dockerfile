@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 #
 # Multi-stage build for geode-ui.
 #
@@ -22,7 +22,7 @@
 #   replace directive in go.mod and the COPY of geode-client-go/ below.
 
 # ----- Stage 1: build the SPA -----
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /work
 COPY geode-ui/package.json geode-ui/package-lock.json ./
 RUN npm ci
@@ -60,7 +60,7 @@ RUN go mod download
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/geode-ui ./cmd/server
 
 # ----- Stage 3: minimal runtime -----
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates && \
     addgroup -S geode && adduser -S -G geode geode
 COPY --from=gobuild /out/geode-ui /usr/local/bin/geode-ui

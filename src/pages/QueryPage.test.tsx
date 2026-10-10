@@ -261,7 +261,9 @@ describe('result panel maximize / fullscreen', () => {
     )
     // The active result tabpanel must live inside the overlay so it can
     // expand to fill it.
-    const panel = view.getByRole('tabpanel')
+    // Web Awesome assigns role="tabpanel" in its (async) Lit update, so
+    // a freshly mounted panel needs a find* query.
+    const panel = await view.findByRole('tabpanel')
     expect(panel.id).toBe('result-panel-table')
     expect(overlay.contains(panel)).toBe(true)
 
@@ -295,7 +297,7 @@ describe('result panel maximize / fullscreen', () => {
   test('the overlay works for the graph tab too (toggle lives in the toolbar, not a single result component)', async () => {
     const view = await renderWithResults()
     // Switch to the graph tab first.
-    fireEvent.click(view.getByRole('tab', { name: 'graph' }))
+    fireEvent.click(await view.findByRole('tab', { name: 'graph' }))
     await waitFor(() => {
       const panel = view.getByRole('tabpanel')
       expect(panel.id).toBe('result-panel-graph')
@@ -305,7 +307,7 @@ describe('result panel maximize / fullscreen', () => {
     fireEvent.click(view.getByTestId('result-fullscreen-toggle'))
     const overlay = view.getByTestId('result-fullscreen-overlay')
     expect(getComputedStyle(overlay).position).toBe('fixed')
-    const panel = within(overlay).getByRole('tabpanel')
+    const panel = await within(overlay).findByRole('tabpanel')
     expect(panel.id).toBe('result-panel-graph')
   })
 })

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "packageRules": [
+    {
+      "description": "Hold TypeScript below 7: TS 7 ships no JS compiler API (the package exports only lib/version.cjs), so ts-loader, ts-jest (peer typescript <7) and typescript-eslint (peer typescript <6.1) cannot run on it.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold ESLint at 8: eslint-config-airbnb 19 (peer eslint ^7 || ^8) and eslint-plugin-import/react/jsx-a11y do not support ESLint 10, and ESLint 9+ needs a flat-config rewrite that replaces the airbnb preset.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "eslint"
+      ],
+      "allowedVersions": "<9"
+    },
+    {
+      "description": "Hold monaco-languageclient at 8: version 9+ requires the @codingame/monaco-vscode-api service stack (v11 pins vscode-api 37) and replacing the @monaco-editor/react editor integration.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "monaco-languageclient"
+      ],
+      "allowedVersions": "<9"
+    },
+    {
+      "description": "Hold vscode-languageclient at 9 to match monaco-languageclient 8, which depends on vscode-languageclient ~9.0.1 (CloseAction/ErrorAction must come from the same copy).",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "vscode-languageclient"
+      ],
+      "allowedVersions": "<10"
+    }
+  ]
+}
