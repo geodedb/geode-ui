@@ -467,6 +467,19 @@ e2e:playwright:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 # ============================================================================
+# SECURITY STAGE - gitleaks (component job override)
+# ============================================================================
+
+# Scan the full history. With the default shallow fetch (depth 20) gitleaks
+# attributes every line in the tree to the oldest fetched commit, so the
+# fingerprints in .gitleaksignore change with each new commit and reviewed
+# historic false positives come back. A full clone makes the attribution
+# stable and also scans more history, not less.
+security-gitleaks:
+  variables:
+    GIT_DEPTH: '0'
+
+# ============================================================================
 # RELEASE STAGE - GoReleaser (Go binary + container images + nfpm packages)
 # ============================================================================
 #
