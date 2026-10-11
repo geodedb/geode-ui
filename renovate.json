@@ -40,6 +40,16 @@
         "vscode-languageclient"
       ],
       "allowedVersions": "<10"
+    },
+    {
+      "description": "Hold the geode Go driver below 0.2: geodedb.com/geode 0.2.x targets engine 0.8.18, and against Geode v0.5.15 (the minimum this UI supports and the version the e2e stack runs) every connection it opens and closes is leaked by the engine, which stops answering HELLO after about 16 of them. Each login opens one, so logins start failing and the login limiter locks the account (429 user_locked). v0.1.28 runs 40+ connect/close cycles cleanly.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "geodedb.com/geode"
+      ],
+      "allowedVersions": "<0.2.0"
     }
   ]
 }

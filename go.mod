@@ -3,7 +3,7 @@ module geodedb.com/geode-ui
 go 1.27.2
 
 require (
-	geodedb.com/geode v0.2.1
+	geodedb.com/geode v0.1.28
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/lestrrat-go/jwx v1.2.31
 	github.com/stretchr/testify v1.12.1
