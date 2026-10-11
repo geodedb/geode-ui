@@ -491,11 +491,19 @@ e2e:playwright:
       -v "$PWD/e2e/playwright-report:/work/e2e/playwright-report"
       pw:local
   after_script:
+    # Keep the engine and server logs (and every other service's) so a
+    # failed run can be diagnosed after the stack is gone.
+    - mkdir -p e2e/compose-logs
+    - docker compose -f deploy/docker-compose.test.yml ps -a > e2e/compose-logs/ps.txt 2>&1 || true
+    - docker compose -f deploy/docker-compose.test.yml logs --no-color --timestamps geode > e2e/compose-logs/geode.log 2>&1 || true
+    - docker compose -f deploy/docker-compose.test.yml logs --no-color --timestamps geode-ui > e2e/compose-logs/geode-ui.log 2>&1 || true
+    - docker compose -f deploy/docker-compose.test.yml logs --no-color --timestamps > e2e/compose-logs/all.log 2>&1 || true
     - make e2e-down || true
   artifacts:
     when: always
     paths:
       - e2e/playwright-report/
+      - e2e/compose-logs/
     expire_in: 7 days
   # Only run on main and on merge requests touching e2e or backend.
   rules:
