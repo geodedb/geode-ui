@@ -6,8 +6,22 @@ import { useConnections, useActiveConnection } from '../../api/connections'
 import { useAuth } from '../../auth/AuthProvider'
 import { Dropdown, DropdownItem } from '../../services/webawesome/components'
 
+// The menu opens bottom-start (its left edge on the trigger's left
+// edge), but wa-dropdown's show animation scales it from 0.9 with
+// transform-origin "top" (top centre) for every bottom-* placement, so
+// while it opens the menu sits ~5% of its width to the right of the
+// trigger and slides into place. Grow it from the corner it is anchored
+// to so it stays aligned with the trigger for the whole animation.
 const SwitcherWrap = styled.div`
   position: relative;
+
+  & wa-dropdown::part(menu) {
+    transform-origin: top left;
+  }
+
+  &:dir(rtl) wa-dropdown::part(menu) {
+    transform-origin: top right;
+  }
 `
 
 // Inline style for the row layout inside each <wa-dropdown-item>.
