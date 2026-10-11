@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import styled from 'styled-components'
 
@@ -65,6 +65,19 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
   const { connections, activeId, loading } = useConnections()
   const active = useActiveConnection()
   const { disconnect, switchActive } = useAuth()
+  // React handles the "×" button's events at the root container, after
+  // wa-dropdown's own click/keydown listeners have already turned the
+  // press into a wa-select for the surrounding row, so stopPropagation
+  // in the React handlers cannot stop it. Without a guard the row was
+  // made active and then disconnected, which left no active connection
+  // and bounced the user to /login. Record presses that start on a
+  // disconnect button (pointerdown and capture-phase keydown both run
+  // before wa-dropdown handles the click / key) and ignore the
+  // wa-select they produce.
+  const disconnectPressAt = useRef(0)
+  const markDisconnectPress = () => {
+    disconnectPressAt.current = Date.now()
+  }
 
   // PSR-F16 (#113): the lazy-hydrate path mounts with an empty
   // connection map; show a non-interactive placeholder while the
@@ -115,6 +128,10 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
           // returns null. Read the property — fall back to the
           // attribute for safety (e.g. an item authored with a
           // bare `value="..."` attribute string).
+          if (Date.now() - disconnectPressAt.current < 1000) {
+            disconnectPressAt.current = 0
+            return
+          }
           const item = (e as CustomEvent<{ item: HTMLElement }>).detail?.item
           const value =
             (item as unknown as { value?: string })?.value ??
@@ -159,6 +176,10 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
                 tabIndex={0}
                 aria-label={`${t('connection.disconnect')}: ${c.profileName}`}
                 data-testid={`connection-disconnect-${c.connectionId}`}
+                onPointerDown={markDisconnectPress}
+                onKeyDownCapture={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') markDisconnectPress()
+                }}
                 onClick={(e) => {
                   // Prevent the dropdown's selection logic from
                   // firing wa-select (which would race the
