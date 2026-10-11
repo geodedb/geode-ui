@@ -385,10 +385,9 @@ bench-gate:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
-# Builds the multi-stage Dockerfile in deploy/. The Dockerfile expects a
-# sibling geode-client-go/ checkout next to the geode-ui/ context root (see
-# deploy/Dockerfile header). For CI, fetch the sibling repo into a temporary
-# parent dir so docker build sees the expected layout.
+# Builds the multi-stage Dockerfile in deploy/. The Dockerfile's build
+# context is the parent of geode-ui/ (see deploy/Dockerfile header), so CI
+# copies the checkout into a temporary parent dir.
 docker:build:
   stage: build
   image: docker:29
@@ -409,7 +408,6 @@ docker:build:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - mkdir -p /tmp/ctx/geode-ui
     - cp -r . /tmp/ctx/geode-ui/
-    - git clone --depth=1 https://gitlab.com/devnw/geode/geode-client-go.git /tmp/ctx/geode-client-go || echo "geode-client-go clone failed; document a private mirror token if needed"
     - cd /tmp/ctx
     - docker build -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
     - if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA; fi
@@ -440,15 +438,15 @@ e2e:playwright:
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
     ZIG_VERSION: "0.16.0"
   script:
-    - apk add --no-cache make git bash curl xz tar
-    # Install Zig so the geode binary can be built on the host.
-    - curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
-    - mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
-    - export PATH="/opt/zig:$PATH"
-    - zig version
-    # Fetch the geode runtime sources at the pinned tag and build the binary.
-    - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git ../geode || git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/geode/geode.git ../geode
-    - (cd ../geode && zig build -Doptimize=ReleaseSafe)
+    - apk add --no-cache make git bash curl
+    # Fetch the geode runtime sources at the tag the e2e stack is built
+    # for (deploy/docker-compose.test.yml / Dockerfile.geode: v0.5.15).
+    - git clone --depth=1 --branch v0.5.15 https://gitlab.com/devnw/codepros/geode/geode.git ../geode
+    # Build geode in a Debian builder so the binary links glibc + libssl3
+    # like the Debian runtime image expects (see Dockerfile.geode-build).
+    - docker build --build-arg ZIG_VERSION="${ZIG_VERSION}" -f deploy/geode/Dockerfile.geode-build -t geode-build:ci ../geode
+    - mkdir -p ../geode/zig-out/bin
+    - cid=$(docker create geode-build:ci) && docker cp "$cid:/src/zig-out/bin/geode" ../geode/zig-out/bin/geode && docker rm "$cid"
     # Build the e2e stack and bring services up.
     - make e2e-up
     # Wait for geode-ui to be ready.
@@ -461,12 +459,15 @@ e2e:playwright:
         sleep 2
       done
     # Build the playwright runner and run the suite. Mount the report dir.
+    # The runner uses the dind daemon's host network, where the stack's
+    # published ports are on localhost; the "docker" service alias only
+    # resolves inside this job container.
     - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
     - mkdir -p e2e/playwright-report
     - >
       docker run --rm --network=host
-      -e UI_URL=http://docker:8080
-      -e MCP_HOST=docker
+      -e UI_URL=http://localhost:8080
+      -e MCP_HOST=localhost
       -e MCP_PORT=8090
       -e ADMIN_USER=geode
       -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"

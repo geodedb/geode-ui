@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+#
+# CI builder for the geode binary used by the e2e stack.
+#
+# deploy/geode/Dockerfile.geode copies a prebuilt geode/zig-out/bin/geode
+# into a debian:bookworm-slim runtime, so the binary must be linked
+# against glibc + libssl3. The e2e:playwright CI job runs in docker:25
+# (Alpine/musl, no OpenSSL headers), where a native `zig build` either
+# fails to link libssl/libcrypto or yields a musl binary the Debian
+# runtime cannot execute. Build it here instead, then `docker cp` the
+# binary out (see .gitlab-ci.yml e2e:playwright).
+#
+# Build context: a geode source checkout.
+#   docker build -f geode-ui/deploy/geode/Dockerfile.geode-build -t geode-build geode
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
+ARG ZIG_VERSION=0.16.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils libssl-dev git \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/zig \
+    && curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+    | tar -xJ -C /opt/zig --strip-components=1
+COPY . /src
+WORKDIR /src
+# Zig's HTTP client intermittently fails GitHub release downloads on CI
+# runners ("invalid HTTP response: HttpConnectionClosing" fetching the
+# protobuf package's lazy protoc dependency). Pre-seed the package cache
+# with curl (content-addressed, so the hash must still match; Zig 0.16
+# needs the project context, hence after WORKDIR), and retry the build to
+# ride out any other transient fetch failure.
+RUN curl -fsSL --retry 5 -o /tmp/protoc.zip \
+        "https://github.com/protocolbuffers/protobuf/releases/download/v32.1/protoc-32.1-linux-x86_64.zip" \
+    && mkdir -p /root/.cache/zig/tmp /src/.zig-cache/tmp /src/zig-pkg \
+    && /opt/zig/zig fetch /tmp/protoc.zip \
+    && rm /tmp/protoc.zip
+RUN for attempt in 1 2 3; do \
+        /opt/zig/zig build -Doptimize=ReleaseSafe && exit 0; \
+        echo "zig build attempt ${attempt} failed; retrying" >&2; sleep 10; \
+    done; exit 1
