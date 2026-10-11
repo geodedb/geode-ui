@@ -98,7 +98,7 @@ fi
 
 ensure_benchstat || { echo "benchstat unavailable" >&2; exit 1; }
 
-CURRENT="$(mktemp -t bench-current.XXXXXX.txt)"
+CURRENT="$(mktemp "${TMPDIR:-/tmp}/bench-current.XXXXXX")"
 trap 'rm -f "$CURRENT" "$CURRENT.cmp"' EXIT
 run_benches "$CURRENT"
 

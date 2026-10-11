@@ -10,10 +10,9 @@
 #
 # Build context for the geode + geode-ui images is the GRANDPARENT
 # directory of this compose file (../.. — i.e. the directory that
-# contains the geode/, geode-ui/, and geode-client-go/ sibling
-# checkouts). Both Dockerfiles reach across siblings: the geode image
-# COPYs ../geode/zig-out/bin/geode, and the geode-ui image COPYs
-# ../geode-client-go/ to satisfy the local `replace` in go.mod.
+# contains the geode/ and geode-ui/ sibling checkouts). The geode image
+# COPYs ../geode/zig-out/bin/geode; the geode-ui image fetches the
+# geodedb.com/geode driver from the Go module proxy.
 #
 # Bring up:  make e2e-up    (= docker compose -f deploy/docker-compose.test.yml up -d --build)
 # Tear down: make e2e-down  (= docker compose -f deploy/docker-compose.test.yml down -v)

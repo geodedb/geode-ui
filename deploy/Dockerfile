@@ -2,24 +2,17 @@
 #
 # Multi-stage build for geode-ui.
 #
-# IMPORTANT — build context:
-#   The geode-ui go.mod includes a `replace geodedb.com/geode => ../geode-client-go`
-#   directive (relative path resolved at module-resolution time). Until the geode
-#   driver is published to a public Go module proxy, the Docker build context
-#   MUST contain a sibling `geode-client-go/` directory next to `geode-ui/`.
+# Build context:
+#   The geode driver (geodedb.com/geode) is consumed from the public Go
+#   module proxy, so no sibling driver checkout is needed. The build context
+#   is still the PARENT directory of geode-ui/ (paths below are prefixed
+#   with geode-ui/) so existing compose files and CI keep working.
 #
-#   Recommended invocation (from the parent directory containing both repos):
+#   Recommended invocation (from the parent directory of geode-ui/):
 #     docker build \
 #       -f geode-ui/deploy/Dockerfile \
 #       -t geode-ui:dev \
 #       .
-#
-#   The Dockerfile assumes:
-#     - geode-ui/        is the project this Dockerfile lives in
-#     - geode-client-go/ is the local geode driver source the replace points at
-#
-#   If `geodedb.com/geode` becomes available via a real Go proxy, drop both the
-#   replace directive in go.mod and the COPY of geode-client-go/ below.
 
 # ----- Stage 1: build the SPA -----
 FROM node:26-alpine AS web
@@ -41,20 +34,12 @@ ENV GEODE_E2E_BUILD=true
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
-FROM golang:1.26-alpine AS gobuild
-ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.26.3
+FROM golang:1.27.2-alpine AS gobuild
+ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.27.2
 RUN apk add --no-cache git
 WORKDIR /work
-# Sibling driver source needed because of the local replace directive.
-# Layout inside the build image:
-#   /work/geode-ui/        ← module root
-#   /work/geode-client-go/ ← replace target
-COPY geode-client-go/ /work/geode-client-go/
 COPY --from=web /work/ /work/geode-ui/
 WORKDIR /work/geode-ui
-# The committed go.mod uses a developer-local absolute replace path. Rewrite
-# it to the in-container sibling location so this build is self-contained.
-RUN go mod edit -replace=geodedb.com/geode=/work/geode-client-go
 RUN go mod download
 # Static binary, stripped, reproducible paths.
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/geode-ui ./cmd/server

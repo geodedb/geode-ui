@@ -7,7 +7,7 @@
 set -euo pipefail
 
 export GOEXPERIMENT=jsonv2
-export GOTOOLCHAIN=go1.26.3
+export GOTOOLCHAIN=go1.27.2
 
 go mod tidy
 
