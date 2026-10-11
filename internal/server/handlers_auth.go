@@ -78,6 +78,10 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 		reason := "invalid_credentials"
 		if err != nil {
 			reason = "upstream_error"
+			// Tell the login limiter this was not a credential
+			// failure, so an engine outage does not lock users out.
+			// The response below is unchanged.
+			markLoginBackendFailure(r.Context())
 		}
 		denyLogin(w, authStart, reason, req.Username, req.Password, profile)
 		return nil, nil

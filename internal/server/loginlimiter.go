@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -334,7 +335,9 @@ func (l *LoginLimiter) NoteSuccess(profile, username string) {
 // flows through the limiter; everything else passes through. The
 // wrapper extracts client IP, parses profile/username from the form
 // body (without consuming it for the inner handler), and on a 401
-// inner response calls NoteFail.
+// inner response calls NoteFail, unless the handler marked the attempt
+// as a back-end failure (markLoginBackendFailure). Only genuine
+// credential failures count toward the lockout.
 func WrapLoginLimit(l *LoginLimiter, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/auth/login" {
@@ -369,15 +372,45 @@ func WrapLoginLimit(l *LoginLimiter, next http.Handler) http.Handler {
 		}
 
 		// Wrap the response to observe status without buffering the body.
+		// The outcome lets the login handler say, out of band, that a
+		// 401 came from a back-end failure rather than bad credentials.
 		sw := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
+		outcome := &loginOutcome{}
+		next.ServeHTTP(sw, r.WithContext(context.WithValue(r.Context(), loginOutcomeKey{}, outcome)))
 		switch {
+		case sw.status == http.StatusUnauthorized && outcome.backendFailure.Load():
+			// The engine or profile store failed; the credentials were
+			// never checked. Counting this would let an engine outage
+			// lock every user out for LockoutWindow. Neither count it
+			// nor reset the counter. The client still gets the uniform
+			// 401 (SEC-N10), so this does not help user enumeration.
 		case sw.status == http.StatusUnauthorized:
 			l.NoteFail(profile, username)
 		case sw.status >= 200 && sw.status < 300:
 			l.NoteSuccess(profile, username)
 		}
 	})
+}
+
+// loginOutcomeKey is the context key for the *loginOutcome that
+// WrapLoginLimit attaches to each login request.
+type loginOutcomeKey struct{}
+
+// loginOutcome is the server-side channel from the login handler to the
+// limiter. It never reaches the client.
+type loginOutcome struct {
+	backendFailure atomic.Bool
+}
+
+// markLoginBackendFailure records that the current login attempt failed
+// for a reason other than the submitted credentials (engine outage,
+// transport error, unknown profile, driver failure). WrapLoginLimit then
+// leaves the per-user lockout counter alone for this attempt. It is a
+// no-op when the request did not come through WrapLoginLimit.
+func markLoginBackendFailure(ctx context.Context) {
+	if o, ok := ctx.Value(loginOutcomeKey{}).(*loginOutcome); ok {
+		o.backendFailure.Store(true)
+	}
 }
 
 // statusWriter tees the status code without altering the body.
