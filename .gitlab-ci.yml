@@ -450,13 +450,8 @@ docker:build:
 # ============================================================================
 #
 # Runs the e2e Playwright suite against the docker-compose.test.yml stack.
-# The stack expects a pre-built geode binary at ../geode/zig-out/bin/geode
-# (see deploy/geode/Dockerfile.geode). In CI we clone the geode repo at the
-# pinned tag and run `zig build` before invoking `make e2e-up`. This requires
-# Zig 0.16.0+ on the runner (installed inline below). If the geode repo
-# becomes inaccessible from CI, switch this job to `when: manual` and rely
-# on local `make e2e-ci` runs until the geode runtime ships as a binary
-# release artifact.
+# The geode engine image extends the published Geode release image, pinned
+# by digest in deploy/geode/Dockerfile.geode, so no geode build is needed.
 e2e:playwright:
   stage: test
   image: docker:29
@@ -466,17 +461,8 @@ e2e:playwright:
     DOCKER_TLS_CERTDIR: "/certs"
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
-    ZIG_VERSION: "0.16.0"
   script:
     - apk add --no-cache make git bash curl
-    # Fetch the geode runtime sources at the tag the e2e stack is built
-    # for (deploy/docker-compose.test.yml / Dockerfile.geode: v0.5.15).
-    - git clone --depth=1 --branch v0.5.15 https://gitlab.com/devnw/codepros/geode/geode.git ../geode
-    # Build geode in a Debian builder so the binary links glibc + libssl3
-    # like the Debian runtime image expects (see Dockerfile.geode-build).
-    - docker build --build-arg ZIG_VERSION="${ZIG_VERSION}" -f deploy/geode/Dockerfile.geode-build -t geode-build:ci ../geode
-    - mkdir -p ../geode/zig-out/bin
-    - cid=$(docker create geode-build:ci) && docker cp "$cid:/src/zig-out/bin/geode" ../geode/zig-out/bin/geode && docker rm "$cid"
     # Build the e2e stack and bring services up.
     - make e2e-up
     # Wait for geode-ui to be ready.

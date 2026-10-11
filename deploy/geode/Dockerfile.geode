@@ -1,74 +1,30 @@
 # syntax=docker/dockerfile:1.28
 #
-# Builds geode:v0.5.15 for the geode-ui e2e test stack.
+# Geode engine image for the geode-ui e2e test stack.
 #
-# Why a host-side build (not a from-source compile inside Docker)?
-# ----------------------------------------------------------------
-# The official Geode repo (../geode) builds with Zig and a large set of
-# vendored sibling deps. Specifically:
+# Based on the published Geode release image (registry.gitlab.com/devnw/
+# codepros/geode/geode), pinned by digest. 0.8.22 is the newest release
+# image; the geodedb.com/geode 0.2.x Go driver this UI uses targets engine
+# 0.8.18 and later. Older e2e stacks built geode v0.5.15 from source with
+# Zig. That engine leaks every connection the 0.2 driver opens and
+# closes, which is why the driver was held at 0.1.28.
 #
-#   * build.zig.zon pins .minimum_zig_version = "0.16.0" — there is no
-#     stable Zig 0.16.0 release tarball at a predictable URL yet.
-#   * Zig's package fetcher cannot resolve git deps inside a default Docker
-#     build (no git creds, no host tooling). The official Geode Dockerfile
-#     works around this by COPYing a pre-populated /root/.cache/zig/p/
-#     into the build context — that cache is not committed to the repo
-#     (docker/zig-packages/ ships empty).
-#   * A from-source Docker build of the full Geode tree takes 5-10 minutes
-#     and pulls in ~250 MB of Zig deps.
-#
-# So this Dockerfile takes the same approach as upstream `Dockerfile.release`:
-# the binary is built on the host (which already has Zig + the warm package
-# cache for any developer who has run a Geode build) and copied into a slim
-# Debian runtime image. The build context is the parent of geode-ui so that
-# `geode/zig-out/bin/geode` is reachable as `geode/zig-out/bin/geode`.
-#
-# Prerequisite (run from the geode source checkout, sibling to geode-ui):
-#   cd ../geode && zig build -Doptimize=ReleaseSafe
+# The release image ships geode, bash and apt but no tini or socat. The
+# compose file runs geode under tini (so SIGTERM reaches `geode serve`)
+# and bridges the MCP and LSP stdio servers over TCP with socat, so both
+# are installed here at build time instead of on every container start.
 #
 # Build (run from geode-ui/):
-#   docker build -f deploy/geode/Dockerfile.geode -t geode:v0.5.15 ..
-#
-# Run:
-#   docker run --rm -p 3141:3141/udp geode:v0.5.15
-#
-# The image is intentionally minimal: ca-certificates, libssl3, tini,
-# and the geode binary. It mirrors upstream's Dockerfile.release layout
-# (debian:bookworm-slim runtime, non-root user, /data volume).
+#   docker build -f deploy/geode/Dockerfile.geode -t geode:e2e deploy/geode
+FROM registry.gitlab.com/devnw/codepros/geode/geode:0.8.22@sha256:867d93375470fd18c60336036196a9ef9715a1922e063e8787dc05d8e798ddce
 
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
-
+USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Runtime deps:
-#   ca-certificates   - TLS root store for outbound clients
-#   libssl3           - geode is dynamically linked against libssl/libcrypto
-#   tini              - PID-1 reaper so SIGTERM/SIGINT propagate cleanly
+# hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        libssl3 \
-        tini \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -u 10001 -m -d /home/geode geode \
-    && mkdir -p /data \
-    && chown geode:geode /data
-
-# Declare /data as a volume so docker doesn't accidentally bury Geode state
-# inside the container layer when run without `-v`.
-VOLUME ["/data"]
-
-# Copy the host-built v0.5.15 binary. Build context is the parent of
-# geode-ui (..), so geode/ resolves to the sibling Geode checkout.
-COPY geode/zig-out/bin/geode /usr/local/bin/geode
-
-RUN chmod +x /usr/local/bin/geode
-
+    && apt-get install -y --no-install-recommends tini socat \
+    && rm -rf /var/lib/apt/lists/*
 USER geode
-WORKDIR /home/geode
-
-# QUIC transport (UDP) and (in case future versions need it) TCP on 3141.
-EXPOSE 3141/udp 3141/tcp
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/geode"]
 CMD ["serve", "--data-dir", "/data", "--listen", "0.0.0.0:3141"]

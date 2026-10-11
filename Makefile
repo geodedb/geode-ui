@@ -4,7 +4,7 @@ GOTOOLCHAIN ?= go1.27.2
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
 BIN := bin/geode-ui
 
-.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci
+.PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci e2e-wait
 
 all: lint test build
 
@@ -109,16 +109,10 @@ dev:
 # ----- E2E stack -----
 COMPOSE := docker compose -f deploy/docker-compose.test.yml
 
-# Prerequisite: build the geode binary on the host because the
-# Dockerfile.geode runtime stage COPYs ../geode/zig-out/bin/geode.
-# Zig caches builds, so this is idempotent and fast on rebuilds.
+# The geode engine image extends the published Geode release image
+# (deploy/geode/Dockerfile.geode), so no local geode build is needed.
 e2e-deps:
-	@if [ ! -f ../geode/zig-out/bin/geode ]; then \
-	  echo "==> building geode binary at ../geode (one-time, takes ~5 min cold)"; \
-	  cd ../geode && zig build -Doptimize=ReleaseSafe; \
-	else \
-	  echo "==> ../geode/zig-out/bin/geode already present (skipping zig build)"; \
-	fi
+	@true
 
 # Bring up the test stack (build images, run init, leave services running).
 e2e-up: e2e-deps
@@ -140,13 +134,16 @@ e2e-test:
 	cd e2e && npx playwright test
 
 # Full CI run: bring up, wait for health, run tests, tear down.
-e2e-ci: e2e-up
+e2e-ci: e2e-up e2e-wait
+	$(MAKE) e2e-test
+	$(MAKE) e2e-down
+
+# Wait (up to ~60 s) for geode-ui to report healthy.
+e2e-wait:
 	@echo "==> waiting for geode-ui health..."
 	@for i in $$(seq 1 30); do \
 	  if wget -qO- http://localhost:8080/healthz 2>/dev/null | grep -q ok; then break; fi; \
 	  sleep 2; \
 	done
-	$(MAKE) e2e-test
-	$(MAKE) e2e-down
 
 pre-commit: fmt go-tidy lint test
