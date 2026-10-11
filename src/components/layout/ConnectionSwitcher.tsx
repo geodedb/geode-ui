@@ -34,6 +34,27 @@ export interface Props {
   onAddRequested: () => void
 }
 
+// wa-dropdown-item stamps role="menuitem" on itself and drops
+// aria-checked in its first Lit update (it only knows menuitem and
+// menuitemcheckbox), which overwrites the role/aria-checked React set
+// for rows that mount after the menu. Re-apply the radio semantics once
+// the element's own update has settled so every connection row is a
+// menuitemradio carrying its checked state.
+const applyRadioSemantics = (el: HTMLElement | null, checked: boolean) => {
+  if (!el) return
+  const apply = () => {
+    el.setAttribute('role', 'menuitemradio')
+    el.setAttribute('aria-checked', checked ? 'true' : 'false')
+  }
+  apply()
+  const pending = (el as HTMLElement & { updateComplete?: Promise<unknown> })
+    .updateComplete
+  if (pending) pending.then(apply).catch(() => undefined)
+}
+
+const radioRowRef = (checked: boolean) => (el: HTMLElement | null) =>
+  applyRadioSemantics(el, checked)
+
 // Sentinel value used on the "Add another connection" dropdown item.
 // The wa-select handler routes any item with this value to the
 // onAddRequested callback rather than switchActive(connectionId).
@@ -127,6 +148,7 @@ export const ConnectionSwitcher: React.FC<Props> = ({ onAddRequested }) => {
             // by default; tests query by text/testid instead.
             role="menuitemradio"
             aria-checked={c.connectionId === activeId}
+            ref={radioRowRef(c.connectionId === activeId)}
             aria-label={c.profileName}
             data-testid={`connection-row-${c.connectionId}`}
           >
