@@ -61,6 +61,15 @@ default:
     - |
       echo "@devnw:registry=https://gitlab.com/api/v4/packages/npm/" >> ~/.npmrc
       echo "//gitlab.com/api/v4/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> ~/.npmrc
+    # Jobs that `needs: install` get node_modules/ as an artifact (58k
+    # files). On the spot runners the extraction has twice come back
+    # incomplete (unit-tests: "Preset ts-jest not found"). Check the tree
+    # and reinstall when it is broken instead of failing the job.
+    - |
+      if [ -d node_modules ] && command -v npm >/dev/null 2>&1 && ! npm ls --depth=0 >/dev/null 2>&1; then
+        echo "node_modules artifact is incomplete; running npm ci"
+        npm ci
+      fi
   cache:
     key:
       files:
