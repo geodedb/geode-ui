@@ -95,12 +95,12 @@ test.describe('schema explorer', () => {
     await page.getByRole('button', { name: 'Person', exact: true }).click()
     await expect(page).toHaveURL(/\/$/)
     // The editor should now contain MATCH (n:Person) RETURN n LIMIT 25
-    const editorText = await page
-      .locator('.monaco-editor')
-      .first()
-      .textContent()
-    expect(editorText).toContain('MATCH')
-    expect(editorText).toContain('Person')
+    // Monaco paints its view lines asynchronously after the lazy editor
+    // mounts, so a one-shot textContent() read can race it and see "".
+    // Use the auto-retrying assertion instead.
+    const editor = page.locator('.monaco-editor').first()
+    await expect(editor).toContainText('MATCH')
+    await expect(editor).toContainText('Person')
     // The staged query MUST also be runnable end-to-end. Regression
     // test for two distinct bugs:
     //   1. Geode v0.5.11 rejects backtick-quoted identifiers, so the
@@ -131,12 +131,12 @@ test.describe('schema explorer', () => {
     await selectGraphAndExpectButtons(page, ['ACTED_IN'])
     await page.getByRole('button', { name: 'ACTED_IN', exact: true }).click()
     await expect(page).toHaveURL(/\/$/)
-    const editorText = await page
-      .locator('.monaco-editor')
-      .first()
-      .textContent()
-    expect(editorText).toContain('MATCH')
-    expect(editorText).toContain('ACTED_IN')
+    // Monaco paints its view lines asynchronously after the lazy editor
+    // mounts, so a one-shot textContent() read can race it and see "".
+    // Use the auto-retrying assertion instead.
+    const editor = page.locator('.monaco-editor').first()
+    await expect(editor).toContainText('MATCH')
+    await expect(editor).toContainText('ACTED_IN')
 
     // Run it. Same regression as the label test — without USE GRAPH the
     // query silently returns 0 rows. The staged template caps at
