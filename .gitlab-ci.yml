@@ -455,6 +455,10 @@ docker:build:
 e2e:playwright:
   stage: test
   image: docker:29
+  # x86 only: the Geode release image the stack runs is amd64-only, and the
+  # ARM lab runner (which also carries company/linux) has no reachable dind
+  # daemon ("Cannot connect to the Docker daemon at tcp://docker:2375").
+  tags: [company, linux, x86]
   services:
     - docker:29-dind
   variables:
@@ -463,6 +467,13 @@ e2e:playwright:
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
   script:
     - apk add --no-cache make git bash curl
+    # The dind service can still be starting when the script begins.
+    - |
+      for i in $(seq 1 60); do
+        if docker info >/dev/null 2>&1; then break; fi
+        sleep 1
+      done
+      docker info >/dev/null
     # Build the e2e stack and bring services up.
     - make e2e-up
     # Wait for geode-ui to be ready.
