@@ -455,6 +455,9 @@ docker:build:
 e2e:playwright:
   stage: test
   image: docker:29
+  # Stack build (~7 min) + seeding + ~106 specs on a contended shared VM
+  # ran past the 1 h project default (job 17097098422).
+  timeout: 2h
   # x86 only: the Geode release image the stack runs is amd64-only, and the
   # ARM lab runner (which also carries company/linux) has no reachable dind
   # daemon ("Cannot connect to the Docker daemon at tcp://docker:2375").

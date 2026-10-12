@@ -34,8 +34,14 @@ export default defineConfig({
     ...((process.env.CI ? [['github'] as const] : []) as never),
   ],
 
-  timeout: 30_000,
-  expect: { timeout: 8_000 },
+  // CI runs the stack and the browser inside one dind job on a shared
+  // autoscaler VM that other jobs keep CPU-bound. There the same specs
+  // take 20-25 s each (1-2 s locally), so the browser-side waits, not the
+  // backend (query_executed elapsed_ms stays in single digits), ran past
+  // a 30 s budget. Give CI 3x the time; local runs keep the tight limits
+  // so a real slowdown still shows up during development.
+  timeout: process.env.CI ? 90_000 : 30_000,
+  expect: { timeout: process.env.CI ? 20_000 : 8_000 },
 
   use: {
     baseURL: UI_URL,
