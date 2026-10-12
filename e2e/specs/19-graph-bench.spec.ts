@@ -48,6 +48,15 @@ const COMBOS: { renderer: 'cytoscape' | 'reagraph'; n: number }[] = [
   { renderer: 'reagraph', n: 10000 },
 ]
 
+// CI runs this spec on a contended shared VM with software WebGL. There,
+// reagraph at n >= 5000 keeps the page's main thread busy past even a
+// 6-minute budget (pipeline 2937517308; locally it already samples at
+// < 1 fps). On CI, run every combo except those two as a smoke check of
+// both renderers. `make bench-graph` (CI unset) still records all eight.
+const RUN_COMBOS = process.env.CI
+  ? COMBOS.filter((c) => !(c.renderer === 'reagraph' && c.n >= 5000))
+  : COMBOS
+
 const RESULTS_PATH = path.resolve(
   __dirname,
   '../../docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json'
@@ -137,7 +146,9 @@ test('graph renderer benchmark', async ({ page }) => {
   // not overlap — same GPU / event loop). A classic `for-of + await`
   // would be cleaner but airbnb's no-restricted-syntax bans for-of in
   // this project, and `Promise.all(COMBOS.map(...))` would parallelise.
-  const records: BenchRecord[] = await COMBOS.reduce<Promise<BenchRecord[]>>(
+  const records: BenchRecord[] = await RUN_COMBOS.reduce<
+    Promise<BenchRecord[]>
+  >(
     (acc, combo) =>
       acc.then(async (prev) => {
         const rec = await runOne(page, combo)
