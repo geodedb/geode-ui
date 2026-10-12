@@ -55,32 +55,43 @@ services:
       # self-signed certificate, so the healthcheck, seed and MCP/LSP
       # clients need it. Test stack only.
       GEODE_ALLOW_INSECURE_TLS: '1'
+      # Acceptor-wedge watchdog, tuned for this test stack. The QUIC
+      # endpoint can deadlock (a connection teardown holds Endpoint.mu
+      # while it waits for a poll worker that is itself waiting on
+      # Endpoint.mu); on a CPU-starved shared CI VM the race window is wide
+      # enough to hit during seeding. The engine detects the wedge from the
+      # listener's UDP rx_queue and exits 70 so the orchestrator restarts
+      # it, but its production threshold (8 MiB for 30 s) is never reached
+      # by a test stack's trickle of traffic, so a wedged engine stays up
+      # and refuses everything for the rest of the job. A healthy engine
+      # drains the queue within milliseconds, so 32 KiB held for 20 s
+      # means it is wedged. Test stack only; production keeps the defaults.
+      GEODE_ACCEPTOR_WATCHDOG_RX_BYTES: '32768'
+      GEODE_ACCEPTOR_WATCHDOG_DEADLINE_MS: '20000'
+    # The watchdog's recovery is a restart; compose is the orchestrator
+    # here. The data volume and the entrypoint's marker make a restart
+    # resume the seeded engine rather than re-bootstrap it.
+    restart: on-failure
     volumes:
     - geode-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
     ports:
     - 3141:3141/udp
-    # The wire is up well before any password rotation has happened, so
-    # we cannot use a normal `geode query 'RETURN 1'` probe — pre-
-    # rotation, every authenticated query rejects with status_class=08P01
-    # ("Password reset required"). Instead, send a deliberately-bad
-    # password and accept ANY auth-error response as proof the server
-    # is reachable. This mirrors seed-bootstrap.sh:wait_for_wire().
-    #
-    # IMPORTANT: probe with a NONEXISTENT username, not the real admin.
-    # Geode v0.5.15 (geode_auth_lib.zig:1466) locks a user account for 5
-    # minutes after 5 failed-password attempts. The healthcheck fires
-    # every 5s, so probing as `-U geode -P x` would lock the admin
-    # account inside 25s and break the entire e2e auth chain. An
-    # unknown user produces the identical "Authentication failed"
-    # response without incrementing any real account's failure counter.
+    # Liveness comes from the engine's out-of-band endpoint
+    # (GET :9090/health), not from a QUIC query. The old probe opened a
+    # QUIC connection and failed auth as `_healthcheck_probe_` every 5 s
+    # for the whole job: the auth rate limiter refused it after a minute,
+    # and each probe was another connection teardown racing the endpoint
+    # deadlock described above. geode-init's wait_for_wire still checks
+    # that the QUIC wire answers before seeding. The runtime image has no
+    # wget/curl, so use bash's /dev/tcp.
     healthcheck:
       test:
       - CMD-SHELL
       - >-
-        geode query --insecure-tls-skip-verify
-        --server 127.0.0.1:3141 -U _healthcheck_probe_ -P x 'RETURN 1' 2>&1
-        | grep -qiE 'auth|password|status_class|reset'
+        bash -c 'exec 3<>/dev/tcp/127.0.0.1/9090
+        && printf "GET /health HTTP/1.0\\r\\n\\r\\n" >&3
+        && timeout 3 cat <&3 | grep -q "\"status\":\"ok\""'
       interval: 5s
       timeout: 5s
       retries: 30

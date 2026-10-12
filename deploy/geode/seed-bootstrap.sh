@@ -298,13 +298,17 @@ verify_graph() {
     return 1
 }
 
-main() {
-    wait_for_wire
-    ensure_admin_password
+# One pass over every bootstrap step. Each step is idempotent: the
+# password check skips a done rotation, CREATE USER is a no-op for an
+# existing user, and seed_graph skips a populated graph and drops a
+# half-loaded one before reseeding. So a failed pass can simply run again.
+bootstrap_once() {
+    wait_for_wire || return 1
+    ensure_admin_password || return 1
     ensure_e2e_user
     # 171 = 38 Movie + 133 Person from the Neo4j Movies dataset.
-    seed_graph movies "${GEODE_INIT_GQL}" 171
-    verify_graph movies 171
+    seed_graph movies "${GEODE_INIT_GQL}" 171 || return 1
+    verify_graph movies 171 || return 1
     # vulndb is a richer secondary fixture: ~969 CWE + KEV CVEs +
     # affected Package nodes. Treat any partial-load as non-fatal so
     # the geode-ui stack still comes up (the movies graph is what
@@ -312,12 +316,35 @@ main() {
     if [[ -f "${GEODE_VULNDB_GQL}" ]]; then
         seed_graph vulndb "${GEODE_VULNDB_GQL}" 1369 || \
             log "vulndb seed reported a non-zero status (continuing)"
+        # A count that differs from the expected one is a partial seed
+        # (logged, non-fatal); no answer at all means the engine went away
+        # mid-seed, so the pass failed.
+        count_nodes vulndb | grep -q '"c":' || return 1
         verify_graph vulndb 1369 || \
             log "vulndb seed is partial; check convert-vulndb.py output for parse-rejected rows"
     else
         log "vulndb seed not present at ${GEODE_VULNDB_GQL}; skipping"
     fi
-    log "bootstrap complete"
+}
+
+# The engine can wedge its QUIC acceptor on a CPU-starved CI VM; its
+# watchdog then exits and compose restarts it (see the geode service in
+# docker-compose.test.yml). A seed pass caught by that restart fails, so
+# retry the whole (idempotent) pass against the restarted engine.
+GEODE_SEED_ATTEMPTS="${GEODE_SEED_ATTEMPTS:-3}"
+
+main() {
+    local attempt
+    for ((attempt = 1; attempt <= GEODE_SEED_ATTEMPTS; attempt++)); do
+        if bootstrap_once; then
+            log "bootstrap complete"
+            return 0
+        fi
+        err "bootstrap pass ${attempt}/${GEODE_SEED_ATTEMPTS} failed"
+        sleep 5
+    done
+    err "bootstrap failed after ${GEODE_SEED_ATTEMPTS} attempts"
+    return 1
 }
 
 main "$@"
