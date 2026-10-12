@@ -129,8 +129,10 @@ async function runOne(
 test.describe.configure({ mode: 'serial', retries: 0 })
 test('graph renderer benchmark', async ({ page }) => {
   // ~50 s wall: 8 combos × ~6 s each (nav + 5 s sample). 120 s gives
-  // headroom for cold WebGL init at n=10000.
-  test.setTimeout(120_000)
+  // headroom for cold WebGL init at n=10000. CI's contended shared VM
+  // renders the n=10000 combos several times slower, so it gets the same
+  // 3x as the suite-wide timeout in playwright.config.ts.
+  test.setTimeout(process.env.CI ? 360_000 : 120_000)
   // Reduce-with-promise-chain so we stay sequential (perf samples must
   // not overlap — same GPU / event loop). A classic `for-of + await`
   // would be cleaner but airbnb's no-restricted-syntax bans for-of in
