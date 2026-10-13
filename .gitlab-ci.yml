@@ -53,7 +53,15 @@ variables:
   # When unset, goreleaser exports SKIP_DOCKERHUB=true and the dockerhub
   # image variants are built locally but not pushed.
 
+# Cancel superseded pipelines: a new commit on the same ref cancels the
+# previous pipeline's interruptible jobs. Side-effecting jobs (push,
+# deploy, release, publish) opt out with `interruptible: false`.
+workflow:
+  auto_cancel:
+    on_new_commit: interruptible
+
 default:
+  interruptible: true
   image: node:${NODE_VERSION}
   before_script:
     # Configure GitLab npm registry for @devnw scope
@@ -70,6 +78,14 @@ default:
   tags:
     - company
     - linux
+
+# Catalog release/codesign components don't set `interruptible` themselves;
+# keep them non-interruptible so `default: interruptible: true` doesn't apply.
+create-release:
+  interruptible: false
+
+codesign:electron-win:
+  interruptible: false
 
 stages:
   - install
@@ -292,6 +308,7 @@ build:
 
 pages:
   stage: pages
+  interruptible: false
   needs: ['build']
   before_script: []
   script:
@@ -416,6 +433,7 @@ bench-gate:
 # copies the checkout into a temporary parent dir.
 docker:build:
   stage: build
+  interruptible: false
   image: docker:29
   services:
     - docker:29-dind
@@ -760,6 +778,7 @@ electron:win:
 
 release:publish:
   stage: publish
+  interruptible: false
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   needs:
     - job: goreleaser:release
