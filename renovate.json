@@ -40,6 +40,16 @@
         "vscode-languageclient"
       ],
       "allowedVersions": "<10"
+    },
+    {
+      "description": "Hold github.com/lestrrat-go/jwx at v1: it is imported only by genapi-generated code (gen/pkg/oidcx), so the move to the jwx/v4 module path has to come from the generator, not a hand edit of gen/.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "github.com/lestrrat-go/jwx"
+      ],
+      "allowedVersions": "<2"
     }
   ]
 }
