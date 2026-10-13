@@ -48,6 +48,18 @@ describe('perfMarks', () => {
 describe('perfMarks buffered upload', () => {
   let fetchSpy: jest.SpyInstance
 
+  // PerformanceObserver delivery is asynchronous and its timing isn't fixed:
+  // under jsdom 30 on a loaded CI runner one setTimeout(0) yield sometimes
+  // returns before the observer callback runs, which left the buffer empty.
+  // Poll the event loop (up to 2 s) until the measure has been delivered.
+  const waitForObserverDelivery = async (
+    deadline = Date.now() + 2000
+  ): Promise<void> => {
+    if (perfMarks.__bufferSizeForTest() > 0 || Date.now() >= deadline) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await waitForObserverDelivery(deadline)
+  }
+
   beforeEach(() => {
     // jsdom 20 doesn't define a global `Response`. perfMarks.flush() never
     // inspects the resolved value (best-effort upload), so a plain object
@@ -66,10 +78,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    // PerformanceObserver delivery is asynchronous (microtask / setImmediate
-    // in Node's perf_hooks). Yield to the event loop so the buffer is
-    // populated before we assert.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForObserverDelivery()
     expect(perfMarks.__bufferSizeForTest()).toBeGreaterThanOrEqual(1)
   })
 
@@ -77,7 +86,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForObserverDelivery()
     await perfMarks.flush()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(perfMarks.__bufferSizeForTest()).toBe(0)
