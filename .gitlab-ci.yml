@@ -513,10 +513,13 @@ e2e:playwright:
     # Build the playwright runner and run the suite. Mount the report dir.
     - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
     - mkdir -p "$CI_PROJECT_DIR/e2e/playwright-report"
+    # --network=host is the dind daemon's network, where the stack's ports
+    # are published on localhost; the "docker" alias only resolves from
+    # this job container.
     - >
       docker run --rm --network=host
-      -e UI_URL=http://docker:8080
-      -e MCP_HOST=docker
+      -e UI_URL=http://localhost:8080
+      -e MCP_HOST=localhost
       -e MCP_PORT=8090
       -e ADMIN_USER=geode
       -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
