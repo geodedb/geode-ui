@@ -244,6 +244,9 @@ build:
     - job: typecheck
     - job: unit-tests
     - job: audit-ratchets
+  variables:
+    # The production webpack build needs more than Node's default ~2 GB heap.
+    NODE_OPTIONS: --max-old-space-size=4096
   script:
     - npm run build
   artifacts:
@@ -342,11 +345,19 @@ go:generate-verify:
 go:test:
   <<: *go_defaults
   stage: test
+  variables:
+    GOEXPERIMENT: jsonv2
+    GOTOOLCHAIN: go1.26.3
+    GEODE_CLIENT_GO_REF: v0.1.28
+    # -race requires cgo.
+    CGO_ENABLED: "1"
   script:
-    - apk add --no-cache git make nodejs npm
+    - apk add --no-cache git make nodejs npm gcc musl-dev
     - npm ci
     - npm run build
-    - go test -race -cover -failfast ./...
+    # Project-owned trees only, so ./... does not walk into
+    # node_modules/flatted/golang/.
+    - go test -race -cover -failfast ./cmd/... ./gen/... ./internal/...
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -429,6 +440,9 @@ docker:build:
 # release artifact.
 e2e:playwright:
   stage: test
+  # Needs a runner with working docker:dind (Spot autoscaler, lab runners);
+  # the k8s cluster runner has no Docker daemon for the service.
+  tags: [dedicated, x86]
   image: docker:25
   services:
     - docker:25-dind
