@@ -444,6 +444,9 @@ e2e:playwright:
   # servers, celebrimbor) are; the OVH and k8s runners are not, and the
   # Windows runners share the dedicated/x86 tags.
   tags: [lab, linux, x86]
+  # The geode compile plus the compose image builds take most of an hour on
+  # the lab servers' spinning disks before the suite starts.
+  timeout: 2h
   image: docker:25
   services:
     # The lab servers mount the host docker.sock into every container,
