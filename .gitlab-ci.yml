@@ -288,7 +288,18 @@ pages:
     GOEXPERIMENT: jsonv2
     GOTOOLCHAIN: go1.26.3
     CGO_ENABLED: "0"
-  before_script: []
+    # v0.1.28 is the last geode-client-go release on the go1.26.3 toolchain;
+    # v0.2.0+ needs go >= 1.27. Bump together with GOTOOLCHAIN.
+    GEODE_CLIENT_GO_REF: v0.1.28
+  # go.mod has `replace geodedb.com/geode => ../geode-client-go`, so every
+  # Go job needs the sibling checkout that local developers keep next to
+  # this repo. geode-client-go is public, so no token is needed.
+  before_script:
+    - apk add --no-cache git
+    - |
+      if [ ! -d ../geode-client-go ]; then
+        git clone --depth=1 --branch "$GEODE_CLIENT_GO_REF" https://gitlab.com/devnw/codepros/geode/geode-client-go.git ../geode-client-go
+      fi
   cache: []
 
 go:lint:
@@ -308,12 +319,13 @@ go:generate-verify:
   <<: *go_defaults
   stage: lint
   script:
-    - apk add --no-cache make git nodejs npm
+    # bash: the Makefile sets SHELL := /usr/bin/env bash.
+    - apk add --no-cache make git nodejs npm bash
     - npm ci
     # Pinned to an immutable tag (Q32 / #127). Bump in lockstep with the
     # genapi version the gen/ tree was generated against. NOTE: this pin
-    # does not change the fetch auth path — CI's Go jobs run with
-    # `before_script: []` and no visible GOPRIVATE/.netrc, so genapi must
+    # does not change the fetch auth path — CI's Go jobs only clone the
+    # public geode-client-go sibling and have no visible GOPRIVATE/.netrc, so genapi must
     # already be go-gettable by the runner (it was being fetched at
     # @latest before); runner-side module-proxy/auth for devnw.dev/genapi
     # is a separate, pre-existing concern.
