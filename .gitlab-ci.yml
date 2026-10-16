@@ -447,13 +447,13 @@ e2e:playwright:
   services:
     - docker:25-dind
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
     # Talk to the dind service explicitly. Without this, runners that mount
     # the host docker.sock (the lab servers) send the build and compose bind
     # mounts to the host daemon, which cannot see this job's /builds paths.
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_VERIFY: "1"
-    DOCKER_CERT_PATH: /certs/client
+    # Plain TCP like docker:build: not every runner shares /certs/client
+    # with services, and the daemon is only reachable from this job.
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
     ZIG_VERSION: "0.16.0"
