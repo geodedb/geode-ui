@@ -454,7 +454,8 @@ e2e:playwright:
   script:
     - apk add --no-cache make git bash curl xz tar
     # Install Zig so the geode binary can be built on the host.
-    - curl -sSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
+    # Zig 0.14+ archives are named zig-<arch>-<os>-<version>.
+    - curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
     - mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
     - export PATH="/opt/zig:$PATH"
     - zig version
