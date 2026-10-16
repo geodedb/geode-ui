@@ -464,6 +464,9 @@ e2e:playwright:
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
     ZIG_VERSION: "0.16.0"
+    # deploy/docker-compose.test.yml and Dockerfile.geode are written for
+    # geode v0.5.15 (image tag, auth init entrypoint, lockout behaviour).
+    GEODE_REF: v0.5.15
     # Same geode-client-go pin as the Go jobs (see .go_defaults).
     GEODE_CLIENT_GO_REF: v0.1.28
   script:
@@ -478,7 +481,7 @@ e2e:playwright:
     # The checkout is owned by the runner, not this container's user.
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - git archive HEAD | tar -x -C "$E2E_ROOT/geode-ui"
-    - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git "$E2E_ROOT/geode"
+    - git clone --depth=1 --branch "$GEODE_REF" https://gitlab.com/devnw/codepros/geode/geode.git "$E2E_ROOT/geode"
     - git clone --depth=1 --branch "$GEODE_CLIENT_GO_REF" https://gitlab.com/devnw/codepros/geode/geode-client-go.git "$E2E_ROOT/geode-client-go"
     # deploy/geode/Dockerfile.geode copies the binary into debian:bookworm-slim
     # with libssl3, so build it against glibc in the same Debian release
@@ -518,6 +521,8 @@ e2e:playwright:
       -v "$CI_PROJECT_DIR/e2e/playwright-report:/work/e2e/playwright-report"
       pw:local
   after_script:
+    # Keep the stack's logs in the job output before tearing it down.
+    - docker compose -p geode-e2e logs --no-color --tail=200 || true
     - make e2e-down || true
     - rm -rf .e2e
   artifacts:
