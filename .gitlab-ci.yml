@@ -440,9 +440,10 @@ docker:build:
 # release artifact.
 e2e:playwright:
   stage: test
-  # Needs a runner with working docker:dind (Spot autoscaler, lab runners);
-  # the k8s cluster runner has no Docker daemon for the service.
-  tags: [dedicated, linux, x86]
+  # Needs a privileged runner for docker:dind. The lab x86 runners (lab
+  # servers, celebrimbor) are; the OVH and k8s runners are not, and the
+  # Windows runners share the dedicated/x86 tags.
+  tags: [lab, linux, x86]
   image: docker:25
   services:
     # TCP listener only: the lab servers mount the host docker.sock into
