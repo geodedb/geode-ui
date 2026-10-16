@@ -452,7 +452,8 @@ e2e:playwright:
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
     ZIG_VERSION: "0.16.0"
   script:
-    - apk add --no-cache make git bash curl xz tar
+    # openssl-dev: geode links libssl and libcrypto.
+    - apk add --no-cache make git bash curl xz tar openssl-dev
     # Install Zig so the geode binary can be built on the host.
     # Zig 0.14+ archives are named zig-<arch>-<os>-<version>.
     - curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
