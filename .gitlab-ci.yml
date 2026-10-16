@@ -442,7 +442,7 @@ e2e:playwright:
   stage: test
   # Needs a runner with working docker:dind (Spot autoscaler, lab runners);
   # the k8s cluster runner has no Docker daemon for the service.
-  tags: [dedicated, x86]
+  tags: [dedicated, linux, x86]
   image: docker:25
   services:
     - docker:25-dind
