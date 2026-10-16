@@ -45,6 +45,15 @@ describe('perfMarks', () => {
   })
 })
 
+// PerformanceObserver delivery is asynchronous and can take more than one
+// event-loop turn on a loaded runner, so poll (up to ~1s) instead of
+// yielding once.
+const waitForObservedMeasure = async (attempts = 100): Promise<void> => {
+  if (perfMarks.__bufferSizeForTest() > 0 || attempts === 0) return
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  await waitForObservedMeasure(attempts - 1)
+}
+
 describe('perfMarks buffered upload', () => {
   let fetchSpy: jest.SpyInstance
 
@@ -66,10 +75,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    // PerformanceObserver delivery is asynchronous (microtask / setImmediate
-    // in Node's perf_hooks). Yield to the event loop so the buffer is
-    // populated before we assert.
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForObservedMeasure()
     expect(perfMarks.__bufferSizeForTest()).toBeGreaterThanOrEqual(1)
   })
 
@@ -77,7 +83,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForObservedMeasure()
     await perfMarks.flush()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(perfMarks.__bufferSizeForTest()).toBe(0)
@@ -140,7 +146,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForObservedMeasure()
     await expect(perfMarks.flush()).resolves.toBeUndefined()
   })
 })
