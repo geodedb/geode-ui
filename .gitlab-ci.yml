@@ -451,19 +451,34 @@ e2e:playwright:
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
     ZIG_VERSION: "0.16.0"
+    # Same geode-client-go pin as the Go jobs (see .go_defaults).
+    GEODE_CLIENT_GO_REF: v0.1.28
   script:
-    # openssl-dev: geode links libssl and libcrypto.
-    - apk add --no-cache make git bash curl xz tar openssl-dev
-    # Install Zig so the geode binary can be built on the host.
-    # Zig 0.14+ archives are named zig-<arch>-<os>-<version>.
-    - curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz
-    - mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
-    - export PATH="/opt/zig:$PATH"
-    - zig version
-    # Fetch the geode runtime sources at the pinned tag and build the binary.
-    - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git ../geode || git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/geode/geode.git ../geode
-    - (cd ../geode && zig build -Doptimize=ReleaseSafe)
+    - apk add --no-cache make git bash tar
+    # The compose stack builds from the grandparent of deploy/ and expects
+    # geode/ and geode-client-go/ next to geode-ui/. On shared runners ../
+    # holds other projects' checkouts, so stage a private sibling layout
+    # under .e2e/ instead. It stays inside the build dir so the dind daemon
+    # can see the compose bind mounts.
+    - E2E_ROOT="$CI_PROJECT_DIR/.e2e"
+    - rm -rf "$E2E_ROOT" && mkdir -p "$E2E_ROOT/geode-ui"
+    - git archive HEAD | tar -x -C "$E2E_ROOT/geode-ui"
+    - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git "$E2E_ROOT/geode"
+    - git clone --depth=1 --branch "$GEODE_CLIENT_GO_REF" https://gitlab.com/devnw/codepros/geode/geode-client-go.git "$E2E_ROOT/geode-client-go"
+    # deploy/geode/Dockerfile.geode copies the binary into debian:bookworm-slim
+    # with libssl3, so build it against glibc in the same Debian release
+    # rather than on this musl image. Zig 0.14+ archives are named
+    # zig-<arch>-<os>-<version>.
+    - >
+      docker run --rm -v "$E2E_ROOT/geode:/src" -w /src -e ZIG_VERSION
+      debian:bookworm sh -euc '
+      apt-get update -qq;
+      apt-get install -y -qq --no-install-recommends ca-certificates curl xz-utils git libssl-dev >/dev/null;
+      curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | tar -xJ -C /opt;
+      /opt/zig-x86_64-linux-${ZIG_VERSION}/zig build -Doptimize=ReleaseSafe'
+    - test -x "$E2E_ROOT/geode/zig-out/bin/geode"
     # Build the e2e stack and bring services up.
+    - cd "$E2E_ROOT/geode-ui"
     - make e2e-up
     # Wait for geode-ui to be ready.
     - |
@@ -476,7 +491,7 @@ e2e:playwright:
       done
     # Build the playwright runner and run the suite. Mount the report dir.
     - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
-    - mkdir -p e2e/playwright-report
+    - mkdir -p "$CI_PROJECT_DIR/e2e/playwright-report"
     - >
       docker run --rm --network=host
       -e UI_URL=http://docker:8080
@@ -485,10 +500,11 @@ e2e:playwright:
       -e ADMIN_USER=geode
       -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
       -e ADMIN_PROFILE=default
-      -v "$PWD/e2e/playwright-report:/work/e2e/playwright-report"
+      -v "$CI_PROJECT_DIR/e2e/playwright-report:/work/e2e/playwright-report"
       pw:local
   after_script:
     - make e2e-down || true
+    - rm -rf .e2e
   artifacts:
     when: always
     paths:
