@@ -462,6 +462,8 @@ e2e:playwright:
     # can see the compose bind mounts.
     - E2E_ROOT="$CI_PROJECT_DIR/.e2e"
     - rm -rf "$E2E_ROOT" && mkdir -p "$E2E_ROOT/geode-ui"
+    # The checkout is owned by the runner, not this container's user.
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - git archive HEAD | tar -x -C "$E2E_ROOT/geode-ui"
     - git clone --depth=1 --branch v0.5.11 https://gitlab.com/devnw/codepros/geode/geode.git "$E2E_ROOT/geode"
     - git clone --depth=1 --branch "$GEODE_CLIENT_GO_REF" https://gitlab.com/devnw/codepros/geode/geode-client-go.git "$E2E_ROOT/geode-client-go"
