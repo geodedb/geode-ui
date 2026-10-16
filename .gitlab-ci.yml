@@ -445,7 +445,11 @@ e2e:playwright:
   tags: [dedicated, linux, x86]
   image: docker:25
   services:
-    - docker:25-dind
+    # TCP listener only: the lab servers mount the host docker.sock into
+    # every container, services included, so dind's default unix socket at
+    # /var/run/docker.sock fails with "device or resource busy".
+    - name: docker:25-dind
+      command: ["--host=tcp://0.0.0.0:2375", "--tls=false"]
   variables:
     # Talk to the dind service explicitly. Without this, runners that mount
     # the host docker.sock (the lab servers) send the build and compose bind
