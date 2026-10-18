@@ -49,13 +49,13 @@ const COMBOS: { renderer: 'cytoscape' | 'reagraph'; n: number }[] = [
 ]
 
 // CI runs this spec on a contended shared VM with software WebGL. There,
-// reagraph at n >= 5000 keeps the page's main thread busy past even a
-// 6-minute budget (pipeline 2937517308; locally it already samples at
-// < 1 fps). On CI, run every combo except those two as a smoke check of
-// both renderers. `make bench-graph` (CI unset) still records all eight.
-const RUN_COMBOS = process.env.CI
-  ? COMBOS.filter((c) => !(c.renderer === 'reagraph' && c.n >= 5000))
-  : COMBOS
+// the large tier (n >= 5000) keeps the page's main thread busy past even
+// a 6-minute budget: reagraph in pipeline 2937517308, and cytoscape
+// n=10000 (35 s first paint, ~2 fps) left too little budget for the rest
+// in job 17152568871. On CI, run only the small and mid tiers of both
+// renderers as a smoke check. `make bench-graph` (CI unset) still records
+// all eight combos.
+const RUN_COMBOS = process.env.CI ? COMBOS.filter((c) => c.n < 5000) : COMBOS
 
 const RESULTS_PATH = path.resolve(
   __dirname,
