@@ -6,40 +6,31 @@ include:
   # Security scanning. The GitLab analyzer images are amd64-only, so pin
   # these jobs to x86 runners; with the default company/linux tags they
   # also land on the ARM lab runner and die with "exec format error".
-  - component: gitlab.com/devnw/ci-catalog/security-sast@v1.55.8
+  - component: gitlab.com/devnw/ci-catalog/security-sast@v1.57.0
     inputs:
       tags: [company, linux, x86]
-  - component: gitlab.com/devnw/ci-catalog/security-dependency-scanning@v1.55.8
+  - component: gitlab.com/devnw/ci-catalog/security-dependency-scanning@v1.57.0
     inputs:
       tags: [company, linux, x86]
-  - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.55.8
+  - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.57.0
     inputs:
       tags: [company, linux, x86]
-  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.55.8
+  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.57.0
 
   # SBOM
-  - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.55.8
-  - component: gitlab.com/devnw/ci-catalog/sbom-scan@v1.55.8
+  - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.57.0
+  - component: gitlab.com/devnw/ci-catalog/sbom-scan@v1.57.0
 
   # Release
-  - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.55.8
+  - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.57.0
 
   # Code signing — Windows Authenticode via ssl.com eSigner.
   # Pulls credentials from group-level CI variables ESIGNER_*; see
   # deploy/RELEASE.md for the one-time ssl.com setup.
   #
-  # TODO(#127): pin to an immutable tag. As of 2026-05, the
-  # `codesign-windows-ssl` component exists only on ci-catalog's
-  # `main` branch (commit db708c0, "feat(catalog): add
-  # codesign-windows-ssl component") — it has NOT shipped in any
-  # tagged release yet (latest catalog tag is v1.25.1, which predates
-  # it; the `~latest` *release* alias resolves to v1.19.2). Every
-  # other catalog component below is pinned to @v1.7.1. The moment a
-  # ci-catalog tag includes templates/codesign-windows-ssl/, bump
-  # this to that tag. `scripts/check-ci-pins.sh` allowlists THIS one
-  # `@~latest` by line content so the guard still catches any *new*
-  # `@latest`/`@~latest` regression.
-  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@~latest # ci-pins-allow: no tagged catalog release ships this component yet (see TODO #127)
+  # Pinned to an immutable tag (#127, SRE-189); v1.56+ marks this
+  # side-effecting signing job `interruptible: false`.
+  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@v1.57.0
     inputs:
       input_glob: 'release/win/*.exe'
       needs: 'electron:win'
@@ -281,6 +272,9 @@ build:
     - job: typecheck
     - job: unit-tests
     - job: audit-ratchets
+  variables:
+    # The production webpack build needs more than Node's default ~2 GB heap.
+    NODE_OPTIONS: --max-old-space-size=4096
   script:
     - npm run build
   artifacts:
@@ -378,7 +372,9 @@ go:test:
     - apk add --no-cache git make nodejs npm gcc musl-dev
     - npm ci
     - npm run build
-    - go test -race -cover -failfast ./...
+    # Project-owned trees only, so ./... does not walk into
+    # node_modules/flatted/golang/.
+    - go test -race -cover -failfast ./cmd/... ./gen/... ./internal/...
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

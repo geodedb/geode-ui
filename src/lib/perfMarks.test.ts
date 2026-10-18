@@ -45,20 +45,17 @@ describe('perfMarks', () => {
   })
 })
 
+// PerformanceObserver delivery is asynchronous and can take more than one
+// event-loop turn on a loaded runner, so poll (up to ~1s) instead of
+// yielding once.
+const waitForObservedMeasure = async (attempts = 100): Promise<void> => {
+  if (perfMarks.__bufferSizeForTest() > 0 || attempts === 0) return
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  await waitForObservedMeasure(attempts - 1)
+}
+
 describe('perfMarks buffered upload', () => {
   let fetchSpy: jest.SpyInstance
-
-  // PerformanceObserver delivery is asynchronous and its timing isn't fixed:
-  // under jsdom 30 on a loaded CI runner one setTimeout(0) yield sometimes
-  // returns before the observer callback runs, which left the buffer empty.
-  // Poll the event loop (up to 2 s) until the measure has been delivered.
-  const waitForObserverDelivery = async (
-    deadline = Date.now() + 2000
-  ): Promise<void> => {
-    if (perfMarks.__bufferSizeForTest() > 0 || Date.now() >= deadline) return
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    await waitForObserverDelivery(deadline)
-  }
 
   beforeEach(() => {
     // jsdom 20 doesn't define a global `Response`. perfMarks.flush() never
@@ -78,7 +75,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await waitForObserverDelivery()
+    await waitForObservedMeasure()
     expect(perfMarks.__bufferSizeForTest()).toBeGreaterThanOrEqual(1)
   })
 
@@ -86,7 +83,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await waitForObserverDelivery()
+    await waitForObservedMeasure()
     await perfMarks.flush()
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(perfMarks.__bufferSizeForTest()).toBe(0)
@@ -149,7 +146,7 @@ describe('perfMarks buffered upload', () => {
     perfMarks.__startObserver('http://otel.local/v1/metrics')
     perfMarks.start('graph:layout')
     perfMarks.end('graph:layout')
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await waitForObservedMeasure()
     await expect(perfMarks.flush()).resolves.toBeUndefined()
   })
 })

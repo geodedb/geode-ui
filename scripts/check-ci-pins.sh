@@ -8,9 +8,8 @@
 # shipping an unpinned, supply-chain-attackable dependency.
 #
 # Escape hatch: a line carrying a trailing `# ci-pins-allow:` marker is
-# tolerated (used today only for `codesign-windows-ssl@~latest`, which
-# has no tagged ci-catalog release yet — see the TODO in .gitlab-ci.yml
-# and #127). Keep that list as short as physically possible.
+# tolerated. Nothing uses it today; keep that list as short as
+# physically possible.
 set -euo pipefail
 
 CI_FILE="${1:-.gitlab-ci.yml}"

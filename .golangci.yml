@@ -1,0 +1,8 @@
+version: '2'
+
+linters:
+  exclusions:
+    paths:
+      # npm packages can ship Go sources (e.g. flatted/golang); they are not
+      # part of this module's code.
+    - node_modules
