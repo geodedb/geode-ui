@@ -107,8 +107,7 @@ function makeMockCy(els: ElData[]): MockCy {
     getElementById: (id: string) => makeEl(id),
     add: jest.fn((toAdd: ElData | ElData[] | { data: ElData }[]) => {
       const arr = (Array.isArray(toAdd) ? toAdd : [toAdd]) as (
-        | ElData
-        | { data: ElData }
+        ElData | { data: ElData }
       )[]
       const datas: ElData[] = arr.map((x) => {
         return 'data' in x ? (x as { data: ElData }).data : (x as ElData)

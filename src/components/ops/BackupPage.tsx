@@ -91,7 +91,7 @@ export const BackupPage: React.FC = () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async (_signal) => {
       const r = await client.getBackups({})
-      return ((r.backups ?? []) as Backup[]) ?? []
+      return (r.backups ?? []) as Backup[]
     },
     []
   )

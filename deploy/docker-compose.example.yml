@@ -1,20 +1,18 @@
 # Example docker-compose for running geode-ui alongside a Geode database.
 #
 # Build context note:
-#   The geode-ui Dockerfile depends on a sibling `geode-client-go/` directory
-#   (see deploy/Dockerfile header). For that reason the build context here
-#   is `..` (the parent directory of geode-ui), and you must run docker-compose
-#   from a checkout layout that looks like:
+#   The geode-ui Dockerfile expects the parent directory of geode-ui as its
+#   build context (see deploy/Dockerfile header), so the build context here
+#   is `..` and you must run docker-compose from a layout like:
 #
 #     parent/
 #       geode-ui/             ← this repo (compose lives in deploy/)
-#       geode-client-go/      ← sibling driver checkout
 #
 #   With that layout, run:
 #     cd parent
 #     docker compose -f geode-ui/deploy/docker-compose.example.yml up --build
 #
-#   Or copy this file out of deploy/ to a parent that owns both repos.
+#   Or copy this file out of deploy/ to the parent directory.
 
 version: '3.8'
 services:

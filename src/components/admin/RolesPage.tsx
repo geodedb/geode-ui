@@ -129,7 +129,7 @@ export const RolesPage: React.FC = () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async (_signal) => {
       const r = await client.getRoles({})
-      return ((r.roles ?? []) as Role[]) ?? []
+      return (r.roles ?? []) as Role[]
     },
     []
   )

@@ -1,5 +1,6 @@
 # E2E test stack for geode-ui. Brings up:
-#   - geode        (database, v0.5.15; offline `auth init` writes the
+#   - geode        (database, release image 0.8.22 pinned by digest in
+#                   geode/Dockerfile.geode; offline `auth init` writes the
 #                   bootstrap password to /data/admin-password.txt before
 #                   `geode serve` starts)
 #   - geode-init   (one-shot: rotate the captured bootstrap password,
@@ -8,20 +9,15 @@
 #   - geode-mcp    (MCP HTTP transport, port 8090, points at the geode service)
 #   - geode-lsp    (LSP-over-TCP bridge via socat, port 2087)
 #
-# Build context for the geode + geode-ui images is the GRANDPARENT
-# directory of this compose file (../.. — i.e. the directory that
-# contains the geode/, geode-ui/, and geode-client-go/ sibling
-# checkouts). Both Dockerfiles reach across siblings: the geode image
-# COPYs ../geode/zig-out/bin/geode, and the geode-ui image COPYs
-# ../geode-client-go/ to satisfy the local `replace` in go.mod.
+# The geode image extends the published Geode release image (see
+# geode/Dockerfile.geode). The geode-ui build context is the GRANDPARENT
+# directory of this compose file (../..); the geode-ui image fetches the
+# geodedb.com/geode driver from the Go module proxy.
 #
 # Bring up:  make e2e-up    (= docker compose -f deploy/docker-compose.test.yml up -d --build)
 # Tear down: make e2e-down  (= docker compose -f deploy/docker-compose.test.yml down -v)
 #
-# Required: prior `cd ../geode && zig build -Doptimize=ReleaseSafe` so the
-# geode binary is staged at ../geode/zig-out/bin/geode for the geode image's COPY.
-#
-# Auth wiring (v0.5.15 has no offline 'set known password' flag):
+# Auth wiring (the engine has no offline 'set known password' flag):
 #   1. geode-entrypoint.sh runs `geode auth init` once on a fresh data
 #      dir, parses the random "Generated password: <hex>" line, and
 #      writes the password to /data/admin-password.txt (mode 0600).
@@ -39,10 +35,10 @@ name: geode-e2e
 
 services:
   geode:
-    image: geode:v0.5.15
+    image: geode:e2e
     build:
-      context: ../..
-      dockerfile: geode-ui/deploy/geode/Dockerfile.geode
+      context: ./geode
+      dockerfile: Dockerfile.geode
     # Override the image entrypoint with our wrapper. We keep tini as
     # PID 1 so SIGTERM/SIGINT propagate cleanly to `geode serve`.
     entrypoint: [/usr/bin/tini, --, /geode-entrypoint.sh]
@@ -53,44 +49,62 @@ services:
     - 0.0.0.0:3141
     - --log-level
     - info
+    environment:
+      # Release builds of the geode CLI refuse --insecure-tls-skip-verify
+      # unless this is set. The test stack uses the engine's generated
+      # self-signed certificate, so the healthcheck, seed and MCP/LSP
+      # clients need it. Test stack only.
+      GEODE_ALLOW_INSECURE_TLS: '1'
+      # Acceptor-wedge watchdog, tuned for this test stack. The QUIC
+      # endpoint can deadlock (a connection teardown holds Endpoint.mu
+      # while it waits for a poll worker that is itself waiting on
+      # Endpoint.mu); on a CPU-starved shared CI VM the race window is wide
+      # enough to hit during seeding. The engine detects the wedge from the
+      # listener's UDP rx_queue and exits 70 so the orchestrator restarts
+      # it, but its production threshold (8 MiB for 30 s) is never reached
+      # by a test stack's trickle of traffic, so a wedged engine stays up
+      # and refuses everything for the rest of the job. A healthy engine
+      # drains the queue within milliseconds, so 32 KiB held for 20 s
+      # means it is wedged. Test stack only; production keeps the defaults.
+      GEODE_ACCEPTOR_WATCHDOG_RX_BYTES: '32768'
+      GEODE_ACCEPTOR_WATCHDOG_DEADLINE_MS: '20000'
+    # The watchdog's recovery is a restart; compose is the orchestrator
+    # here. The data volume and the entrypoint's marker make a restart
+    # resume the seeded engine rather than re-bootstrap it.
+    restart: on-failure
     volumes:
     - geode-data:/data
     - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
     ports:
     - 3141:3141/udp
-    # The wire is up well before any password rotation has happened, so
-    # we cannot use a normal `geode query 'RETURN 1'` probe — pre-
-    # rotation, every authenticated query rejects with status_class=08P01
-    # ("Password reset required"). Instead, send a deliberately-bad
-    # password and accept ANY auth-error response as proof the server
-    # is reachable. This mirrors seed-bootstrap.sh:wait_for_wire().
-    #
-    # IMPORTANT: probe with a NONEXISTENT username, not the real admin.
-    # Geode v0.5.15 (geode_auth_lib.zig:1466) locks a user account for 5
-    # minutes after 5 failed-password attempts. The healthcheck fires
-    # every 5s, so probing as `-U geode -P x` would lock the admin
-    # account inside 25s and break the entire e2e auth chain. An
-    # unknown user produces the identical "Authentication failed"
-    # response without incrementing any real account's failure counter.
+    # Liveness comes from the engine's out-of-band endpoint
+    # (GET :9090/health), not from a QUIC query. The old probe opened a
+    # QUIC connection and failed auth as `_healthcheck_probe_` every 5 s
+    # for the whole job: the auth rate limiter refused it after a minute,
+    # and each probe was another connection teardown racing the endpoint
+    # deadlock described above. geode-init's wait_for_wire still checks
+    # that the QUIC wire answers before seeding. The runtime image has no
+    # wget/curl, so use bash's /dev/tcp.
     healthcheck:
       test:
       - CMD-SHELL
       - >-
-        geode query --insecure-tls-skip-verify
-        --server 127.0.0.1:3141 -U _healthcheck_probe_ -P x 'RETURN 1' 2>&1
-        | grep -qiE 'auth|password|status_class|reset'
+        bash -c 'exec 3<>/dev/tcp/127.0.0.1/9090
+        && printf "GET /health HTTP/1.0\\r\\n\\r\\n" >&3
+        && timeout 3 cat <&3 | grep -q "\"status\":\"ok\""'
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 10s
 
   geode-init:
-    image: geode:v0.5.15
+    image: geode:e2e
     depends_on:
       geode:
         condition: service_healthy
     entrypoint: [/seed/seed-bootstrap.sh]
     environment:
+      GEODE_ALLOW_INSECURE_TLS: '1'
       GEODE_HOST: geode
       GEODE_PORT: '3141'
       GEODE_ADMIN_USER: ${GEODE_ADMIN_USER:-geode}
@@ -169,31 +183,18 @@ services:
       start_period: 5s
 
   geode-mcp:
-    image: geode:v0.5.15
+    image: geode:e2e
     depends_on:
       geode-init:
         condition: service_completed_successfully
-    # v0.5.15's `geode mcp serve --port` is unusable for compose:
-    # (1) the CLI returns immediately after spawning the HTTP listener
-    # thread, so the process exits and the thread dies; (2) the
-    # listener binds 127.0.0.1, with no `--bind` flag. We bridge the
-    # stable stdio transport over TCP via socat instead — identical
-    # pattern to geode-lsp. socat itself isn't in the slim runtime,
-    # so install it on first start (test container only).
-    user: root
+    # Bridge the stable MCP stdio transport over TCP via socat (the
+    # same pattern as geode-lsp); `geode mcp serve --port` binds
+    # 127.0.0.1 only. socat is installed in geode/Dockerfile.geode.
     environment:
+      GEODE_ALLOW_INSECURE_TLS: '1'
       MCP_GEODE_ENDPOINT: ${MCP_GEODE_ENDPOINT:-geode:3141}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-e2e-mcp-token}
-    entrypoint: [/bin/bash, -c]
-    command:
-    - |
-      set -euo pipefail
-      if ! command -v socat >/dev/null 2>&1; then
-        apt-get update
-        apt-get install -y --no-install-recommends socat
-        rm -rf /var/lib/apt/lists/*
-      fi
-      exec /mcp/mcp-bridge.sh
+    entrypoint: [/mcp/mcp-bridge.sh]
     volumes:
     - ./geode/mcp-bridge.sh:/mcp/mcp-bridge.sh:ro
     - ./geode/mcp-stdio-launch.sh:/mcp/mcp-stdio-launch.sh:ro
@@ -211,24 +212,14 @@ services:
       start_period: 5s
 
   geode-lsp:
-    image: geode:v0.5.15
+    image: geode:e2e
     depends_on:
       geode-init:
         condition: service_completed_successfully
-    # socat isn't in the slim runtime image. Install it on first start
-    # (test container only — we accept the apt-get cost), then exec the
-    # bridge. Running as root because apt-get needs to write to /var/lib.
-    user: root
-    entrypoint: [/bin/bash, -c]
-    command:
-    - |
-      set -euo pipefail
-      if ! command -v socat >/dev/null 2>&1; then
-        apt-get update
-        apt-get install -y --no-install-recommends socat
-        rm -rf /var/lib/apt/lists/*
-      fi
-      exec /lsp/lsp-bridge.sh
+    # socat is installed in geode/Dockerfile.geode.
+    environment:
+      GEODE_ALLOW_INSECURE_TLS: '1'
+    entrypoint: [/lsp/lsp-bridge.sh]
     volumes:
     - ./geode/lsp-bridge.sh:/lsp/lsp-bridge.sh:ro
     ports:

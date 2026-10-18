@@ -102,8 +102,8 @@ export const MigrationsPage: React.FC = () => {
     async (_signal) => {
       const r = await client.getMigrations({})
       return {
-        applied: ((r.applied ?? []) as Migration[]) ?? [],
-        pending: ((r.pending ?? []) as string[]) ?? [],
+        applied: (r.applied ?? []) as Migration[],
+        pending: (r.pending ?? []) as string[],
       }
     },
     []

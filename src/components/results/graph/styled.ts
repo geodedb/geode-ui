@@ -53,6 +53,20 @@ export const CanvasArea = styled.div`
   gap: ${({ theme }) => theme.spacing.xs};
 `
 
+// CanvasStack is the position-relative box that layers the overlays
+// (empty state, error banner, mini-map, badges, tooltip) over the
+// Canvas. It sits between CanvasArea and Canvas, so it has to carry
+// the flex chain on: without `flex: 1 1 auto` it was sized by its
+// content, and in fill mode (Canvas has no explicit height) the canvas
+// collapsed to 0 px tall (maximized result overlay, /dev/graph-bench).
+export const CanvasStack = styled.div`
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+`
+
 // Canvas renders the Cytoscape <canvas> host. When an explicit `$height`
 // is passed (the inline / non-fill case) it pins a pixel height. When
 // `$height` is omitted (fill mode) it flexes to fill its CanvasArea

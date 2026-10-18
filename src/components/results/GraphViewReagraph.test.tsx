@@ -14,15 +14,13 @@ type ReagraphProps = {
   edges: { id: string }[]
   layoutType: string
 }
-const mockGraphCanvas = jest.fn(
-  (props: ReagraphProps): JSX.Element => (
-    // Touch `props` (rendering a data attribute with the layout type
-    // we received) so eslint's no-unused-vars rule is satisfied without
-    // an underscore-prefixed arg name or rule-disable comment. The
-    // assertions read from `mockGraphCanvas.mock.calls`, not the DOM.
-    <div data-testid="reagraph-canvas" data-layout={props.layoutType} />
-  )
-)
+const mockGraphCanvas = jest.fn((props: ReagraphProps): React.JSX.Element => (
+  // Touch `props` (rendering a data attribute with the layout type
+  // we received) so eslint's no-unused-vars rule is satisfied without
+  // an underscore-prefixed arg name or rule-disable comment. The
+  // assertions read from `mockGraphCanvas.mock.calls`, not the DOM.
+  <div data-testid="reagraph-canvas" data-layout={props.layoutType} />
+))
 jest.mock('reagraph', () => ({
   __esModule: true,
   GraphCanvas: (props: ReagraphProps) => mockGraphCanvas(props),

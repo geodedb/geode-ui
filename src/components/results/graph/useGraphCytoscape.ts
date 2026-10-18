@@ -111,6 +111,11 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
   // every light↔dark flip — the live-swap effect handles that instead).
   const [themeRef] = useState({ current: theme })
   themeRef.current = theme
+  // Same for the per-node hide set: a node can be hidden (via the
+  // keyboard id picker + inspector) before the debounced build below
+  // has produced a core, so the fresh core must pick the set up.
+  const [hiddenRef] = useState({ current: hidden })
+  hiddenRef.current = hidden
 
   // Debounced (re)build keyed on sig. Theme is intentionally NOT a dep —
   // theme flips swap the stylesheet via the dedicated effect below
@@ -234,6 +239,13 @@ export function useGraphCytoscape(args: UseGraphCytoscapeArgs): void {
           }
           applyLabels(cy, nodePrefsRef.current, edgePrefsRef.current)
           applySelectionMode(cy, selectionModeRef.current)
+          if (hiddenRef.current.size > 0) {
+            cy.batch(() => {
+              hiddenRef.current.forEach((nodeId) => {
+                cy.getElementById(nodeId).addClass('hidden-node')
+              })
+            })
+          }
           setCounts({ nodes: cy.nodes().length, edges: cy.edges().length })
           // PERF: writeback the scale tier derived from the live node
           // count so feature gates (effectiveDomNodes / cxtmenu / tooltips

@@ -30,6 +30,11 @@
       "rules": {
         "@typescript-eslint/no-explicit-any": 0,
         "@typescript-eslint/no-var-requires": 0,
+        "@typescript-eslint/no-require-imports": 0,
+        "@typescript-eslint/no-empty-object-type": [
+          "error",
+          { "allowInterfaces": "with-single-extends" }
+        ],
         "function-paren-newline": 0,
         "implicit-arrow-linebreak": 0,
         "import/extensions": 0,

@@ -48,6 +48,15 @@ const COMBOS: { renderer: 'cytoscape' | 'reagraph'; n: number }[] = [
   { renderer: 'reagraph', n: 10000 },
 ]
 
+// CI runs this spec on a contended shared VM with software WebGL. There,
+// the large tier (n >= 5000) keeps the page's main thread busy past even
+// a 6-minute budget: reagraph in pipeline 2937517308, and cytoscape
+// n=10000 (35 s first paint, ~2 fps) left too little budget for the rest
+// in job 17152568871. On CI, run only the small and mid tiers of both
+// renderers as a smoke check. `make bench-graph` (CI unset) still records
+// all eight combos.
+const RUN_COMBOS = process.env.CI ? COMBOS.filter((c) => c.n < 5000) : COMBOS
+
 const RESULTS_PATH = path.resolve(
   __dirname,
   '../../docs/performance/2026-05-14-cytoscape-vs-reagraph.results.json'
@@ -129,13 +138,17 @@ async function runOne(
 test.describe.configure({ mode: 'serial', retries: 0 })
 test('graph renderer benchmark', async ({ page }) => {
   // ~50 s wall: 8 combos × ~6 s each (nav + 5 s sample). 120 s gives
-  // headroom for cold WebGL init at n=10000.
-  test.setTimeout(120_000)
+  // headroom for cold WebGL init at n=10000. CI's contended shared VM
+  // renders the n=10000 combos several times slower, so it gets the same
+  // 3x as the suite-wide timeout in playwright.config.ts.
+  test.setTimeout(process.env.CI ? 360_000 : 120_000)
   // Reduce-with-promise-chain so we stay sequential (perf samples must
   // not overlap — same GPU / event loop). A classic `for-of + await`
   // would be cleaner but airbnb's no-restricted-syntax bans for-of in
   // this project, and `Promise.all(COMBOS.map(...))` would parallelise.
-  const records: BenchRecord[] = await COMBOS.reduce<Promise<BenchRecord[]>>(
+  const records: BenchRecord[] = await RUN_COMBOS.reduce<
+    Promise<BenchRecord[]>
+  >(
     (acc, combo) =>
       acc.then(async (prev) => {
         const rec = await runOne(page, combo)

@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.26.2-00ADD8.svg)](https://go.dev/)
-[![Node.js](https://img.shields.io/badge/Node.js-22.14.0+-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-24.21.0+-green.svg)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18.2.0-blue.svg)](https://reactjs.org/)
 
 A self-contained Go binary that embeds a React + TypeScript SPA and exposes the
@@ -14,7 +14,7 @@ restores, migrations, and the audit log.
 ## Quick start
 
 ```bash
-# Build (Go 1.26.2 + Node 22.14+)
+# Build (Go 1.26.2 + Node 24.21+)
 make build
 
 # Generate a JWT secret
@@ -134,12 +134,13 @@ DDL + role + grant management; v0.5.x is sufficient for read-only query
 flows.** The SPA gates admin CTAs from the upstream `SHOW CAPABILITIES` probe
 (surfaced via `GET /api/v1/capabilities`), so older engines render with the
 admin write affordances disabled and an inline "not supported" note instead
-of failing outright. See [docs/ARCHITECTURE.md → Server-side admin DDL
+of failing outright. The e2e stack runs the Geode 0.8.22 release image
+(pinned by digest in `deploy/geode/Dockerfile.geode`), the engine line the
+`geodedb.com/geode` 0.2 Go driver targets. See [docs/ARCHITECTURE.md → Server-side admin DDL
 (Geode v0.5.15+)](docs/ARCHITECTURE.md) for the supported operations and
 the upstream divergences (e.g. CREATE POLICY remains upstream-deferred).
 
 ```bash
-make e2e-deps        # build geode binary on the host (one-time, ~5 min cold)
 make e2e-up          # build images, run init, leave services running
 make e2e-test        # run Playwright against the running stack
 make e2e-down        # tear down + clear volumes
@@ -150,7 +151,7 @@ Services brought up by the stack:
 
 | Service     | Port           | Purpose                          |
 |-------------|----------------|----------------------------------|
-| geode       | 3141/udp       | Geode v0.5.15 graph database     |
+| geode       | 3141/udp       | Geode 0.8.22 graph database      |
 | geode-init  | one-shot       | Bootstraps admin + seeds movies  |
 | geode-ui    | 8080           | Go API + embedded React SPA      |
 | geode-mcp   | 8090           | MCP TCP bridge (socat to stdio)  |

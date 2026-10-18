@@ -51,3 +51,41 @@ describe('useGraphActions — onExploreNeighbours with options', () => {
     )
   })
 })
+
+describe('useGraphActions — onHideNode', () => {
+  const render = (cy: unknown) => {
+    const setSelected = jest.fn()
+    const hook = renderHook(() =>
+      useGraphActions({
+        cyRef: { current: cy } as never,
+        layoutRef: { current: 'cose' } as never,
+        queryRef: { current: undefined } as never,
+        setSelected,
+        setError: jest.fn(),
+        t: (k) => k,
+      })
+    )
+    return { ...hook, setSelected }
+  }
+
+  it('records the hide before the Cytoscape core exists', () => {
+    // The inspector can be driven from the keyboard id picker before the
+    // debounced build has created a core; the hide must not be dropped.
+    const { result, setSelected } = render(null)
+    act(() => {
+      result.current.onHideNode('117424107931660290')
+    })
+    expect([...result.current.hidden]).toEqual(['117424107931660290'])
+    expect(setSelected).toHaveBeenCalledWith(null)
+  })
+
+  it('hides the node on a live core', () => {
+    const addClass = jest.fn()
+    const { result } = render({ getElementById: () => ({ addClass }) })
+    act(() => {
+      result.current.onHideNode('7')
+    })
+    expect(addClass).toHaveBeenCalledWith('hidden-node')
+    expect(result.current.hidden.has('7')).toBe(true)
+  })
+})

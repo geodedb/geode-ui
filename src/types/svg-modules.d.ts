@@ -27,3 +27,8 @@ declare module '*.webp' {
   const src: string
   export default src
 }
+
+// Side-effect CSS imports (`import './fonts.css'`) are handled by
+// css-loader / MiniCssExtractPlugin. TypeScript 6 checks side-effect
+// imports (TS2882), so declare the module shape.
+declare module '*.css'
