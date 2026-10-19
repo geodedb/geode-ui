@@ -70,6 +70,10 @@ default:
   tags:
     - company
     - linux
+    # Policy-injected scanner jobs inherit these tags; their GitLab SAST images
+    # are AMD64-only, so keep them off the ARM fleet (SRE-183). electron:mac and
+    # electron:win set their own tags.
+    - amd64
 
 stages:
   - install
