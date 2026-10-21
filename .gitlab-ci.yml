@@ -2,6 +2,10 @@
 # GitLab CI/CD Pipeline for ui
 # SPDX-License-Identifier: Apache-2.0
 
+workflow:
+  auto_cancel:
+    on_job_failure: all
+
 include:
   # Security scanning. The GitLab analyzer images are amd64-only, so pin
   # these jobs to x86 runners; with the default company/linux tags they
