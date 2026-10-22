@@ -32,7 +32,7 @@ include:
 
 variables:
   NODE_VERSION: '24.21.0'
-  GO_VERSION: '1.27.2-alpine'
+  GO_VERSION: '1.27.3-alpine'
   GORELEASER_VERSION: 'v2.13.3'
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
   FF_USE_FASTZIP: 'true'
@@ -313,10 +313,10 @@ pages:
 # install/lint/test/build stages declared above.
 
 .go_defaults: &go_defaults
-  image: golang:1.27.2-alpine
+  image: golang:1.27.3-alpine
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     CGO_ENABLED: "0"
   before_script: []
   cache: []
@@ -363,7 +363,7 @@ go:test:
   stage: test
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     # -race needs cgo (and a C toolchain); the shared defaults disable it
     # for static builds.
     CGO_ENABLED: "1"
@@ -398,7 +398,7 @@ go:fuzz:
   timeout: 1h
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     CGO_ENABLED: "0"
     FUZZ_SHORT_TIME: "200x"
     FUZZ_EXTENDED_TIME: "10m"
