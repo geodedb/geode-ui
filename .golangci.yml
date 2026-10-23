@@ -5,4 +5,7 @@ linters:
     paths:
       # npm packages can ship Go sources (e.g. flatted/golang); they are not
       # part of this module's code.
-    - node_modules
+      - node_modules
+formatters:
+  enable:
+    - gofmt

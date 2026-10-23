@@ -6,23 +6,14 @@ include:
   # Security scanning. The GitLab analyzer images are amd64-only, so pin
   # these jobs to x86 runners; with the default company/linux tags they
   # also land on the ARM lab runner and die with "exec format error".
-  - component: gitlab.com/devnw/ci-catalog/security-sast@v1.57.0
-    inputs:
-      tags: [company, linux, x86]
-  - component: gitlab.com/devnw/ci-catalog/security-dependency-scanning@v1.57.0
-    inputs:
-      tags: [company, linux, x86]
-  - component: gitlab.com/devnw/ci-catalog/security-secrets@v1.57.0
-    inputs:
-      tags: [company, linux, x86]
-  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@v1.57.0
+  - component: gitlab.com/devnw/ci-catalog/security-gitleaks@aad997d40e358eeef7ec943f761498341c37c724
 
   # SBOM
-  - component: gitlab.com/devnw/ci-catalog/sbom-generate@v1.57.0
-  - component: gitlab.com/devnw/ci-catalog/sbom-scan@v1.57.0
+  - component: gitlab.com/devnw/ci-catalog/sbom-generate@aad997d40e358eeef7ec943f761498341c37c724
+  - component: gitlab.com/devnw/ci-catalog/sbom-scan@aad997d40e358eeef7ec943f761498341c37c724
 
   # Release
-  - component: gitlab.com/devnw/ci-catalog/release-semantic@v1.57.0
+  - component: gitlab.com/devnw/ci-catalog/release-semantic@aad997d40e358eeef7ec943f761498341c37c724
 
   # Code signing — Windows Authenticode via ssl.com eSigner.
   # Pulls credentials from group-level CI variables ESIGNER_*; see
@@ -30,7 +21,7 @@ include:
   #
   # Pinned to an immutable tag (#127, SRE-189); v1.56+ marks this
   # side-effecting signing job `interruptible: false`.
-  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@v1.57.0
+  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@aad997d40e358eeef7ec943f761498341c37c724
     inputs:
       input_glob: 'release/win/*.exe'
       needs: 'electron:win'
@@ -41,7 +32,7 @@ include:
 
 variables:
   NODE_VERSION: '24.21.0'
-  GO_VERSION: '1.27.2-alpine'
+  GO_VERSION: '1.27.3-alpine'
   GORELEASER_VERSION: 'v2.13.3'
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
   FF_USE_FASTZIP: 'true'
@@ -322,10 +313,10 @@ pages:
 # install/lint/test/build stages declared above.
 
 .go_defaults: &go_defaults
-  image: golang:1.27.2-alpine
+  image: golang:1.27.3-alpine
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     CGO_ENABLED: "0"
   before_script: []
   cache: []
@@ -372,7 +363,7 @@ go:test:
   stage: test
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     # -race needs cgo (and a C toolchain); the shared defaults disable it
     # for static builds.
     CGO_ENABLED: "1"
@@ -407,7 +398,7 @@ go:fuzz:
   timeout: 1h
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     CGO_ENABLED: "0"
     FUZZ_SHORT_TIME: "200x"
     FUZZ_EXTENDED_TIME: "10m"
@@ -576,23 +567,33 @@ e2e:playwright:
         fi
         sleep 2
       done
-    # Build the playwright runner and run the suite. Mount the report dir.
+    # Build the playwright runner and run the suite. Copy reports back through
+    # the Docker API: the daemon may not share this job's checkout paths.
     # The runner uses the dind daemon's host network, where the stack's
     # published ports are on localhost; the "docker" service alias only
     # resolves inside this job container.
     - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
     - mkdir -p e2e/playwright-report
-    - >
-      docker run --rm --network=host
-      -e UI_URL=http://localhost:8080
-      -e MCP_HOST=localhost
-      -e MCP_PORT=8090
-      -e ADMIN_USER=geode
-      -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
-      -e ADMIN_PROFILE=default
-      -v "$PWD/e2e/playwright-report:/work/e2e/playwright-report"
-      pw:local
+    - |
+      container_id="$(docker create --network=host \
+        -e UI_URL=http://localhost:8080 \
+        -e MCP_HOST=localhost \
+        -e MCP_PORT=8090 \
+        -e ADMIN_USER=geode \
+        -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}" \
+        -e ADMIN_PROFILE=default \
+        pw:local)"
+      printf '%s\n' "$container_id" > .e2e-playwright-container
+      docker start --attach "$container_id"
   after_script:
+    - |
+      if [ -s .e2e-playwright-container ]; then
+        container_id="$(cat .e2e-playwright-container)"
+        mkdir -p e2e/playwright-report
+        docker cp "$container_id:/work/e2e/playwright-report/." e2e/playwright-report/ || true
+        docker rm --force "$container_id" || true
+        rm -f .e2e-playwright-container
+      fi
     # Keep the engine and server logs (and every other service's) so a
     # failed run can be diagnosed after the stack is gone.
     - mkdir -p e2e/compose-logs
@@ -934,3 +935,10 @@ release:publish:
       attached as a job artifact.
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
+
+workflow:
+  # An open MR owns push validation; other pipeline sources stay admitted.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - when: always

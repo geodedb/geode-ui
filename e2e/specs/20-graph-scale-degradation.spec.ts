@@ -5,8 +5,10 @@ test.describe.configure({ mode: 'serial', retries: 0 })
 test('scale degradation: large tier disables cxtmenu / tooltip / badges / domNodes', async ({
   page,
 }) => {
-  // 3x on CI's contended shared VM, as in playwright.config.ts.
-  test.setTimeout(process.env.CI ? 180_000 : 60_000)
+  // The 6,000-node CI trace spent 100s on a browser evaluation and
+  // another 73s on pointer actions; all degradation assertions succeeded.
+  // Keep the full large-tier fixture and allow five bounded minutes on CI.
+  test.setTimeout(process.env.CI ? 300_000 : 60_000)
   await page.goto('/dev/graph-bench?n=6000&renderer=cytoscape')
   // Warmup for layout to complete + tier write to land.
   await page.waitForTimeout(5_000)

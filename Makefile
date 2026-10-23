@@ -27,8 +27,8 @@ go-lint:
 	$(GOENV) python3 scripts/golangci-lint.py run
 
 go-fmt:
-	$(GOENV) gofmt -s -w .
-	$(GOENV) goimports -w .
+	$(GOENV) python3 scripts/golangci-lint.py fmt .
+	$(GOENV) python3 scripts/golangci-lint.py fmt
 
 go-tidy:
 	$(GOENV) go mod tidy

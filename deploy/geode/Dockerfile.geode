@@ -24,6 +24,14 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini socat \
     && rm -rf /var/lib/apt/lists/*
+
+# Docker daemons used by CI do not necessarily share the job's checkout.
+# Carry the test fixtures in the image so every service sees the same files.
+COPY --chmod=0555 geode-entrypoint.sh /geode-entrypoint.sh
+COPY --chmod=0555 seed-bootstrap.sh /seed/seed-bootstrap.sh
+COPY --chmod=0444 init.gql vulndb.gql /seed/
+COPY --chmod=0555 mcp-bridge.sh mcp-stdio-launch.sh /mcp/
+COPY --chmod=0555 lsp-bridge.sh /lsp/lsp-bridge.sh
 USER geode
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/geode"]
