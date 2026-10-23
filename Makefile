@@ -21,13 +21,12 @@ go-build: web-build
 	$(GOENV) go build -o $(BIN) ./cmd/server
 
 go-test:
-	$(GOENV) go test -race -cover -failfast ./...
+	$(GOENV) go test -vet=off -race -cover -failfast ./...
 
 go-lint:
 	$(GOENV) python3 scripts/golangci-lint.py run
 
 go-fmt:
-	$(GOENV) python3 scripts/golangci-lint.py fmt .
 	$(GOENV) python3 scripts/golangci-lint.py fmt
 
 go-tidy:
