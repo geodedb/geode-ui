@@ -74,7 +74,6 @@ services:
     restart: on-failure
     volumes:
     - geode-data:/data
-    - ./geode/geode-entrypoint.sh:/geode-entrypoint.sh:ro
     ports:
     - 3141:3141/udp
     # Liveness comes from the engine's out-of-band endpoint
@@ -115,9 +114,6 @@ services:
     volumes:
       # Read the bootstrap password the geode container wrote to /data.
     - geode-data:/shared-data:ro
-    - ./geode/seed-bootstrap.sh:/seed/seed-bootstrap.sh:ro
-    - ./geode/init.gql:/seed/init.gql:ro
-    - ./geode/vulndb.gql:/seed/vulndb.gql:ro
     restart: no
 
   geode-ui:
@@ -195,9 +191,6 @@ services:
       MCP_GEODE_ENDPOINT: ${MCP_GEODE_ENDPOINT:-geode:3141}
       MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-e2e-mcp-token}
     entrypoint: [/mcp/mcp-bridge.sh]
-    volumes:
-    - ./geode/mcp-bridge.sh:/mcp/mcp-bridge.sh:ro
-    - ./geode/mcp-stdio-launch.sh:/mcp/mcp-stdio-launch.sh:ro
     ports:
     - 8090:8090
     # No wget/curl/nc in the geode runtime image; bash 5+ is present, so
@@ -220,8 +213,6 @@ services:
     environment:
       GEODE_ALLOW_INSECURE_TLS: '1'
     entrypoint: [/lsp/lsp-bridge.sh]
-    volumes:
-    - ./geode/lsp-bridge.sh:/lsp/lsp-bridge.sh:ro
     ports:
     - 2087:2087
 

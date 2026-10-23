@@ -567,23 +567,33 @@ e2e:playwright:
         fi
         sleep 2
       done
-    # Build the playwright runner and run the suite. Mount the report dir.
+    # Build the playwright runner and run the suite. Copy reports back through
+    # the Docker API: the daemon may not share this job's checkout paths.
     # The runner uses the dind daemon's host network, where the stack's
     # published ports are on localhost; the "docker" service alias only
     # resolves inside this job container.
     - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
     - mkdir -p e2e/playwright-report
-    - >
-      docker run --rm --network=host
-      -e UI_URL=http://localhost:8080
-      -e MCP_HOST=localhost
-      -e MCP_PORT=8090
-      -e ADMIN_USER=geode
-      -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
-      -e ADMIN_PROFILE=default
-      -v "$PWD/e2e/playwright-report:/work/e2e/playwright-report"
-      pw:local
+    - |
+      container_id="$(docker create --network=host \
+        -e UI_URL=http://localhost:8080 \
+        -e MCP_HOST=localhost \
+        -e MCP_PORT=8090 \
+        -e ADMIN_USER=geode \
+        -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}" \
+        -e ADMIN_PROFILE=default \
+        pw:local)"
+      printf '%s\n' "$container_id" > .e2e-playwright-container
+      docker start --attach "$container_id"
   after_script:
+    - |
+      if [ -s .e2e-playwright-container ]; then
+        container_id="$(cat .e2e-playwright-container)"
+        mkdir -p e2e/playwright-report
+        docker cp "$container_id:/work/e2e/playwright-report/." e2e/playwright-report/ || true
+        docker rm --force "$container_id" || true
+        rm -f .e2e-playwright-container
+      fi
     # Keep the engine and server logs (and every other service's) so a
     # failed run can be diagnosed after the stack is gone.
     - mkdir -p e2e/compose-logs
