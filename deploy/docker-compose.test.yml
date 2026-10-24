@@ -121,6 +121,7 @@ services:
     build:
       context: ../..
       dockerfile: geode-ui/deploy/Dockerfile
+      target: e2e
     depends_on:
       geode-init:
         condition: service_completed_successfully
@@ -167,7 +168,6 @@ services:
     - -admin-users
     - geode,e2e_admin
     volumes:
-    - ./profiles.json:/etc/geode-ui/profiles.json:ro
     - geode-ui-uploads:/var/lib/geode-ui/uploads
     ports:
     - 8080:8080

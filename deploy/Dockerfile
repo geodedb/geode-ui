@@ -45,7 +45,7 @@ RUN go mod download
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/geode-ui ./cmd/server
 
 # ----- Stage 3: minimal runtime -----
-FROM alpine:3.24
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache ca-certificates && \
     addgroup -S geode && adduser -S -G geode geode
 COPY --from=gobuild /out/geode-ui /usr/local/bin/geode-ui
@@ -73,3 +73,11 @@ USER geode
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/geode-ui"]
 CMD ["-listen", ":8080"]
+
+# The DinD daemon cannot bind-mount files from the CI job's checkout. Ship
+# the fixture through the build context, only in the Compose test target.
+FROM runtime AS e2e
+COPY --chown=geode:geode geode-ui/deploy/profiles.json /etc/geode-ui/profiles.json
+
+# Keep ordinary builds free of the E2E connection profile.
+FROM runtime AS final
