@@ -10,15 +10,13 @@ test('scale degradation: large tier disables cxtmenu / tooltip / badges / domNod
   // Keep the full large-tier fixture and allow five bounded minutes on CI.
   test.setTimeout(process.env.CI ? 300_000 : 60_000)
   await page.goto('/dev/graph-bench?n=6000&renderer=cytoscape')
-  // Warmup for layout to complete + tier write to land.
-  await page.waitForTimeout(5_000)
-
-  // Tier write should have produced a graph:tier:large mark.
-  const hadLargeTier = await page.evaluate(() => {
-    const entries = performance.getEntriesByName('graph:tier:large', 'mark')
-    return entries.length > 0
-  })
-  expect(hadLargeTier).toBe(true)
+  // Wait for the actual tier write. Building the 6,000-node graph can
+  // outlast a fixed five-second sleep on a shared CI runner.
+  await page.waitForFunction(
+    () => performance.getEntriesByName('graph:tier:large', 'mark').length > 0,
+    undefined,
+    { timeout: process.env.CI ? 120_000 : 30_000 }
+  )
 
   // cxtmenu trigger: a right-click on a node in "large" tier should NOT
   // open the context menu (its consumer is mounted but tier-gated off).
