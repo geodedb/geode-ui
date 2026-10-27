@@ -1,11 +1,22 @@
 version: '2'
 
+run:
+  # Fuzz discovery/execution uses -vet=off; analyze its tagged tests here too.
+  build-tags: [fuzz]
+
 linters:
   exclusions:
     paths:
       # npm packages can ship Go sources (e.g. flatted/golang); they are not
       # part of this module's code.
       - node_modules
+    rules:
+      # genapi v0.3.1 emits these seed writes through a bufio.Writer whose
+      # only destination is bytes.Buffer; Write/WriteByte/Flush cannot return
+      # an error here. Keep other errcheck findings and all vet checks active.
+      - path: '^gen/pkg/wsx/fuzz_test\.go$'
+        linters: [errcheck]
+        text: 'Error return value of `bw\.(Write|WriteByte|Flush)` is not checked'
 formatters:
   enable:
     - gofmt

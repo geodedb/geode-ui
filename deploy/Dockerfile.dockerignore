@@ -11,10 +11,13 @@
 # install cleanly.
 
 geode-ui/node_modules/
+geode-ui/.cache/
+geode-ui/.npm/
 geode-ui/**/node_modules/
 geode-ui/dist/
 geode-ui/build/
 geode-ui/internal/ui/dist/
+geode-ui/internal/ui/electron-dist/
 geode-ui/bin/
 geode-ui/coverage/
 geode-ui/test-results/

@@ -31,6 +31,9 @@ include:
 variables:
   NODE_VERSION: '24.21.0'
   GO_VERSION: '1.27.3-alpine'
+  GOCACHE: '$CI_PROJECT_DIR/.cache/go-build'
+  GOMODCACHE: '$CI_PROJECT_DIR/.cache/go-mod'
+  GOLANGCI_LINT_CACHE: '$CI_PROJECT_DIR/.cache/golangci-lint'
   GORELEASER_VERSION: 'v2.13.3'
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
   FF_USE_FASTZIP: 'true'
@@ -43,6 +46,7 @@ variables:
   # image variants are built locally but not pushed.
 
 default:
+  interruptible: true
   image: node:${NODE_VERSION}
   before_script:
     # Configure GitLab npm registry for @devnw scope
@@ -128,6 +132,7 @@ typecheck:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 eslint:
   interruptible: true
@@ -140,6 +145,7 @@ eslint:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 prettier:
   interruptible: true
@@ -172,6 +178,7 @@ audit-ratchets:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 # Closes GAP-009 / Q25 (#170): type-check the Electron main + preload
 # independently from the SPA tsc pass. The renderer tsconfig
@@ -258,6 +265,7 @@ unit-tests:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 # ============================================================================
 # BUILD STAGE
@@ -265,6 +273,7 @@ unit-tests:
 
 build:
   interruptible: true
+  # Required dependencies above also run on tags so release pipelines can start.
   # Same architecture as `install` (see there).
   tags: [company, linux, x86]
   stage: build
@@ -279,9 +288,10 @@ build:
     NODE_OPTIONS: --max-old-space-size=4096
   script:
     - npm run build
+    - test -s internal/ui/dist/index.html
   artifacts:
     paths:
-      - dist/
+      - internal/ui/dist/
     expire_in: 7 days
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -297,11 +307,11 @@ pages:
   stage: pages
   needs: ['build']
   before_script: []
+  cache: []
   script:
-    - mv dist public
-  artifacts:
-    paths:
-      - public
+    - test -s internal/ui/dist/index.html
+  pages:
+    publish: internal/ui/dist
   environment:
     name: production
     url: $CI_PAGES_URL
@@ -322,17 +332,29 @@ pages:
 
 .go_defaults: &go_defaults
   image: golang:1.27.3-alpine
+  tags: [company, linux, x86]
   variables:
     GOEXPERIMENT: jsonv2
     GOTOOLCHAIN: go1.27.3
     CGO_ENABLED: "0"
   before_script: []
-  cache: []
+  # Each job publishes its own cache to avoid concurrent writers replacing
+  # one another's compiler/tool entries. Go content-addresses build entries.
+  cache: &go_job_cache
+    key:
+      prefix: go-1.27.3-linux-amd64-$CI_JOB_NAME
+      files: [go.sum]
+    paths:
+      - .cache/go-mod/
+      - .cache/go-build/
+      - .cache/golangci-lint/
+    policy: pull-push
 
 go:lint:
   interruptible: true
   <<: *go_defaults
   stage: lint
+  dependencies: []
   script:
     - apk add --no-cache git make
     # Pinned to an immutable tag (Q32 / #127). Bump deliberately; keep in
@@ -346,11 +368,15 @@ go:lint:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $GO_FUZZ_MODE == "extended"
 
 go:generate-verify:
   interruptible: true
   <<: *go_defaults
   stage: lint
+  dependencies: []
   script:
     - apk add --no-cache make git nodejs npm bash
     - npm ci
@@ -371,7 +397,10 @@ go:generate-verify:
 go:test:
   interruptible: true
   <<: *go_defaults
-  stage: test
+  stage: build
+  needs:
+    - job: build
+      artifacts: true
   variables:
     GOEXPERIMENT: jsonv2
     GOTOOLCHAIN: go1.27.3
@@ -379,15 +408,14 @@ go:test:
     # for static builds.
     CGO_ENABLED: "1"
   script:
-    - apk add --no-cache git make nodejs npm gcc musl-dev
-    - npm ci
-    - npm run build
-    # Project-owned trees only, so ./... does not walk into
-    # node_modules/flatted/golang/.
-    - go test -race -cover -failfast ./cmd/... ./gen/... ./internal/...
+    # Makefile selects /usr/bin/env bash for every recipe.
+    - apk add --no-cache bash git make gcc musl-dev
+    - test -s internal/ui/dist/index.html
+    - make go-test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 # Native Go fuzzing with an explicit cadence (SRE-178). The generated fuzz
 # targets carry `//go:build fuzz`, so discovery and runs use -tags=fuzz.
@@ -435,11 +463,11 @@ go:fuzz:
       dirs=$(git ls-files '*_test.go' | xargs -r grep -lE '^func Fuzz' | xargs -r -n1 dirname | sort -u)
       for pkg in $(for d in $dirs; do go list "./$d"; done); do
         # A test-compile error must fail the job, not silently list nothing.
-        listing=$(go test -tags=fuzz -list '^Fuzz' "$pkg")
+        listing=$(go test -vet=off -tags=fuzz -list '^Fuzz' "$pkg")
         for fn in $(printf '%s\n' "$listing" | grep '^Fuzz' || true); do
           targets=$((targets + 1))
           echo "=== fuzz ${pkg} ${fn} (${budget})"
-          if go test -tags=fuzz -run "^${fn}\$" -fuzz "^${fn}\$" -fuzztime "$budget" "$pkg"; then
+          if go test -vet=off -tags=fuzz -run "^${fn}\$" -fuzz "^${fn}\$" -fuzztime "$budget" "$pkg"; then
             echo "PASS ${pkg} ${fn} ${budget}" >> out/fuzz-summary.txt
           else
             echo "FAIL ${pkg} ${fn} ${budget}" >> out/fuzz-summary.txt
@@ -488,7 +516,7 @@ go:fuzz:
 bench-gate:
   interruptible: true
   <<: *go_defaults
-  stage: test
+  stage: build
   needs: ['go:test']
   script:
     - apk add --no-cache git make bash
@@ -512,6 +540,8 @@ docker:build:
   services:
     - docker:29-dind
   before_script: []
+  dependencies: []
+  cache: []
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
@@ -548,6 +578,10 @@ e2e:playwright:
   interruptible: true
   stage: test
   image: docker:29
+  # Every dependency is installed inside the images; host npm artifacts and
+  # cache downloads only enlarge the workspace and Docker build context.
+  dependencies: []
+  cache: []
   # Stack build (~7 min) + seeding + ~106 specs on a contended shared VM
   # ran past the 1 h project default (job 17097098422).
   timeout: 2h
@@ -640,8 +674,7 @@ security-gitleaks:
 # Two release entry points mirroring the ../geode pipeline:
 #
 #   • goreleaser:snapshot — runs on every main-branch commit. Builds the
-#     binaries + images locally and pushes the GitLab Container Registry
-#     tags only. Never touches Docker Hub or the GitLab Release page.
+#     binaries + images without publishing them.
 #     allow_failure: true so a flaky goreleaser run doesn't block main.
 #
 #   • goreleaser:release — runs only on git tags matching v*. Pushes to
@@ -652,19 +685,25 @@ security-gitleaks:
 # pipe-to-shell), authenticate to registries, then invoke goreleaser.
 
 .goreleaser-base:
-  image: docker:29
+  image: golang:${GO_VERSION}
   services:
     - docker:29-dind
   tags:
     - company
     - linux
+    - x86
+  cache: *go_job_cache
   variables:
+    DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ''
     DOCKER_BUILDKIT: '1'
     GIT_DEPTH: '0'
+    GORELEASER_FORCE_TOKEN: gitlab
   before_script:
-    # Tools: alpine package set + node (for the npm-build before-hook).
-    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm
+    # The build job supplies the SPA; GoReleaser only compiles/packages it.
+    - apk add --no-cache curl git bash tar xz coreutils jq docker-cli docker-cli-buildx
+    - go version
+    - test -s internal/ui/dist/index.html
     # Goreleaser binary (pinned, integrity-verifiable via SHA next time).
     - |
       curl -fsSL "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" -o /tmp/gr.tgz
@@ -705,8 +744,6 @@ security-gitleaks:
     # Buildx for multi-arch image assembly.
     - docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null
     - docker buildx inspect --bootstrap
-    # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
-    - npm ci
 
 goreleaser:snapshot:
   extends: .goreleaser-base
@@ -716,7 +753,7 @@ goreleaser:snapshot:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
     - job: go:test
       artifacts: false
   timeout: 1h
@@ -724,9 +761,8 @@ goreleaser:snapshot:
     - . /tmp/dockerhub.env
     - echo "SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
     # `--snapshot` skips git-tag validation, marks the build as a snapshot,
-    # and short-circuits any release-publish step. Container images are
-    # still pushed (snapshot tags carry the `-snapshot-<sha>` suffix).
-    - goreleaser release --snapshot --clean --timeout 60m
+    # and skips publication, including container image pushes.
+    - goreleaser release --snapshot --clean --skip=before --timeout 60m
     - ls -la dist/
   artifacts:
     paths:
@@ -744,14 +780,14 @@ goreleaser:release:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
     - job: go:test
       artifacts: false
   timeout: 2h
   script:
     - . /tmp/dockerhub.env
     - 'echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
-    - goreleaser release --clean --timeout 120m
+    - goreleaser release --clean --skip=before --timeout 120m
     - ls -la dist/
   artifacts:
     paths:
@@ -791,7 +827,7 @@ goreleaser:release:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
   timeout: 1h
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
@@ -803,7 +839,7 @@ electron:linux:
     - npm ci
     # electron-builder needs a few system libs to package linux artifacts.
     - apt-get update && apt-get install -y --no-install-recommends rpm fakeroot dpkg
-    - npm run electron:build
+    - npm run electron:assemble
     # Build BOTH AppImage + deb for x64 + arm64 (per electron-builder.yml).
     - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml
     - ls -la release/linux/ || true
@@ -818,7 +854,7 @@ electron:mac:
     - macos
   script:
     - npm ci
-    - npm run electron:build
+    - npm run electron:assemble
     # mac universal dmg. Code signing kicks in if CSC_LINK is set.
     - npx electron-builder --mac --universal --config electron-builder.yml
     - ls -la release/mac/ || true
@@ -836,7 +872,7 @@ electron:win:
     - windows
   script:
     - npm ci
-    - npm run electron:build
+    - npm run electron:assemble
     - npx electron-builder --win --x64 --config electron-builder.yml
     - dir release\win || echo "no win artifacts"
   artifacts:
@@ -953,4 +989,12 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
       when: never
+    # Stop obsolete validation work after a required failure, while allowing
+    # default-branch publication and tag release work to finish independently.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      auto_cancel:
+        on_job_failure: all
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      auto_cancel:
+        on_job_failure: all
     - when: always

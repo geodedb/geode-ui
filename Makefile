@@ -21,7 +21,7 @@ go-build: web-build
 	$(GOENV) go build -o $(BIN) ./cmd/server
 
 go-test:
-	$(GOENV) go test -vet=off -race -cover -failfast ./...
+	$(GOENV) go test -vet=off -race -cover -failfast ./cmd/... ./gen/... ./internal/...
 
 go-lint:
 	$(GOENV) python3 scripts/golangci-lint.py run
