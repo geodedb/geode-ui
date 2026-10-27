@@ -46,6 +46,7 @@ variables:
   # image variants are built locally but not pushed.
 
 default:
+  interruptible: true
   image: node:${NODE_VERSION}
   before_script:
     # Configure GitLab npm registry for @devnw scope
@@ -987,4 +988,12 @@ workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
       when: never
+    # Stop obsolete validation work after a required failure, while allowing
+    # default-branch publication and tag release work to finish independently.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      auto_cancel:
+        on_job_failure: all
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      auto_cancel:
+        on_job_failure: all
     - when: always
