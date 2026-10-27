@@ -6,7 +6,7 @@
 #   - Cross-compile a single static Go binary per linux/{amd64,arm64} +
 #     darwin/{amd64,arm64} target.
 #   - Bundle the SPA assets into the binary via //go:embed before the Go
-#     compile step (the npm build runs in `before:hooks`).
+#     compile step (CI reuses the build artifact; local runs use before:hooks).
 #   - Build 4 docker images: debian + alpine, each in amd64 + arm64; push to
 #     both GitLab Container Registry (CI_REGISTRY_IMAGE) and Docker Hub
 #     (geodedb/geode-ui), with multi-arch manifest tags.
@@ -26,8 +26,8 @@ project_name: geode-ui
 before:
   hooks:
     # Build the SPA so internal/ui/dist/* is populated before `go build`
-    # runs the //go:embed pass. CI seeds node_modules via the install
-    # job; locally, the engineer should `npm ci` first.
+    # runs the //go:embed pass. CI downloads the build job's SPA artifact
+    # and skips this hook; locally, the engineer should `npm ci` first.
   - npm run build
 
 builds:

@@ -279,9 +279,10 @@ build:
     NODE_OPTIONS: --max-old-space-size=4096
   script:
     - npm run build
+    - test -s internal/ui/dist/index.html
   artifacts:
     paths:
-      - dist/
+      - internal/ui/dist/
     expire_in: 7 days
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -297,11 +298,11 @@ pages:
   stage: pages
   needs: ['build']
   before_script: []
+  cache: []
   script:
-    - mv dist public
-  artifacts:
-    paths:
-      - public
+    - test -s internal/ui/dist/index.html
+  pages:
+    publish: internal/ui/dist
   environment:
     name: production
     url: $CI_PAGES_URL
@@ -640,8 +641,7 @@ security-gitleaks:
 # Two release entry points mirroring the ../geode pipeline:
 #
 #   • goreleaser:snapshot — runs on every main-branch commit. Builds the
-#     binaries + images locally and pushes the GitLab Container Registry
-#     tags only. Never touches Docker Hub or the GitLab Release page.
+#     binaries + images without publishing them.
 #     allow_failure: true so a flaky goreleaser run doesn't block main.
 #
 #   • goreleaser:release — runs only on git tags matching v*. Pushes to
@@ -652,19 +652,25 @@ security-gitleaks:
 # pipe-to-shell), authenticate to registries, then invoke goreleaser.
 
 .goreleaser-base:
-  image: docker:29
+  image: golang:${GO_VERSION}
   services:
     - docker:29-dind
   tags:
     - company
     - linux
+    - x86
+  cache: []
   variables:
+    DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ''
     DOCKER_BUILDKIT: '1'
     GIT_DEPTH: '0'
+    GORELEASER_FORCE_TOKEN: gitlab
   before_script:
-    # Tools: alpine package set + node (for the npm-build before-hook).
-    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm
+    # The build job supplies the SPA; GoReleaser only compiles/packages it.
+    - apk add --no-cache curl git bash tar xz coreutils jq docker-cli docker-cli-buildx
+    - go version
+    - test -s internal/ui/dist/index.html
     # Goreleaser binary (pinned, integrity-verifiable via SHA next time).
     - |
       curl -fsSL "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" -o /tmp/gr.tgz
@@ -705,8 +711,6 @@ security-gitleaks:
     # Buildx for multi-arch image assembly.
     - docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null
     - docker buildx inspect --bootstrap
-    # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
-    - npm ci
 
 goreleaser:snapshot:
   extends: .goreleaser-base
@@ -716,7 +720,7 @@ goreleaser:snapshot:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
     - job: go:test
       artifacts: false
   timeout: 1h
@@ -724,9 +728,8 @@ goreleaser:snapshot:
     - . /tmp/dockerhub.env
     - echo "SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
     # `--snapshot` skips git-tag validation, marks the build as a snapshot,
-    # and short-circuits any release-publish step. Container images are
-    # still pushed (snapshot tags carry the `-snapshot-<sha>` suffix).
-    - goreleaser release --snapshot --clean --timeout 60m
+    # and skips publication, including container image pushes.
+    - goreleaser release --snapshot --clean --skip=before --timeout 60m
     - ls -la dist/
   artifacts:
     paths:
@@ -744,14 +747,14 @@ goreleaser:release:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
     - job: go:test
       artifacts: false
   timeout: 2h
   script:
     - . /tmp/dockerhub.env
     - 'echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
-    - goreleaser release --clean --timeout 120m
+    - goreleaser release --clean --skip=before --timeout 120m
     - ls -la dist/
   artifacts:
     paths:
