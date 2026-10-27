@@ -408,7 +408,8 @@ go:test:
     # for static builds.
     CGO_ENABLED: "1"
   script:
-    - apk add --no-cache git make gcc musl-dev
+    # Makefile selects /usr/bin/env bash for every recipe.
+    - apk add --no-cache bash git make gcc musl-dev
     - test -s internal/ui/dist/index.html
     - make go-test
   rules:
