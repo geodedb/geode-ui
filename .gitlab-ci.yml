@@ -851,7 +851,7 @@ electron:linux:
 electron:mac:
   extends: .electron-base
   tags:
-    - macos
+    [dedicated, macos, arm]
   script:
     - npm ci
     - npm run electron:assemble
@@ -984,6 +984,7 @@ workflow:
   # SRE-172: a newer commit on the same ref cancels the superseded pipeline's
   # interruptible (validation) jobs. Release/deploy jobs stay non-interruptible.
   auto_cancel:
+    on_job_failure: all
     on_new_commit: interruptible
   # An open MR owns push validation; other pipeline sources stay admitted.
   rules:
