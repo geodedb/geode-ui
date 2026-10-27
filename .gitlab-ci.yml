@@ -3,9 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 include:
-  # Security scanning. The GitLab analyzer images are amd64-only, so pin
-  # these jobs to x86 runners; with the default company/linux tags they
-  # also land on the ARM lab runner and die with "exec format error".
+  # Standalone secret checks.
   - component: gitlab.com/devnw/ci-catalog/security-gitleaks@aad997d40e358eeef7ec943f761498341c37c724
 
   # SBOM
@@ -61,9 +59,8 @@ default:
   tags:
     - company
     - linux
-    # Policy-injected scanner jobs inherit these tags; their GitLab SAST images
-    # are AMD64-only, so keep them off the ARM fleet (SRE-183). electron:mac and
-    # electron:win set their own tags.
+    # Native artifacts are built for AMD64. Electron's other platforms set
+    # their own runner tags.
     - amd64
 
 stages:
@@ -564,6 +561,8 @@ e2e:playwright:
     DOCKER_TLS_CERTDIR: "/certs"
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
+    COMPOSE_PROJECT_NAME: "geode-ui-${CI_PROJECT_ID}-${CI_JOB_ID}"
+    COMPOSE_FILES: "-f deploy/docker-compose.test.yml -f deploy/docker-compose.ci.yml"
   script:
     - apk add --no-cache make git bash curl
     # The dind service can still be starting when the script begins.
@@ -575,31 +574,21 @@ e2e:playwright:
       docker info >/dev/null
     # Build the e2e stack and bring services up.
     - make e2e-up
-    # Wait for geode-ui to be ready.
-    - |
-      for i in $(seq 1 90); do
-        if wget -qO- http://docker:8080/healthz 2>/dev/null | grep -q ok; then
-          echo "geode-ui is healthy"
-          break
-        fi
-        sleep 2
-      done
     # Build the playwright runner and run the suite. Copy reports back through
     # the Docker API: the daemon may not share this job's checkout paths.
-    # The runner uses the dind daemon's host network, where the stack's
-    # published ports are on localhost; the "docker" service alias only
-    # resolves inside this job container.
-    - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
+    # Playwright's global setup owns the bounded health wait. Browser and
+    # services communicate on this job's network without publishing ports.
+    - docker build -f deploy/playwright/Dockerfile.playwright -t "${COMPOSE_PROJECT_NAME}-playwright:e2e" .
     - mkdir -p e2e/playwright-report
     - |
-      container_id="$(docker create --network=host \
-        -e UI_URL=http://localhost:8080 \
-        -e MCP_HOST=localhost \
+      container_id="$(docker create --network="${COMPOSE_PROJECT_NAME}_default" \
+        -e UI_URL=http://geode-ui:8080 \
+        -e MCP_HOST=geode-mcp \
         -e MCP_PORT=8090 \
         -e ADMIN_USER=geode \
         -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}" \
         -e ADMIN_PROFILE=default \
-        pw:local)"
+        "${COMPOSE_PROJECT_NAME}-playwright:e2e")"
       printf '%s\n' "$container_id" > .e2e-playwright-container
       docker start --attach "$container_id"
   after_script:
@@ -614,11 +603,12 @@ e2e:playwright:
     # Keep the engine and server logs (and every other service's) so a
     # failed run can be diagnosed after the stack is gone.
     - mkdir -p e2e/compose-logs
-    - docker compose -f deploy/docker-compose.test.yml ps -a > e2e/compose-logs/ps.txt 2>&1 || true
-    - docker compose -f deploy/docker-compose.test.yml logs --no-color --timestamps geode > e2e/compose-logs/geode.log 2>&1 || true
-    - docker compose -f deploy/docker-compose.test.yml logs --no-color --timestamps geode-ui > e2e/compose-logs/geode-ui.log 2>&1 || true
-    - docker compose -f deploy/docker-compose.test.yml logs --no-color --timestamps > e2e/compose-logs/all.log 2>&1 || true
+    - docker compose $COMPOSE_FILES ps -a > e2e/compose-logs/ps.txt 2>&1 || true
+    - docker compose $COMPOSE_FILES logs --no-color --timestamps geode > e2e/compose-logs/geode.log 2>&1 || true
+    - docker compose $COMPOSE_FILES logs --no-color --timestamps geode-ui > e2e/compose-logs/geode-ui.log 2>&1 || true
+    - docker compose $COMPOSE_FILES logs --no-color --timestamps > e2e/compose-logs/all.log 2>&1 || true
     - make e2e-down || true
+    - docker image rm "${COMPOSE_PROJECT_NAME}-playwright:e2e" "${COMPOSE_PROJECT_NAME}-ui:e2e" "${COMPOSE_PROJECT_NAME}-geode:e2e" || true
   artifacts:
     when: always
     paths:
