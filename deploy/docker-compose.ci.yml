@@ -1,0 +1,22 @@
+# CI connects the browser through this job's private Compose network. Keep
+# local development's published ports and subnet out of shared runner hosts.
+services:
+  geode:
+    image: "${COMPOSE_PROJECT_NAME:?CI Compose project is required}-geode:e2e"
+    ports: !reset []
+  geode-init:
+    image: "${COMPOSE_PROJECT_NAME:?CI Compose project is required}-geode:e2e"
+  geode-ui:
+    image: "${COMPOSE_PROJECT_NAME:?CI Compose project is required}-ui:e2e"
+    ports: !reset []
+  geode-mcp:
+    image: "${COMPOSE_PROJECT_NAME:?CI Compose project is required}-geode:e2e"
+    ports: !reset []
+  geode-lsp:
+    image: "${COMPOSE_PROJECT_NAME:?CI Compose project is required}-geode:e2e"
+    ports: !reset []
+
+networks:
+  default:
+    ipam:
+      config: !reset []

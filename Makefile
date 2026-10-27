@@ -106,7 +106,8 @@ dev:
 	@echo "Run 'make web-dev' in one terminal and './$(BIN) -listen :8080' in another"
 
 # ----- E2E stack -----
-COMPOSE := docker compose -f deploy/docker-compose.test.yml
+COMPOSE_FILES ?= -f deploy/docker-compose.test.yml
+COMPOSE := docker compose $(COMPOSE_FILES)
 
 # The geode engine image extends the published Geode release image
 # (deploy/geode/Dockerfile.geode), so no local geode build is needed.
@@ -116,7 +117,7 @@ e2e-deps:
 # Bring up the test stack (build images, run init, leave services running).
 e2e-up: e2e-deps
 	$(COMPOSE) up -d --build
-	@echo "stack is up — http://localhost:8080 (UI), :8090 (MCP), :2087 (LSP), :3141/udp (Geode)"
+	@echo "E2E stack started"
 
 # Tear down + delete named volumes (full reset for next run).
 e2e-down:
