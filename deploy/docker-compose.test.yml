@@ -122,6 +122,8 @@ services:
       context: ../..
       dockerfile: geode-ui/deploy/Dockerfile
       target: e2e
+      args:
+        GEODE_E2E_BUILD: 'true'
     depends_on:
       geode-init:
         condition: service_completed_successfully
