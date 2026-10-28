@@ -587,9 +587,9 @@ e2e:playwright:
   # Stack build (~7 min) + seeding + ~106 specs on a contended shared VM
   # ran past the 1 h project default (job 17097098422).
   timeout: 2h
-  # The Geode image requires x86, and the stack requires privileged DinD.
-  # Spot workers provide both, with one job per disposable worker.
-  tags: [company, linux, x86, aws-spot]
+  # The fast AWS runner provides x86 and privileged DinD for the browser stack.
+  # The same browser suite takes 1.5 minutes there versus 21.5 on Spot.
+  tags: [company, linux, x86, go-fast]
   services:
     - docker:29-dind
   variables:
