@@ -1,6 +1,10 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const UI_URL = process.env.UI_URL ?? 'http://localhost:8080'
+const graphPerformanceSpecs = [
+  '**/19-graph-bench.spec.ts',
+  '**/20-graph-scale-degradation.spec.ts',
+]
 
 export default defineConfig({
   testDir: './specs',
@@ -9,6 +13,9 @@ export default defineConfig({
 
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
+  // Report the first exhausted failure immediately so workflow cancellation
+  // can release the other jobs. Keep the existing per-test retry policy.
+  maxFailures: process.env.CI ? 1 : 0,
   // The Schema Explorer, responsive-data-table, and multi-request specs
   // each run a query against the single upstream Geode v0.5.11 driver,
   // which serialises those queries — so under the suite's parallel
@@ -51,7 +58,11 @@ export default defineConfig({
   },
 
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      testIgnore: graphPerformanceSpecs,
+      use: { ...devices['Desktop Chrome'] },
+    },
     // Mobile + tablet projects exercise the same suite at the
     // viewports we promise to support after Phase 3 of the UI audit.
     // The hamburger drawer, GraphView vertical-stack, and SchemaExplorer
@@ -78,6 +89,19 @@ export default defineConfig({
         hasTouch: true,
       },
       grep: /@tablet|@responsive|@auth/,
+    },
+    {
+      name: 'chromium-graph-performance',
+      testMatch: graphPerformanceSpecs,
+      use: { ...devices['Desktop Chrome'] },
+      // The 6,000-node degradation check and renderer benchmark shared the
+      // software GPU with each other and the functional suite. Run them one
+      // at a time after CI's functional projects, retaining every fixture,
+      // assertion and timeout. Local focused benchmarks stay independent.
+      workers: 1,
+      dependencies: process.env.CI
+        ? ['chromium', 'mobile-chrome', 'tablet-chrome']
+        : [],
     },
   ],
 })
