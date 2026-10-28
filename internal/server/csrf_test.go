@@ -1,4 +1,5 @@
 // Tests for the CSRF double-submit middleware (SEC-F7 / #62 S3b).
+
 package server
 
 import (

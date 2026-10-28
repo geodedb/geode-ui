@@ -62,7 +62,10 @@ type Claims struct {
 	Profile      string   `json:"profile"`
 	Roles        []string `json:"roles"`
 	ConnectionID string   `json:"cid,omitempty"`
-	jjwt.RegisteredClaims
+	// Declared last on purpose: struct field order fixes the JSON key
+	// order of every issued token payload, so moving the embed to the
+	// top would change minted token bytes.
+	jjwt.RegisteredClaims //nolint:embeddedstructfieldcheck // field order = JWT payload key order.
 }
 
 // Issuer signs and verifies HS256 tokens. It is safe for concurrent use:
@@ -74,6 +77,10 @@ type Issuer struct {
 	revoked *RevocationSet
 }
 
+// minSecretBytes is the minimum HMAC secret length NewIssuer accepts
+// (256 bits, matching the HS256 output size).
+const minSecretBytes = 32
+
 // NewIssuer constructs an Issuer. The secret must be at least 32 bytes
 // (HS256 keys shorter than the hash output size weaken signature
 // strength) and the ttl must lie between one minute and 24 hours —
@@ -82,7 +89,7 @@ type Issuer struct {
 // created with a fresh in-process RevocationSet (SEC-N2 / #64),
 // reachable via Revocation().
 func NewIssuer(secret []byte, ttl time.Duration) (*Issuer, error) {
-	if len(secret) < 32 {
+	if len(secret) < minSecretBytes {
 		return nil, errors.New("jwt: secret must be at least 32 bytes")
 	}
 	if ttl < time.Minute || ttl > 24*time.Hour {

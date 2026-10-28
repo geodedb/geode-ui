@@ -1,6 +1,7 @@
 package server
 
 import (
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,14 +70,20 @@ type ProfileLimiterConfig struct {
 	TrustProxyXFF bool
 }
 
+// Production profile-limiter defaults; see ProfileLimiterDefaults.
+const (
+	defaultProfilePerActorRate  = 0.5 // tokens/second = 30 req/min
+	defaultProfilePerActorBurst = 10
+)
+
 // ProfileLimiterDefaults applies production defaults: 30 req/min per
 // actor with burst 10. Production callers can pass an empty
 // ProfileLimiterConfig{} (with JWT set) and let NewProfileLimiter fill
 // these in.
 func ProfileLimiterDefaults() ProfileLimiterConfig {
 	return ProfileLimiterConfig{
-		PerActorRate:  0.5, // 30 req/min
-		PerActorBurst: 10,
+		PerActorRate:  defaultProfilePerActorRate,
+		PerActorBurst: defaultProfilePerActorBurst,
 		Now:           time.Now,
 	}
 }
@@ -142,13 +149,10 @@ func (l *ProfileLimiter) Allow(key string) (bool, time.Duration) {
 	if bkt.tokens < 1 {
 		shortfall := 1.0 - bkt.tokens
 		bkt.mu.Unlock()
-		retry := time.Duration(shortfall / l.cfg.PerActorRate * float64(time.Second))
-		if retry < time.Second {
-			retry = time.Second
-		}
+		retry := max(time.Duration(shortfall/l.cfg.PerActorRate*float64(time.Second)), time.Second)
 		return false, retry
 	}
-	bkt.tokens -= 1
+	bkt.tokens--
 	bkt.mu.Unlock()
 	return true, 0
 }
@@ -164,9 +168,7 @@ func (l *ProfileLimiter) insertBucket(key string, now time.Time) *ipBucket {
 	}
 	bkt := &ipBucket{tokens: l.cfg.PerActorBurst, last: now}
 	next := make(map[string]*ipBucket, len(current)+1)
-	for k, v := range current {
-		next[k] = v
-	}
+	maps.Copy(next, current)
 	next[key] = bkt
 	l.perActor.Store(&next)
 	return bkt
@@ -252,5 +254,6 @@ func rejectProfileCRUD(w http.ResponseWriter, retry time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(retry/time.Second)))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
-	_, _ = w.Write([]byte(`{"code":"rate_limited","description":"too many profile CRUD attempts; try again later","reason":"actor_rate_limited"}`))
+	_, _ = w.Write([]byte(`{"code":"rate_limited",` +
+		`"description":"too many profile CRUD attempts; try again later","reason":"actor_rate_limited"}`))
 }

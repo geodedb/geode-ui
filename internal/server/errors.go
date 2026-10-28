@@ -20,6 +20,17 @@ type endpointError struct {
 
 func (e *endpointError) Error() string { return e.code + ": " + e.description }
 
+// responseWritten is the result a genapi handler returns after it has
+// already written the full HTTP response itself (typically an error
+// envelope via writeEndpointError). The generated dispatcher in
+// gen/api treats a (nil, nil) result as "response handled": it writes
+// nothing further and records the span as OK. Returning a non-nil
+// error instead would make the dispatcher append a generic 500 body,
+// so these call sites must not be converted to sentinel errors.
+func responseWritten[T any]() (*T, error) {
+	return nil, nil //nolint:nilnil // genapi handler contract: (nil, nil) means the handler already wrote the response.
+}
+
 // errorBody is the on-wire JSON shape every endpoint error serialises
 // into. Defining it as a struct (rather than a map[string]any) keeps
 // the key order deterministic — required by GAP-N10 so that the
@@ -88,8 +99,7 @@ func writeNotFound(w http.ResponseWriter, msg string) {
 // asEndpointError extracts an *endpointError from err if it is one (or wraps
 // one), otherwise returns nil.
 func asEndpointError(err error) *endpointError {
-	var ep *endpointError
-	if errors.As(err, &ep) {
+	if ep, ok := errors.AsType[*endpointError](err); ok {
 		return ep
 	}
 	return nil
@@ -113,10 +123,12 @@ var errWireFeatureMissing = errors.New("server: wire feature not implemented on 
 // the wire-degradation behaviour cannot drift silently when a
 // driver upstream changes its error wording. Adding a new entry
 // requires both a code change here AND an explicit test row.
-var wireFeatureMissingSubstrings = []string{
-	"parse error",
-	"expected token",
-	"expected identifier",
+func wireFeatureMissingSubstrings() []string {
+	return []string{
+		"parse error",
+		"expected token",
+		"expected identifier",
+	}
 }
 
 // isWireFeatureMissing reports whether err looks like a parse error from
@@ -160,7 +172,7 @@ func isWireFeatureMissing(err error) bool {
 	if !strings.Contains(msg, "42000") {
 		return false
 	}
-	for _, sub := range wireFeatureMissingSubstrings {
+	for _, sub := range wireFeatureMissingSubstrings() {
 		if strings.Contains(msg, sub) {
 			return true
 		}
@@ -212,9 +224,10 @@ func wireErr(err error) error {
 	}
 	if isWireFeatureMissing(err) {
 		return &endpointError{
-			status:      http.StatusNotImplemented,
-			code:        ErrCodeWireFeatureMissing,
-			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA may have surfaced this CTA prematurely",
+			status: http.StatusNotImplemented,
+			code:   ErrCodeWireFeatureMissing,
+			description: "this operation is not supported on the connected Geode build (status_class=42000); the SPA " +
+				"may have surfaced this CTA prematurely",
 		}
 	}
 	return &endpointError{

@@ -78,9 +78,9 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 	out := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
 		obj := rowToMap(cols, row)
-		if _, hasName := obj["name"]; !hasName {
+		if _, hasName := obj[colName]; !hasName {
 			if rn, ok := obj["role_name"]; ok {
-				obj["name"] = rn
+				obj[colName] = rn
 			}
 		}
 		raw, mErr := json.Marshal(obj)
@@ -115,7 +115,11 @@ func (s *GraphServer) GetRoles(w http.ResponseWriter, r *http.Request, _ *gentyp
 // invalid_permission rather than emitting an upstream-broken statement
 // that would trip a 422 wire_feature_missing. Permission membership
 // is modelled per-graph via GRANT (see handlers_grants.go).
-func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *gentypes.RoleCreateReq) (*gentypes.Role, error) {
+//
+//nolint:revive // var-naming: the method name is fixed by the genapi-generated ServerInterface.
+func (s *GraphServer) PostApiRoles(
+	w http.ResponseWriter, r *http.Request, req *gentypes.RoleCreateReq,
+) (*gentypes.Role, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -128,7 +132,8 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	// emitting an upstream-broken `WITH PERMISSIONS` clause.
 	if len(req.Permissions) > 0 {
 		return nil, respondErr(w, badRequest(ErrCodeInvalidPermission,
-			"role permissions are not modelled in Geode v0.5.15 grammar; use GRANT per-graph (see docs/GQL_AUTH_DDL.md Limitations #2)"))
+			"role permissions are not modelled in Geode v0.5.15 grammar; use GRANT per-graph (see "+
+				"docs/GQL_AUTH_DDL.md Limitations #2)"))
 	}
 	stmt := "CREATE ROLE " + rname
 	if req.Description != "" {
@@ -143,7 +148,7 @@ func (s *GraphServer) PostApiRoles(w http.ResponseWriter, r *http.Request, req *
 	}
 	emitAudit(auditEventRoleCreated,
 		"user", userFromContext(r.Context()),
-		"role", req.Name,
+		auditKeyRole, req.Name,
 		"permissions", req.Permissions,
 	)
 	return &gentypes.Role{
@@ -176,7 +181,7 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 	}
 	nameCol := -1
 	for i, c := range cols {
-		if c == "role_name" || c == "name" || c == "role" {
+		if c == "role_name" || c == colName || c == colRole {
 			nameCol = i
 			break
 		}
@@ -210,7 +215,9 @@ func (s *GraphServer) GetRole(w http.ResponseWriter, r *http.Request, req *genty
 // uses fetchRemove which is a no-op on missing keys), so `IF EXISTS`
 // is a safeguard against a future upstream tightening rather than a
 // semantic change.
-func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *gentypes.RoleParam) (*gentypes.Empty, error) {
+func (s *GraphServer) DeleteRole(
+	w http.ResponseWriter, r *http.Request, req *gentypes.RoleParam,
+) (*gentypes.Empty, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -224,7 +231,7 @@ func (s *GraphServer) DeleteRole(w http.ResponseWriter, r *http.Request, req *ge
 	}
 	emitAudit(auditEventRoleDeleted,
 		"user", userFromContext(r.Context()),
-		"role", req.Role,
+		auditKeyRole, req.Role,
 	)
 	return &gentypes.Empty{}, nil
 }
@@ -248,7 +255,7 @@ func roleFromRow(cols []string, row []any) *gentypes.Role {
 			break
 		}
 		switch c {
-		case "role_name", "name", "role":
+		case "role_name", colName, colRole:
 			rl.Name = asStr(row[i])
 		case "description":
 			rl.Description = asStr(row[i])

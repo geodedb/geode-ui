@@ -25,7 +25,7 @@ package server
 // Codes are grouped by area. The string value of each constant is the
 // exact byte sequence emitted on the wire; do not change it.
 const (
-	// --- generic / transport ---
+	// Section: generic / transport.
 
 	// ErrCodeProfileUnreachable: the connection pool could not produce a
 	// *sql.DB for the request's connection profile (502).
@@ -43,14 +43,17 @@ const (
 	// configuration (e.g. no auth signing key) for this endpoint (500).
 	ErrCodeServerMisconfigured = "server_misconfigured"
 
-	// --- auth ---
+	// Section: auth.
 
 	// ErrCodeInvalidCredentials: username/password did not authenticate
 	// (401). Constant value is byte-identical across every login-failure
 	// mode (see errorBody doc / GAP-N10).
 	ErrCodeInvalidCredentials = "invalid_credentials"
+	// ErrCodeRateLimited: the login limiter rejected the attempt (per-IP
+	// rate or per-user lockout); the body's "reason" says which (429).
+	ErrCodeRateLimited = "rate_limited"
 
-	// --- password policy ---
+	// Section: password policy.
 
 	// ErrCodePasswordTooShort: candidate password is below the minimum
 	// length (400).
@@ -67,7 +70,7 @@ const (
 	// ErrCodePasswordPolicy: catch-all password-policy violation (400).
 	ErrCodePasswordPolicy = "password_policy"
 
-	// --- profile CRUD / profilestore ---
+	// Section: profile CRUD / profilestore.
 
 	// ErrCodeStoreDisabled: the profile store is not configured (503).
 	ErrCodeStoreDisabled = "store_disabled"
@@ -94,13 +97,13 @@ const (
 	// failed validation (400).
 	ErrCodeInvalidPoolOverrides = "invalid_pool_overrides"
 
-	// --- schema / catalog ---
+	// Section: schema / catalog.
 
 	// ErrCodeSchemaError: a driver-level error running a catalog
 	// statement (SHOW INDEXES / CONSTRAINTS / …) (422).
 	ErrCodeSchemaError = "schema_error"
 
-	// --- transactions ---
+	// Section: transactions.
 
 	// ErrCodeTxBeginFailed: opening a transaction on the upstream
 	// failed (502).
@@ -115,7 +118,7 @@ const (
 	// ErrCodeTxRollbackFailed: ROLLBACK on the upstream failed (502).
 	ErrCodeTxRollbackFailed = "tx_rollback_failed"
 
-	// --- uploads ---
+	// Section: uploads.
 
 	// ErrCodeUploadDisabled: file uploads are not enabled on this
 	// server (403).
@@ -140,7 +143,7 @@ const (
 	// place failed (500).
 	ErrCodeUploadRenameFailed = "upload_rename_failed"
 
-	// --- audit ---
+	// Section: audit.
 
 	// ErrCodeInvalidSince: the audit-log `since` query parameter is not a
 	// valid timestamp (400).
@@ -221,84 +224,3 @@ const (
 	// ErrCodeWSCanceled: the stream was cancelled by the client.
 	ErrCodeWSCanceled = "canceled"
 )
-
-// allErrorCodes lists every ErrCode* constant in this file. errorcodes_test.go
-// uses it as the golden set: every literal error code in the package's
-// source must be present here, and every entry here must be referenced.
-//
-// Keep this in sync with the const block above (the test will fail loudly
-// if a constant is missing from this slice).
-var allErrorCodes = []string{
-	ErrCodeProfileUnreachable,
-	ErrCodeInvalidParams,
-	ErrCodeQueryError,
-	ErrCodeInternalError,
-	ErrCodeServerMisconfigured,
-	ErrCodeInvalidCredentials,
-	ErrCodePasswordTooShort,
-	ErrCodePasswordTooWeak,
-	ErrCodePasswordContainsUsername,
-	ErrCodePasswordPwned,
-	ErrCodePasswordPolicy,
-	ErrCodeStoreDisabled,
-	ErrCodeNotFound,
-	ErrCodeConflict,
-	ErrCodeImmutable,
-	ErrCodeInvalid,
-	ErrCodeForbidden,
-	ErrCodeMissingID,
-	ErrCodeInvalidScope,
-	ErrCodeInvalidTLS,
-	ErrCodeInvalidPoolOverrides,
-	ErrCodeSchemaError,
-	ErrCodeTxBeginFailed,
-	ErrCodeTxUseGraphFailed,
-	ErrCodeTxNotFound,
-	ErrCodeTxCommitFailed,
-	ErrCodeTxRollbackFailed,
-	ErrCodeUploadDisabled,
-	ErrCodeMissingFile,
-	ErrCodeInvalidFilename,
-	ErrCodeUploadDirFailed,
-	ErrCodeUploadOpenFailed,
-	ErrCodeUploadWriteFailed,
-	ErrCodeUploadCloseFailed,
-	ErrCodeUploadRenameFailed,
-	ErrCodeInvalidSince,
-	ErrCodeUserAdminError,
-	ErrCodeWireFeatureMissing,
-	ErrCodeUserNotFound,
-	ErrCodeRoleNotFound,
-	ErrCodePolicyNotFound,
-	ErrCodeBackupNotFound,
-	ErrCodeInvalidEmail,
-	ErrCodeInvalidPassword,
-	ErrCodeInvalidUsername,
-	ErrCodeInvalidRole,
-	ErrCodeInvalidPermission,
-	ErrCodeInvalidDescription,
-	ErrCodeInvalidPolicyName,
-	ErrCodeInvalidExpression,
-	ErrCodeInvalidResource,
-	ErrCodeInvalidGrantee,
-	ErrCodeInvalidGranteeKind,
-	ErrCodeInvalidName,
-	ErrCodeInvalidGraph,
-	ErrCodeInvalidOutput,
-	ErrCodeInvalidFile,
-	ErrCodeInvalidTargetTime,
-	ErrCodeWSInternal,
-	ErrCodeWSBadRequest,
-	ErrCodeWSScan,
-	ErrCodeWSCanceled,
-}
-
-// errorCodeSet is allErrorCodes as a set for O(1) membership checks in
-// the golden test and any future runtime validation.
-var errorCodeSet = func() map[string]struct{} {
-	m := make(map[string]struct{}, len(allErrorCodes))
-	for _, c := range allErrorCodes {
-		m[c] = struct{}{}
-	}
-	return m
-}()

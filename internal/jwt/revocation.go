@@ -126,13 +126,6 @@ func (rs *RevocationSet) AttachSQLiteRW(rw, ro *sql.DB) error {
 	return nil
 }
 
-func (rs *RevocationSet) now() time.Time {
-	if rs.nowFn != nil {
-		return rs.nowFn()
-	}
-	return time.Now()
-}
-
 // Revoke marks the token identified by jti as revoked until exp. A blank
 // jti is ignored (legacy tokens minted before SEC-N2 carry no jti and
 // therefore cannot be individually revoked — they remain subject to the
@@ -187,21 +180,6 @@ func (rs *RevocationSet) RevokeUser(username string) {
 	}
 }
 
-// persistUser write-throughs a password_changed_at row. now is always
-// strictly newer than any previously-persisted instant for username
-// (the caller only reaches here after winning the monotonic-advance
-// check), so an INSERT OR REPLACE can never move the durable marker
-// backward. A SQLite failure is logged, not fatal — the in-memory
-// marker is already updated and takes effect for this process.
-func (rs *RevocationSet) persistUser(username string, now time.Time) {
-	if rs.backend == nil {
-		return
-	}
-	if err := rs.backend.putUser(username, now); err != nil {
-		slog.Error("jwt: persist user revocation", "user", username, "err", err)
-	}
-}
-
 // IsRevoked reports whether the supplied claims correspond to a token
 // that has been revoked, by either mechanism. A nil RevocationSet or nil
 // claims is treated as "not revoked".
@@ -221,6 +199,87 @@ func (rs *RevocationSet) IsRevoked(c *Claims) bool {
 		return true
 	}
 	return false
+}
+
+// Sweep drops jti entries whose expiry has passed and passwordChangedAt
+// entries older than maxTokenAge (which should be ≥ the maximum JWT TTL,
+// so no still-valid token can reference a swept instant). Call it
+// periodically — e.g. from StartSweeper — to keep the maps bounded.
+func (rs *RevocationSet) Sweep(maxTokenAge time.Duration) {
+	now := rs.now()
+	// Durable layer first (one or two DELETEs), then the cache. Order
+	// doesn't matter for correctness here — both ends are converging on
+	// "drop the stale rows" — but doing SQLite first keeps the pattern
+	// consistent with the write-through path. A SQLite failure is
+	// logged, not fatal: the cache prune below still bounds memory.
+	if rs.backend != nil {
+		if err := rs.backend.sweep(now, maxTokenAge); err != nil {
+			slog.Error("jwt: sweep durable revocation store", "err", err)
+		}
+	}
+	rs.revoked.Range(func(k, v any) bool {
+		if exp, ok := v.(time.Time); ok && !now.Before(exp) {
+			rs.revoked.Delete(k)
+		}
+		return true
+	})
+	if maxTokenAge > 0 {
+		cutoff := now.Add(-maxTokenAge)
+		rs.passwordChangedAt.Range(func(k, v any) bool {
+			if changedAt, ok := v.(time.Time); ok && changedAt.Before(cutoff) {
+				rs.passwordChangedAt.Delete(k)
+			}
+			return true
+		})
+	}
+}
+
+// defaultSweepInterval is the StartSweeper cadence used when the caller
+// passes a non-positive interval.
+const defaultSweepInterval = 10 * time.Minute
+
+// StartSweeper runs Sweep on a ticker until ctx is cancelled. interval
+// is the sweep cadence; maxTokenAge is forwarded to Sweep (pass the
+// issuer's TTL ceiling — 24h is a safe over-estimate). It returns
+// immediately; the loop runs in a goroutine.
+func (rs *RevocationSet) StartSweeper(ctx context.Context, interval, maxTokenAge time.Duration) {
+	if interval <= 0 {
+		interval = defaultSweepInterval
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				rs.Sweep(maxTokenAge)
+			}
+		}
+	}()
+}
+
+func (rs *RevocationSet) now() time.Time {
+	if rs.nowFn != nil {
+		return rs.nowFn()
+	}
+	return time.Now()
+}
+
+// persistUser write-throughs a password_changed_at row. now is always
+// strictly newer than any previously-persisted instant for username
+// (the caller only reaches here after winning the monotonic-advance
+// check), so an INSERT OR REPLACE can never move the durable marker
+// backward. A SQLite failure is logged, not fatal — the in-memory
+// marker is already updated and takes effect for this process.
+func (rs *RevocationSet) persistUser(username string, now time.Time) {
+	if rs.backend == nil {
+		return
+	}
+	if err := rs.backend.putUser(username, now); err != nil {
+		slog.Error("jwt: persist user revocation", "user", username, "err", err)
+	}
 }
 
 // jtiRevoked reports whether the per-token revocation map names jti.
@@ -264,59 +323,4 @@ func (rs *RevocationSet) subjectRevokeAll(sub string, iat time.Time) bool {
 	}
 	// iat at or before the change instant ⇒ stale token.
 	return !iat.After(changedAt)
-}
-
-// Sweep drops jti entries whose expiry has passed and passwordChangedAt
-// entries older than maxTokenAge (which should be ≥ the maximum JWT TTL,
-// so no still-valid token can reference a swept instant). Call it
-// periodically — e.g. from StartSweeper — to keep the maps bounded.
-func (rs *RevocationSet) Sweep(maxTokenAge time.Duration) {
-	now := rs.now()
-	// Durable layer first (one or two DELETEs), then the cache. Order
-	// doesn't matter for correctness here — both ends are converging on
-	// "drop the stale rows" — but doing SQLite first keeps the pattern
-	// consistent with the write-through path. A SQLite failure is
-	// logged, not fatal: the cache prune below still bounds memory.
-	if rs.backend != nil {
-		if err := rs.backend.sweep(now, maxTokenAge); err != nil {
-			slog.Error("jwt: sweep durable revocation store", "err", err)
-		}
-	}
-	rs.revoked.Range(func(k, v any) bool {
-		if exp, ok := v.(time.Time); ok && !now.Before(exp) {
-			rs.revoked.Delete(k)
-		}
-		return true
-	})
-	if maxTokenAge > 0 {
-		cutoff := now.Add(-maxTokenAge)
-		rs.passwordChangedAt.Range(func(k, v any) bool {
-			if changedAt, ok := v.(time.Time); ok && changedAt.Before(cutoff) {
-				rs.passwordChangedAt.Delete(k)
-			}
-			return true
-		})
-	}
-}
-
-// StartSweeper runs Sweep on a ticker until ctx is cancelled. interval
-// is the sweep cadence; maxTokenAge is forwarded to Sweep (pass the
-// issuer's TTL ceiling — 24h is a safe over-estimate). It returns
-// immediately; the loop runs in a goroutine.
-func (rs *RevocationSet) StartSweeper(ctx context.Context, interval, maxTokenAge time.Duration) {
-	if interval <= 0 {
-		interval = 10 * time.Minute
-	}
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				rs.Sweep(maxTokenAge)
-			}
-		}
-	}()
 }

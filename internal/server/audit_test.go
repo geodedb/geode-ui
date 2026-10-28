@@ -25,7 +25,7 @@ func resetAuditRing() func() {
 
 func TestAuditRing_AppendAndSnapshot(t *testing.T) {
 	t.Cleanup(resetAuditRing())
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		defaultAuditRing.append(AuditEntry{
 			Timestamp: time.Date(2026, 5, 6, 12, i, 0, 0, time.UTC),
 			Event:     "tx_begun",
@@ -47,7 +47,7 @@ func TestAuditRing_AppendAndSnapshot(t *testing.T) {
 func TestAuditRing_FilterSince(t *testing.T) {
 	t.Cleanup(resetAuditRing())
 	base := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		defaultAuditRing.append(AuditEntry{
 			Timestamp: base.Add(time.Duration(i) * time.Minute),
 			Event:     "x",
@@ -67,7 +67,7 @@ func TestAuditRing_WrapAround(t *testing.T) {
 	// Force a small ring by stack-allocating one — the package-level
 	// auditBufferCap is too large to overflow in a unit test.
 	r := &auditRing{buf: make([]AuditEntry, 3)}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.append(AuditEntry{
 			Timestamp: time.Unix(int64(i), 0),
 			Event:     "x",
@@ -89,11 +89,11 @@ func TestAuditRing_WrapAround(t *testing.T) {
 func TestAuditRing_ConcurrentAppend(t *testing.T) {
 	r := &auditRing{buf: make([]AuditEntry, 256)}
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				r.append(AuditEntry{Event: "x", Fields: map[string]any{"i": i, "j": j}})
 			}
 		}(i)
@@ -125,7 +125,7 @@ func TestAuditRing_SnapshotSinceExact(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &auditRing{buf: make([]AuditEntry, tc.ringCap)}
-			for i := 0; i < tc.n; i++ {
+			for i := range tc.n {
 				r.append(AuditEntry{
 					Timestamp: base.Add(time.Duration(i) * time.Millisecond),
 					Event:     "x",
@@ -177,7 +177,7 @@ func TestAuditRing_SnapshotSinceUnderConcurrentAppend(t *testing.T) {
 	r := &auditRing{buf: make([]AuditEntry, 4096)}
 	base := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
 	const prefill = 200
-	for i := 0; i < prefill; i++ {
+	for i := range prefill {
 		r.append(AuditEntry{
 			Timestamp: base.Add(time.Duration(i) * time.Millisecond),
 			Event:     "x",
@@ -188,11 +188,11 @@ func TestAuditRing_SnapshotSinceUnderConcurrentAppend(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for w := 0; w < 8; w++ {
+	for w := range 8 {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for j := range 100 {
 				select {
 				case <-stop:
 					return
@@ -208,7 +208,7 @@ func TestAuditRing_SnapshotSinceUnderConcurrentAppend(t *testing.T) {
 			}
 		}(w)
 	}
-	for k := 0; k < 300; k++ {
+	for range 300 {
 		got := r.snapshot(since)
 		if cap(got) != len(got) {
 			t.Fatalf("snapshot cap=%d len=%d: result must be sized to match count, not whole ring", cap(got), len(got))
@@ -240,7 +240,7 @@ func BenchmarkAuditRing_ConcurrentAppendSnapshot(b *testing.B) {
 	r := newAuditRing()
 	// Pre-fill so snapshot copies a realistic, near-full ring.
 	now := time.Now()
-	for i := 0; i < auditBufferCap; i++ {
+	for i := range auditBufferCap {
 		r.append(AuditEntry{
 			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
 			Event:     "query_executed",
@@ -253,9 +253,7 @@ func BenchmarkAuditRing_ConcurrentAppendSnapshot(b *testing.B) {
 
 	stop := make(chan struct{})
 	var snapWG sync.WaitGroup
-	snapWG.Add(1)
-	go func() {
-		defer snapWG.Done()
+	snapWG.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -264,7 +262,7 @@ func BenchmarkAuditRing_ConcurrentAppendSnapshot(b *testing.B) {
 				_ = r.snapshot(since)
 			}
 		}
-	}()
+	})
 
 	b.ReportAllocs()
 	b.ResetTimer()

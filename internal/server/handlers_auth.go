@@ -28,14 +28,16 @@ import (
 // genapi calls this method "Login" — derived from the path's terminal
 // segment, /api/v1/auth/login, with the path containing no other
 // disambiguating tokens.
-func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentypes.LoginReq) (*gentypes.LoginResp, error) {
+func (s *GraphServer) Login(
+	w http.ResponseWriter, r *http.Request, req *gentypes.LoginReq,
+) (*gentypes.LoginResp, error) {
 	if s.cfg.JWT == nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
 			code:        ErrCodeServerMisconfigured,
 			description: "jwt issuer not configured",
 		})
-		return nil, nil
+		return responseWritten[gentypes.LoginResp]()
 	}
 	if s.cfg.Profiles == nil {
 		writeEndpointError(w, &endpointError{
@@ -43,7 +45,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 			code:        ErrCodeServerMisconfigured,
 			description: "profile lookup not configured",
 		})
-		return nil, nil
+		return responseWritten[gentypes.LoginResp]()
 	}
 	// SEC-N10 (#76): start the auth-failure timer BEFORE any upstream
 	// call so every failure path — unknown user, wrong password, and
@@ -84,7 +86,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 			markLoginBackendFailure(r.Context())
 		}
 		denyLogin(w, authStart, reason, req.Username, req.Password, profile)
-		return nil, nil
+		return responseWritten[gentypes.LoginResp]()
 	}
 	// Grant the "admin" role to configured bootstrap admins (see
 	// adminRolesFor / authenticateUpstream).
@@ -98,7 +100,7 @@ func (s *GraphServer) Login(w http.ResponseWriter, r *http.Request, req *gentype
 	emitAudit(auditEventLoginSuccess,
 		"user", req.Username,
 		"profile", profile,
-		"roles", roles,
+		auditKeyRoles, roles,
 		"cid", connID,
 	)
 	expiresIn := s.mintAndSetAuthCookie(w, token, exp)
@@ -166,13 +168,13 @@ func (s *GraphServer) adminRolesFor(username string, upstreamRoles []string) []s
 // callers (CLIs, MCP) keep working unchanged. The expires_in clamp
 // arithmetic is preserved exactly.
 func (s *GraphServer) mintAndSetAuthCookie(w http.ResponseWriter, token string, exp time.Time) int64 {
-	expiresIn := int64(exp.Sub(timeNow()).Seconds())
-	if expiresIn < 1 {
-		// Schema requires expires_in >= 1 — clamp to 1 second on the
-		// vanishingly unlikely race where the wall clock advanced
-		// past the expiry between Issue() and the Sub() call.
-		expiresIn = 1
-	}
+	// Schema requires expires_in >= 1 — clamp to 1 second on the
+	// vanishingly unlikely race where the wall clock advanced
+	// past the expiry between Issue() and the Sub() call.
+	expiresIn := max(int64(exp.Sub(timeNow()).Seconds()), 1)
+	// G124: HttpOnly and SameSite=Strict are set; Secure follows the
+	// operator's -secure-cookies flag so plain-HTTP local dev works.
+	//nolint:gosec // G124: see above.
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    token,
@@ -202,6 +204,9 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	// G124: HttpOnly and SameSite=Strict are set; Secure follows the
+	// operator's -secure-cookies flag so plain-HTTP local dev works.
+	//nolint:gosec // G124: see above.
 	http.SetCookie(w, &http.Cookie{
 		Name:     AuthCookieName,
 		Value:    "",
@@ -239,7 +244,9 @@ func (s *GraphServer) HandleLogout(w http.ResponseWriter, r *http.Request) {
 // `error`s from this function are reserved for *infrastructure*
 // problems (unknown profile, driver init failure) — callers translate
 // those to 502.
-func (s *GraphServer) authenticateUpstream(ctx context.Context, profile, username, password string) (bool, []string, error) {
+func (s *GraphServer) authenticateUpstream(
+	ctx context.Context, profile, username, password string,
+) (bool, []string, error) {
 	prof, err := s.cfg.Profiles.Lookup(profile)
 	if err != nil {
 		return false, nil, err
@@ -343,6 +350,8 @@ func newConnectionID() string {
 // immediately when the upstream answers faster). Lowercase / var so
 // tests in this package can lower it to a few microseconds and avoid
 // pegging the suite on real wall-clock waits.
+//
+//nolint:gochecknoglobals // test seam: tests lower the floor to avoid real wall-clock waits.
 var loginMinFailureLatency = 250 * time.Millisecond
 
 // dummyCompareTarget is a constant-time-compare sink: a fixed SHA-256
@@ -352,6 +361,8 @@ var loginMinFailureLatency = 250 * time.Millisecond
 // subtle.ConstantTimeCompare so the function's runtime is dominated
 // by the hash, not by an unequal-byte short-circuit. The output is
 // thrown away — we don't care whether they match.
+//
+//nolint:gochecknoglobals // fixed digest computed once; Go has no constant arrays.
 var dummyCompareTarget = sha256.Sum256([]byte("SEC-N10 anti-timing sink"))
 
 // performDummyCompare burns roughly the same CPU as a real password

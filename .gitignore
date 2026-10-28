@@ -72,3 +72,8 @@ coverage.txt
 # Stray build artifacts (a `go build` without -o bin/, an accidental pnpm install)
 /server
 /pnpm-lock.yaml
+
+# Local multi-module development workspaces (e.g. against a local
+# geode-client-go checkout) are per-developer and never committed.
+go.work
+go.work.sum

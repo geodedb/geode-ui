@@ -51,7 +51,9 @@ import (
 // to admin_writable.{users,roles,policies,grants}=false and
 // geode_version=s.cfg.Version — the same all-false posture the hard-
 // coded predecessor returned.
-func (s *GraphServer) GetCapabilities(_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.Capabilities, error) {
+func (s *GraphServer) GetCapabilities(
+	_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.Capabilities, error) {
 	ctx := r.Context()
 
 	// Resolve the active connection DB. A missing pool (test wiring
@@ -110,6 +112,14 @@ func readShowVersion(ctx context.Context, db *sql.DB) string {
 	return asStr(rows[0][0])
 }
 
+// SPA admin_writable gate keys reported by readShowCapabilities.
+const (
+	gateUsers    = "users"
+	gateRoles    = "roles"
+	gatePolicies = "policies"
+	gateGrants   = "grants"
+)
+
 // readShowCapabilities issues `SHOW CAPABILITIES` against db and folds
 // the (feature, supported) rows into the four-bool admin_writable map
 // the SPA consumes. Unknown features are ignored; missing/expected
@@ -120,10 +130,10 @@ func readShowVersion(ctx context.Context, db *sql.DB) string {
 // (the legacy posture).
 func readShowCapabilities(ctx context.Context, db *sql.DB) map[string]bool {
 	out := map[string]bool{
-		"users":    false,
-		"roles":    false,
-		"policies": false,
-		"grants":   false,
+		gateUsers:    false,
+		gateRoles:    false,
+		gatePolicies: false,
+		gateGrants:   false,
 	}
 	if db == nil {
 		return out
@@ -150,10 +160,10 @@ func readShowCapabilities(ctx context.Context, db *sql.DB) map[string]bool {
 	// `src/execution/admin_ddl.zig` (executeShowCapabilities) at
 	// geodedb v0.5.15.
 	featureToGate := map[string]string{
-		"auth_ddl":   "users",
-		"role_ddl":   "roles",
-		"grant_ddl":  "grants",
-		"policy_ddl": "policies",
+		"auth_ddl":   gateUsers,
+		"role_ddl":   gateRoles,
+		"grant_ddl":  gateGrants,
+		"policy_ddl": gatePolicies,
 	}
 	for _, row := range rows {
 		if featureCol >= len(row) || supportedCol >= len(row) {

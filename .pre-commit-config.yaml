@@ -1,3 +1,5 @@
+default_language_version:
+  golang: 1.27.2
 # yaml-language-server: $schema=https://json.schemastore.org/pre-commit-config.json
 # https://pre-commit.com
 #
@@ -116,22 +118,6 @@ repos:
     pass_filenames: false
     files: ^(internal/server/errorcodes\.go|src/api/serverErrorCodes\.ts)$
 
-  - id: gofmt-check
-    name: gofmt
-    entry: scripts/check-gofmt.sh
-    language: system
-    pass_filenames: false
-    files: \.go$
-    exclude: ^gen/
-
-  - id: go-vet
-    name: go vet
-    entry: scripts/run-go.sh vet ./...
-    language: system
-    pass_filenames: false
-    files: \.go$
-    exclude: ^gen/
-
   - id: eslint
     name: eslint
     entry: npx --no-install eslint --max-warnings=0
@@ -204,7 +190,7 @@ repos:
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint
     name: golangci-lint
-    entry: scripts/run-go.sh tool-golangci
+    entry: make go-lint
     language: system
     pass_filenames: false
     stages: [pre-push]
@@ -225,7 +211,7 @@ repos:
 
   - id: go-test
     name: go test -race
-    entry: scripts/run-go.sh test -race -cover -failfast ./...
+    entry: make go-test
     language: system
     pass_filenames: false
     stages: [pre-push]
@@ -264,8 +250,6 @@ ci:
   autoupdate_schedule: weekly
   # CI runs its own pipeline (.gitlab-ci.yml); skip local hooks there.
   skip:
-  - gofmt-check
-  - go-vet
   - eslint
   - prettier-check
   - lint-hardcoded-styles

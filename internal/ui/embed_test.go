@@ -23,13 +23,6 @@ type countingFS struct {
 	stats sync.Map // key: string path, value: *atomic.Int64
 }
 
-func (c *countingFS) statCount(name string) int64 {
-	if v, ok := c.stats.Load(name); ok {
-		return v.(*atomic.Int64).Load()
-	}
-	return 0
-}
-
 func (c *countingFS) Open(name string) (fs.File, error) {
 	return c.inner.Open(name)
 }
@@ -49,6 +42,13 @@ func (c *countingFS) Stat(name string) (fs.FileInfo, error) {
 	}
 	n.Add(1)
 	return fs.Stat(c.inner, name)
+}
+
+func (c *countingFS) statCount(name string) int64 {
+	if v, ok := c.stats.Load(name); ok {
+		return v.(*atomic.Int64).Load()
+	}
+	return 0
 }
 
 func TestHandlerServesIndexForUnknownPaths(t *testing.T) {
@@ -138,7 +138,7 @@ func findLargeJSAsset(t *testing.T) (string, []byte) {
 		}
 		info, err := d.Info()
 		if err != nil || info.Size() < minCompressSize {
-			return nil //nolint:nilerr
+			return nil //nolint:nilerr // best-effort walk: skip unreadable or small files
 		}
 		found = p
 		return nil
@@ -361,7 +361,7 @@ func TestEmbedHandler_DoesNotCache404(t *testing.T) {
 		t.Fatalf("handlerFS: %v", err)
 	}
 	const missing = "/totally-not-a-real-asset-abc123.js"
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req := httptest.NewRequest(http.MethodGet, missing, nil)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)

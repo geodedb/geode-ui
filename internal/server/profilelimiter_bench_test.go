@@ -21,7 +21,7 @@ func BenchmarkProfileLimiter_Allow_Parallel(b *testing.B) {
 		Now:           time.Now,
 	})
 	keys := make([]string, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		keys[i] = "u\x00user" + strconv.Itoa(i)
 		l.Allow(keys[i])
 	}
@@ -29,9 +29,9 @@ func BenchmarkProfileLimiter_Allow_Parallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		var idx uint64
+		var idx atomic.Uint64
 		for pb.Next() {
-			k := keys[atomic.AddUint64(&idx, 1)%keyCount]
+			k := keys[idx.Add(1)%keyCount]
 			l.Allow(k)
 		}
 	})

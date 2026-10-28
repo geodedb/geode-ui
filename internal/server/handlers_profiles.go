@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
+	"time"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 	"geodedb.com/geode-ui/internal/conn"
@@ -27,11 +28,13 @@ import (
 //   - When Config.Store is nil, falls back to enumerating profile
 //     names from the *conn.Pool registered as Config.Profiles.
 //     Returned Profile entries carry only Name (legacy contract).
-func (s *GraphServer) GetProfiles(_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.ProfileList, error) {
+func (s *GraphServer) GetProfiles(
+	_ http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.ProfileList, error) {
 	if s.cfg.Store != nil {
 		ctx := r.Context()
 		actr := actorFromContext(ctx)
-		isAdmin := hasRole(actr.Roles, "admin")
+		isAdmin := hasAdminRole(actr.Roles)
 
 		// Single visibility-scoped query: the store walks the
 		// `scope='system' OR (scope='personal' AND owner_user_id=?)`
@@ -126,6 +129,8 @@ type poolOverridesWire struct {
 // per zero-valued profile. The bytes are treated as read-only by every
 // caller (they flow straight into the response codec, which only reads
 // jsontext.Value), so sharing a single backing array is safe.
+//
+//nolint:gochecknoglobals // precomputed read-only encodings (PSR-F15 / #112).
 var (
 	zeroTLSWire = mustMarshalWire(tlsWire{})
 	zeroPOWire  = mustMarshalWire(poolOverridesWire{})
@@ -171,8 +176,8 @@ func marshalPoolOverrides(o conn.PoolOverrides) (jsontext.Value, error) {
 	raw, err := json.Marshal(poolOverridesWire{
 		MaxOpenConns:      o.MaxOpenConns,
 		MaxIdleConns:      o.MaxIdleConns,
-		ConnMaxLifetimeMs: int64(o.ConnMaxLifetime / 1_000_000),
-		ConnMaxIdleMs:     int64(o.ConnMaxIdleTime / 1_000_000),
+		ConnMaxLifetimeMs: int64(o.ConnMaxLifetime / time.Millisecond),
+		ConnMaxIdleMs:     int64(o.ConnMaxIdleTime / time.Millisecond),
 	})
 	if err != nil {
 		return nil, err

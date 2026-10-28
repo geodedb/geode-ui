@@ -54,7 +54,9 @@ var safeNameRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 // BackupUpload stages an uploaded backup file under <UploadDir>/backups/.
 // Generated route: POST /api/v1/backups/upload.
-func (s *GraphServer) BackupUpload(w http.ResponseWriter, r *http.Request, req *gentypes.BackupUploadReq) (*gentypes.UploadResp, error) {
+func (s *GraphServer) BackupUpload(
+	w http.ResponseWriter, r *http.Request, req *gentypes.BackupUploadReq,
+) (*gentypes.UploadResp, error) {
 	var f *gen.FileUpload
 	if req != nil {
 		f = req.File
@@ -64,7 +66,9 @@ func (s *GraphServer) BackupUpload(w http.ResponseWriter, r *http.Request, req *
 
 // MigrationUpload stages an uploaded migration file under
 // <UploadDir>/migrations/. Generated route: POST /api/v1/migrations/upload.
-func (s *GraphServer) MigrationUpload(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationUploadReq) (*gentypes.UploadResp, error) {
+func (s *GraphServer) MigrationUpload(
+	w http.ResponseWriter, r *http.Request, req *gentypes.MigrationUploadReq,
+) (*gentypes.UploadResp, error) {
 	var f *gen.FileUpload
 	if req != nil {
 		f = req.File
@@ -82,14 +86,16 @@ func (s *GraphServer) MigrationUpload(w http.ResponseWriter, r *http.Request, re
 // (the genapi wrapper only maps a non-nil error to 500/501) and returns
 // (nil, nil) so the wrapper writes nothing further. On success it
 // returns the typed UploadResp and the wrapper marshals it (200).
-func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *gen.FileUpload, subdir, auditEvent string) (*gentypes.UploadResp, error) {
+func (s *GraphServer) stageUpload(
+	w http.ResponseWriter, r *http.Request, file *gen.FileUpload, subdir, auditEvent string,
+) (*gentypes.UploadResp, error) {
 	if s.cfg.UploadDir == "" {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusServiceUnavailable,
 			code:        ErrCodeUploadDisabled,
 			description: "server started without -upload-dir; uploads disabled",
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	if file == nil || file.Reader == nil {
 		writeEndpointError(w, &endpointError{
@@ -97,7 +103,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeMissingFile,
 			description: `multipart field "file" is required`,
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	name, err := sanitiseUploadName(file.Filename)
@@ -107,7 +113,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeInvalidFilename,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	dir := filepath.Join(s.cfg.UploadDir, subdir)
@@ -117,20 +123,25 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadDirFailed,
 			description: "could not create upload dir: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	finalPath := filepath.Join(dir, name)
 	tmpPath := finalPath + ".tmp"
-	// G302/G304: mode 0o640 is intentional (group-readable so the backup/restore worker running under the same group can consume staged files); path is filepath.Join(UploadDir, subdir, name) where name is the return of sanitiseUploadName — an [A-Za-z0-9._-]+ allowlist that rejects path separators and "."/".." and re-checks filepath.Base(name)==name, so no traversal is possible.
-	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640) // #nosec G302 G304 -- see comment above; intentional 0o640 + allowlist-sanitised basename //nolint:gosec
+	// G302/G304: mode 0o640 is intentional (group-readable so the
+	// backup/restore worker running under the same group can consume
+	// staged files); path is filepath.Join(UploadDir, subdir, name) where
+	// name is the return of sanitiseUploadName — an [A-Za-z0-9._-]+
+	// allowlist that rejects path separators and "."/".." and re-checks
+	// filepath.Base(name)==name, so no traversal is possible.
+	out, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o640) // #nosec G302 G304 -- see above
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusInternalServerError,
 			code:        ErrCodeUploadOpenFailed,
 			description: "could not open destination: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	n, copyErr := io.Copy(out, file.Reader)
 	closeErr := out.Close()
@@ -141,7 +152,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadWriteFailed,
 			description: "could not write file: " + copyErr.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmpPath)
@@ -150,7 +161,7 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadCloseFailed,
 			description: "could not close file: " + closeErr.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
@@ -159,12 +170,12 @@ func (s *GraphServer) stageUpload(w http.ResponseWriter, r *http.Request, file *
 			code:        ErrCodeUploadRenameFailed,
 			description: "could not finalise upload: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.UploadResp]()
 	}
 
 	emitAudit(auditEvent,
 		"user", userFromContext(r.Context()),
-		"file", name,
+		auditKeyFile, name,
 		"size_bytes", n,
 		"kind", subdir,
 		"source", "upload",

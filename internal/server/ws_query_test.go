@@ -36,7 +36,7 @@ func TestRowBatcher_BatchingFramesLessThanRows(t *testing.T) {
 	const rowCount = 200
 	w := &fakeFrameWriter{}
 	b := newRowBatcher(w, wsRowBatchSize)
-	for i := 0; i < rowCount; i++ {
+	for i := range rowCount {
 		if err := b.add([]any{int64(i), "x"}); err != nil {
 			t.Fatalf("add row %d: %v", i, err)
 		}
@@ -62,7 +62,7 @@ func TestRowBatcher_BatchingFramesLessThanRows(t *testing.T) {
 func TestRowBatcher_FrameSchema(t *testing.T) {
 	w := &fakeFrameWriter{}
 	b := newRowBatcher(w, 4)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		if err := b.add([]any{int64(i)}); err != nil {
 			t.Fatalf("add: %v", err)
 		}
@@ -108,7 +108,7 @@ func TestRowBatcher_FrameSchema(t *testing.T) {
 func TestRowBatcher_FlushIsIdempotent(t *testing.T) {
 	w := &fakeFrameWriter{}
 	b := newRowBatcher(w, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_ = b.add([]any{int64(i)})
 	}
 	// First flush: should NOT emit an extra frame because the batch
@@ -170,20 +170,14 @@ func TestStringsToAny(t *testing.T) {
 	}
 }
 
-// TestMapToNamedArgs_Empty: nil/empty params must yield (nil, nil) so
-// the handler can pass the result straight to db.QueryContext.
+// TestMapToNamedArgs_Empty: nil/empty params must yield nil so the
+// handler can pass the result straight to db.QueryContext.
 func TestMapToNamedArgs_Empty(t *testing.T) {
-	args, err := mapToNamedArgs(nil)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
+	args := mapToNamedArgs(nil)
 	if args != nil {
 		t.Fatalf("args=%v want nil", args)
 	}
-	args, err = mapToNamedArgs(map[string]any{})
-	if err != nil {
-		t.Fatalf("err empty map: %v", err)
-	}
+	args = mapToNamedArgs(map[string]any{})
 	if args != nil {
 		t.Fatalf("args empty map=%v want nil", args)
 	}
@@ -193,10 +187,7 @@ func TestMapToNamedArgs_Empty(t *testing.T) {
 // per key. We don't assert ordering — Go map iteration is intentionally
 // randomized — but we do assert length.
 func TestMapToNamedArgs_Values(t *testing.T) {
-	args, err := mapToNamedArgs(map[string]any{"x": 1, "name": "alice"})
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
+	args := mapToNamedArgs(map[string]any{"x": 1, "name": "alice"})
 	if len(args) != 2 {
 		t.Fatalf("args len=%d want 2", len(args))
 	}

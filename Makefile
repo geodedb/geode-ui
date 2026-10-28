@@ -1,7 +1,8 @@
 SHELL := /usr/bin/env bash
 GOEXPERIMENT ?= jsonv2
-GOTOOLCHAIN ?= go1.27.2
+GOTOOLCHAIN ?= go1.27.3
 GOENV := GOEXPERIMENT=$(GOEXPERIMENT) GOTOOLCHAIN=$(GOTOOLCHAIN)
+GOLANGCI_LINT ?= python3 scripts/golangci-lint.py
 BIN := bin/geode-ui
 
 .PHONY: all help generate go-build go-test go-lint go-fmt go-tidy bench-gate bench-baseline bench-record bench-graph web-install web-build web-dev web-test web-lint web-fmt web-typecheck build test lint fmt ci clean dev pre-commit e2e-deps e2e-up e2e-down e2e-logs e2e-test e2e-ci e2e-wait
@@ -24,7 +25,8 @@ go-test:
 	$(GOENV) go test -vet=off -race -cover -failfast ./cmd/... ./gen/... ./internal/...
 
 go-lint:
-	$(GOENV) python3 scripts/golangci-lint.py run
+	$(GOENV) $(GOLANGCI_LINT) fmt --diff
+	$(GOENV) $(GOLANGCI_LINT) run
 
 go-fmt:
 	$(GOENV) python3 scripts/golangci-lint.py fmt

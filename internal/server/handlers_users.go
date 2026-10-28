@@ -124,7 +124,9 @@ func (s *GraphServer) GetUsers(w http.ResponseWriter, r *http.Request, _ *gentyp
 // re-assigning the current role -- no version bump and no audit row --
 // so emitting the post-create GRANT ROLE keeps the audit trail visible
 // to clients that key on the wire trace.
-func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gentypes.UserCreateReq) (*gentypes.User, error) {
+func (s *GraphServer) PostUsers(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UserCreateReq,
+) (*gentypes.User, error) {
 	var resp *gentypes.User
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		// Password is mandatory on v0.5.15. Reject early with a 400 so
@@ -176,7 +178,7 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 		emitAudit(auditEventUserCreated,
 			"user", userFromContext(r.Context()),
 			"target", req.Username,
-			"roles", req.Roles,
+			auditKeyRoles, req.Roles,
 		)
 		resp = &gentypes.User{Username: req.Username, Email: req.Email, Roles: append([]string(nil), req.Roles...)}
 		return nil
@@ -196,7 +198,9 @@ func (s *GraphServer) PostUsers(w http.ResponseWriter, r *http.Request, req *gen
 // user count which is acceptable -- a Geode instance is not expected
 // to host millions of admin users, and the alternative (a per-name
 // catalog query) is not in the v0.5.15 grammar.
-func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.User, error) {
+func (s *GraphServer) GetUsername(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam,
+) (*gentypes.User, error) {
 	var resp *gentypes.User
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, _ string) error {
 		rows, cols, qErr := runQuery(r.Context(), db, "SHOW USERS")
@@ -207,7 +211,7 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 		// `username`; legacy drivers may emit `name`.
 		nameCol := -1
 		for i, c := range cols {
-			if c == "username" || c == "name" {
+			if c == "username" || c == colName {
 				nameCol = i
 				break
 			}
@@ -254,30 +258,16 @@ func (s *GraphServer) GetUsername(w http.ResponseWriter, r *http.Request, req *g
 // a wasted BEGIN/COMMIT round-trip for clients that PATCH with an
 // empty body. quoteIdent runs unconditionally so a malformed username
 // is rejected with 400 before any driver work.
-func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UserUpdateReq) (*gentypes.User, error) {
+func (s *GraphServer) PatchUsername(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UserUpdateReq,
+) (*gentypes.User, error) {
 	var resp *gentypes.User
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		// Pre-validate every quoted literal before opening the tx so a 400
 		// from a bad input does not leave a dangling open transaction.
-		var email string
-		if req.Email != "" {
-			var qErr error
-			email, qErr = quoteString(req.Email)
-			if qErr != nil {
-				return badRequest(ErrCodeInvalidEmail, qErr.Error())
-			}
-		}
-		var pw string
-		if req.Password != "" {
-			// GAP-N4 (#72): same server-side policy gate as PostUsers.
-			if vErr := validatePassword(r.Context(), req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
-				return passwordPolicyEndpointError(vErr)
-			}
-			var qErr error
-			pw, qErr = quoteString(req.Password)
-			if qErr != nil {
-				return badRequest(ErrCodeInvalidPassword, qErr.Error())
-			}
+		email, pw, err := s.quoteUserPatch(r.Context(), req)
+		if err != nil {
+			return err
 		}
 
 		// Empty patch -- nothing to commit.
@@ -286,46 +276,9 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 			return nil
 		}
 
-		tx, txErr := db.BeginTx(r.Context(), nil)
-		if txErr != nil {
-			return wireErr(txErr)
+		if err := applyUserPatchTx(r.Context(), db, uname, email, pw, req.Roles); err != nil {
+			return err
 		}
-		// rollbackErr lets us surface the original failure even when the
-		// driver's Rollback returns a non-nil error of its own. The handler
-		// always prefers the original sub-statement error in the response.
-		commit := false
-		defer func() {
-			if !commit {
-				_ = tx.Rollback()
-			}
-		}()
-
-		if email != "" {
-			if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
-				return wireErr(execErr)
-			}
-		}
-		if pw != "" {
-			if _, execErr := tx.ExecContext(r.Context(), "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
-				return wireErr(execErr)
-			}
-		}
-		for _, role := range req.Roles {
-			roleIdent, qErr := quoteIdent(role)
-			if qErr != nil {
-				return badRequest(ErrCodeInvalidRole, qErr.Error())
-			}
-			// v0.5.15: `GRANT ROLE <role> TO <user>` -- no USER
-			// keyword (see file-level grammar note).
-			if _, execErr := tx.ExecContext(r.Context(), "GRANT ROLE "+roleIdent+" TO "+uname); execErr != nil {
-				return wireErr(execErr)
-			}
-		}
-
-		if cErr := tx.Commit(); cErr != nil {
-			return wireErr(cErr)
-		}
-		commit = true
 
 		// SEC-N2 (#64): a password change invalidates every existing
 		// session for that user — revoke all of the target's currently-
@@ -344,6 +297,78 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 	return resp, nil
 }
 
+// quoteUserPatch validates and quotes the optional email and password of
+// a user PATCH, returning "" for each field the request leaves unset. The
+// password runs through the same server-side policy gate as PostUsers
+// (GAP-N4 / #72) before it is quoted.
+func (s *GraphServer) quoteUserPatch(ctx context.Context, req *gentypes.UserUpdateReq) (string, string, error) {
+	var email string
+	if req.Email != "" {
+		var qErr error
+		email, qErr = quoteString(req.Email)
+		if qErr != nil {
+			return "", "", badRequest(ErrCodeInvalidEmail, qErr.Error())
+		}
+	}
+	var pw string
+	if req.Password != "" {
+		if vErr := validatePassword(ctx, req.Password, req.Username, s.cfg.PasswordPolicy); vErr != nil {
+			return "", "", passwordPolicyEndpointError(vErr)
+		}
+		var qErr error
+		pw, qErr = quoteString(req.Password)
+		if qErr != nil {
+			return "", "", badRequest(ErrCodeInvalidPassword, qErr.Error())
+		}
+	}
+	return email, pw, nil
+}
+
+// applyUserPatchTx applies the pre-quoted email / password and the role
+// grants for uname inside one transaction. Any sub-statement failure
+// rolls the transaction back and is returned as the response error (the
+// original failure wins over any Rollback error).
+func applyUserPatchTx(ctx context.Context, db *sql.DB, uname, email, pw string, roles []string) error {
+	tx, txErr := db.BeginTx(ctx, nil)
+	if txErr != nil {
+		return wireErr(txErr)
+	}
+	commit := false
+	defer func() {
+		if !commit {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if email != "" {
+		if _, execErr := tx.ExecContext(ctx, "ALTER USER "+uname+" SET EMAIL "+email); execErr != nil {
+			return wireErr(execErr)
+		}
+	}
+	if pw != "" {
+		if _, execErr := tx.ExecContext(ctx, "ALTER USER "+uname+" SET PASSWORD "+pw); execErr != nil {
+			return wireErr(execErr)
+		}
+	}
+	for _, role := range roles {
+		roleIdent, qErr := quoteIdent(role)
+		if qErr != nil {
+			return badRequest(ErrCodeInvalidRole, qErr.Error())
+		}
+		// v0.5.15: `GRANT ROLE <role> TO <user>` -- no USER
+		// keyword (see file-level grammar note).
+		if _, execErr := tx.ExecContext(ctx, "GRANT ROLE "+roleIdent+" TO "+uname); execErr != nil {
+			return wireErr(execErr)
+		}
+	}
+
+	if cErr := tx.Commit(); cErr != nil {
+		return wireErr(cErr)
+	}
+	commit = true
+	return nil
+}
+
 // DeleteUsername implements DELETE /api/v1/users/{username}.
 //
 // Emits `DROP USER IF EXISTS <name>` per the v0.5.15 grammar. Upstream
@@ -352,7 +377,9 @@ func (s *GraphServer) PatchUsername(w http.ResponseWriter, r *http.Request, req 
 // a no-op safeguard today (see Limitations #6). Emitting it anyway
 // keeps the parse surface idempotent and shields the SPA from a future
 // upstream tightening that elevates "user not found" to a 422.
-func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
+func (s *GraphServer) DeleteUsername(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam,
+) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		if _, err := runStatement(r.Context(), db, "DROP USER IF EXISTS "+uname); err != nil {
 			return wireErr(err)
@@ -370,8 +397,10 @@ func (s *GraphServer) DeleteUsername(w http.ResponseWriter, r *http.Request, req
 }
 
 // Disable implements POST /api/v1/users/{username}/disable.
-func (s *GraphServer) Disable(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	resp, err := s.toggleUser(w, r.Context(), req.Username, "DISABLE")
+func (s *GraphServer) Disable(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam,
+) (*gentypes.Empty, error) {
+	resp, err := s.toggleUser(r.Context(), w, req.Username, "DISABLE")
 	if err == nil && resp != nil {
 		emitAudit(auditEventUserDisabled,
 			"user", userFromContext(r.Context()),
@@ -382,8 +411,10 @@ func (s *GraphServer) Disable(w http.ResponseWriter, r *http.Request, req *genty
 }
 
 // Enable implements POST /api/v1/users/{username}/enable.
-func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.Empty, error) {
-	resp, err := s.toggleUser(w, r.Context(), req.Username, "ENABLE")
+func (s *GraphServer) Enable(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam,
+) (*gentypes.Empty, error) {
+	resp, err := s.toggleUser(r.Context(), w, req.Username, "ENABLE")
 	if err == nil && resp != nil {
 		emitAudit(auditEventUserEnabled,
 			"user", userFromContext(r.Context()),
@@ -394,7 +425,9 @@ func (s *GraphServer) Enable(w http.ResponseWriter, r *http.Request, req *gentyp
 }
 
 // Password implements POST /api/v1/users/{username}/password.
-func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gentypes.PasswordChangeReq) (*gentypes.Empty, error) {
+func (s *GraphServer) Password(
+	w http.ResponseWriter, r *http.Request, req *gentypes.PasswordChangeReq,
+) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		// GAP-N4 (#72): server-side password policy. NewPassword must
 		// satisfy length, weak-pattern, username-collision and (when
@@ -438,7 +471,9 @@ func (s *GraphServer) Password(w http.ResponseWriter, r *http.Request, req *gent
 // Naming: the genapi disambiguator collapses POST /users/{username}/roles
 // onto PostUsernameRoles (the URI-prefix fallback because both the
 // terminal segment `roles` and `Roles` collide with /api/v1/roles).
-func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, req *gentypes.AssignRoleReq) (*gentypes.Empty, error) {
+func (s *GraphServer) PostUsernameRoles(
+	w http.ResponseWriter, r *http.Request, req *gentypes.AssignRoleReq,
+) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		if err := assignRole(r.Context(), db, uname, req.Role); err != nil {
 			return err
@@ -446,7 +481,7 @@ func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, 
 		emitAudit(auditEventRoleAssigned,
 			"user", userFromContext(r.Context()),
 			"target", req.Username,
-			"role", req.Role,
+			auditKeyRole, req.Role,
 		)
 		return nil
 	})
@@ -471,7 +506,9 @@ func (s *GraphServer) PostUsernameRoles(w http.ResponseWriter, r *http.Request, 
 // SHOW PERMISSIONS FOR a non-self user requires the caller to have the
 // admin role -- the geode-ui side relies on the genapi
 // `required_roles:["admin"]` route gate for the same check.
-func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam) (*gentypes.PermissionList, error) {
+func (s *GraphServer) Permissions(
+	w http.ResponseWriter, r *http.Request, req *gentypes.UsernameParam,
+) (*gentypes.PermissionList, error) {
 	var resp *gentypes.PermissionList
 	err := s.withConnDBAndIdent(r.Context(), req.Username, func(db *sql.DB, uname string) error {
 		rows, cols, qErr := runQuery(r.Context(), db, "SHOW PERMISSIONS FOR "+uname)
@@ -493,7 +530,9 @@ func (s *GraphServer) Permissions(w http.ResponseWriter, r *http.Request, req *g
 
 // toggleUser is the shared body of Disable/Enable. action is "DISABLE"
 // or "ENABLE" — the literal verb embedded into the GQL statement.
-func (s *GraphServer) toggleUser(w http.ResponseWriter, ctx context.Context, username, action string) (*gentypes.Empty, error) {
+func (s *GraphServer) toggleUser(
+	ctx context.Context, w http.ResponseWriter, username, action string,
+) (*gentypes.Empty, error) {
 	err := s.withConnDBAndIdent(ctx, username, func(db *sql.DB, uname string) error {
 		if _, err := runStatement(ctx, db, "ALTER USER "+uname+" "+action); err != nil {
 			return wireErr(err)
@@ -536,7 +575,9 @@ func assignRole(ctx context.Context, db *sql.DB, uname, role string) error {
 // retire the 9 hand-rolled preambles in this file. Callers that need
 // only `connDB` (e.g. `GetUsers`) keep using it directly; callers
 // that need `connDB` *and* a quoted username route through here.
-func (s *GraphServer) withConnDBAndIdent(ctx context.Context, name string, fn func(db *sql.DB, qname string) error) error {
+func (s *GraphServer) withConnDBAndIdent(
+	ctx context.Context, name string, fn func(db *sql.DB, qname string) error,
+) error {
 	db, err := s.connDB(ctx)
 	if err != nil {
 		return err
@@ -610,11 +651,11 @@ func userFromRow(cols []string, row []any) *gentypes.User {
 			break
 		}
 		switch c {
-		case "username", "name":
+		case "username", colName:
 			u.Username = asStr(row[i])
 		case "email":
 			u.Email = asStr(row[i])
-		case "role":
+		case colRole:
 			// v0.5.15: SHOW USERS emits a single `role` column with the
 			// built-in role name (admin / user / readwrite / readonly).
 			// Lift into the typed []Roles slice so the SPA continues to
@@ -622,7 +663,7 @@ func userFromRow(cols []string, row []any) *gentypes.User {
 			if v := asStr(row[i]); v != "" {
 				u.Roles = []string{v}
 			}
-		case "roles":
+		case colRoles:
 			u.Roles = asStrs(row[i])
 		case "active":
 			// v0.5.15 inverts the polarity: the catalog tracks "is_active",
@@ -665,6 +706,8 @@ func permissionFromRow(cols []string, row []any) gentypes.Permission {
 
 // driftSeen deduplicates the per-(statement,column) drift warning so a
 // large result set does not spam the log with one line per row.
+//
+//nolint:gochecknoglobals // once-per-process dedupe latch; must outlive any single request or server instance.
 var driftSeen = struct {
 	mu  sync.Mutex
 	set map[string]struct{}

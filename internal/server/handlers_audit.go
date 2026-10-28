@@ -23,7 +23,9 @@ import (
 // the schema declares entries as `array<any>` so callers (the UI) can
 // render arbitrary key/value pairs without a strict per-event schema —
 // the `event` discriminator is the contract.
-func (s *GraphServer) Audit(_ http.ResponseWriter, _ *http.Request, req *gentypes.AuditQuery) (*gentypes.AuditList, error) {
+func (s *GraphServer) Audit(
+	_ http.ResponseWriter, _ *http.Request, req *gentypes.AuditQuery,
+) (*gentypes.AuditList, error) {
 	since, err := parseAuditSince(req.Since)
 	if err != nil {
 		return nil, &endpointError{

@@ -3,7 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -71,15 +73,23 @@ type LoginLimiterConfig struct {
 	TrustProxyXFF bool
 }
 
+// Production login-limiter defaults; see LoginLimiterDefaults.
+const (
+	defaultLoginPerIPRate     = 5
+	defaultLoginPerIPBurst    = 10
+	defaultLoginFailThreshold = 5
+	defaultLoginLockoutWindow = 15 * time.Minute
+)
+
 // LoginLimiterDefaults applies production defaults (5 rps per IP,
 // burst 10, 5 fails -> 15-min lockout). Production callers can pass an
 // empty LoginLimiterConfig{} and let NewLoginLimiter fill these in.
 func LoginLimiterDefaults() LoginLimiterConfig {
 	return LoginLimiterConfig{
-		PerIPRate:     5,
-		PerIPBurst:    10,
-		FailThreshold: 5,
-		LockoutWindow: 15 * time.Minute,
+		PerIPRate:     defaultLoginPerIPRate,
+		PerIPBurst:    defaultLoginPerIPBurst,
+		FailThreshold: defaultLoginFailThreshold,
+		LockoutWindow: defaultLoginLockoutWindow,
 		Now:           time.Now,
 	}
 }
@@ -244,54 +254,12 @@ func (l *LoginLimiter) Allow(ip, profile, username string) (bool, time.Duration,
 		// One token's worth of seconds = 1/rate.
 		shortfall := 1.0 - bkt.tokens
 		bkt.mu.Unlock()
-		retry := time.Duration(shortfall / l.cfg.PerIPRate * float64(time.Second))
-		if retry < time.Second {
-			retry = time.Second
-		}
+		retry := max(time.Duration(shortfall/l.cfg.PerIPRate*float64(time.Second)), time.Second)
 		return false, retry, "ip_rate_limited"
 	}
-	bkt.tokens -= 1
+	bkt.tokens--
 	bkt.mu.Unlock()
 	return true, 0, ""
-}
-
-// insertIPBucket COW-inserts a new bucket for ip. Returns the inserted
-// bucket (or, if a concurrent caller raced us and inserted first, the
-// existing bucket so we both converge on the same instance).
-func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
-	l.perIPWriteMu.Lock()
-	defer l.perIPWriteMu.Unlock()
-	// Re-check under the writer mutex.
-	current := *l.perIP.Load()
-	if bkt, ok := current[ip]; ok {
-		return bkt
-	}
-	bkt := &ipBucket{tokens: l.cfg.PerIPBurst, last: now}
-	next := make(map[string]*ipBucket, len(current)+1)
-	for k, v := range current {
-		next[k] = v
-	}
-	next[ip] = bkt
-	l.perIP.Store(&next)
-	return bkt
-}
-
-// insertUserLockout COW-inserts a new userLockout for key.
-func (l *LoginLimiter) insertUserLockout(key string) *userLockout {
-	l.perUserWriteMu.Lock()
-	defer l.perUserWriteMu.Unlock()
-	current := *l.perUserFails.Load()
-	if u, ok := current[key]; ok {
-		return u
-	}
-	u := &userLockout{}
-	next := make(map[string]*userLockout, len(current)+1)
-	for k, v := range current {
-		next[k] = v
-	}
-	next[key] = u
-	l.perUserFails.Store(&next)
-	return u
 }
 
 // NoteFail records one authentication failure against (profile, user).
@@ -329,6 +297,41 @@ func (l *LoginLimiter) NoteSuccess(profile, username string) {
 		u.lastFail = time.Time{}
 		u.mu.Unlock()
 	}
+}
+
+// insertIPBucket COW-inserts a new bucket for ip. Returns the inserted
+// bucket (or, if a concurrent caller raced us and inserted first, the
+// existing bucket so we both converge on the same instance).
+func (l *LoginLimiter) insertIPBucket(ip string, now time.Time) *ipBucket {
+	l.perIPWriteMu.Lock()
+	defer l.perIPWriteMu.Unlock()
+	// Re-check under the writer mutex.
+	current := *l.perIP.Load()
+	if bkt, ok := current[ip]; ok {
+		return bkt
+	}
+	bkt := &ipBucket{tokens: l.cfg.PerIPBurst, last: now}
+	next := make(map[string]*ipBucket, len(current)+1)
+	maps.Copy(next, current)
+	next[ip] = bkt
+	l.perIP.Store(&next)
+	return bkt
+}
+
+// insertUserLockout COW-inserts a new userLockout for key.
+func (l *LoginLimiter) insertUserLockout(key string) *userLockout {
+	l.perUserWriteMu.Lock()
+	defer l.perUserWriteMu.Unlock()
+	current := *l.perUserFails.Load()
+	if u, ok := current[key]; ok {
+		return u
+	}
+	u := &userLockout{}
+	next := make(map[string]*userLockout, len(current)+1)
+	maps.Copy(next, current)
+	next[key] = u
+	l.perUserFails.Store(&next)
+	return u
 }
 
 // WrapLoginLimit wraps next so any POST /api/v1/auth/login traffic
@@ -416,6 +419,7 @@ func markLoginBackendFailure(ctx context.Context) {
 // statusWriter tees the status code without altering the body.
 type statusWriter struct {
 	http.ResponseWriter
+
 	status int
 }
 
@@ -441,15 +445,28 @@ func rejectLogin(w http.ResponseWriter, retry time.Duration, reason string) {
 	w.Header().Set("Retry-After", strconv.Itoa(int(retry/time.Second)))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
-	body := `{"code":"rate_limited","description":"too many attempts; try again later","reason":"` + reason + `"}`
-	_, _ = w.Write([]byte(body))
+	// Encoded (not string-concatenated) so reason can never break out of
+	// the JSON string. Field order matches the historical wire bytes.
+	_ = json.MarshalWrite(w, rateLimitedBody{
+		Code:        ErrCodeRateLimited,
+		Description: "too many attempts; try again later",
+		Reason:      reason,
+	})
+}
+
+// rateLimitedBody is the 429 body written by rejectLogin.
+type rateLimitedBody struct {
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Reason      string `json:"reason"`
 }
 
 // peekLoginCreds reads the form body, parses profile + username, and
 // restores the body on the request so the inner handler can re-parse
 // it. Limits the read to 4096 bytes to match the genapi-emitted body
-// cap on this route. Returns "" + nil error if the body is empty.
-func peekLoginCreds(r *http.Request) (profile, username string, err error) {
+// cap on this route. Returns the profile and username (both "" with a
+// nil error if the body is empty).
+func peekLoginCreds(r *http.Request) (string, string, error) {
 	if r.Body == nil {
 		return "", "", nil
 	}
@@ -471,7 +488,9 @@ func peekLoginCreds(r *http.Request) (profile, username string, err error) {
 	vals, perr := url.ParseQuery(string(buf))
 	if perr != nil {
 		// Treat as empty — the inner handler's r.ParseForm will reject.
-		return "", "", nil
+		// A nil url.Values yields "" from Get, so the bucket key falls
+		// back to the IP-only dimensions.
+		vals = nil
 	}
 	return vals.Get("profile"), vals.Get("username"), nil
 }

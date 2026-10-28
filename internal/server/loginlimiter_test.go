@@ -37,7 +37,7 @@ func TestLoginLimiter_PerIPRateLimit(t *testing.T) {
 	})
 
 	// First two requests allowed (burst).
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		ok, _, _ := l.Allow("1.2.3.4", "default", "alice")
 		if !ok {
 			t.Fatalf("burst[%d] should be allowed", i)
@@ -80,7 +80,7 @@ func TestLoginLimiter_LockoutAfterThreshold(t *testing.T) {
 
 	// 3 fails on (default, alice). Threshold=3 means the 3rd fail puts the
 	// account into lockout — no further attempts should be allowed.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		l.NoteFail("default", "alice")
 	}
 
@@ -171,17 +171,17 @@ func TestLoginLimiter_Wrapper_Lockout(t *testing.T) {
 	})
 
 	// Stub login that always 401s.
-	var calls int32
+	var calls atomic.Int32
 	inner := http.NewServeMux()
 	inner.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"code":"invalid_credentials"}`))
 	})
 	wrapped := WrapLoginLimit(l, inner)
 
 	// Two 401s -> reaches threshold.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
 			strings.NewReader("username=alice&password=wrong&profile=default"))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -192,7 +192,7 @@ func TestLoginLimiter_Wrapper_Lockout(t *testing.T) {
 			t.Fatalf("call[%d] code=%d want 401", i, rec.Code)
 		}
 	}
-	if got := atomic.LoadInt32(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Fatalf("inner called %d times after 2 fails want 2", got)
 	}
 
@@ -206,7 +206,7 @@ func TestLoginLimiter_Wrapper_Lockout(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("after lockout code=%d want 429", rec.Code)
 	}
-	if got := atomic.LoadInt32(&calls); got != 2 {
+	if got := calls.Load(); got != 2 {
 		t.Errorf("inner called %d times after lockout want 2 (no further calls)", got)
 	}
 	if rec.Header().Get("Retry-After") == "" {
@@ -263,7 +263,7 @@ func TestLoginLimiter_Wrapper_NoteSuccessOn200(t *testing.T) {
 
 	// Two further fails should NOT trip the lockout (counter was reset on success).
 	state.Store(0) // make inner 401 again
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		rec = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
 			strings.NewReader("username=alice&password=wrong&profile=default"))
@@ -305,7 +305,7 @@ func TestLoginLimiter_Wrapper_PassesThroughNonLogin(t *testing.T) {
 	})
 	wrapped := WrapLoginLimit(l, inner)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
 		req.RemoteAddr = "1.2.3.4:54321"
@@ -331,6 +331,7 @@ func TestClientIPFromXForwardedFor(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.Header = tc.h
 			req.RemoteAddr = tc.ra

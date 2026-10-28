@@ -49,11 +49,11 @@ func TestSQLiteRevocation_RevokeByJTI_RoundTrips(t *testing.T) {
 	exp := time.Now().Add(time.Hour)
 	rs.Revoke("jti-abc", exp)
 
-	c := &Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "jti-abc"}}
+	c := &Claims{ID: "jti-abc"}
 	if !rs.IsRevoked(c) {
 		t.Fatal("expected jti-abc to be revoked after Revoke")
 	}
-	other := &Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "jti-xyz"}}
+	other := &Claims{ID: "jti-xyz"}
 	if rs.IsRevoked(other) {
 		t.Fatal("a different jti should not be revoked")
 	}
@@ -69,7 +69,7 @@ func TestSQLiteRevocation_JTISurvivesRestart(t *testing.T) {
 	rs1 := attachedSet(t, db1)
 	exp := time.Now().Add(2 * time.Hour)
 	rs1.Revoke("survivor", exp)
-	if !rs1.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "survivor"}}) {
+	if !rs1.IsRevoked(&Claims{ID: "survivor"}) {
 		t.Fatal("precondition: survivor should be revoked in rs1")
 	}
 	_ = db1.Close()
@@ -77,11 +77,11 @@ func TestSQLiteRevocation_JTISurvivesRestart(t *testing.T) {
 	// Fresh process: new DB handle on the same file, new RevocationSet.
 	db2 := openTestDB(t, dbPath)
 	rs2 := attachedSet(t, db2)
-	if !rs2.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "survivor"}}) {
+	if !rs2.IsRevoked(&Claims{ID: "survivor"}) {
 		t.Fatal("revoked jti did not survive restart")
 	}
 	// An unrelated jti is still fine.
-	if rs2.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "fresh"}}) {
+	if rs2.IsRevoked(&Claims{ID: "fresh"}) {
 		t.Fatal("unrelated jti should not be revoked after restart")
 	}
 }
@@ -252,13 +252,13 @@ func TestSQLiteRevocation_HotPath_ZeroQueries(t *testing.T) {
 	}
 
 	// Now hammer IsRevoked across every code path.
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		// hit: revoked jti
-		_ = rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "revoked-jti"}})
+		_ = rs.IsRevoked(&Claims{ID: "revoked-jti"})
 		// hit: expired jti (drops the cache entry, must not query SQLite)
-		_ = rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "expired-jti"}})
+		_ = rs.IsRevoked(&Claims{ID: "expired-jti"})
 		// miss: unknown jti
-		_ = rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "unknown-jti"}})
+		_ = rs.IsRevoked(&Claims{ID: "unknown-jti"})
 		// hit: revoked user, old iat
 		_ = rs.IsRevoked(&Claims{Subject: "alice", RegisteredClaims: jjwt.RegisteredClaims{Subject: "alice", IssuedAt: jjwt.NewNumericDate(now.Add(-time.Hour))}})
 		// miss: revoked user, new iat
@@ -367,7 +367,7 @@ func TestSQLiteRevocation_AttachRW_ReadsFromROHandle(t *testing.T) {
 	}
 	// Write a revocation through the RW path.
 	rs.Revoke("jti-1", now.Add(time.Hour))
-	if !rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "jti-1"}}) {
+	if !rs.IsRevoked(&Claims{ID: "jti-1"}) {
 		t.Fatal("jti-1 should be revoked")
 	}
 	// The RO handle can see the row but cannot write.
@@ -408,7 +408,7 @@ func TestSQLiteRevocation_AttachSQLite_AliasesRW(t *testing.T) {
 		t.Fatalf("AttachSQLite: %v", err)
 	}
 	rs.Revoke("jti-z", time.Now().Add(time.Hour))
-	if !rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "jti-z"}}) {
+	if !rs.IsRevoked(&Claims{ID: "jti-z"}) {
 		t.Fatal("jti-z should be revoked")
 	}
 	if rs.backend.rw != db || rs.backend.ro != db {
@@ -440,9 +440,7 @@ func TestSQLiteRevocation_ROLoadConcurrentWithWrites(t *testing.T) {
 
 	stop := make(chan struct{})
 	var writerWG sync.WaitGroup
-	writerWG.Add(1)
-	go func() {
-		defer writerWG.Done()
+	writerWG.Go(func() {
 		i := 0
 		for {
 			select {
@@ -456,7 +454,7 @@ func TestSQLiteRevocation_ROLoadConcurrentWithWrites(t *testing.T) {
 				rs.Sweep(48 * time.Hour) // DELETEs through the RW handle
 			}
 		}
-	}()
+	})
 
 	const (
 		numReaders = 8
@@ -465,11 +463,9 @@ func TestSQLiteRevocation_ROLoadConcurrentWithWrites(t *testing.T) {
 	)
 	var readerWG sync.WaitGroup
 	var loads atomic.Int64
-	for r := 0; r < numReaders; r++ {
-		readerWG.Add(1)
-		go func() {
-			defer readerWG.Done()
-			for k := 0; k < perReader; k++ {
+	for range numReaders {
+		readerWG.Go(func() {
+			for range perReader {
 				jtis, users, err := rs.backend.load(now)
 				if err != nil {
 					t.Errorf("revocation load: %v", err)
@@ -484,13 +480,13 @@ func TestSQLiteRevocation_ROLoadConcurrentWithWrites(t *testing.T) {
 					return
 				}
 				// IsRevoked must also stay correct under churn.
-				if !rs.IsRevoked(&Claims{RegisteredClaims: jjwt.RegisteredClaims{ID: "seed-jti"}}) {
+				if !rs.IsRevoked(&Claims{ID: "seed-jti"}) {
 					t.Errorf("seed-jti not revoked")
 					return
 				}
 				loads.Add(1)
 			}
-		}()
+		})
 	}
 
 	readersDone := make(chan struct{})
@@ -542,15 +538,13 @@ func BenchmarkRevocationReloadUnderWrite(b *testing.B) {
 	if err := rs.AttachSQLiteRW(rw, ro); err != nil {
 		b.Fatalf("AttachSQLiteRW: %v", err)
 	}
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		rs.Revoke(fmt.Sprintf("seed-%d", i), now.Add(time.Hour))
 	}
 
 	stop := make(chan struct{})
 	var writerWG sync.WaitGroup
-	writerWG.Add(1)
-	go func() {
-		defer writerWG.Done()
+	writerWG.Go(func() {
 		i := 0
 		for {
 			select {
@@ -561,7 +555,7 @@ func BenchmarkRevocationReloadUnderWrite(b *testing.B) {
 			i++
 			rs.Revoke(fmt.Sprintf("churn-%d", i), now.Add(time.Hour))
 		}
-	}()
+	})
 
 	b.ReportAllocs()
 	b.ResetTimer()

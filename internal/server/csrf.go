@@ -47,6 +47,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -60,7 +61,10 @@ const CSRFCookieName = "geode-ui-csrf"
 // for double-submit verification. The "X-" prefix is conventional and
 // signals the value is application-controlled (not a browser-managed
 // header).
-const CSRFHeaderName = "X-CSRF-Token"
+//
+// The value is written in Go's canonical MIME header form; HTTP header
+// names are case-insensitive, so clients sending "X-CSRF-Token" match.
+const CSRFHeaderName = "X-Csrf-Token"
 
 // CSRFEndpointPath is the route that mints a fresh token. Public —
 // no auth required, since the SPA fetches it before login completes.
@@ -101,6 +105,9 @@ func (s *GraphServer) HandleCSRF(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "csrf: token mint failed", http.StatusInternalServerError)
 		return
 	}
+	// G124: HttpOnly=false is required (double-submit: the SPA reads the
+	// cookie); Secure follows the operator's -secure-cookies flag.
+	//nolint:gosec // G124: see above.
 	http.SetCookie(w, &http.Cookie{
 		Name:     CSRFCookieName,
 		Value:    tok,
@@ -115,7 +122,10 @@ func (s *GraphServer) HandleCSRF(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]string{"token": tok})
+	if err := json.NewEncoder(w).Encode(map[string]string{"token": tok}); err != nil {
+		// Headers are already sent; the client most likely went away.
+		slog.Debug("csrf: write token response", "err", err)
+	}
 }
 
 // csrfCheck verifies that a request's X-CSRF-Token header matches its
@@ -136,19 +146,23 @@ func csrfCheck(r *http.Request) error {
 	return nil
 }
 
-// csrfExemptPaths is the set of paths the middleware never enforces
-// against. Login is exempt because the user is not yet authenticated;
+// isCSRFExemptPath reports whether path is one the middleware never
+// enforces against. Login is exempt because the user is not yet authenticated;
 // logout is idempotent and clears the cookie either way; /api/v1/csrf
 // is the source of the token. /healthz is unauthenticated read-only.
 //
-// The map is keyed by exact path; any sub-path under these names is
-// NOT exempt unless added explicitly.
-var csrfExemptPaths = map[string]struct{}{
-	"/api/v1/auth/login":  {},
-	"/api/v1/auth/logout": {},
-	CSRFEndpointPath:      {},
-	"/api/v1/healthz":     {},
-	"/healthz":            {},
+// Matching is by exact path; any sub-path under these names is NOT
+// exempt unless added explicitly.
+func isCSRFExemptPath(path string) bool {
+	switch path {
+	case "/api/v1/auth/login",
+		"/api/v1/auth/logout",
+		CSRFEndpointPath,
+		"/api/v1/healthz",
+		"/healthz":
+		return true
+	}
+	return false
 }
 
 // isSafeMethod reports whether the HTTP method is read-only by RFC 9110
@@ -192,7 +206,7 @@ func csrfMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, exempt := csrfExemptPaths[r.URL.Path]; exempt {
+		if isCSRFExemptPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -219,6 +233,8 @@ func csrfMiddleware(next http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 			return
+		case authSourceNone:
+			fallthrough
 		default:
 			// No auth credentials on the request — let the downstream
 			// AuthJWT emit its 401. CSRF is irrelevant for an

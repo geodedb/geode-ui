@@ -57,6 +57,14 @@ const (
 	auditEventProfileRateLimited = "profile_rate_limited"
 )
 
+// Audit field keys shared by several emitAudit call sites.
+const (
+	auditKeyName  = "name"
+	auditKeyFile  = "file"
+	auditKeyRole  = "role"
+	auditKeyRoles = "roles"
+)
+
 // sensitiveKeys are case-insensitive substrings that, when found in an
 // audit field's key name, force the value to be redacted. We extend the
 // centralised obsx.DefaultSensitiveKeyFragments list (which already covers
@@ -68,6 +76,8 @@ const (
 // list and these locals together so a single isSensitive() call covers
 // the full surface. False positives (over-redaction) are far cheaper
 // than false negatives (leaking a secret to the audit channel).
+//
+//nolint:gochecknoglobals // read-only table built once; rebuilding it per emit would allocate.
 var sensitiveKeys = append(append([]string{}, obsx.DefaultSensitiveKeyFragments...),
 	// geode-ui-specific additions on top of obsx defaults.
 	"saved_password",    // profilestore on-disk password field
@@ -175,7 +185,7 @@ func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 	matches := r.count
 	if !since.IsZero() {
 		matches = 0
-		for i := 0; i < r.count; i++ {
+		for i := range r.count {
 			idx := (r.start + i) % len(r.buf)
 			if !r.buf[idx].Timestamp.Before(since) {
 				matches++
@@ -186,7 +196,7 @@ func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 	// Pass two: allocate exactly `matches` slots and copy the matching
 	// entries in ring (chronological) order.
 	out := make([]AuditEntry, 0, matches)
-	for i := 0; i < r.count; i++ {
+	for i := range r.count {
 		idx := (r.start + i) % len(r.buf)
 		e := r.buf[idx]
 		if since.IsZero() || !e.Timestamp.Before(since) {
@@ -201,6 +211,8 @@ func (r *auditRing) snapshot(since time.Time) []AuditEntry {
 // emit call sites honest — every handler can fire and forget, and the
 // HTTP handler reads from the same buffer regardless of which goroutine
 // recorded the event.
+//
+//nolint:gochecknoglobals // process-wide ring shared by emitAudit and the /api/v1/audit handler by design.
 var defaultAuditRing = newAuditRing()
 
 // emitAudit writes one record to slog at INFO level (prefixed with
@@ -243,9 +255,11 @@ func emitAudit(event string, kv ...any) {
 				"AUDIT EMISSION FAILED event=%s panic=%v\n", event, rec)
 		}
 	}()
-	args := make([]any, 0, len(kv)+2)
+	// kv is a flat key/value list; "event" adds one more pair.
+	const pairLen = 2
+	args := make([]any, 0, len(kv)+pairLen)
 	args = append(args, "event", event)
-	fields := make(map[string]any, len(kv)/2)
+	fields := make(map[string]any, len(kv)/pairLen)
 	for i := 0; i+1 < len(kv); i += 2 {
 		key, _ := kv[i].(string)
 		val := kv[i+1]

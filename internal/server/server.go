@@ -1,3 +1,6 @@
+// Package server implements the geode-ui backend: the genapi REST
+// handlers, the /ws/query and /ws/lsp WebSocket surfaces, the MCP tools,
+// and the auth, CSRF, rate-limit and audit middleware around them.
 package server
 
 import (
@@ -162,6 +165,7 @@ type Config struct {
 //     ring.
 type GraphServer struct {
 	genapi.UnimplementedServer
+
 	cfg            Config
 	reloadGroup    singleflight.Group
 	reloadVersion  atomic.Int64
@@ -197,6 +201,11 @@ func New(cfg Config) *GraphServer {
 // to dial without poking at the unexported GraphServer.cfg.
 func (s *GraphServer) LSPConfig() LspConfig { return s.cfg.LSP }
 
+// Healthz returns liveness info. Open route, no auth.
+func (s *GraphServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *gentypes.Empty) (*gentypes.HealthResp, error) {
+	return &gentypes.HealthResp{Status: "ok", Version: s.cfg.Version}, nil
+}
+
 // awaitReloadIdle blocks until every async maybeReload spawned by this
 // server has completed. Test-only — production code never needs to
 // observe reload completion (the whole point of F1 is decoupling the
@@ -205,11 +214,6 @@ func (s *GraphServer) LSPConfig() LspConfig { return s.cfg.LSP }
 // into the public API.
 func (s *GraphServer) awaitReloadIdle() {
 	s.reloadInflight.Wait()
-}
-
-// Healthz returns liveness info. Open route, no auth.
-func (s *GraphServer) Healthz(_ http.ResponseWriter, _ *http.Request, _ *gentypes.Empty) (*gentypes.HealthResp, error) {
-	return &gentypes.HealthResp{Status: "ok", Version: s.cfg.Version}, nil
 }
 
 // RegisterLspWS registers the /ws/lsp WebSocket-to-TCP bridge route on

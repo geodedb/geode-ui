@@ -1,4 +1,4 @@
-// Package server: WebSocket streaming query handler.
+// WebSocket streaming query handler.
 //
 // /ws/query is the streaming counterpart to POST /api/v1/query. The
 // client sends one {kind:"start", statement, ...} message; the server
@@ -13,6 +13,7 @@
 // satisfying the synchronous API ServerInterface. Splitting the
 // surfaces also matches the conceptual difference: REST returns a
 // completed result; WS streams an in-progress one.
+
 package server
 
 import (
@@ -41,6 +42,8 @@ const wsRowBatchSize = 64
 // batches so the per-batch JSON encoding does not allocate a fresh
 // backing slice for every flush. Buffers are reset (not nil-cleared)
 // on Get so callers can append directly.
+//
+//nolint:gochecknoglobals // a sync.Pool only amortises allocations when shared process-wide.
 var wsRowBufPool = sync.Pool{
 	New: func() any { return &bytes.Buffer{} },
 }
@@ -109,7 +112,10 @@ func (b *rowBatcher) flush() error {
 	if len(b.buf) == 0 {
 		return nil
 	}
-	buf := wsRowBufPool.Get().(*bytes.Buffer)
+	buf, ok := wsRowBufPool.Get().(*bytes.Buffer)
+	if !ok {
+		buf = &bytes.Buffer{}
+	}
 	buf.Reset()
 	defer wsRowBufPool.Put(buf)
 
@@ -141,6 +147,7 @@ func (b *rowBatcher) flush() error {
 // methods into it accidentally.
 type WSServer struct {
 	genws.UnimplementedWSServer
+
 	cfg Config
 
 	// onCancelReaderExit, when non-nil, is invoked by the cancel-reader
@@ -229,10 +236,7 @@ func (s *WSServer) Query(conn *wsx.Conn) error {
 	// coordinator's teardown is observable in tests via onCancelReaderExit.
 	s.startCancelReader(conn, cancel, done)
 
-	args, err := mapToNamedArgs(first.Params)
-	if err != nil {
-		return writeErr(conn, ErrCodeInvalidParams, err.Error())
-	}
+	args := mapToNamedArgs(first.Params)
 
 	start := time.Now()
 	rows, err := db.QueryContext(ctx, stmt, args...)
@@ -462,18 +466,14 @@ func stringsToAny(ss []string) []any {
 // sql.Named values suitable for db.QueryContext. Mirrors the namedArgs
 // helper used by the synchronous handler — the difference is that the
 // WS frame already gives us a typed map, so no jsontext round-trip is
-// needed. Empty/nil input returns (nil, nil).
-//
-// Returning an error today is reserved for future validation (e.g.
-// rejecting reserved-name keys); the current implementation cannot
-// fail.
-func mapToNamedArgs(params map[string]any) ([]any, error) {
+// needed. Empty/nil input returns nil.
+func mapToNamedArgs(params map[string]any) []any {
 	if len(params) == 0 {
-		return nil, nil
+		return nil
 	}
 	args := make([]any, 0, len(params))
 	for k, v := range params {
 		args = append(args, sql.Named(k, v))
 	}
-	return args, nil
+	return args
 }

@@ -112,11 +112,11 @@ func TestLogin_UnknownProfile(t *testing.T) {
 // returns to drive the unknown-profile code path. We use a sentinel
 // rather than fmt.Errorf so the comparison in the handler stays
 // stable regardless of fmt's output formatting choices.
-var errMissingProfile = stringErr("conn: unknown profile \"nope\"")
+var errMissingProfile = stringError("conn: unknown profile \"nope\"")
 
-type stringErr string
+type stringError string
 
-func (s stringErr) Error() string { return string(s) }
+func (s stringError) Error() string { return string(s) }
 
 // TestInjectCreds_StripsExistingUserinfo confirms the helper rewrites
 // a DSN to carry only the new credentials and never leaks the prior
@@ -304,7 +304,7 @@ func TestLogin_ReturnsConnectionID(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 	resp, err := srv.Login(w, r, &gentypes.LoginReq{
 		Username: "alice", Password: "p", Profile: "default",
 	})
@@ -316,7 +316,7 @@ func TestLogin_ReturnsConnectionID(t *testing.T) {
 	}
 
 	w2 := httptest.NewRecorder()
-	r2 := httptest.NewRequest("POST", "/api/v1/auth/login", nil)
+	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 	resp2, _ := srv.Login(w2, r2, &gentypes.LoginReq{
 		Username: "alice", Password: "p", Profile: "default",
 	})

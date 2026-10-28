@@ -100,7 +100,9 @@ func userFromContext(ctx context.Context) string {
 
 // Tx implements POST /api/v1/tx — opens a new transaction on the
 // caller's connection profile and returns an opaque txid.
-func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.TxBeginReq) (*gentypes.TxBeginResp, error) {
+func (s *GraphServer) Tx(
+	w http.ResponseWriter, r *http.Request, req *gentypes.TxBeginReq,
+) (*gentypes.TxBeginResp, error) {
 	if s.cfg.Pool == nil || s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx subsystem not configured")
 	}
@@ -111,7 +113,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 			code:        ErrCodeProfileUnreachable,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.TxBeginResp]()
 	}
 	tx, err := db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: req.ReadOnly})
 	if err != nil {
@@ -120,7 +122,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 			code:        ErrCodeTxBeginFailed,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.TxBeginResp]()
 	}
 	if req.Graph != "" {
 		if _, err := tx.ExecContext(r.Context(), "USE GRAPH "+sanitizeGraphName(req.Graph)); err != nil {
@@ -130,7 +132,7 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 				code:        ErrCodeTxUseGraphFailed,
 				description: err.Error(),
 			})
-			return nil, nil
+			return responseWritten[gentypes.TxBeginResp]()
 		}
 	}
 	id := s.cfg.TxStore.put(tx, userFromContext(r.Context()))
@@ -152,7 +154,9 @@ func (s *GraphServer) Tx(w http.ResponseWriter, r *http.Request, req *gentypes.T
 // endpoint (POST /api/v1/migrations/run, method PostMigrationsRun) by
 // folding the path-parameter token into the method name. The B7+B8
 // regen rotated this from the simpler `Run` we had before that.
-func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq) (*gentypes.QueryResp, error) {
+func (s *GraphServer) PostTxidRun(
+	w http.ResponseWriter, r *http.Request, req *gentypes.TxRunReq,
+) (*gentypes.QueryResp, error) {
 	if s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx store not configured")
 	}
@@ -163,7 +167,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.QueryResp]()
 	}
 	args, err := namedArgs(req.Params)
 	if err != nil {
@@ -172,7 +176,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 			code:        ErrCodeInvalidParams,
 			description: "params field is not a valid JSON object: " + err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.QueryResp]()
 	}
 	start := time.Now()
 	rows, err := tx.QueryContext(r.Context(), req.Statement, args...)
@@ -182,7 +186,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 			code:        ErrCodeQueryError,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.QueryResp]()
 	}
 	defer func() { _ = rows.Close() }()
 	resp, err := scanQueryResult(rows, start)
@@ -193,7 +197,7 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 				code:        ErrCodeQueryError,
 				description: err.Error(),
 			})
-			return nil, nil
+			return responseWritten[gentypes.QueryResp]()
 		}
 		return nil, err
 	}
@@ -203,59 +207,51 @@ func (s *GraphServer) PostTxidRun(w http.ResponseWriter, r *http.Request, req *g
 // Commit implements POST /api/v1/tx/{txid}/commit — finalises the
 // transaction and removes it from the store.
 func (s *GraphServer) Commit(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
-	if s.cfg.TxStore == nil {
-		return nil, errors.New("server: tx store not configured")
-	}
-	tx, err := s.cfg.TxStore.take(req.Txid, userFromContext(r.Context()))
-	if err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusNotFound,
-			code:        ErrCodeTxNotFound,
-			description: err.Error(),
-		})
-		return nil, nil
-	}
-	if err := tx.Commit(); err != nil {
-		writeEndpointError(w, &endpointError{
-			status:      http.StatusUnprocessableEntity,
-			code:        ErrCodeTxCommitFailed,
-			description: err.Error(),
-		})
-		return nil, nil
-	}
-	emitAudit(auditEventTxCommitted,
-		"user", userFromContext(r.Context()),
-		"txid", req.Txid,
-	)
-	return &gentypes.Empty{}, nil
+	return s.finishTx(w, r, req.Txid, (*sql.Tx).Commit, ErrCodeTxCommitFailed, auditEventTxCommitted)
 }
 
 // Rollback implements POST /api/v1/tx/{txid}/rollback — discards the
 // transaction and removes it from the store.
-func (s *GraphServer) Rollback(w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam) (*gentypes.Empty, error) {
+func (s *GraphServer) Rollback(
+	w http.ResponseWriter, r *http.Request, req *gentypes.TxIDParam,
+) (*gentypes.Empty, error) {
+	return s.finishTx(w, r, req.Txid, (*sql.Tx).Rollback, ErrCodeTxRollbackFailed, auditEventTxRollback)
+}
+
+// finishTx is the shared body of Commit and Rollback: it takes the
+// caller-owned transaction out of the store, applies finish (Commit or
+// Rollback), and emits auditEvent on success. A missing/foreign txid is
+// a 404 tx_not_found; a finish error is a 422 carrying failCode.
+func (s *GraphServer) finishTx(
+	w http.ResponseWriter,
+	r *http.Request,
+	txid string,
+	finish func(*sql.Tx) error,
+	failCode, auditEvent string,
+) (*gentypes.Empty, error) {
 	if s.cfg.TxStore == nil {
 		return nil, errors.New("server: tx store not configured")
 	}
-	tx, err := s.cfg.TxStore.take(req.Txid, userFromContext(r.Context()))
+	tx, err := s.cfg.TxStore.take(txid, userFromContext(r.Context()))
 	if err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusNotFound,
 			code:        ErrCodeTxNotFound,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
-	if err := tx.Rollback(); err != nil {
+	if err := finish(tx); err != nil {
 		writeEndpointError(w, &endpointError{
 			status:      http.StatusUnprocessableEntity,
-			code:        ErrCodeTxRollbackFailed,
+			code:        failCode,
 			description: err.Error(),
 		})
-		return nil, nil
+		return responseWritten[gentypes.Empty]()
 	}
-	emitAudit(auditEventTxRollback,
+	emitAudit(auditEvent,
 		"user", userFromContext(r.Context()),
-		"txid", req.Txid,
+		"txid", txid,
 	)
 	return &gentypes.Empty{}, nil
 }

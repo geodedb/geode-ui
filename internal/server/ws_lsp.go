@@ -1,4 +1,4 @@
-// Package server: /ws/lsp WebSocket-to-TCP bridge.
+// /ws/lsp WebSocket-to-TCP bridge.
 //
 // /ws/lsp proxies a browser WebSocket connection through to an upstream
 // Language Server Protocol TCP listener — concretely, `geode serve
@@ -34,6 +34,7 @@
 // the generated /ws/query handler (func(*http.Request) error) keeps
 // wiring uniform. An anonymous request receives 401 and the upstream
 // TCP listener is never dialed.
+
 package server
 
 import (
@@ -54,6 +55,16 @@ import (
 // larger than this on either side abort the bridge — there is no
 // legitimate LSP payload that exceeds it.
 const maxLspMessage = 16 * 1024 * 1024
+
+// LSP bridge timeouts and limits.
+const (
+	lspWriteTimeout = 30 * time.Second
+	lspPingInterval = 30 * time.Second
+	lspDialTimeout  = 5 * time.Second
+	// maxLspHeader caps the LSP base-protocol header block
+	// ("Content-Length: N\r\n\r\n" plus optional fields).
+	maxLspHeader = 4096
+)
 
 // wsLspHandler is the http.Handler for /ws/lsp. It is constructed with
 // the upstream TCP address (typically 127.0.0.1:3142 for a colocated
@@ -102,8 +113,8 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MaxFrame:       maxLspMessage,
 		MaxMessage:     maxLspMessage,
 		ReadTimeout:    0,
-		WriteTimeout:   30 * time.Second,
-		PingInterval:   30 * time.Second,
+		WriteTimeout:   lspWriteTimeout,
+		PingInterval:   lspPingInterval,
 		AllowAnyOrigin: true,
 	})
 	if err != nil {
@@ -113,7 +124,8 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	tcp, err := net.DialTimeout("tcp", h.upstreamAddr, 5*time.Second)
+	dialer := net.Dialer{Timeout: lspDialTimeout}
+	tcp, err := dialer.DialContext(r.Context(), "tcp", h.upstreamAddr)
 	if err != nil {
 		// A close frame surfaces the failure mode cleanly to the
 		// browser; the WebSocket library can't send an HTTP error at
@@ -123,21 +135,23 @@ func (h *wsLspHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tcp.Close() }()
 
-	errCh := make(chan error, 2)
-	go func() { errCh <- proxyWsToTcp(conn, tcp, token) }()
-	go func() { errCh <- proxyTcpToWs(tcp, conn) }()
+	// One slot per proxy direction so neither goroutine blocks on send.
+	const proxyDirections = 2
+	errCh := make(chan error, proxyDirections)
+	go func() { errCh <- proxyWsToTCP(conn, tcp, token) }()
+	go func() { errCh <- proxyTCPToWs(tcp, conn) }()
 	// The first goroutine to error (or hit EOF) unblocks the receive;
 	// the deferred Close calls on both sockets cascade the shutdown to
 	// the second goroutine.
 	<-errCh
 }
 
-// proxyWsToTcp reads WebSocket text frames in a loop, optionally
+// proxyWsToTCP reads WebSocket text frames in a loop, optionally
 // rewrites JSON-RPC initialize requests to carry the caller's bearer
 // token, and writes each frame to the upstream TCP socket with an LSP
 // Content-Length envelope. Returns on the first read or write error
 // (including normal close).
-func proxyWsToTcp(ws *wsx.Conn, tcp net.Conn, token string) error {
+func proxyWsToTCP(ws *wsx.Conn, tcp net.Conn, token string) error {
 	for {
 		op, body, err := ws.ReadMessage()
 		if err != nil {
@@ -170,10 +184,10 @@ func proxyWsToTcp(ws *wsx.Conn, tcp net.Conn, token string) error {
 	}
 }
 
-// proxyTcpToWs reads framed LSP messages from the upstream TCP socket
+// proxyTCPToWs reads framed LSP messages from the upstream TCP socket
 // and emits each body as a single WebSocket text frame. Returns nil on
 // clean EOF, error on any other failure.
-func proxyTcpToWs(tcp net.Conn, ws *wsx.Conn) error {
+func proxyTCPToWs(tcp net.Conn, ws *wsx.Conn) error {
 	rd := newLspFrameReader(tcp)
 	for {
 		frame, err := rd.ReadFrame()
@@ -272,8 +286,8 @@ func (f *lspFrameReader) ReadFrame() ([]byte, error) {
 		if len(header) >= 4 && string(header[len(header)-4:]) == "\r\n\r\n" {
 			break
 		}
-		if len(header) > 4096 {
-			return nil, fmt.Errorf("LSP header too large")
+		if len(header) > maxLspHeader {
+			return nil, errors.New("LSP header too large")
 		}
 	}
 	headerStr := string(header)
@@ -282,7 +296,7 @@ func (f *lspFrameReader) ReadFrame() ([]byte, error) {
 	// specific case.
 	lowerIdx := strings.Index(strings.ToLower(headerStr), "content-length:")
 	if lowerIdx < 0 {
-		return nil, fmt.Errorf("LSP: missing Content-Length header")
+		return nil, errors.New("LSP: missing Content-Length header")
 	}
 	// Slice off everything before "Content-Length:" so the integer
 	// parse starts at the prefix.

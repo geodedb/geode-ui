@@ -6,17 +6,17 @@ import (
 	"testing"
 )
 
-// fakeStatusClasser implements the unexported `statusClasser`
+// fakeStatusClassError implements the unexported `statusClasser`
 // interface that `isWireFeatureMissing` and `isAuthError` look for via
 // errors.As. It pins the typed-error path so a driver that DOES
 // expose StatusClass() bypasses the substring fallback entirely.
-type fakeStatusClasser struct {
+type fakeStatusClassError struct {
 	cls string
 	msg string
 }
 
-func (e *fakeStatusClasser) Error() string       { return "fake: " + e.cls + ": " + e.msg }
-func (e *fakeStatusClasser) StatusClass() string { return e.cls }
+func (e *fakeStatusClassError) Error() string       { return "fake: " + e.cls + ": " + e.msg }
+func (e *fakeStatusClassError) StatusClass() string { return e.cls }
 
 // TestIsWireFeatureMissing_TypedSentinel pins the GAP-Q6 sentinel
 // path: callers that wrap errWireFeatureMissing via %w must be
@@ -52,7 +52,7 @@ func TestIsWireFeatureMissing_TypedStatusClass(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := &fakeStatusClasser{cls: tc.cls, msg: "anything"}
+			err := &fakeStatusClassError{cls: tc.cls, msg: "anything"}
 			if got := isWireFeatureMissing(err); got != tc.want {
 				t.Fatalf("got=%v want=%v", got, tc.want)
 			}
@@ -72,11 +72,12 @@ func TestIsWireFeatureMissing_PinnedSubstrings(t *testing.T) {
 		"expected token":      true,
 		"expected identifier": true,
 	}
-	if len(wireFeatureMissingSubstrings) != len(wantSubstrings) {
+	got := wireFeatureMissingSubstrings()
+	if len(got) != len(wantSubstrings) {
 		t.Fatalf("wireFeatureMissingSubstrings drift: have %v, expected size %d",
-			wireFeatureMissingSubstrings, len(wantSubstrings))
+			got, len(wantSubstrings))
 	}
-	for _, s := range wireFeatureMissingSubstrings {
+	for _, s := range got {
 		if !wantSubstrings[s] {
 			t.Fatalf("unexpected substring in fallback list: %q (update test if intentional)", s)
 		}
@@ -136,7 +137,7 @@ func TestWireErr_UpgradesToNotImplementedOnMissingFeature(t *testing.T) {
 		},
 		{
 			name:       "typed_42000_yields_501",
-			in:         &fakeStatusClasser{cls: "42000", msg: "parse error"},
+			in:         &fakeStatusClassError{cls: "42000", msg: "parse error"},
 			wantStatus: 501,
 			wantCode:   "wire_feature_missing",
 		},

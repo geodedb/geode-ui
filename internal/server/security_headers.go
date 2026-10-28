@@ -138,6 +138,7 @@ func WithSPASecurityHeaders(next http.Handler) http.Handler {
 // is HTML.
 type spaHeaderWriter struct {
 	http.ResponseWriter
+
 	wroteHeader bool
 	status      int
 	// sniffed records whether we have sniffed the body once so the

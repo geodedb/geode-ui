@@ -67,7 +67,7 @@ func mustMarshalArrayField(t *testing.T, v any, fields ...string) string {
 	}
 	if rv.Kind() == reflect.Struct {
 		rt := rv.Type()
-		for i := 0; i < rv.NumField(); i++ {
+		for i := range rv.NumField() {
 			fv := rv.Field(i)
 			if fv.Kind() == reflect.Slice && fv.IsNil() {
 				t.Errorf("%s.%s is a nil slice — list endpoints must return a non-nil empty slice on no results", rt.Name(), rt.Field(i).Name)

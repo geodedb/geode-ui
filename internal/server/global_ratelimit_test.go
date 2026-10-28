@@ -66,7 +66,7 @@ func TestGlobalRate_CrossRouteAggregateCeiling(t *testing.T) {
 	if respB.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("route B GET /api/v1/graphs: want 429 from the cross-route aggregate limiter, got %d (body %q)", respB.StatusCode, string(bodyB))
 	}
-	if respB.Header.Get("X-RateLimit-Limit") == "" {
+	if respB.Header.Get("X-Ratelimit-Limit") == "" {
 		t.Errorf("route B 429 response is missing X-RateLimit-Limit header")
 	}
 	if !strings.Contains(string(bodyB), "rate limit") {
@@ -90,7 +90,7 @@ func TestGlobalRate_DisabledWhenZero(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		path := "/api/v1/capabilities"
 		if i%2 == 1 {
 			path = "/api/v1/graphs"

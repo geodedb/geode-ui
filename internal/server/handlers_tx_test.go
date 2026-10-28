@@ -90,7 +90,7 @@ func TestTxStore_GetMissing(t *testing.T) {
 // truncated.
 func TestNewTxID_Uniqueness(t *testing.T) {
 	seen := make(map[string]struct{}, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		id := newTxID()
 		if len(id) != 32 {
 			t.Fatalf("len=%d want 32", len(id))
@@ -130,14 +130,14 @@ type txCapableDriver struct {
 	rows [][]driver.Value
 }
 
+func (d *txCapableDriver) Open(_ string) (driver.Conn, error) {
+	return &txCapableConn{d: d}, nil
+}
+
 func (d *txCapableDriver) record(s string) {
 	d.mu.Lock()
 	d.events = append(d.events, s)
 	d.mu.Unlock()
-}
-
-func (d *txCapableDriver) Open(_ string) (driver.Conn, error) {
-	return &txCapableConn{d: d}, nil
 }
 
 // registerTxDriver registers d under name once per process so multiple

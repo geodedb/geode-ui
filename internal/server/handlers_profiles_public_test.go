@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestPublicProfiles_ReturnsSystemOnly_NoAuth(t *testing.T) {
 	}
 	srv := New(Config{Store: st})
 
-	r := httptest.NewRequest("GET", "/api/v1/profiles/public", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles/public", nil)
 	resp, err := srv.Public(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Public: %v", err)
@@ -60,7 +61,7 @@ func TestPublicProfiles_EmptyStoreReturnsEmptyList(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	srv := New(Config{Store: st})
 
-	r := httptest.NewRequest("GET", "/api/v1/profiles/public", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles/public", nil)
 	resp, err := srv.Public(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Public: %v", err)
@@ -83,7 +84,7 @@ func TestPublicProfiles_EmptyStoreReturnsEmptyList(t *testing.T) {
 func TestPublicProfiles_StoreErrorBubbles(t *testing.T) {
 	listErr := errors.New("disk on fire")
 	srv := New(Config{Store: &listErrStore{err: listErr}})
-	r := httptest.NewRequest("GET", "/api/v1/profiles/public", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles/public", nil)
 	resp, err := srv.Public(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err == nil {
 		t.Fatalf("Public: want error, got nil (resp=%+v)", resp)
@@ -124,7 +125,7 @@ func TestPublicProfiles_StoreNil_FallbackToPool(t *testing.T) {
 		Store:    nil,
 		Profiles: namesPoolStub{names: []string{"east", "west"}},
 	})
-	r := httptest.NewRequest("GET", "/api/v1/profiles/public", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles/public", nil)
 	resp, err := srv.Public(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Public: %v", err)
@@ -149,7 +150,7 @@ func TestPublicProfiles_StoreNil_FallbackToPool(t *testing.T) {
 // SPA's connection picker can still render its zero-state UI.
 func TestPublicProfiles_StoreNil_NoPool_ReturnsEmpty(t *testing.T) {
 	srv := New(Config{}) // no Store, no Profiles
-	r := httptest.NewRequest("GET", "/api/v1/profiles/public", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/profiles/public", nil)
 	resp, err := srv.Public(httptest.NewRecorder(), r, &gentypes.Empty{})
 	if err != nil {
 		t.Fatalf("Public: %v", err)

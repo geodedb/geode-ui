@@ -179,7 +179,7 @@ func BenchmarkScanQueryResult_FoldedSummary(b *testing.B) {
 			"plain",
 		},
 	}
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fr := &fakeRowScanner{cols: []string{"n", "r"}, rows: rowFixture}
 		_ = mustScan(b, fr)
 	}
@@ -202,11 +202,6 @@ func mustScan(b *testing.B, fr *fakeRowScanner) GraphSummary {
 	}
 	return summary.finish()
 }
-
-// referenceTime is a fixed clock used by tests that need a non-zero
-// elapsed_ms; not currently used but kept here so future stop-the-world
-// regression tests can pin a deterministic time.Since.
-var referenceTime = time.Date(2026, 5, 7, 0, 0, 0, 0, time.UTC) //nolint:unused
 
 // discardFlushWriter is an http.ResponseWriter that discards the body
 // (so the benchmark measures the codec, not buffer growth) and implements
@@ -250,7 +245,7 @@ func BenchmarkStreamQueryResult_PerRowAlloc(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fr := &fakeRowScanner{cols: colNames, rows: rows}
 		w := newDiscardFlushWriter()
 		if _, err := streamQueryResult(w, fr, fr.cols, colDescs, time.Now()); err != nil {

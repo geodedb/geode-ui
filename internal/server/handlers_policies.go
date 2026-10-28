@@ -1,11 +1,7 @@
 package server
 
 import (
-	"encoding/json/v2"
-	"fmt"
 	"net/http"
-
-	"encoding/json/jsontext"
 
 	gentypes "geodedb.com/geode-ui/gen/types"
 )
@@ -60,26 +56,12 @@ import (
 // for the SPA's gate.
 
 // GetPolicies implements GET /api/v1/policies (list policies).
-func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.PolicyList, error) {
-	db, err := s.connDB(r.Context())
-	if err != nil {
-		return nil, respondErr(w, err)
-	}
-	rows, cols, err := runQuery(r.Context(), db, "SHOW POLICIES")
-	if err != nil {
-		if isWireFeatureMissing(err) {
-			return &gentypes.PolicyList{Policies: []jsontext.Value{}}, nil
-		}
-		return nil, respondErr(w, wireErr(err))
-	}
-	out := make([]jsontext.Value, 0, len(rows))
-	for _, row := range rows {
-		obj := rowToMap(cols, row)
-		raw, mErr := json.Marshal(obj)
-		if mErr != nil {
-			return nil, fmt.Errorf("marshal policy row: %w", mErr)
-		}
-		out = append(out, jsontext.Value(raw))
+func (s *GraphServer) GetPolicies(
+	w http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.PolicyList, error) {
+	out, done, err := s.showRowsAsJSON(w, r, "SHOW POLICIES", "policy")
+	if done {
+		return nil, err
 	}
 	return &gentypes.PolicyList{Policies: out}, nil
 }
@@ -97,7 +79,9 @@ func (s *GraphServer) GetPolicies(w http.ResponseWriter, r *http.Request, _ *gen
 //
 // Tested by TestCreatePolicy_StaysWireFeatureMissingOnV0_5_15 in
 // handlers_policies_test.go.
-func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyCreateReq) (*gentypes.Policy, error) {
+func (s *GraphServer) PostPolicies(
+	w http.ResponseWriter, r *http.Request, req *gentypes.PolicyCreateReq,
+) (*gentypes.Policy, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -135,7 +119,9 @@ func (s *GraphServer) PostPolicies(w http.ResponseWriter, r *http.Request, req *
 }
 
 // GetName implements GET /api/v1/policies/{name}.
-func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyParam) (*gentypes.Policy, error) {
+func (s *GraphServer) GetName(
+	w http.ResponseWriter, r *http.Request, req *gentypes.PolicyParam,
+) (*gentypes.Policy, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -159,7 +145,9 @@ func (s *GraphServer) GetName(w http.ResponseWriter, r *http.Request, req *genty
 }
 
 // DeleteName implements DELETE /api/v1/policies/{name}.
-func (s *GraphServer) DeleteName(w http.ResponseWriter, r *http.Request, req *gentypes.PolicyParam) (*gentypes.Empty, error) {
+func (s *GraphServer) DeleteName(
+	w http.ResponseWriter, r *http.Request, req *gentypes.PolicyParam,
+) (*gentypes.Empty, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -186,7 +174,7 @@ func policyFromRow(cols []string, row []any) *gentypes.Policy {
 			break
 		}
 		switch c {
-		case "name", "policy":
+		case colName, "policy":
 			p.Name = asStr(row[i])
 		case "expression":
 			p.Expression = asStr(row[i])

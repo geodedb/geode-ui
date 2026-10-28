@@ -49,7 +49,9 @@ import (
 // applied (the conservative default — surfaces the row to the UI in
 // either case, but lets the operator distinguish state once Geode
 // emits the column).
-func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.MigrationStatus, error) {
+func (s *GraphServer) GetMigrations(
+	w http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.MigrationStatus, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -79,7 +81,7 @@ func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *g
 			}
 		}
 		if isPending {
-			pending = append(pending, asStr(obj["name"]))
+			pending = append(pending, asStr(obj[colName]))
 			continue
 		}
 		raw, mErr := json.Marshal(obj)
@@ -96,7 +98,9 @@ func (s *GraphServer) GetMigrations(w http.ResponseWriter, r *http.Request, _ *g
 // MIGRATE RUN returns one row per applied migration name. The
 // response surfaces a string slice of those names in the order Geode
 // applied them.
-func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, _ *gentypes.Empty) (*gentypes.MigrationRunResp, error) {
+func (s *GraphServer) PostMigrationsRun(
+	w http.ResponseWriter, r *http.Request, _ *gentypes.Empty,
+) (*gentypes.MigrationRunResp, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -108,7 +112,7 @@ func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, 
 	applied := make([]string, 0, len(rows))
 	for _, row := range rows {
 		obj := rowToMap(cols, row)
-		if v, ok := obj["name"]; ok {
+		if v, ok := obj[colName]; ok {
 			applied = append(applied, asStr(v))
 			continue
 		}
@@ -125,7 +129,9 @@ func (s *GraphServer) PostMigrationsRun(w http.ResponseWriter, r *http.Request, 
 }
 
 // PostMigrations implements POST /api/v1/migrations (create migration).
-func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationCreateReq) (*gentypes.MigrationRef, error) {
+func (s *GraphServer) PostMigrations(
+	w http.ResponseWriter, r *http.Request, req *gentypes.MigrationCreateReq,
+) (*gentypes.MigrationRef, error) {
 	db, err := s.connDB(r.Context())
 	if err != nil {
 		return nil, respondErr(w, err)
@@ -150,30 +156,20 @@ func (s *GraphServer) PostMigrations(w http.ResponseWriter, r *http.Request, req
 	}
 	emitAudit(auditEventMigrationCreated,
 		"user", userFromContext(r.Context()),
-		"name", req.Name,
+		auditKeyName, req.Name,
 	)
 	return &gentypes.MigrationRef{Name: req.Name}, nil
 }
 
 // Sign implements POST /api/v1/migrations/{name}/sign.
-func (s *GraphServer) Sign(w http.ResponseWriter, r *http.Request, req *gentypes.MigrationParam) (*gentypes.Empty, error) {
-	db, err := s.connDB(r.Context())
-	if err != nil {
-		return nil, respondErr(w, err)
-	}
-	if err := sanitizeBackupFile(req.Name); err != nil {
-		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
-	}
-	mname, err := quoteIdent(req.Name)
-	if err != nil {
-		return nil, respondErr(w, badRequest(ErrCodeInvalidName, err.Error()))
-	}
-	if _, err := runStatement(r.Context(), db, "MIGRATE SIGN "+mname); err != nil {
-		return nil, respondErr(w, wireErr(err))
-	}
-	emitAudit(auditEventMigrationSigned,
-		"user", userFromContext(r.Context()),
-		"name", req.Name,
-	)
-	return &gentypes.Empty{}, nil
+func (s *GraphServer) Sign(
+	w http.ResponseWriter, r *http.Request, req *gentypes.MigrationParam,
+) (*gentypes.Empty, error) {
+	return s.execNamedAdmin(w, r, req.Name, namedAdminStmt{
+		prefix:      "MIGRATE SIGN ",
+		quote:       quoteIdent,
+		invalidCode: ErrCodeInvalidName,
+		auditEvent:  auditEventMigrationSigned,
+		auditKey:    auditKeyName,
+	})
 }

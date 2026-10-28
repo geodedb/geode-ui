@@ -30,6 +30,10 @@ type userTxDriver struct {
 	failOnSubstring string
 }
 
+func (d *userTxDriver) Open(_ string) (driver.Conn, error) {
+	return &userTxConn{d: d}, nil
+}
+
 func (d *userTxDriver) record(s string) {
 	d.mu.Lock()
 	d.events = append(d.events, s)
@@ -40,10 +44,6 @@ func (d *userTxDriver) seen() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]string(nil), d.events...)
-}
-
-func (d *userTxDriver) Open(_ string) (driver.Conn, error) {
-	return &userTxConn{d: d}, nil
 }
 
 type userTxConn struct{ d *userTxDriver }

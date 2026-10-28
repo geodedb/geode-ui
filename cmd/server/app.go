@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +39,32 @@ const defaultJWTTTL = 8 * time.Hour
 // routed around this (PERF-F12 / #56) — a streaming query legitimately
 // runs for minutes.
 const restWriteTimeout = 60 * time.Second
+
+// HTTP server limits. See the hcfg literal in newApp for the rationale
+// behind each value.
+const (
+	readHeaderTimeout = 5 * time.Second
+	restReadTimeout   = 30 * time.Second
+	idleConnTimeout   = 120 * time.Second
+	maxHeaderBytes    = 16 << 10 // 16 KiB
+	maxBodyBytes      = 1 << 20  // 1 MiB
+
+	// Global (all-routes) genapi token bucket.
+	apiGlobalRate  = 2000
+	apiGlobalBurst = 400
+
+	// Coarse per-IP abuse ceiling (SEC-N7 / #66).
+	perIPRPS   = 50
+	perIPBurst = 100
+
+	// revocationSweepInterval is how often the JWT revocation set is
+	// pruned (SEC-N2 / #64).
+	revocationSweepInterval = 10 * time.Minute
+
+	// exitUsage is the process exit code for a flag-parsing failure,
+	// matching the flag package's own convention.
+	exitUsage = 2
+)
 
 // appConfig is the fully-parsed startup configuration: everything the
 // dependency graph needs that came off a flag or has a fixed default.
@@ -75,14 +102,23 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	fs.SetOutput(output)
 	var cfg appConfig
 	fs.StringVar(&cfg.listen, "listen", ":8080", "address to listen on")
-	fs.StringVar(&cfg.profilesFile, "profiles", "", "path to JSON profiles config; on first launch with -profile-store empty, seeds the store as scope=system profiles, then is unused")
-	fs.StringVar(&cfg.profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
-	fs.StringVar(&cfg.secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl rand -hex 32`")
+	fs.StringVar(&cfg.profilesFile, "profiles", "", "path to JSON profiles config; on first launch with "+
+		"-profile-store empty, seeds the store as scope=system profiles, then is unused")
+	fs.StringVar(&cfg.profileStore, "profile-store", "/var/lib/geode-ui/profiles.db", "path to the SQLite profile "+
+		"store; profiles can be CRUD'd at runtime via /api/v1/profiles. ':memory:' for ephemeral test runs")
+	fs.StringVar(&cfg.secretHex, "jwt-secret-hex", "", "hex-encoded HS256 secret (>=32 bytes); generate with `openssl "+
+		"rand -hex 32`")
 	fs.DurationVar(&cfg.jwtTTL, "jwt-ttl", defaultJWTTTL, "JWT TTL (1m..24h)")
-	fs.StringVar(&cfg.adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
-	fs.StringVar(&cfg.uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are auto-created")
-	fs.BoolVar(&cfg.secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / #62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
-	fs.BoolVar(&cfg.passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and air-gap-friendly")
+	fs.StringVar(&cfg.adminUsers, "admin-users", "geode", "comma-separated upstream usernames granted the 'admin' "+
+		"role on login (Geode v0.5.11 doesn't expose role enumeration on the wire yet)")
+	fs.StringVar(&cfg.uploadDir, "upload-dir", "/var/lib/geode-ui/uploads", "filesystem directory where multipart "+
+		"uploads (backup files, migration content) are persisted; subdirectories backups/ and migrations/ are "+
+		"auto-created")
+	fs.BoolVar(&cfg.secureCookies, "secure-cookies", true, "set the Secure attribute on auth + CSRF cookies (SEC-F7 / "+
+		"#62); disable only for local-dev over plain HTTP — production deployments MUST keep this true")
+	fs.BoolVar(&cfg.passwordHIBPCheck, "password-hibp-check", false, "enable HIBP k-anonymity check on "+
+		"PostUsers/PatchUsername/Password (GAP-N4 / #72); off by default so password-set handlers stay hermetic and "+
+		"air-gap-friendly")
 	// Per-actor profile-CRUD rate limit (GAP-S7 #120). Production default
 	// is a deliberately tight 30 req/min (rps 0.5) / burst 10 — see
 	// server.ProfileLimiterDefaults(). Tunable here so heavy automated
@@ -90,8 +126,10 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// several parallel browser workers sharing one JWT subject) can
 	// loosen it without weakening the shipped default. <= 0 means "use
 	// the built-in default".
-	fs.Float64Var(&cfg.profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the built-in default (0.5 = 30/min)")
-	fs.Float64Var(&cfg.profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the built-in default (10)")
+	fs.Float64Var(&cfg.profileCRUDRPS, "profile-crud-rps", 0, "per-actor profile-CRUD rate (req/sec); <=0 uses the "+
+		"built-in default (0.5 = 30/min)")
+	fs.Float64Var(&cfg.profileCRUDBurst, "profile-crud-burst", 0, "per-actor profile-CRUD burst size; <=0 uses the "+
+		"built-in default (10)")
 	// S-NEW-5 (#201): X-Forwarded-For is no longer trusted by default.
 	// When this flag is false (the secure-by-default), the per-IP login
 	// limiter (5 rps) and the per-(profile,username) lockout counter
@@ -100,13 +138,16 @@ func parseFlags(args []string, output io.Writer) (appConfig, error) {
 	// arbitrary innocent IPs (DoS-by-lockout). Enable only when the
 	// binary sits behind a TLS-terminating reverse proxy you control
 	// and that proxy strips/normalises any inbound XFF header.
-	fs.BoolVar(&cfg.trustProxyXFF, "trust-proxy-xff", false, "trust X-Forwarded-For header for per-IP rate limiting (enable only when behind a TLS-terminating reverse proxy you control)")
+	fs.BoolVar(&cfg.trustProxyXFF, "trust-proxy-xff", false, "trust X-Forwarded-For header for per-IP rate limiting "+
+		"(enable only when behind a TLS-terminating reverse proxy you control)")
 	// /ws/lsp bridge wiring. The upstream defaults to 127.0.0.1:3142 to
 	// match `geode serve --lsp-port=3142` colocation. Enabled by default
 	// so a clean local boot of both binaries gives the browser editor
 	// schema-aware completion out of the box.
-	fs.StringVar(&cfg.lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener (geode serve --lsp-port)")
-	fs.BoolVar(&cfg.lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP listener")
+	fs.StringVar(&cfg.lspUpstreamAddr, "lsp-upstream", "127.0.0.1:3142", "host:port of the upstream LSP TCP listener "+
+		"(geode serve --lsp-port)")
+	fs.BoolVar(&cfg.lspEnabled, "lsp-enabled", true, "register the /ws/lsp WebSocket bridge to the upstream LSP "+
+		"listener")
 	if err := fs.Parse(args[1:]); err != nil {
 		return appConfig{}, err
 	}
@@ -136,8 +177,8 @@ const defaultShutdownBudget = 5 * time.Second
 // close runs the registered cleanup funcs in reverse registration order
 // (LIFO, like deferred closes in the original main).
 func (a *app) close() {
-	for i := len(a.cleanups) - 1; i >= 0; i-- {
-		a.cleanups[i]()
+	for _, v := range slices.Backward(a.cleanups) {
+		v()
 	}
 }
 
@@ -158,32 +199,89 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		}
 	}()
 
-	if cfg.secretHex == "" {
-		return nil, errors.New("missing -jwt-secret-hex (generate with `openssl rand -hex 32`)")
+	if err := a.initIssuer(); err != nil {
+		return nil, err
 	}
-	secret, err := hex.DecodeString(cfg.secretHex)
+	pool, store, err := a.initPoolAndStore(getenv)
 	if err != nil {
-		return nil, fmt.Errorf("decode -jwt-secret-hex: %w", err)
+		return nil, err
 	}
-	issuer, err := jwt.NewIssuer(secret, cfg.jwtTTL)
+	mux, err := a.buildMux(pool, store)
 	if err != nil {
-		return nil, fmt.Errorf("jwt issuer: %w", err)
+		return nil, err
+	}
+	handler, hcfg := a.buildHandler(mux)
+
+	// PERF-F12 (#56): cap REST + SPA responses at restWriteTimeout, but
+	// route WebSocket upgrades around the timeout handler. http.TimeoutHandler
+	// buffers the whole response and does not implement http.Hijacker —
+	// either of which would break a streaming WS connection (the upgrade
+	// hijacks the conn and then streams indefinitely). The /ws/ prefix
+	// therefore reaches `handler` directly; everything else goes through
+	// the timeout-wrapped copy. Both branches dispatch into the same
+	// middleware chain + mux, so routing is unchanged — only the timeout
+	// envelope differs.
+	rootHandler := wsExemptTimeoutHandler(handler, restWriteTimeout)
+	a.handler = rootHandler
+
+	a.httpSrv = &http.Server{
+		Addr:    cfg.listen,
+		Handler: rootHandler,
+		// ReadHeaderTimeout guards against slowloris on the header read.
+		ReadHeaderTimeout: readHeaderTimeout,
+		// IdleTimeout reaps idle keep-alive connections — including a WS
+		// connection whose peer has gone silent without sending a close
+		// frame (the per-frame deadlines in wsx handle the in-flight
+		// case; this handles the "open but doing nothing" case).
+		IdleTimeout: hcfg.IdleTimeout,
+		// WriteTimeout is deliberately left at its zero value (no cap):
+		// the /ws/ surface streams for as long as the query runs. The
+		// REST surface's per-request cap is restWriteTimeout, applied
+		// via the http.TimeoutHandler above (which the /ws/ prefix is
+		// routed around). See the PERF-F12 comment block above.
+	}
+
+	ok = true
+	return a, nil
+}
+
+// initIssuer decodes the JWT secret and builds the token issuer.
+func (a *app) initIssuer() error {
+	if a.cfg.secretHex == "" {
+		return errors.New("missing -jwt-secret-hex (generate with `openssl rand -hex 32`)")
+	}
+	secret, err := hex.DecodeString(a.cfg.secretHex)
+	if err != nil {
+		return fmt.Errorf("decode -jwt-secret-hex: %w", err)
+	}
+	issuer, err := jwt.NewIssuer(secret, a.cfg.jwtTTL)
+	if err != nil {
+		return fmt.Errorf("jwt issuer: %w", err)
 	}
 	a.issuer = issuer
+	return nil
+}
 
+// initPoolAndStore builds the connection pool and the encrypted profile
+// store, seeds/reloads the pool from the store, and makes the JWT
+// revocation set durable. Every opened resource is registered in
+// a.cleanups.
+func (a *app) initPoolAndStore(getenv func(string) string) (*conn.Pool, profilestore.Store, error) {
+	cfg := a.cfg
+	issuer := a.issuer
 	profiles := []conn.Profile{{Name: "default", DSN: "quic://127.0.0.1:3141"}}
 	if cfg.profilesFile != "" {
 		raw, err := os.ReadFile(cfg.profilesFile)
 		if err != nil {
-			return nil, fmt.Errorf("read profiles: %w", err)
+			return nil, nil, fmt.Errorf("read profiles: %w", err)
 		}
 		if err := json.Unmarshal(raw, &profiles); err != nil {
-			return nil, fmt.Errorf("parse profiles: %w", err)
+			return nil, nil, fmt.Errorf("parse profiles: %w", err)
 		}
 	}
 	pool, err := conn.NewPool(profiles)
 	if err != nil {
-		return nil, fmt.Errorf("conn pool: %w", err)
+		return nil, nil, fmt.Errorf("conn pool: %w", err)
 	}
 	a.cleanups = append(a.cleanups, func() { _ = pool.Close() })
 
@@ -196,11 +294,11 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// wire format and the legacy-row migration path.
 	cipher, err := profilestore.NewCipherFromEnvFunc(getenv, "GEODE_PROFILESTORE_KEY")
 	if err != nil {
-		return nil, fmt.Errorf("profile store encryption key: %w", err)
+		return nil, nil, fmt.Errorf("profile store encryption key: %w", err)
 	}
 	store, err := profilestore.OpenSQLiteEncrypted(cfg.profileStore, cipher)
 	if err != nil {
-		return nil, fmt.Errorf("profile store open: %w", err)
+		return nil, nil, fmt.Errorf("profile store open: %w", err)
 	}
 	a.cleanups = append(a.cleanups, func() { _ = store.Close() })
 
@@ -209,12 +307,12 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// scope=system. Subsequent launches respect whatever's in the store —
 	// the JSON file becomes one-shot.
 	if err := seedFromJSON(context.Background(), store, profiles); err != nil {
-		return nil, fmt.Errorf("profile store seed: %w", err)
+		return nil, nil, fmt.Errorf("profile store seed: %w", err)
 	}
 
 	// Make the persisted set the source of truth for the in-memory pool.
 	if err := reloadPoolFromStore(context.Background(), store, pool); err != nil {
-		return nil, fmt.Errorf("profile pool reload: %w", err)
+		return nil, nil, fmt.Errorf("profile pool reload: %w", err)
 	}
 
 	// SEC-N2 follow-up: make the JWT revocation set durable by backing it
@@ -236,16 +334,24 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// is for the production constructor), fall back to in-memory-only.
 	if dbp, ok := store.(profilestore.DBHandleProvider); ok {
 		if err := issuer.Revocation().AttachSQLiteRW(dbp.DBHandle(), dbp.DBHandleRO()); err != nil {
-			return nil, fmt.Errorf("jwt revocation store: %w", err)
+			return nil, nil, fmt.Errorf("jwt revocation store: %w", err)
 		}
 	} else {
-		slog.Warn("profile store backend does not expose a SQLite handle; JWT revocation state is in-memory only and will not survive a restart")
+		slog.Warn("profile store backend does not expose a SQLite handle; JWT revocation state is in-memory only and " +
+			"will not survive a restart")
 	}
+	return pool, store, nil
+}
 
+// buildMux registers the generated REST/WS/MCP surfaces, the hand-rolled
+// auth/CSRF routes, the optional LSP bridge and the SPA on a new mux.
+func (a *app) buildMux(pool *conn.Pool, store profilestore.Store) (*http.ServeMux, error) {
+	cfg := a.cfg
+	issuer := a.issuer
 	mux := http.NewServeMux()
 
 	adminSet := map[string]bool{}
-	for _, u := range strings.Split(cfg.adminUsers, ",") {
+	for u := range strings.SplitSeq(cfg.adminUsers, ",") {
 		if name := strings.TrimSpace(u); name != "" {
 			adminSet[name] = true
 		}
@@ -266,8 +372,8 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	})
 	genapi.RegisterGeneratedAPI(mux, srv, genapi.APIOptions{
 		AuthJWT:     srv.AuthJWT,
-		GlobalRate:  2000,
-		GlobalBurst: 400,
+		GlobalRate:  apiGlobalRate,
+		GlobalBurst: apiGlobalBurst,
 	})
 
 	// GAP-Q5 (#34): the multipart upload endpoints
@@ -358,7 +464,15 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// httpx.WrapHandler alongside HSTS and X-Frame-Options; until that
 	// lands the SPA wrapper is the safe, minimal mitigation for SEC-F4.
 	mux.Handle("/", server.WithSPASecurityHeaders(uiHandler))
+	return mux, nil
+}
 
+// buildHandler wraps mux in the middleware chain (login/profile rate
+// limits, CSRF, Permissions-Policy, access-token deprecation, httpx
+// limits) and returns it with the httpx config it was built from.
+func (a *app) buildHandler(mux *http.ServeMux) (http.Handler, httpx.Config) {
+	cfg := a.cfg
+	issuer := a.issuer
 	// PERF-F12 (#56): the WS streaming surface (/ws/query) must NOT be
 	// killed by a server-wide write timeout — a `MATCH (n) RETURN n` over
 	// a large graph legitimately streams for minutes. So WriteTimeout is
@@ -380,12 +494,12 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	// the timeouts are applied explicitly below where the WS exemption
 	// can be expressed.
 	hcfg := httpx.Config{
-		ReadHeader:     5 * time.Second,
-		ReadTimeout:    30 * time.Second,
+		ReadHeader:     readHeaderTimeout,
+		ReadTimeout:    restReadTimeout,
 		WriteTimeout:   restWriteTimeout,
-		IdleTimeout:    120 * time.Second,
-		MaxHeaderBytes: 16384,
-		MaxBodyBytes:   1 << 20,
+		IdleTimeout:    idleConnTimeout,
+		MaxHeaderBytes: maxHeaderBytes,
+		MaxBodyBytes:   maxBodyBytes,
 		// PERF-F13 (#57): transparent gzip of text-ish JSON responses
 		// >=1 KiB when the client sends Accept-Encoding: gzip. Skips
 		// already-encoded responses, images/video/audio, and tiny
@@ -403,8 +517,8 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 		// RemoteAddr — this server is not behind a trusted proxy that
 		// rewrites X-Forwarded-For, so the proxy-header sources would
 		// be forgeable.
-		PerIPRPS:    50,
-		PerIPBurst:  100,
+		PerIPRPS:    perIPRPS,
+		PerIPBurst:  perIPBurst,
 		PerIPSource: httpx.IPSourceRemoteAddr,
 	}
 	// Per-IP / per-(profile, username) login limiter (SEC-F2 #58, SEC-N7
@@ -448,38 +562,7 @@ func newApp(cfg appConfig, getenv func(string) string) (*app, error) {
 	handler := server.WithPermissionsPolicy(
 		server.WithAccessTokenDeprecation(httpx.WrapHandler(hcfg, csrfWrapped)),
 	)
-
-	// PERF-F12 (#56): cap REST + SPA responses at restWriteTimeout, but
-	// route WebSocket upgrades around the timeout handler. http.TimeoutHandler
-	// buffers the whole response and does not implement http.Hijacker —
-	// either of which would break a streaming WS connection (the upgrade
-	// hijacks the conn and then streams indefinitely). The /ws/ prefix
-	// therefore reaches `handler` directly; everything else goes through
-	// the timeout-wrapped copy. Both branches dispatch into the same
-	// middleware chain + mux, so routing is unchanged — only the timeout
-	// envelope differs.
-	rootHandler := wsExemptTimeoutHandler(handler, restWriteTimeout)
-	a.handler = rootHandler
-
-	a.httpSrv = &http.Server{
-		Addr:    cfg.listen,
-		Handler: rootHandler,
-		// ReadHeaderTimeout guards against slowloris on the header read.
-		ReadHeaderTimeout: 5 * time.Second,
-		// IdleTimeout reaps idle keep-alive connections — including a WS
-		// connection whose peer has gone silent without sending a close
-		// frame (the per-frame deadlines in wsx handle the in-flight
-		// case; this handles the "open but doing nothing" case).
-		IdleTimeout: hcfg.IdleTimeout,
-		// WriteTimeout is deliberately left at its zero value (no cap):
-		// the /ws/ surface streams for as long as the query runs. The
-		// REST surface's per-request cap is restWriteTimeout, applied
-		// via the http.TimeoutHandler above (which the /ws/ prefix is
-		// routed around). See the PERF-F12 comment block above.
-	}
-
-	ok = true
-	return a, nil
+	return handler, hcfg
 }
 
 // errGracefulShutdown wraps the (rare) error returned by
@@ -503,7 +586,7 @@ func (a *app) serve(ctx context.Context) error {
 	// 10-minute cadence is plenty given the 1m..24h TTL window; the
 	// maxTokenAge is the issuer's TTL so the sweep never drops a marker
 	// a live token could still reference.
-	a.issuer.Revocation().StartSweeper(ctx, 10*time.Minute, a.issuer.TTL())
+	a.issuer.Revocation().StartSweeper(ctx, revocationSweepInterval, a.issuer.TTL())
 
 	listenErr := make(chan error, 1)
 	go func() {
@@ -541,7 +624,7 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 			return 0
 		}
 		// flag already printed the error + usage to stderr.
-		return 2
+		return exitUsage
 	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(stdout, nil)))

@@ -1,4 +1,4 @@
-// Package server: tests for the /ws/lsp WebSocket-to-TCP bridge.
+// Tests for the /ws/lsp WebSocket-to-TCP bridge.
 //
 // The bridge proxies a browser WebSocket connection through to an
 // upstream LSP TCP listener (geode serve --lsp-port=N). The tests here
@@ -14,6 +14,7 @@
 //     WS frame is a JSON-RPC "initialize" request, so the LSP session
 //     can authenticate without the browser having to know the upstream
 //     auth scheme.
+
 package server
 
 import (
@@ -25,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -33,13 +35,13 @@ import (
 	"geodedb.com/geode-ui/gen/pkg/wsx"
 )
 
-// fakeLspTcp accepts a single LSP TCP connection on a local port and
+// fakeLspTCP accepts a single LSP TCP connection on a local port and
 // makes the next decoded frame available to the test via WaitForFrame.
 // Modeled on the LSP-side framing used by zig's Transport / TcpTransport
 // (Tasks 25/26): one Content-Length: N\r\n\r\n header followed by N
 // bytes of JSON body. Frames are surfaced one-at-a-time so tests can
 // assert on exactly the wire bytes the bridge produced.
-type fakeLspTcp struct {
+type fakeLspTCP struct {
 	ln    net.Listener
 	mu    sync.Mutex
 	frame []byte
@@ -47,20 +49,20 @@ type fakeLspTcp struct {
 	done  chan struct{}
 }
 
-func newFakeLspTcp(t *testing.T) *fakeLspTcp {
+func newFakeLspTCP(t *testing.T) *fakeLspTCP {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	f := &fakeLspTcp{ln: ln, got: make(chan struct{}, 1), done: make(chan struct{})}
+	f := &fakeLspTCP{ln: ln, got: make(chan struct{}, 1), done: make(chan struct{})}
 	go f.serve()
 	return f
 }
 
-func (f *fakeLspTcp) Addr() string { return f.ln.Addr().String() }
+func (f *fakeLspTCP) Addr() string { return f.ln.Addr().String() }
 
-func (f *fakeLspTcp) Close() {
+func (f *fakeLspTCP) Close() {
 	_ = f.ln.Close()
 	select {
 	case <-f.done:
@@ -69,7 +71,23 @@ func (f *fakeLspTcp) Close() {
 	}
 }
 
-func (f *fakeLspTcp) serve() {
+// WaitForFrame blocks until the fake LSP has decoded one frame from
+// the bridge, then returns the JSON body bytes. Fails the test on
+// timeout — a deadlocked bridge would otherwise hang the suite.
+func (f *fakeLspTCP) WaitForFrame(t *testing.T) []byte {
+	t.Helper()
+	select {
+	case <-f.got:
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.frame
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for upstream LSP frame")
+		return nil
+	}
+}
+
+func (f *fakeLspTCP) serve() {
 	c, err := f.ln.Accept()
 	if err != nil {
 		return
@@ -116,22 +134,6 @@ func (f *fakeLspTcp) serve() {
 	<-f.done
 }
 
-// WaitForFrame blocks until the fake LSP has decoded one frame from
-// the bridge, then returns the JSON body bytes. Fails the test on
-// timeout — a deadlocked bridge would otherwise hang the suite.
-func (f *fakeLspTcp) WaitForFrame(t *testing.T) []byte {
-	t.Helper()
-	select {
-	case <-f.got:
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		return f.frame
-	case <-time.After(3 * time.Second):
-		t.Fatalf("timed out waiting for upstream LSP frame")
-		return nil
-	}
-}
-
 // newTestLspServer wires a fresh *http.ServeMux to the bridge and
 // returns the *httptest.Server plus the *GraphServer (which owns the
 // JWT issuer) so tests can mint matching tokens. upstreamAddr is the
@@ -166,7 +168,7 @@ func mintTestToken(t *testing.T, srv *GraphServer, sub string) string {
 // Accept() will not see a connection: the auth gate must short-circuit
 // before Dial.
 func TestWsLspRequiresAuth(t *testing.T) {
-	upstream := newFakeLspTcp(t)
+	upstream := newFakeLspTCP(t)
 	defer upstream.Close()
 	hs, _ := newTestLspServer(t, upstream.Addr())
 	defer hs.Close()
@@ -190,7 +192,7 @@ func TestWsLspRequiresAuth(t *testing.T) {
 // from the WS client arrives intact on the upstream TCP side wrapped
 // in a Content-Length frame.
 func TestWsLspProxiesFrameToUpstream(t *testing.T) {
-	upstream := newFakeLspTcp(t)
+	upstream := newFakeLspTCP(t)
 	defer upstream.Close()
 	hs, srv := newTestLspServer(t, upstream.Addr())
 	defer hs.Close()
@@ -225,7 +227,7 @@ func TestWsLspProxiesFrameToUpstream(t *testing.T) {
 // 12); the browser would otherwise have to know the upstream auth
 // scheme.
 func TestWsLspInjectsAuthIntoInitialize(t *testing.T) {
-	upstream := newFakeLspTcp(t)
+	upstream := newFakeLspTCP(t)
 	defer upstream.Close()
 	hs, srv := newTestLspServer(t, upstream.Addr())
 	defer hs.Close()
@@ -297,7 +299,7 @@ func TestInjectAuthIntoInitialize_MalformedBypass(t *testing.T) {
 // Content-Length is rejected.
 func TestLspFrameReader(t *testing.T) {
 	body := `{"jsonrpc":"2.0","method":"window/logMessage","params":{}}`
-	stream := "Content-Length: " + fmt.Sprintf("%d", len(body)) + "\r\n\r\n" + body
+	stream := "Content-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body
 	r := newLspFrameReader(strings.NewReader(stream))
 	got, err := r.ReadFrame()
 	if err != nil {

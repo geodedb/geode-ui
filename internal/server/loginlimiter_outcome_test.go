@@ -48,23 +48,23 @@ func TestLoginLimiter_Wrapper_UpstreamFailureDoesNotLock(t *testing.T) {
 	t.Parallel()
 	l := newOutcomeTestLimiter(2)
 
-	var calls int32
+	var calls atomic.Int32
 	inner := http.NewServeMux()
 	inner.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		markLoginBackendFailure(r.Context())
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"code":"invalid_credentials"}`))
 	})
 	wrapped := WrapLoginLimit(l, inner)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		rec := postLogin(t, wrapped, "alice")
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("call[%d] code=%d want 401 (back-end failures must not lock)", i, rec.Code)
 		}
 	}
-	if got := atomic.LoadInt32(&calls); got != 10 {
+	if got := calls.Load(); got != 10 {
 		t.Fatalf("inner called %d times want 10", got)
 	}
 }
@@ -77,11 +77,11 @@ func TestLoginLimiter_Wrapper_CredentialFailuresStillLockAfterOutage(t *testing.
 	t.Parallel()
 	l := newOutcomeTestLimiter(2)
 
-	var n int32
+	var n atomic.Int32
 	inner := http.NewServeMux()
 	inner.HandleFunc("POST /api/v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
 		// Odd calls are outages, even calls are wrong passwords.
-		if atomic.AddInt32(&n, 1)%2 == 1 {
+		if n.Add(1)%2 == 1 {
 			markLoginBackendFailure(r.Context())
 		}
 		w.WriteHeader(http.StatusUnauthorized)
@@ -89,7 +89,7 @@ func TestLoginLimiter_Wrapper_CredentialFailuresStillLockAfterOutage(t *testing.
 	wrapped := WrapLoginLimit(l, inner)
 
 	// outage, wrong pw, outage, wrong pw -> 2 credential failures.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if rec := postLogin(t, wrapped, "bob"); rec.Code != http.StatusUnauthorized {
 			t.Fatalf("call[%d] code=%d want 401", i, rec.Code)
 		}
@@ -134,7 +134,7 @@ func TestLogin_WithLimiter_OutageVsWrongPassword(t *testing.T) {
 			})
 		})
 		wrapped := WrapLoginLimit(newOutcomeTestLimiter(3), inner)
-		for i := 0; i < 6; i++ {
+		for range 6 {
 			rec := postLogin(t, wrapped, "carol")
 			codes = append(codes, rec.Code)
 			bodies = append(bodies, rec.Body.String())
@@ -150,7 +150,7 @@ func TestLogin_WithLimiter_OutageVsWrongPassword(t *testing.T) {
 	}
 
 	badCodes, badBodies := run(nil)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if badCodes[i] != http.StatusUnauthorized {
 			t.Fatalf("wrong-password call[%d] code=%d want 401", i, badCodes[i])
 		}

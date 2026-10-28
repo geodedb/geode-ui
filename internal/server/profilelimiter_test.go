@@ -31,7 +31,7 @@ func TestProfileLimiter_AllowsBurstThenDenies(t *testing.T) {
 	})
 
 	const key = "u\x00alice"
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		ok, _ := l.Allow(key)
 		if !ok {
 			t.Fatalf("burst[%d] should be allowed (bucket starts full)", i)
@@ -65,7 +65,7 @@ func TestProfileLimiter_PerActorIsolation(t *testing.T) {
 		Now:           clk.Now,
 	})
 	// Drain alice's bucket.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if ok, _ := l.Allow("u\x00alice"); !ok {
 			t.Fatalf("alice burst[%d] should be allowed", i)
 		}
@@ -90,18 +90,18 @@ func TestProfileLimiter_Wrapper_PassesThroughGET(t *testing.T) {
 		PerActorBurst: 1,
 		Now:           clk.Now,
 	})
-	var calls int32
+	var calls atomic.Int32
 	inner := http.NewServeMux()
 	inner.HandleFunc("GET /api/v1/profiles", func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 	})
 	inner.HandleFunc("GET /api/v1/profiles/{id}", func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 	})
 	inner.HandleFunc("GET /api/v1/profiles/public", func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 	})
 	wrapped := WrapProfileLimit(l, inner)
@@ -115,7 +115,7 @@ func TestProfileLimiter_Wrapper_PassesThroughGET(t *testing.T) {
 			t.Errorf("GET %s [%d]: status=%d, want 200 (read paths must not rate-limit)", p, i, rec.Code)
 		}
 	}
-	if got := atomic.LoadInt32(&calls); got != 3 {
+	if got := calls.Load(); got != 3 {
 		t.Errorf("inner handler called %d times, want 3", got)
 	}
 }
@@ -132,17 +132,17 @@ func TestProfileLimiter_Wrapper_LimitsPostThirtyOne(t *testing.T) {
 		PerActorBurst: 30,
 		Now:           clk.Now,
 	})
-	var calls int32
+	var calls atomic.Int32
 	inner := http.NewServeMux()
 	inner.HandleFunc("POST /api/v1/profiles", func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
 	})
 	wrapped := WrapProfileLimit(l, inner)
 
 	// 30 POSTs from the same IP (no JWT issuer wired -> per-IP
 	// fallback keying). All must be allowed.
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/profiles", strings.NewReader(`{}`))
 		req.RemoteAddr = "1.2.3.4:54321"
 		rec := httptest.NewRecorder()
@@ -151,7 +151,7 @@ func TestProfileLimiter_Wrapper_LimitsPostThirtyOne(t *testing.T) {
 			t.Fatalf("POST[%d] code=%d, want 200", i, rec.Code)
 		}
 	}
-	if got := atomic.LoadInt32(&calls); got != 30 {
+	if got := calls.Load(); got != 30 {
 		t.Fatalf("inner called %d times after 30 POSTs, want 30", got)
 	}
 
@@ -166,7 +166,7 @@ func TestProfileLimiter_Wrapper_LimitsPostThirtyOne(t *testing.T) {
 	if rec.Header().Get("Retry-After") == "" {
 		t.Errorf("Retry-After header missing on 429")
 	}
-	if got := atomic.LoadInt32(&calls); got != 30 {
+	if got := calls.Load(); got != 30 {
 		t.Errorf("inner called %d times after 429, want 30 (handler must be short-circuited)", got)
 	}
 

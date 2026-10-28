@@ -266,10 +266,11 @@ func TestParse_LegacyNoCidClaim(t *testing.T) {
 
 	// Mint a token without any cid claim — mirrors Plan A's wire shape.
 	type legacyClaims struct {
+		jjwt.RegisteredClaims
+
 		Subject string   `json:"sub"`
 		Profile string   `json:"profile"`
 		Roles   []string `json:"roles"`
-		jjwt.RegisteredClaims
 	}
 	now := time.Now()
 	tok := jjwt.NewWithClaims(jjwt.SigningMethodHS256, legacyClaims{

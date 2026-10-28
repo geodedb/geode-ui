@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -181,6 +182,7 @@ func TestValidatePEM_RejectsGarbage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if err := validatePEM(tc.in, pemRoleCA); err == nil {
 				t.Errorf("CA: garbage accepted: %q", tc.in)
 			}
@@ -229,7 +231,7 @@ func TestValidatePEM_RejectsOversize(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: oversized input accepted", role)
 		}
-		if err != errPEMTooLarge {
+		if !errors.Is(err, errPEMTooLarge) {
 			t.Errorf("%s: want errPEMTooLarge, got %v", role, err)
 		}
 	}
@@ -308,7 +310,7 @@ func TestValidateTLSMaterialPEM_OneFieldBad(t *testing.T) {
 	if err == nil {
 		t.Errorf("bad CA accepted alongside good cert/key")
 	}
-	if err != errPEMInvalidCA {
+	if !errors.Is(err, errPEMInvalidCA) {
 		t.Errorf("expected errPEMInvalidCA, got %v", err)
 	}
 }

@@ -22,7 +22,7 @@ func BenchmarkEmbedHandler_StaticHit(b *testing.B) {
 	req := httptest.NewRequest(http.MethodGet, "/favicon.ico", nil)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 	}

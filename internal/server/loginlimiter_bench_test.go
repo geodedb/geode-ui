@@ -35,10 +35,10 @@ func TestLoginLimiter_ConcurrentInsertRace(t *testing.T) {
 	const iterations = 200
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+			for i := range iterations {
 				// Half the keys overlap across goroutines, half are
 				// unique — guarantees both insert-race and shared-bucket
 				// contention.
@@ -76,10 +76,10 @@ func TestProfileLimiter_ConcurrentInsertRace(t *testing.T) {
 	const iterations = 200
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < iterations; i++ {
+			for i := range iterations {
 				var key string
 				if i%2 == 0 {
 					key = "u\x00shared-" + strconv.Itoa(i%32)
@@ -117,7 +117,7 @@ func BenchmarkLoginLimiter_Allow_Parallel(b *testing.B) {
 	// path. Insert is the rare cold path; cache-hit is the hot path the
 	// 2-map redesign targets.
 	keys := make([]string, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		keys[i] = "10.0." + strconv.Itoa(i/256) + "." + strconv.Itoa(i%256)
 		l.Allow(keys[i], "default", "alice")
 	}
@@ -125,9 +125,9 @@ func BenchmarkLoginLimiter_Allow_Parallel(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		var idx uint64
+		var idx atomic.Uint64
 		for pb.Next() {
-			k := keys[atomic.AddUint64(&idx, 1)%keyCount]
+			k := keys[idx.Add(1)%keyCount]
 			l.Allow(k, "default", "alice")
 		}
 	})

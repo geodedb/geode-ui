@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,11 +111,6 @@ func TestSQLitePutValidation(t *testing.T) {
 	}
 }
 
-// stringPtr / boolPtr are tiny helpers that keep the literal-pointer
-// boilerplate in tests readable.
-func stringPtr(s string) *string { return &s }
-func boolPtr(b bool) *bool       { return &b }
-
 func TestSQLitePatchUpdatesFields(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
@@ -123,8 +119,8 @@ func TestSQLitePatchUpdatesFields(t *testing.T) {
 		Name: "p1", DSN: "quic://x:1",
 	})
 	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description:   stringPtr("updated"),
-		SavedUsername: stringPtr("alice@host"),
+		Description:   new("updated"),
+		SavedUsername: new("alice@host"),
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
@@ -151,7 +147,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 
 	// 1. Set Description to "hello" via a non-nil pointer.
 	got, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr("hello"),
+		Description: new("hello"),
 	})
 	if err != nil {
 		t.Fatalf("Patch (set): %v", err)
@@ -162,7 +158,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 
 	// 2. Clear Description by passing a non-nil pointer to "".
 	got, err = st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr(""),
+		Description: new(""),
 	})
 	if err != nil {
 		t.Fatalf("Patch (clear): %v", err)
@@ -178,7 +174,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 
 	// 3. PATCH with a nil Description pointer preserves the cleared value.
 	got, err = st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Name: stringPtr("p1-renamed"),
+		Name: new("p1-renamed"),
 	})
 	if err != nil {
 		t.Fatalf("Patch (preserve): %v", err)
@@ -194,7 +190,7 @@ func TestSQLitePatchScalarSetThenClearRoundTrip(t *testing.T) {
 func TestSQLitePatchNotFound(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
-	_, err := st.Patch(context.Background(), "missing", ProfilePatch{Description: stringPtr("x")})
+	_, err := st.Patch(context.Background(), "missing", ProfilePatch{Description: new("x")})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Patch missing: want ErrNotFound, got %v", err)
 	}
@@ -227,7 +223,7 @@ func TestSQLitePatchClearsDefault(t *testing.T) {
 		t.Fatalf("Put: Default not stored as true: %+v", saved)
 	}
 	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Default: boolPtr(false),
+		Default: new(false),
 	})
 	if err != nil {
 		t.Fatalf("Patch clearing default: %v", err)
@@ -283,7 +279,7 @@ func TestSQLitePatchPreservesTLSWhenAbsent(t *testing.T) {
 		TLS: conn.TLSMaterial{CAPEM: "keep-me"},
 	})
 	updated, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr("just a tweak"),
+		Description: new("just a tweak"),
 	})
 	if err != nil {
 		t.Fatalf("Patch: %v", err)
@@ -347,7 +343,7 @@ func TestSQLitePatchAtomic_NoLostUpdate(t *testing.T) {
 
 	// Run many trials to give the race a chance to manifest.
 	const trials = 50
-	for trial := 0; trial < trials; trial++ {
+	for trial := range trials {
 		saved, err := st.Put(context.Background(), conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("trial-%03d", trial),
@@ -362,13 +358,13 @@ func TestSQLitePatchAtomic_NoLostUpdate(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, _ = st.Patch(context.Background(), saved.ID, ProfilePatch{
-				Description: stringPtr("D"),
+				Description: new("D"),
 			})
 		}()
 		go func() {
 			defer wg.Done()
 			_, _ = st.Patch(context.Background(), saved.ID, ProfilePatch{
-				SavedUsername: stringPtr("U"),
+				SavedUsername: new("U"),
 			})
 		}()
 		wg.Wait()
@@ -408,19 +404,18 @@ func TestSQLitePatchAtomic_NoTornStateUnderHighContention(t *testing.T) {
 		t.Fatalf("Put: %v", err)
 	}
 
-	const N = 20
+	const n = 20
 	var wg sync.WaitGroup
-	wg.Add(N)
-	errCh := make(chan error, N)
-	for i := 0; i < N; i++ {
-		i := i
+	wg.Add(n)
+	errCh := make(chan error, n)
+	for i := range n {
 		go func() {
 			defer wg.Done()
 			name := fmt.Sprintf("name-%02d", i)
 			desc := fmt.Sprintf("desc-%02d", i)
 			if _, err := st.Patch(context.Background(), saved.ID, ProfilePatch{
-				Name:        stringPtr(name),
-				Description: stringPtr(desc),
+				Name:        new(name),
+				Description: new(desc),
 			}); err != nil {
 				errCh <- fmt.Errorf("goroutine %d: %w", i, err)
 			}
@@ -466,7 +461,7 @@ func TestSQLitePatchAtomic_DetectsConcurrentDelete(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	_, err := st.Patch(context.Background(), "deadbeef", ProfilePatch{
-		Description: stringPtr("ghost"),
+		Description: new("ghost"),
 	})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("Patch on missing id: want ErrNotFound, got %v", err)
@@ -677,7 +672,7 @@ func TestSQLiteEncrypted_LegacyRowReencryptedOnPatch(t *testing.T) {
 
 	enc := openEncryptedSQLite(t, tmp)
 	if _, err := enc.Patch(context.Background(), saved.ID, ProfilePatch{
-		Description: stringPtr("touched"),
+		Description: new("touched"),
 	}); err != nil {
 		t.Fatalf("encrypted Patch: %v", err)
 	}
@@ -717,7 +712,7 @@ func TestSQLiteEncrypted_ListReturnsPlaintext(t *testing.T) {
 	st := openEncryptedSQLite(t, tmp)
 	defer func() { _ = st.Close() }()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if _, err := st.Put(context.Background(), conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%d", i),
@@ -735,10 +730,10 @@ func TestSQLiteEncrypted_ListReturnsPlaintext(t *testing.T) {
 		t.Fatalf("want 3 rows, got %d", len(all))
 	}
 	for _, p := range all {
-		if !bytes.Contains([]byte(p.DSN), []byte("quic://host")) {
+		if !strings.Contains(p.DSN, "quic://host") {
 			t.Errorf("List row %q DSN not unsealed: %q", p.Name, p.DSN)
 		}
-		if !bytes.HasPrefix([]byte(p.TLS.CAPEM), []byte("ca-")) {
+		if !strings.HasPrefix(p.TLS.CAPEM, "ca-") {
 			t.Errorf("List row %q CA not unsealed: %q", p.Name, p.TLS.CAPEM)
 		}
 	}
@@ -777,7 +772,7 @@ func TestSQLiteList_LimitCapsResultSet(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -802,7 +797,7 @@ func TestSQLiteList_LimitLargerThanTableReturnsAll(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -829,8 +824,8 @@ func TestSQLiteList_ZeroLimitReturnsAll(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	const N = 12
-	for i := 0; i < N; i++ {
+	const n = 12
+	for i := range n {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -843,8 +838,8 @@ func TestSQLiteList_ZeroLimitReturnsAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List(zero filter): %v", err)
 	}
-	if len(got) != N {
-		t.Errorf("List(zero filter) returned %d rows, want %d (default must be unbounded)", len(got), N)
+	if len(got) != n {
+		t.Errorf("List(zero filter) returned %d rows, want %d (default must be unbounded)", len(got), n)
 	}
 }
 
@@ -855,8 +850,8 @@ func TestSQLiteList_CursorAdvancesCorrectly(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	const N = 5
-	for i := 0; i < N; i++ {
+	const n = 5
+	for i := range n {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -889,8 +884,8 @@ func TestSQLiteList_CursorAdvancesCorrectly(t *testing.T) {
 			t.Fatalf("cursor failed to terminate after 10 pages")
 		}
 	}
-	if len(seen) != N {
-		t.Errorf("cursor visited %d distinct ids, want %d", len(seen), N)
+	if len(seen) != n {
+		t.Errorf("cursor visited %d distinct ids, want %d", len(seen), n)
 	}
 	// 5 rows, 2 per page → 3 pages (2,2,1). The terminating empty
 	// page is not counted.
@@ -907,7 +902,7 @@ func TestSQLiteList_PaginationOrdersById(t *testing.T) {
 	st, _ := OpenSQLite(":memory:")
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, err := st.Put(ctx, conn.Profile{
 			Scope: conn.ProfileScopeSystem,
 			Name:  fmt.Sprintf("p%02d", i),
@@ -1099,15 +1094,15 @@ func TestMergeProfile_OnlyAppliesNonNilFields(t *testing.T) {
 	}
 
 	// Each non-nil pointer overwrites.
-	got = mergeProfile(cur, ProfilePatch{Name: stringPtr("new")})
+	got = mergeProfile(cur, ProfilePatch{Name: new("new")})
 	if got.Name != "new" || got.DSN != "cur-dsn" {
 		t.Errorf("Name=new only: got %+v", got)
 	}
-	got = mergeProfile(cur, ProfilePatch{Description: stringPtr("")})
+	got = mergeProfile(cur, ProfilePatch{Description: new("")})
 	if got.Description != "" {
 		t.Errorf("Description=\"\" should clear: got %q", got.Description)
 	}
-	got = mergeProfile(cur, ProfilePatch{Default: boolPtr(false)})
+	got = mergeProfile(cur, ProfilePatch{Default: new(false)})
 	if got.Default {
 		t.Errorf("Default=false should clear: got %v", got.Default)
 	}
@@ -1258,9 +1253,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 
 	// Writer goroutine: Put/Patch/Delete churn on the single-writer
 	// handle, running until the readers are done.
-	writerWG.Add(1)
-	go func() {
-		defer writerWG.Done()
+	writerWG.Go(func() {
 		i := 0
 		for {
 			select {
@@ -1287,7 +1280,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 				return
 			}
 		}
-	}()
+	})
 
 	// Reader goroutines: tight-loop SELECTs through the RO handle. Each
 	// does a fixed number of iterations then exits; the test asserts
@@ -1299,11 +1292,9 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 	)
 	var readerWG sync.WaitGroup
 	var reads atomic.Int64
-	for r := 0; r < numReaders; r++ {
-		readerWG.Add(1)
-		go func() {
-			defer readerWG.Done()
-			for k := 0; k < perReader; k++ {
+	for range numReaders {
+		readerWG.Go(func() {
+			for range perReader {
 				var name string
 				err := ro.QueryRowContext(ctx,
 					`SELECT name FROM profiles WHERE id = ?`, seeded.ID).Scan(&name)
@@ -1317,7 +1308,7 @@ func TestSQLiteFileBacked_ROReadsConcurrentWithWrites(t *testing.T) {
 				}
 				reads.Add(1)
 			}
-		}()
+		})
 	}
 
 	readersDone := make(chan struct{})
