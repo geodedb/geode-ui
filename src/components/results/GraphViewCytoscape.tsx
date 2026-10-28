@@ -48,6 +48,7 @@ import {
   Overlay,
   PathStatus,
   Wrap,
+  CanvasStack,
 } from './graph/styled'
 
 // Register the layout extensions once, at module load. cytoscape.use is
@@ -700,7 +701,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             {pathStatusText}
           </PathStatus>
         )}
-        <div style={{ position: 'relative' }}>
+        <CanvasStack>
           <Canvas
             ref={ref}
             $height={effectiveHeight}
@@ -725,7 +726,7 @@ export const GraphViewCytoscape: React.FC<GraphViewCytoscapeProps> = ({
             onClear={() => focusMode.clear()}
             t={t}
           />
-        </div>
+        </CanvasStack>
       </CanvasArea>
       {!sidebarCollapsed && (
         <GraphSidebar height={effectiveHeight} fill={fillHeight}>

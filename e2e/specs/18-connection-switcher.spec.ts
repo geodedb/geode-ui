@@ -35,17 +35,23 @@ test.describe('connection switcher', () => {
     const rows = page.getByRole('menuitemradio', { name: /default/i })
     await expect(rows).toHaveCount(2)
 
-    // The Disconnect aria-label is "Disconnect: <profileName>". Both
-    // rows are named 'default' so we use .last() to pick one. The
-    // disconnect handler stops propagation, so the menu stays open
-    // and we can assert the new count without re-clicking the
-    // trigger (which would toggle the menu closed).
+    const active = page.getByRole('menuitemradio', { checked: true })
+    const activeId = await active.getAttribute('data-testid')
+    expect(activeId).toBeTruthy()
+    // Both profiles have the same label. Select by checked state so this
+    // always disconnects the inactive session, regardless of insertion order.
     await page
+      .getByRole('menuitemradio', { checked: false })
       .getByRole('button', { name: 'Disconnect: default' })
-      .last()
       .click()
 
-    await expect(rows).toHaveCount(1, { timeout: 5000 })
+    // The web-component dropdown closes on selection. Reopen it before
+    // querying visible menu roles, and verify the original session survived.
+    await expect(page.getByRole('menu').first()).not.toBeVisible()
+    await sel.connectionTrigger(page).click()
+    await expect(rows).toHaveCount(1)
+    await expect(page.getByTestId(activeId!)).toHaveAttribute('aria-checked', 'true')
+
   })
 
   test('unseeded protected shell redirects to /login (lazy-hydrate empty)', async ({

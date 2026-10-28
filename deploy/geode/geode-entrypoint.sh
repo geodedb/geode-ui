@@ -47,23 +47,19 @@ TARGET_PW="${GEODE_BOOTSTRAP_PASSWORD:-Geode E2E Bootstrap Password 2024}"
 
 if [[ ! -f "$MARKER" ]]; then
     echo "[entrypoint] first start: running 'geode auth init' offline" >&2
-    init_out=$(geode auth init --data-dir "$DATA_DIR" 2>&1 || true)
-    echo "$init_out" >&2
-
-    # Extract the generated password. Format from auth_init_cli.zig is
-    #   "Generated password: <32-hex>"
-    pw=$(printf '%s\n' "$init_out" \
-        | grep -oE 'Generated password: [a-f0-9]+' \
-        | head -1 \
-        | awk '{print $3}')
-
-    if [[ -z "$pw" ]]; then
-        echo "[entrypoint] FATAL: auth init produced no admin password" >&2
-        echo "[entrypoint] auth init output was:" >&2
+    if ! init_out=$(geode auth init --data-dir "$DATA_DIR" 2>&1); then
+        echo "[entrypoint] FATAL: auth init failed; output was:" >&2
         echo "$init_out" >&2
         exit 1
     fi
-    echo "[entrypoint] auth init produced bootstrap password (${#pw} chars)" >&2
+    echo "$init_out" >&2
+
+    # The bootstrap password itself is not needed: the offline reset
+    # below sets the target password without it. Engines up to v0.5.x
+    # printed it ("Generated password: <hex>"); 0.8.x writes it to
+    # /data/.geode_admin_password instead. Remove that file so the
+    # random bootstrap secret does not linger in the volume.
+    rm -f "${DATA_DIR}/.geode_admin_password"
 
     # Rotate offline to a policy-compliant target. The wire-level passphrase
     # policy (geode_auth_lib.zig::geodeSecure) rejects the bootstrap hex

@@ -32,8 +32,7 @@ export type QueryRespLike = {
   columns?: GqlColumnLike[]
   rows?: unknown[][]
   graph_summary?:
-    | { nodes?: GqlNode[]; edges?: GqlEdge[] }
-    | Record<string, unknown>
+    { nodes?: GqlNode[]; edges?: GqlEdge[] } | Record<string, unknown>
 }
 
 function isGraphSummary(

@@ -7,7 +7,9 @@
 // their tag names + prop shapes here. Keep prop types loose (any
 // HTML attribute, plus the WA-specific ones we actually use) — the
 // upstream package exports stronger types via @awesome.me/webawesome
-// but they require React 19 wrappers. We're React 18.
+// but they require React 19 wrappers we haven't adopted. React 19 dropped
+// the global JSX namespace, so these tags augment React's own JSX
+// namespace (`declare module 'react'`).
 
 import type {
   Attributes,
@@ -141,7 +143,7 @@ type WaDropdownItemProps = HTMLAttributes<HTMLElement> & {
   children?: ReactNode
 }
 
-declare global {
+declare module 'react' {
   namespace JSX {
     interface IntrinsicElements {
       'wa-button': WaButtonProps

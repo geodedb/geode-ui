@@ -95,7 +95,7 @@ export const PoliciesPage: React.FC = () => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async (_signal) => {
       const r = await client.getPolicies({})
-      return ((r.policies ?? []) as Policy[]) ?? []
+      return (r.policies ?? []) as Policy[]
     },
     []
   )

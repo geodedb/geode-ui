@@ -92,10 +92,23 @@ authedTest.describe('admin / RBAC CTA gating (v0.5.15)', () => {
         .first()
         .waitFor({ timeout: 6_000 })
         .catch(() => undefined)
+      // The gate follows capabilities.admin_writable.policies, which the
+      // server derives from the engine's policy_ddl feature: false on
+      // v0.5.15, true from the 0.8 line on. Assert whichever the
+      // connected build reports.
+      const capsRes = await page.request.get('/api/v1/capabilities')
+      expect(capsRes.ok()).toBeTruthy()
+      const caps = await capsRes.json()
+      const btn = sel.adminNewPolicyBtn(page)
+      if (caps?.admin_writable?.policies === true) {
+        await expect(sel.adminPoliciesUnsupported(page)).toHaveCount(0)
+        await expect(btn).toBeVisible({ timeout: 6_000 })
+        await expect(btn).toBeEnabled()
+        return
+      }
       await expect(sel.adminPoliciesUnsupported(page)).toBeVisible({
         timeout: 6_000,
       })
-      const btn = sel.adminNewPolicyBtn(page)
       if (await btn.isVisible({ timeout: 1_000 }).catch(() => false)) {
         await expect(btn).toBeDisabled()
         const title = await btn.getAttribute('title')

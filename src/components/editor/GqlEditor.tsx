@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 // Side-effect import: wires @monaco-editor/react to the webpack-bundled
 // monaco instance (skips the CDN AMD loader our CSP blocks). This used
 // to live at the top of src/index.tsx, which pulled all of
@@ -35,6 +35,36 @@ export const GqlEditor: React.FC<Props> = ({
 }) => {
   const lspRef = useRef<LspClientHandle | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
+  // @monaco-editor/react writes the `value` prop back into the model
+  // whenever it differs from the model text. Under React 19 the parent's
+  // setState from Monaco's input events is not always committed before
+  // the next keystroke, so a render can carry an OLDER `value` than the
+  // model already holds; writing it back erased the newer keystrokes
+  // (fast typing, e.g. Playwright's keyboard.type, lost most of a query).
+  //
+  // `emitted` holds the texts the editor itself reported through
+  // onChange that the parent has not fully caught up with. A `value`
+  // found there is our own echo (possibly stale), so it is not handed
+  // back to <Editor>; only external changes (the default statement, a
+  // statement staged by the schema explorer, a ?statement= deep link)
+  // are. The change handler is also kept referentially stable so the
+  // library does not re-subscribe onDidChangeModelContent every render.
+  const emitted = useRef<Set<string>>(new Set())
+  const lastEmitted = useRef<string | null>(null)
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const handleChange = useCallback((v: string | undefined) => {
+    const text = v ?? ''
+    emitted.current.add(text)
+    lastEmitted.current = text
+    onChangeRef.current(text)
+  }, [])
+  const isEcho = emitted.current.has(value)
+  useEffect(() => {
+    // Caught up with the latest keystroke, or overridden by an external
+    // value: either way the pending echoes are obsolete.
+    if (!isEcho || value === lastEmitted.current) emitted.current.clear()
+  }, [value, isEcho])
   // useAuth() throws when no AuthProvider is mounted (tests that render
   // GqlEditor in isolation, anonymous SPA boot before sign-in). The
   // editor must still render in those cases; we fall back to "not
@@ -134,8 +164,9 @@ export const GqlEditor: React.FC<Props> = ({
       height={height}
       language={GQL_LANGUAGE_ID}
       theme="vs-dark"
-      value={value}
-      onChange={(v) => onChange(v ?? '')}
+      defaultValue={value}
+      value={isEcho ? undefined : value}
+      onChange={handleChange}
       onMount={handleMount}
       options={{
         minimap: { enabled: false },

@@ -25,8 +25,7 @@ const layoutCalls: unknown[] = []
 // The last-constructed mock core, so tests can poke its jest.fn-backed
 // methods (Tasks 1.3/1.4/1.5).
 let lastCyInstance:
-  | (Record<string, unknown> & { __lastElements?: unknown })
-  | null = null
+  (Record<string, unknown> & { __lastElements?: unknown }) | null = null
 
 // A no-op chainable collection: every method returns the collection so
 // `.removeClass(...).removeClass(...)` and friends don't blow up. forEach
@@ -1405,9 +1404,16 @@ describe('Phase 2: Explore neighbours', () => {
     })
     // The synthesised node id for `p` is `p:Alice`.
     pickNode(view, 'p:Alice')
-    const exploreBtn = view.getByTestId('graph-action-explore')
-    expect(exploreBtn).toBeDisabled()
-    expect(exploreBtn).toHaveAttribute('title')
+    // React 19 sets `disabled`/`title` on custom elements as properties;
+    // <wa-button> doesn't reflect either synchronously, so assert on the
+    // properties rather than the attributes.
+    const exploreBtn = view.getByTestId(
+      'graph-action-explore'
+    ) as HTMLElement & {
+      disabled: boolean
+    }
+    expect(exploreBtn.disabled).toBe(true)
+    expect(exploreBtn.title).not.toBe('')
   })
 
   it('surfaces a fetch failure via the graph error banner', async () => {

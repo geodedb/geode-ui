@@ -19,6 +19,8 @@
 version: '2'
 
 run:
+  # Analyze tagged fuzz sources because tests run with -vet=off.
+  build-tags: [fuzz]
   timeout: 5m
   concurrency: 4
 

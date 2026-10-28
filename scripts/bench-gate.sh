@@ -57,7 +57,7 @@ run_benches() {
   local out="$1"
   echo "==> running curated benchmarks (count=$COUNT, benchtime=$BENCHTIME) into $out" >&2
   # -run='^$' disables unit tests; we only want benchmarks here.
-  go test -bench=. -benchmem -run='^$' -benchtime="$BENCHTIME" -count="$COUNT" \
+  go test -vet=off -bench=. -benchmem -run='^$' -benchtime="$BENCHTIME" -count="$COUNT" \
     "${BENCH_PKGS[@]}" | tee "$out" >&2
 }
 

@@ -1,8 +1,9 @@
+---
 # GitLab CI/CD Pipeline for ui
 # SPDX-License-Identifier: Apache-2.0
 
 include:
-  # Security scanning
+  # Standalone secret checks.
   - component: gitlab.com/devnw/ci-catalog/security-gitleaks@aad997d40e358eeef7ec943f761498341c37c724
 
   # SBOM
@@ -16,18 +17,9 @@ include:
   # Pulls credentials from group-level CI variables ESIGNER_*; see
   # deploy/RELEASE.md for the one-time ssl.com setup.
   #
-  # TODO(#127): pin to an immutable tag. As of 2026-05, the
-  # `codesign-windows-ssl` component exists only on ci-catalog's
-  # `main` branch (commit db708c0, "feat(catalog): add
-  # codesign-windows-ssl component") — it has NOT shipped in any
-  # tagged release yet (latest catalog tag is v1.25.1, which predates
-  # it; the `~latest` *release* alias resolves to v1.19.2). Every
-  # other catalog component below is pinned to @v1.7.1. The moment a
-  # ci-catalog tag includes templates/codesign-windows-ssl/, bump
-  # this to that tag. `scripts/check-ci-pins.sh` allowlists THIS one
-  # `@~latest` by line content so the guard still catches any *new*
-  # `@latest`/`@~latest` regression.
-  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@~latest # ci-pins-allow: no tagged catalog release ships this component yet (see TODO #127)
+  # Pinned to an immutable tag (#127, SRE-189); v1.56+ marks this
+  # side-effecting signing job `interruptible: false`.
+  - component: gitlab.com/devnw/ci-catalog/codesign-windows-ssl@aad997d40e358eeef7ec943f761498341c37c724
     inputs:
       input_glob: 'release/win/*.exe'
       needs: 'electron:win'
@@ -37,8 +29,11 @@ include:
       allow_failure: true
 
 variables:
-  NODE_VERSION: '22.14.0'
-  GO_VERSION: '1.27.2-alpine'
+  NODE_VERSION: '24.21.0'
+  GO_VERSION: '1.27.3-alpine'
+  GOCACHE: '$CI_PROJECT_DIR/.cache/go-build'
+  GOMODCACHE: '$CI_PROJECT_DIR/.cache/go-mod'
+  GOLANGCI_LINT_CACHE: '$CI_PROJECT_DIR/.cache/golangci-lint'
   GORELEASER_VERSION: 'v2.13.3'
   npm_config_cache: '$CI_PROJECT_DIR/.npm'
   FF_USE_FASTZIP: 'true'
@@ -51,6 +46,7 @@ variables:
   # image variants are built locally but not pushed.
 
 default:
+  interruptible: true
   image: node:${NODE_VERSION}
   before_script:
     # Configure GitLab npm registry for @devnw scope
@@ -64,7 +60,13 @@ default:
     paths:
       - .npm/
     policy: pull
-  tags: [company, linux, x86]
+  tags:
+    - company
+    - linux
+    # Native artifacts are built for AMD64. Electron's other platforms set
+    # their own runner tags.
+    - amd64
+
 stages:
   - install
   - lint
@@ -81,6 +83,15 @@ stages:
 # ============================================================================
 
 install:
+  interruptible: true
+  # node_modules/ is built once by `install` and shipped to these jobs as
+  # an artifact, and it carries native bindings for the CPU it was built
+  # on (unrs-resolver for jest-resolve, @parcel/watcher, ...). Keep the
+  # producer and every consumer on x86: with plain company/linux tags,
+  # `install` sometimes ran on the ARM lab runner, and unit-tests on x86
+  # then failed with "Preset ts-jest not found" (the arm64 resolver
+  # binding cannot load).
+  tags: [company, linux, x86]
   stage: install
   script:
     - npm ci
@@ -111,6 +122,9 @@ install:
 # ============================================================================
 
 typecheck:
+  interruptible: true
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: lint
   needs: ['install']
   script:
@@ -118,8 +132,12 @@ typecheck:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 eslint:
+  interruptible: true
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: lint
   needs: ['install']
   script:
@@ -127,8 +145,12 @@ eslint:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 prettier:
+  interruptible: true
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: lint
   needs: ['install']
   script:
@@ -143,6 +165,9 @@ prettier:
 # the same enforcement contract, so a contributor who skips the
 # pre-commit hook still blocks at MR time.
 audit-ratchets:
+  interruptible: true
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: lint
   needs: ['install']
   script:
@@ -153,6 +178,7 @@ audit-ratchets:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 # Closes GAP-009 / Q25 (#170): type-check the Electron main + preload
 # independently from the SPA tsc pass. The renderer tsconfig
@@ -164,6 +190,9 @@ audit-ratchets:
 # module + `node` lib types), the electron sources type-check cleanly,
 # and the job is a real gate — no longer allow_failure.
 electron-typecheck:
+  interruptible: true
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: lint
   needs: ['install']
   script:
@@ -178,6 +207,7 @@ electron-typecheck:
 # pre-commit hook of the same name runs locally; this job mirrors it at
 # MR time so a contributor who skipped pre-commit still blocks here.
 ci-pins-check:
+  interruptible: true
   stage: lint
   needs: []
   image: alpine:3
@@ -195,6 +225,7 @@ ci-pins-check:
 # pre-commit still blocks here if src/api/serverErrorCodes.ts names a
 # code that internal/server/errorcodes.go no longer declares.
 error-codes-check:
+  interruptible: true
   stage: lint
   needs: []
   image: alpine:3
@@ -213,6 +244,9 @@ error-codes-check:
 # ============================================================================
 
 unit-tests:
+  interruptible: true
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: test
   needs: ['install']
   script:
@@ -231,12 +265,17 @@ unit-tests:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
 
 # ============================================================================
 # BUILD STAGE
 # ============================================================================
 
 build:
+  interruptible: true
+  # Required dependencies above also run on tags so release pipelines can start.
+  # Same architecture as `install` (see there).
+  tags: [company, linux, x86]
   stage: build
   needs:
     - job: install
@@ -244,11 +283,15 @@ build:
     - job: typecheck
     - job: unit-tests
     - job: audit-ratchets
+  variables:
+    # The production webpack build needs more than Node's default ~2 GB heap.
+    NODE_OPTIONS: --max-old-space-size=4096
   script:
     - npm run build
+    - test -s internal/ui/dist/index.html
   artifacts:
     paths:
-      - dist/
+      - internal/ui/dist/
     expire_in: 7 days
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -260,18 +303,23 @@ build:
 # ============================================================================
 
 pages:
+  interruptible: false
   stage: pages
   needs: ['build']
   before_script: []
+  cache: []
   script:
-    - mv dist public
-  artifacts:
-    paths:
-      - public
+    - test -s internal/ui/dist/index.html
+  pages:
+    publish: internal/ui/dist
   environment:
     name: production
     url: $CI_PAGES_URL
   rules:
+    # A scheduled pipeline (e.g. the weekly extended fuzz, SRE-178) is not a
+    # release event: never deploy or push an image from one.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 # ============================================================================
@@ -283,19 +331,32 @@ pages:
 # install/lint/test/build stages declared above.
 
 .go_defaults: &go_defaults
-  image: golang:1.27.2-alpine
+  image: golang:1.27.3-alpine
+  tags: [company, linux, x86]
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     CGO_ENABLED: "0"
   before_script: []
-  cache: []
+  # Each job publishes its own cache to avoid concurrent writers replacing
+  # one another's compiler/tool entries. Go content-addresses build entries.
+  cache: &go_job_cache
+    key:
+      prefix: go-1.27.3-linux-amd64-$CI_JOB_NAME
+      files: [go.sum]
+    paths:
+      - .cache/go-mod/
+      - .cache/go-build/
+      - .cache/golangci-lint/
+    policy: pull-push
 
 go:lint:
+  interruptible: true
   <<: *go_defaults
   stage: lint
+  dependencies: []
   script:
-    - apk add --no-cache git make
+    - apk add --no-cache bash git make
     # Pinned to an immutable tag (Q32 / #127). Bump deliberately; keep in
     # sync with the version local devs run (see CLAUDE.md / scripts).
     - go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
@@ -303,14 +364,19 @@ go:lint:
     # checking only needs the pattern to match, so stub the gitignored
     # dist/ instead of running the full npm build in the lint stage.
     - mkdir -p internal/ui/dist && touch internal/ui/dist/index.html
-    - golangci-lint run
+    - make go-lint GOLANGCI_LINT=golangci-lint
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $GO_FUZZ_MODE == "extended"
 
 go:generate-verify:
+  interruptible: true
   <<: *go_defaults
   stage: lint
+  dependencies: []
   script:
     - apk add --no-cache make git nodejs npm bash
     - npm ci
@@ -329,22 +395,107 @@ go:generate-verify:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 go:test:
+  interruptible: true
   <<: *go_defaults
-  stage: test
+  stage: build
+  needs:
+    - job: build
+      artifacts: true
   variables:
     GOEXPERIMENT: jsonv2
-    GOTOOLCHAIN: go1.27.2
+    GOTOOLCHAIN: go1.27.3
     # -race needs cgo (and a C toolchain); the shared defaults disable it
     # for static builds.
     CGO_ENABLED: "1"
   script:
-    - apk add --no-cache git make nodejs npm gcc musl-dev
-    - npm ci
-    - npm run build
-    - go test -race -cover -failfast ./...
+    # Makefile selects /usr/bin/env bash for every recipe.
+    - apk add --no-cache bash git make gcc musl-dev
+    - test -s internal/ui/dist/index.html
+    - make go-test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# Native Go fuzzing with an explicit cadence (SRE-178). The generated fuzz
+# targets carry `//go:build fuzz`, so discovery and runs use -tags=fuzz.
+# Every Fuzz target `go test -list` finds in the project-owned trees
+# (gen/pkg/mcpx FuzzJSONRPC and gen/pkg/wsx FuzzWSFrame today) is fuzzed:
+#   extended  the weekly schedule (infra/org devnw-governance,
+#             gitlab_go_extended_fuzz.tf, which sets GO_FUZZ_MODE=extended) or a
+#             "Run pipeline" (web): FUZZ_EXTENDED_TIME per target.
+#   short     merge requests that touch Go code, fuzz corpora or this file:
+#             FUZZ_SHORT_TIME iterations per target, a bounded repeatable gate.
+# Default-branch pushes and tags do not fuzz. A failing target does not stop
+# the others: each result goes to out/fuzz-summary.txt, and new failing inputs
+# are kept under testdata/fuzz so they can be committed as seeds.
+# GO_FUZZ_MODE and GO_FUZZ_TIME override the mode and budget for one run.
+go:fuzz:
+  <<: *go_defaults
+  stage: test
+  needs: []
+  timeout: 1h
+  variables:
+    GOEXPERIMENT: jsonv2
+    GOTOOLCHAIN: go1.27.3
+    CGO_ENABLED: "0"
+    FUZZ_SHORT_TIME: "200x"
+    FUZZ_EXTENDED_TIME: "10m"
+  script:
+    - apk add --no-cache git
+    # internal/ui embeds the webpack build (//go:embed all:dist); compiling
+    # its tests only needs the pattern to match (same stub as go:lint).
+    - mkdir -p internal/ui/dist && touch internal/ui/dist/index.html
+    - |
+      case "${GO_FUZZ_MODE:-}" in
+        short|extended) mode="$GO_FUZZ_MODE" ;;
+        *) if [ "$CI_PIPELINE_SOURCE" = "web" ]; then mode=extended; else mode=short; fi ;;
+      esac
+      if [ "$mode" = extended ]; then budget="${GO_FUZZ_TIME:-$FUZZ_EXTENDED_TIME}"; else budget="${GO_FUZZ_TIME:-$FUZZ_SHORT_TIME}"; fi
+      echo "fuzz mode=${mode} fuzztime=${budget} (source=${CI_PIPELINE_SOURCE})"
+      mkdir -p out
+      : > out/fuzz-summary.txt
+      targets=0
+      failed=0
+      # Only packages whose tracked test files declare a Fuzz function need
+      # `go test -list` (each call compiles that package's tests); tracked
+      # files only, so node_modules is never searched.
+      dirs=$(git ls-files '*_test.go' | xargs -r grep -lE '^func Fuzz' | xargs -r -n1 dirname | sort -u)
+      for pkg in $(for d in $dirs; do go list "./$d"; done); do
+        # A test-compile error must fail the job, not silently list nothing.
+        listing=$(go test -vet=off -tags=fuzz -list '^Fuzz' "$pkg")
+        for fn in $(printf '%s\n' "$listing" | grep '^Fuzz' || true); do
+          targets=$((targets + 1))
+          echo "=== fuzz ${pkg} ${fn} (${budget})"
+          if go test -vet=off -tags=fuzz -run "^${fn}\$" -fuzz "^${fn}\$" -fuzztime "$budget" "$pkg"; then
+            echo "PASS ${pkg} ${fn} ${budget}" >> out/fuzz-summary.txt
+          else
+            echo "FAIL ${pkg} ${fn} ${budget}" >> out/fuzz-summary.txt
+            failed=$((failed + 1))
+          fi
+        done
+      done
+      echo "fuzz targets: ${targets}, failed: ${failed} (${mode})" | tee -a out/fuzz-summary.txt
+      cat out/fuzz-summary.txt
+      [ "$targets" -gt 0 ] && [ "$failed" -eq 0 ]
+  artifacts:
+    when: always
+    paths:
+      - out/fuzz-summary.txt
+      - cmd/**/testdata/fuzz/
+      - gen/**/testdata/fuzz/
+      - internal/**/testdata/fuzz/
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $GO_FUZZ_MODE == "extended"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - '**/*.go'
+        - '**/testdata/fuzz/**/*'
+        - go.mod
+        - go.sum
+        - .gitlab-ci.yml
 
 # Performance regression gate (PERF-2026-05-11-11 / #156).
 #
@@ -363,8 +514,9 @@ go:test:
 # ("Performance SLOs"). Promote to `allow_failure: false` once runner noise is
 # characterised on real telemetry.
 bench-gate:
+  interruptible: true
   <<: *go_defaults
-  stage: test
+  stage: build
   needs: ['go:test']
   script:
     - apk add --no-cache git make bash
@@ -382,11 +534,14 @@ bench-gate:
 # context is the parent of geode-ui/ (see deploy/Dockerfile header), so CI
 # copies the checkout into a temporary parent dir.
 docker:build:
+  interruptible: false
   stage: build
-  image: docker:25
+  image: docker:29
   services:
-    - docker:25-dind
+    - docker:29-dind
   before_script: []
+  dependencies: []
+  cache: []
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
@@ -405,6 +560,10 @@ docker:build:
     - docker build -f geode-ui/deploy/Dockerfile -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
     - if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA; fi
   rules:
+    # A scheduled pipeline (e.g. the weekly extended fuzz, SRE-178) is not a
+    # release event: never deploy or push an image from one.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
@@ -413,71 +572,100 @@ docker:build:
 # ============================================================================
 #
 # Runs the e2e Playwright suite against the docker-compose.test.yml stack.
-# The stack expects a pre-built geode binary at ../geode/zig-out/bin/geode
-# (see deploy/geode/Dockerfile.geode). In CI we clone the geode repo at the
-# pinned tag and run `zig build` before invoking `make e2e-up`. This requires
-# Zig 0.16.0+ on the runner (installed inline below). If the geode repo
-# becomes inaccessible from CI, switch this job to `when: manual` and rely
-# on local `make e2e-ci` runs until the geode runtime ships as a binary
-# release artifact.
+# The geode engine image extends the published Geode release image, pinned
+# by digest in deploy/geode/Dockerfile.geode, so no geode build is needed.
 e2e:playwright:
+  interruptible: true
   stage: test
-  image: docker:25
+  image: docker:29
+  # Every dependency is installed inside the images; host npm artifacts and
+  # cache downloads only enlarge the workspace and Docker build context.
+  dependencies: []
+  cache: []
+  # Stack build (~7 min) + seeding + ~106 specs on a contended shared VM
+  # ran past the 1 h project default (job 17097098422).
+  timeout: 2h
+  # x86 only: the Geode release image the stack runs is amd64-only, and the
+  # ARM lab runner (which also carries company/linux) has no reachable dind
+  # daemon ("Cannot connect to the Docker daemon at tcp://docker:2375").
+  tags: [company, linux, x86]
   services:
-    - docker:25-dind
+    - docker:29-dind
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
     GEODE_ADMIN_PASSWORD: "Geode E2E Bootstrap Password 2024"
     JWT_SECRET_HEX: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" # pragma: allowlist secret
-    ZIG_VERSION: "0.16.0"
+    COMPOSE_PROJECT_NAME: "geode-ui-${CI_PROJECT_ID}-${CI_JOB_ID}"
+    COMPOSE_FILES: "-f deploy/docker-compose.test.yml -f deploy/docker-compose.ci.yml"
   script:
     - apk add --no-cache make git bash curl
-    # Fetch the geode runtime sources at the tag the e2e stack is built
-    # for (deploy/docker-compose.test.yml / Dockerfile.geode: v0.5.15).
-    - git clone --depth=1 --branch v0.5.15 https://gitlab.com/devnw/codepros/geode/geode.git ../geode
-    # Build geode in a Debian builder so the binary links glibc + libssl3
-    # like the Debian runtime image expects (see Dockerfile.geode-build).
-    - docker build --build-arg ZIG_VERSION="${ZIG_VERSION}" -f deploy/geode/Dockerfile.geode-build -t geode-build:ci ../geode
-    - mkdir -p ../geode/zig-out/bin
-    - cid=$(docker create geode-build:ci) && docker cp "$cid:/src/zig-out/bin/geode" ../geode/zig-out/bin/geode && docker rm "$cid"
+    # The dind service can still be starting when the script begins.
+    - |
+      for i in $(seq 1 60); do
+        if docker info >/dev/null 2>&1; then break; fi
+        sleep 1
+      done
+      docker info >/dev/null
     # Build the e2e stack and bring services up.
     - make e2e-up
-    # Wait for geode-ui to be ready.
-    - |
-      for i in $(seq 1 90); do
-        if wget -qO- http://docker:8080/healthz 2>/dev/null | grep -q ok; then
-          echo "geode-ui is healthy"
-          break
-        fi
-        sleep 2
-      done
-    # Build the playwright runner and run the suite. Mount the report dir.
-    # The runner uses the dind daemon's host network, where the stack's
-    # published ports are on localhost; the "docker" service alias only
-    # resolves inside this job container.
-    - docker build -f deploy/playwright/Dockerfile.playwright -t pw:local .
+    # Build the playwright runner and run the suite. Copy reports back through
+    # the Docker API: the daemon may not share this job's checkout paths.
+    # Playwright's global setup owns the bounded health wait. Browser and
+    # services communicate on this job's network without publishing ports.
+    - docker build -f deploy/playwright/Dockerfile.playwright -t "${COMPOSE_PROJECT_NAME}-playwright:e2e" .
     - mkdir -p e2e/playwright-report
-    - >
-      docker run --rm --network=host
-      -e UI_URL=http://localhost:8080
-      -e MCP_HOST=localhost
-      -e MCP_PORT=8090
-      -e ADMIN_USER=geode
-      -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}"
-      -e ADMIN_PROFILE=default
-      -v "$PWD/e2e/playwright-report:/work/e2e/playwright-report"
-      pw:local
+    - |
+      container_id="$(docker create --network="${COMPOSE_PROJECT_NAME}_default" \
+        -e UI_URL=http://geode-ui:8080 \
+        -e MCP_HOST=geode-mcp \
+        -e MCP_PORT=8090 \
+        -e ADMIN_USER=geode \
+        -e ADMIN_PASSWORD="${GEODE_ADMIN_PASSWORD}" \
+        -e ADMIN_PROFILE=default \
+        "${COMPOSE_PROJECT_NAME}-playwright:e2e")"
+      printf '%s\n' "$container_id" > .e2e-playwright-container
+      docker start --attach "$container_id"
   after_script:
+    - |
+      if [ -s .e2e-playwright-container ]; then
+        container_id="$(cat .e2e-playwright-container)"
+        mkdir -p e2e/playwright-report
+        docker cp "$container_id:/work/e2e/playwright-report/." e2e/playwright-report/ || true
+        docker rm --force "$container_id" || true
+        rm -f .e2e-playwright-container
+      fi
+    # Keep the engine and server logs (and every other service's) so a
+    # failed run can be diagnosed after the stack is gone.
+    - mkdir -p e2e/compose-logs
+    - docker compose $COMPOSE_FILES ps -a > e2e/compose-logs/ps.txt 2>&1 || true
+    - docker compose $COMPOSE_FILES logs --no-color --timestamps geode > e2e/compose-logs/geode.log 2>&1 || true
+    - docker compose $COMPOSE_FILES logs --no-color --timestamps geode-ui > e2e/compose-logs/geode-ui.log 2>&1 || true
+    - docker compose $COMPOSE_FILES logs --no-color --timestamps > e2e/compose-logs/all.log 2>&1 || true
     - make e2e-down || true
+    - docker image rm "${COMPOSE_PROJECT_NAME}-playwright:e2e" "${COMPOSE_PROJECT_NAME}-ui:e2e" "${COMPOSE_PROJECT_NAME}-geode:e2e" || true
   artifacts:
     when: always
     paths:
       - e2e/playwright-report/
+      - e2e/compose-logs/
     expire_in: 7 days
   # Only run on main and on merge requests touching e2e or backend.
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# ============================================================================
+# SECURITY STAGE - gitleaks (component job override)
+# ============================================================================
+
+# Scan the full history. With the default shallow fetch (depth 20) gitleaks
+# attributes every line in the tree to the oldest fetched commit, so the
+# fingerprints in .gitleaksignore change with each new commit and reviewed
+# historic false positives come back. A full clone makes the attribution
+# stable and also scans more history, not less.
+security-gitleaks:
+  variables:
+    GIT_DEPTH: '0'
 
 # ============================================================================
 # RELEASE STAGE - GoReleaser (Go binary + container images + nfpm packages)
@@ -486,8 +674,7 @@ e2e:playwright:
 # Two release entry points mirroring the ../geode pipeline:
 #
 #   • goreleaser:snapshot — runs on every main-branch commit. Builds the
-#     binaries + images locally and pushes the GitLab Container Registry
-#     tags only. Never touches Docker Hub or the GitLab Release page.
+#     binaries + images without publishing them.
 #     allow_failure: true so a flaky goreleaser run doesn't block main.
 #
 #   • goreleaser:release — runs only on git tags matching v*. Pushes to
@@ -498,19 +685,25 @@ e2e:playwright:
 # pipe-to-shell), authenticate to registries, then invoke goreleaser.
 
 .goreleaser-base:
-  image: docker:25
+  image: golang:${GO_VERSION}
   services:
-    - docker:25-dind
+    - docker:29-dind
   tags:
     - company
     - linux
+    - x86
+  cache: *go_job_cache
   variables:
+    DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ''
     DOCKER_BUILDKIT: '1'
     GIT_DEPTH: '0'
+    GORELEASER_FORCE_TOKEN: gitlab
   before_script:
-    # Tools: alpine package set + node (for the npm-build before-hook).
-    - apk add --no-cache curl git bash tar xz coreutils jq nodejs npm
+    # The build job supplies the SPA; GoReleaser only compiles/packages it.
+    - apk add --no-cache curl git bash tar xz coreutils jq docker-cli docker-cli-buildx
+    - go version
+    - test -s internal/ui/dist/index.html
     # Goreleaser binary (pinned, integrity-verifiable via SHA next time).
     - |
       curl -fsSL "https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}/goreleaser_Linux_x86_64.tar.gz" -o /tmp/gr.tgz
@@ -551,8 +744,6 @@ e2e:playwright:
     # Buildx for multi-arch image assembly.
     - docker buildx create --name multiarch --driver docker-container --use 2>/dev/null || docker buildx use multiarch 2>/dev/null
     - docker buildx inspect --bootstrap
-    # NPM dependencies for the SPA build (goreleaser's `before:hooks` runs `npm run build`).
-    - npm ci
 
 goreleaser:snapshot:
   extends: .goreleaser-base
@@ -562,7 +753,7 @@ goreleaser:snapshot:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
     - job: go:test
       artifacts: false
   timeout: 1h
@@ -570,9 +761,8 @@ goreleaser:snapshot:
     - . /tmp/dockerhub.env
     - echo "SKIP_DOCKERHUB=${SKIP_DOCKERHUB}"
     # `--snapshot` skips git-tag validation, marks the build as a snapshot,
-    # and short-circuits any release-publish step. Container images are
-    # still pushed (snapshot tags carry the `-snapshot-<sha>` suffix).
-    - goreleaser release --snapshot --clean --timeout 60m
+    # and skips publication, including container image pushes.
+    - goreleaser release --snapshot --clean --skip=before --timeout 60m
     - ls -la dist/
   artifacts:
     paths:
@@ -590,14 +780,14 @@ goreleaser:release:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
     - job: go:test
       artifacts: false
   timeout: 2h
   script:
     - . /tmp/dockerhub.env
     - 'echo "Building release: ${CI_COMMIT_TAG} (SKIP_DOCKERHUB=${SKIP_DOCKERHUB})"'
-    - goreleaser release --clean --timeout 120m
+    - goreleaser release --clean --skip=before --timeout 120m
     - ls -la dist/
   artifacts:
     paths:
@@ -637,7 +827,7 @@ goreleaser:release:
     - job: unit-tests
       artifacts: false
     - job: build
-      artifacts: false
+      artifacts: true
   timeout: 1h
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
@@ -649,7 +839,7 @@ electron:linux:
     - npm ci
     # electron-builder needs a few system libs to package linux artifacts.
     - apt-get update && apt-get install -y --no-install-recommends rpm fakeroot dpkg
-    - npm run electron:build
+    - npm run electron:assemble
     # Build BOTH AppImage + deb for x64 + arm64 (per electron-builder.yml).
     - npx electron-builder --linux --x64 --arm64 --config electron-builder.yml
     - ls -la release/linux/ || true
@@ -660,10 +850,11 @@ electron:linux:
 
 electron:mac:
   extends: .electron-base
-  tags: [dedicated, macos, arm]
+  tags:
+    [dedicated, macos, arm]
   script:
     - npm ci
-    - npm run electron:build
+    - npm run electron:assemble
     # mac universal dmg. Code signing kicks in if CSC_LINK is set.
     - npx electron-builder --mac --universal --config electron-builder.yml
     - ls -la release/mac/ || true
@@ -681,7 +872,7 @@ electron:win:
     - windows
   script:
     - npm ci
-    - npm run electron:build
+    - npm run electron:assemble
     - npx electron-builder --win --x64 --config electron-builder.yml
     - dir release\win || echo "no win artifacts"
   artifacts:
@@ -704,6 +895,7 @@ electron:win:
 # job has full control over asset link names + descriptions.
 
 release:publish:
+  interruptible: false
   stage: publish
   image: registry.gitlab.com/gitlab-org/release-cli:latest
   needs:
@@ -789,9 +981,20 @@ release:publish:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/'
 
 workflow:
+  # SRE-172: a newer commit on the same ref cancels the superseded pipeline's
+  # interruptible (validation) jobs. Release/deploy jobs stay non-interruptible.
   auto_cancel:
     on_job_failure: all
+    on_new_commit: interruptible
+  # An open MR owns push validation; other pipeline sources stay admitted.
   rules:
-    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
       when: never
+    # Required failures stop remaining work for every admitted pipeline source.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      auto_cancel:
+        on_job_failure: all
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+      auto_cancel:
+        on_job_failure: all
     - when: always

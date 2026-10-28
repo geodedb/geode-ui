@@ -54,6 +54,7 @@ repos:
   rev: v1.5.0
   hooks:
   - id: detect-secrets
+    additional_dependencies: ['detect-secrets[gibberish]==1.5.0']
     name: detect secrets
     args:
     - --baseline
@@ -63,13 +64,13 @@ repos:
 
   # ── Makefile lint ──────────────────────────────────────────────────────
 - repo: https://github.com/mrtazz/checkmake.git
-  rev: 0.2.2
+  rev: v0.3.2
   hooks:
   - id: checkmake
 
   # ── Markdown linting ───────────────────────────────────────────────────
 - repo: https://github.com/igorshubovych/markdownlint-cli
-  rev: v0.43.0
+  rev: v0.49.1
   hooks:
   - id: markdownlint
     args: [--config, .markdownlint.json]
@@ -77,7 +78,7 @@ repos:
 
   # ── YAML formatting ────────────────────────────────────────────────────
 - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
-  rev: v2.14.0
+  rev: v2.16.0
   hooks:
   - id: pretty-format-yaml
     args: [--autofix, --indent, '2']
@@ -85,7 +86,7 @@ repos:
 
   # ── Conventional commits ───────────────────────────────────────────────
 - repo: https://github.com/commitizen-tools/commitizen
-  rev: v4.13.10
+  rev: v4.19.2
   hooks:
   - id: commitizen
     stages: [commit-msg]
@@ -116,22 +117,6 @@ repos:
     language: system
     pass_filenames: false
     files: ^(internal/server/errorcodes\.go|src/api/serverErrorCodes\.ts)$
-
-  - id: gofmt-check
-    name: gofmt
-    entry: scripts/check-gofmt.sh
-    language: system
-    pass_filenames: false
-    files: \.go$
-    exclude: ^gen/
-
-  - id: go-vet
-    name: go vet
-    entry: scripts/run-go.sh vet ./...
-    language: system
-    pass_filenames: false
-    files: \.go$
-    exclude: ^gen/
 
   - id: eslint
     name: eslint
@@ -205,7 +190,7 @@ repos:
       # ── pre-push (heavy: typecheck + tests + build verifications) ──────
   - id: golangci-lint
     name: golangci-lint
-    entry: scripts/run-go.sh tool-golangci
+    entry: make go-lint
     language: system
     pass_filenames: false
     stages: [pre-push]
@@ -226,7 +211,7 @@ repos:
 
   - id: go-test
     name: go test -race
-    entry: scripts/run-go.sh test -race -cover -failfast ./...
+    entry: make go-test
     language: system
     pass_filenames: false
     stages: [pre-push]
@@ -265,8 +250,6 @@ ci:
   autoupdate_schedule: weekly
   # CI runs its own pipeline (.gitlab-ci.yml); skip local hooks there.
   skip:
-  - gofmt-check
-  - go-vet
   - eslint
   - prettier-check
   - lint-hardcoded-styles

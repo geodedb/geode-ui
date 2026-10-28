@@ -122,8 +122,7 @@ export function projectColumns(resp: {
             }
             if (st.kind === 'node' || st.kind === 'edge') {
               const props = (cell as AnyRecord).properties as
-                | AnyRecord
-                | undefined
+                AnyRecord | undefined
               if (props) {
                 const propKeys = Object.keys(props)
                 for (let k = 0; k < propKeys.length; k += 1) {

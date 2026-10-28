@@ -70,8 +70,7 @@ const Snippet = styled.code`
 // payload uses different capitalizations across event types.
 const pickField = (e: AuditEntry, names: string[]): string => {
   const found = names.map((n) => e[n]).find((v) => typeof v === 'string') as
-    | string
-    | undefined
+    string | undefined
   return found ?? ''
 }
 

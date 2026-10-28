@@ -3,19 +3,18 @@
   "compilerOptions": {
     "target": "es2015",
     "module": "esnext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "jsx": "react-jsx",
     "allowJs": true,
     "sourceMap": true,
-    "downlevelIteration": true,
     "lib": ["dom", "esnext"],
-    "typeRoots": ["node_modules/@types"],
-    "baseUrl": ".",
+    "typeRoots": ["./node_modules/@types"],
+    "types": ["node", "jest"],
     "outDir": "./dist/",
     "paths": {
-      "@/*": ["src/*"],
-      "@api": ["gen/client/react/index.ts"],
-      "@api/*": ["gen/client/react/*"]
+      "@/*": ["./src/*"],
+      "@api": ["./gen/client/react/index.ts"],
+      "@api/*": ["./gen/client/react/*"]
     }
   },
   "exclude": [

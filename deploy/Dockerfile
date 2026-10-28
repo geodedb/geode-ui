@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 #
 # Multi-stage build for geode-ui.
 #
@@ -15,7 +15,7 @@
 #       .
 
 # ----- Stage 1: build the SPA -----
-FROM node:22-alpine AS web
+FROM node:26-alpine AS web
 WORKDIR /work
 COPY geode-ui/package.json geode-ui/package-lock.json ./
 RUN npm ci
@@ -23,14 +23,11 @@ COPY geode-ui/ ./
 # Webpack outputs to internal/ui/dist/ (per webpack.common.js); the Go
 # embed.go uses //go:embed all:dist relative to internal/ui/.
 #
-# SECURITY (GAP-S2 / #115): this is the *e2e* Dockerfile, used by
-# `make e2e-up` / docker-compose.test.yml. We set GEODE_E2E_BUILD=true
-# so webpack's DefinePlugin substitutes `__E2E_ENABLED__` as the literal
-# `true`, leaving the Playwright `addInitScript` backdoor reachable.
-# The release Dockerfiles (Dockerfile.release, Dockerfile.release.alpine)
-# deliberately do NOT set the env var, so production bundles dead-code-
-# eliminate the gated block.
-ENV GEODE_E2E_BUILD=true
+# Ordinary CI image builds use this Dockerfile too. Test hooks require an
+# explicit build argument from the test Compose stack; production defaults
+# let webpack eliminate the gated Playwright bootstrap block.
+ARG GEODE_E2E_BUILD=false
+ENV GEODE_E2E_BUILD=${GEODE_E2E_BUILD}
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
@@ -45,7 +42,7 @@ RUN go mod download
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/geode-ui ./cmd/server
 
 # ----- Stage 3: minimal runtime -----
-FROM alpine:3.20
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache ca-certificates && \
     addgroup -S geode && adduser -S -G geode geode
 COPY --from=gobuild /out/geode-ui /usr/local/bin/geode-ui
@@ -73,3 +70,11 @@ USER geode
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/geode-ui"]
 CMD ["-listen", ":8080"]
+
+# The DinD daemon cannot bind-mount files from the CI job's checkout. Ship
+# the fixture through the build context, only in the Compose test target.
+FROM runtime AS e2e
+COPY --chown=geode:geode geode-ui/deploy/profiles.json /etc/geode-ui/profiles.json
+
+# Keep ordinary builds free of the E2E connection profile.
+FROM runtime AS final

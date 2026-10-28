@@ -79,9 +79,13 @@ export function useGraphActions(
 
   const onHideNode = useCallback(
     (id: string): void => {
+      if (!id) return
+      // The inspector (fed by the keyboard id picker) can act before the
+      // debounced Cytoscape build has produced a core. Record the hide
+      // anyway: `hidden` is the source of truth and the build applies it
+      // to the fresh core. Dropping it here made Hide a silent no-op.
       const cy = cyRef.current
-      if (!cy || !id) return
-      hideNode(cy, id)
+      if (cy) hideNode(cy, id)
       setHidden((prev) => {
         const next = new Set(prev)
         next.add(id)
