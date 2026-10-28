@@ -537,6 +537,8 @@ docker:build:
   interruptible: false
   stage: build
   image: docker:29
+  # The isolated Spot workers enable privileged DinD; the OVH pool does not.
+  tags: [company, linux, x86, aws-spot]
   services:
     - docker:29-dind
   before_script: []
@@ -585,10 +587,9 @@ e2e:playwright:
   # Stack build (~7 min) + seeding + ~106 specs on a contended shared VM
   # ran past the 1 h project default (job 17097098422).
   timeout: 2h
-  # x86 only: the Geode release image the stack runs is amd64-only, and the
-  # ARM lab runner (which also carries company/linux) has no reachable dind
-  # daemon ("Cannot connect to the Docker daemon at tcp://docker:2375").
-  tags: [company, linux, x86]
+  # The Geode image requires x86, and the stack requires privileged DinD.
+  # Spot workers provide both, with one job per disposable worker.
+  tags: [company, linux, x86, aws-spot]
   services:
     - docker:29-dind
   variables:
@@ -692,6 +693,8 @@ security-gitleaks:
     - company
     - linux
     - x86
+    # This pool supports the privileged Docker service used to package images.
+    - aws-spot
   cache: *go_job_cache
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -769,6 +772,11 @@ goreleaser:snapshot:
       - dist/
     expire_in: 3 days
   rules:
+    # Validate release configuration before it reaches the default branch.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - .gitlab-ci.yml
+        - .goreleaser.yaml
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TAG == null'
   allow_failure: true
 
