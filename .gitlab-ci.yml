@@ -12,6 +12,8 @@ include:
 
   # Release
   - component: gitlab.com/devnw/ci-catalog/release-semantic@aad997d40e358eeef7ec943f761498341c37c724
+    inputs:
+      release_auth: job_token
 
   # Code signing — Windows Authenticode via ssl.com eSigner.
   # Pulls credentials from group-level CI variables ESIGNER_*; see
