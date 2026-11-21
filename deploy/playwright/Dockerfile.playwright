@@ -1,7 +1,7 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 # Pre-baked Playwright runner for CI. Has Node + Playwright 1.64 +
 # Chromium baked in, with the e2e package layout staged.
-FROM mcr.microsoft.com/playwright:v1.64.0-jammy
+FROM mcr.microsoft.com/playwright:v1.65.1-jammy
 
 WORKDIR /work
 COPY package.json package-lock.json ./
