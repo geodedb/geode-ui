@@ -31,7 +31,7 @@ ENV GEODE_E2E_BUILD=${GEODE_E2E_BUILD}
 RUN npm run build
 
 # ----- Stage 2: build the Go binary -----
-FROM golang:1.27.2-alpine AS gobuild
+FROM golang:1.27.4-alpine AS gobuild
 ENV GOEXPERIMENT=jsonv2 GOTOOLCHAIN=go1.27.2
 RUN apk add --no-cache git
 WORKDIR /work

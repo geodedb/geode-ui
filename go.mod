@@ -1,6 +1,6 @@
 module geodedb.com/geode-ui
 
-go 1.27.2
+go 1.27.4
 
 require (
 	geodedb.com/geode v0.2.1

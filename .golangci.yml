@@ -2,7 +2,7 @@
 #
 # Source: derived from the strictest config in this estate
 # (devnw/eng-4542/llm/.golangci.yml, itself derived from devnw/go/structs).
-# Updated for golangci-lint v2.14.0 — all non-deprecated linters that make
+# Updated for golangci-lint v2.15.0 — all non-deprecated linters that make
 # sense for general Go work are enabled. Project-specific exclusions have been
 # stripped; add them per-repo on top of this base.
 #

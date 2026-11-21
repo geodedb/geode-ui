@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 GO_VERSION = "1.27.3"
-GOLANGCI_LINT_VERSION = "v2.14.0"
+GOLANGCI_LINT_VERSION = "v2.15.0"
 
 
 def main():
