@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 #
 # Geode engine image for the geode-ui e2e test stack.
 #
@@ -16,7 +16,7 @@
 #
 # Build (run from geode-ui/):
 #   docker build -f deploy/geode/Dockerfile.geode -t geode:e2e deploy/geode
-FROM registry.gitlab.com/devnw/codepros/geode/geode:0.8.22@sha256:867d93375470fd18c60336036196a9ef9715a1922e063e8787dc05d8e798ddce
+FROM registry.gitlab.com/devnw/codepros/geode/geode:0.8.27@sha256:2c5a9b856ab7ba4b12e6bc88786a663c3321270eec308bde5f8f9028fa69bb85
 
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
